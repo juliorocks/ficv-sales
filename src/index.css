@@ -1,0 +1,168 @@
+@import "tailwindcss";
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap');
+
+:root {
+  --bg-main: #f0f2f5;
+  --bg-sidebar: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f8fafc;
+  --primary: #5551FF;
+  --text-main: #0F172A;
+  --text-muted: #64748B;
+  --success: #238636;
+  --success-text: #166534;
+  --warning: #B45309;
+  --danger: #DC2626;
+  --border: #E2E8F0;
+  --sidebar-shadow: 0 4px 12px rgba(85, 81, 255, 0.1);
+  --header-bg: rgba(255, 255, 255, 0.8);
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.dark {
+  --bg-main: #05070A;
+  --bg-sidebar: #05070A;
+  --bg-card: #0D1117;
+  --bg-card-hover: #161B22;
+  --text-main: #FFFFFF;
+  --text-muted: #8B949E;
+  --success-text: #3FB950;
+  --warning: #D29922;
+  --danger: #F85149;
+  --border: #30363D;
+  --sidebar-shadow: 0 0 25px rgba(85, 81, 255, 0.4);
+  --header-bg: rgba(5, 7, 10, 0.8);
+  --card-shadow: none;
+}
+
+@theme {
+  --color-primary: var(--primary);
+  --color-success-text: var(--success-text);
+}
+
+@layer base {
+  body {
+    background-color: var(--bg-main);
+    color: var(--text-main);
+    @apply font-sans antialiased transition-colors duration-300;
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+  }
+
+
+  h1,
+  h2,
+  h3,
+  h4,
+  .font-display {
+    @apply font-semibold tracking-tight;
+  }
+}
+
+@layer components {
+  .glass-card {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
+    @apply rounded-[24px] transition-all duration-300;
+    box-shadow: var(--card-shadow);
+  }
+
+  .pill-indicator {
+    @apply px-3 py-1 rounded-full text-[10px] font-bold flex items-center gap-1;
+    background-color: var(--bg-card-hover);
+    color: var(--success-text);
+    border: 1px solid var(--border);
+  }
+
+  .sidebar-item {
+    @apply flex items-center gap-3 w-full px-4 py-3 rounded-full transition-all font-medium text-sm;
+    color: var(--text-muted);
+  }
+
+  .sidebar-item:hover {
+    color: var(--text-main);
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+
+  .sidebar-item-active {
+    @apply bg-[#5551FF] text-white;
+    box-shadow: var(--sidebar-shadow);
+  }
+
+  .btn-primary {
+    @apply px-6 py-2.5 bg-[#5551FF] rounded-full font-bold text-white transition-all active:scale-95 text-xs hover:bg-[#6C69FF] flex items-center justify-center gap-2;
+    box-shadow: 0 10px 15px -3px rgba(85, 81, 255, 0.2);
+  }
+
+  .btn-pill {
+    @apply px-5 py-2.5 rounded-full text-xs font-bold transition-all flex items-center justify-center gap-2;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-main);
+  }
+
+  .btn-pill:hover {
+    border-color: var(--text-muted);
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 10px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+  }
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
+}
+
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 8s linear infinite;
+}
+
+/* Recharts Customization */
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: #30363D;
+  stroke-opacity: 0.5;
+}
+
+.recharts-tooltip-cursor {
+  fill: rgba(255, 255, 255, 0.03);
+}
