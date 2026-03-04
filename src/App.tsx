@@ -618,18 +618,22 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                             {(profile?.role === 'admin') && <NavItem icon={Users} label="Agentes" active={activeTab === 'agents'} onClick={() => setActiveTab('agents')} />}
                             {(profile?.role === 'agent') && <NavItem icon={Award} label="Meu Desempenho" active={activeTab === 'performance'} onClick={() => setActiveTab('performance')} />}
                             <NavItem icon={Target} label="Metas" active={activeTab === 'goals'} onClick={() => setActiveTab('goals')} />
-                            <NavItem icon={FileUp} label="Uploads" active={activeTab === 'uploads'} onClick={() => setActiveTab('uploads')} />
+                            {(profile?.role === 'admin') && <NavItem icon={FileUp} label="Uploads" active={activeTab === 'uploads'} onClick={() => setActiveTab('uploads')} />}
                             <NavItem icon={BookOpen} label="Base de Conhecimento" active={activeTab === 'knowledge'} onClick={() => setActiveTab('knowledge')} />
                             <NavItem icon={MessageSquare} label="Scripts" active={activeTab === 'scripts'} onClick={() => setActiveTab('scripts')} />
-                            <NavItem icon={Tv} label="Dashboard Live" active={isTvMode} onClick={() => setIsTvMode(!isTvMode)} />
+                            {(profile?.role === 'admin') && <NavItem icon={Tv} label="Dashboard Live" active={isTvMode} onClick={() => setIsTvMode(!isTvMode)} />}
                         </nav>
 
-                        <p className="text-[10px] text-[var(--text-muted)] font-bold tracking-widest uppercase mt-8 mb-4 px-2">Gestão</p>
-                        <nav className="space-y-1">
-                            {profile?.role === 'admin' && <NavItem icon={Users} label="Usuários" active={activeTab === 'users'} onClick={() => setActiveTab('users')} />}
-                            <NavItem icon={Settings} label="Configurações" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
-                            <NavItem icon={History} label="Relatórios" active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
-                        </nav>
+                        {profile?.role === 'admin' && (
+                            <>
+                                <p className="text-[10px] text-[var(--text-muted)] font-bold tracking-widest uppercase mt-8 mb-4 px-2">Gestão</p>
+                                <nav className="space-y-1">
+                                    <NavItem icon={Users} label="Usuários" active={activeTab === 'users'} onClick={() => setActiveTab('users')} />
+                                    <NavItem icon={Settings} label="Configurações" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
+                                    <NavItem icon={History} label="Relatórios (Admin)" active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
+                                </nav>
+                            </>
+                        )}
                     </div>
 
                     <div className="p-4 border-t border-[var(--border)]">
