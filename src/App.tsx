@@ -111,16 +111,18 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
         fetchProfile(session.user.id);
     }, [session?.user?.id]);
 
-    const fetchData = async () => {
+    const fetchData = async (currentProfile?: any) => {
         let allLogs: any[] = [];
         let from = 0;
         const limit = 1000;
         let hasMore = true;
 
+        const activeProfile = currentProfile || profile;
+
         // Determine if we need to filter by agent profile name
         let targetAgentName: string | null = null;
-        if (profile && profile.role === 'agent') {
-            targetAgentName = profile.full_name;
+        if (activeProfile && activeProfile.role === 'agent') {
+            targetAgentName = activeProfile.full_name;
         }
 
         while (hasMore) {
@@ -283,7 +285,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
 
             if (!error && data) {
                 setProfile(data);
-                fetchData();
+                fetchData(data); // Pass parameter to avoid stale state in React
             }
         } catch (err) {
             console.error('Profile fetch error:', err);
