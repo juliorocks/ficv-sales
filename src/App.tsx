@@ -615,7 +615,8 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                         <p className="text-[10px] text-[var(--text-muted)] font-bold tracking-widest uppercase mb-4 px-2">Menu Principal</p>
                         <nav className="space-y-1">
                             <NavItem icon={LayoutDashboard} label="Visão Geral" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
-                            {(profile?.role === 'admin' || !profile) && <NavItem icon={Users} label="Agentes" active={activeTab === 'agents'} onClick={() => setActiveTab('agents')} />}
+                            {(profile?.role === 'admin') && <NavItem icon={Users} label="Agentes" active={activeTab === 'agents'} onClick={() => setActiveTab('agents')} />}
+                            {(profile?.role === 'agent') && <NavItem icon={Award} label="Meu Desempenho" active={activeTab === 'performance'} onClick={() => setActiveTab('performance')} />}
                             <NavItem icon={Target} label="Metas" active={activeTab === 'goals'} onClick={() => setActiveTab('goals')} />
                             <NavItem icon={FileUp} label="Uploads" active={activeTab === 'uploads'} onClick={() => setActiveTab('uploads')} />
                             <NavItem icon={BookOpen} label="Base de Conhecimento" active={activeTab === 'knowledge'} onClick={() => setActiveTab('knowledge')} />
@@ -1132,10 +1133,17 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                         </div>
                     </div>
                 )}
-                {/* Agent Admin View */}
-                {activeTab === 'agents' && (
+                {/* Agent Admin View (Admin) */}
+                {activeTab === 'agents' && profile?.role === 'admin' && (
                     <div className="animate-fade-in">
                         <AgentAdmin isAdmin={profile?.role === 'admin'} analysisData={filteredData} />
+                    </div>
+                )}
+
+                {/* Agent Performance View (Agent) */}
+                {activeTab === 'performance' && profile?.role === 'agent' && (
+                    <div className="animate-fade-in max-w-6xl mx-auto py-6">
+                        <AgentProfile name={profile.full_name} data={analysisData} />
                     </div>
                 )}
 
