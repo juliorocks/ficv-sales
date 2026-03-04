@@ -200,14 +200,14 @@ export const KnowledgeBase: React.FC = () => {
                 {/* Main Content Area */}
                 <div
                     id="kb-content-area"
-                    className="flex-1 flex flex-col h-full bg-transparent overflow-y-auto custom-scrollbar relative scroll-smooth"
+                    className="flex-1 overflow-y-auto custom-scrollbar relative scroll-smooth h-full"
                     onScroll={(e) => {
                         const target = e.currentTarget;
                         setShowScrollTop(target.scrollTop > 400);
                     }}
                 >
                     {selectedItem && !isEditing ? (
-                        <div className="flex-1 flex flex-col overflow-hidden max-w-4xl mx-auto w-full">
+                        <div className="flex-1 max-w-4xl mx-auto w-full pt-10">
                             <div className="mb-8 flex justify-between items-start">
                                 <div>
                                     <div className="flex items-center gap-2 mb-2">
