@@ -165,7 +165,7 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
                 </div>
                 <button
                     onClick={() => {
-                        setFormState({ title: '', content: '', category: 'Geral' });
+                        setFormState({ title: '', content: '', category: 'Geral', file_url: '' });
                         setIsEditing(true);
                         setSelectedItem(null);
                     }}
