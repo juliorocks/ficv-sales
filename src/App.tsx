@@ -1295,7 +1295,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {/* Knowledge Base View */}
                 {activeTab === 'knowledge' && (
                     <div className="animate-fade-in">
-                        <KnowledgeBase />
+                        <KnowledgeBase profile={profile} />
                     </div>
                 )}
 

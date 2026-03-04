@@ -23,10 +23,15 @@ interface KnowledgeItem {
     content: string;
     type: string;
     category: string;
+    file_url?: string;
     created_at: string;
 }
 
-export const KnowledgeBase: React.FC = () => {
+interface UserProfile {
+    role: 'admin' | 'agent';
+}
+
+export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profile }) => {
     const [items, setItems] = useState<KnowledgeItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedItem, setSelectedItem] = useState<KnowledgeItem | null>(null);
@@ -39,8 +44,32 @@ export const KnowledgeBase: React.FC = () => {
     const [formState, setFormState] = useState({
         title: '',
         content: '',
-        category: 'Geral'
+        category: 'Geral',
+        file_url: ''
     });
+
+    const formatText = (text: string) => {
+        // Regex to match **text** but also capture the asterisks if needed
+        // Since user wants to keep one asterisk for WhatsApp copying but show it pretty:
+        // We will render it as: <span class="font-bold text-primary">*Texto*</span>
+        // This way when they copy the text, the markdown bold (*) might be picked up depending on how they copy,
+        // but for "true" WhatsApp bold they need *text*. 
+        // The user said: "onde estiver **texto** significa que é Negrito. Não precisa mostre apenas 1 vez o *, para que quando o agente copiar a informação, vá como negrito no Whatsapp."
+        // So: **texto** -> *texto* (visual bold)
+
+        const parts = text.split(/(\*\*.*?\*\*)/g);
+        return parts.map((part, i) => {
+            if (part.startsWith('**') && part.endsWith('**')) {
+                const innerText = part.slice(2, -2);
+                return (
+                    <span key={i} className="font-bold text-primary">
+                        *{innerText}*
+                    </span>
+                );
+            }
+            return part;
+        });
+    };
 
     useEffect(() => {
         fetchKnowledge();
@@ -75,6 +104,7 @@ export const KnowledgeBase: React.FC = () => {
             title: formState.title,
             content: formState.content,
             category: formState.category,
+            file_url: formState.file_url,
             type: 'document'
         };
 
@@ -217,31 +247,59 @@ export const KnowledgeBase: React.FC = () => {
                                         <span className="text-[10px] text-[var(--text-muted)] font-bold uppercase tracking-widest">
                                             Criado em {new Date(selectedItem.created_at).toLocaleDateString()}
                                         </span>
+                                        {selectedItem.file_url && (
+                                            <a
+                                                href={selectedItem.file_url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-red-500/10 text-red-500 text-[10px] font-bold uppercase tracking-widest hover:bg-red-500/20 transition-all"
+                                            >
+                                                <FileText size={10} />
+                                                PDF Original
+                                            </a>
+                                        )}
                                     </div>
                                     <h1 className="text-4xl font-black text-[var(--text-main)] tracking-tight">{selectedItem.title}</h1>
                                 </div>
                                 <div className="flex gap-2">
-                                    <button
-                                        onClick={() => {
-                                            setFormState({
-                                                title: selectedItem.title,
-                                                content: selectedItem.content,
-                                                category: selectedItem.category || 'Geral'
-                                            });
-                                            setIsEditing(true);
-                                        }}
-                                        className="p-2.5 rounded-xl bg-[var(--bg-card-hover)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-primary transition-all shadow-sm"
-                                        title="Editar"
-                                    >
-                                        <Edit2 size={18} />
-                                    </button>
-                                    <button
-                                        onClick={() => handleDelete(selectedItem.id)}
-                                        className="p-2.5 rounded-xl bg-[var(--bg-card-hover)] border border-[var(--border)] text-[var(--text-muted)] hover:text-red-400 hover:border-red-400/50 transition-all shadow-sm"
-                                        title="Excluir"
-                                    >
-                                        <Trash2 size={18} />
-                                    </button>
+                                    {selectedItem.file_url && (
+                                        <button
+                                            onClick={() => {
+                                                navigator.clipboard.writeText(selectedItem.file_url || '');
+                                                alert('Link do PDF copiado!');
+                                            }}
+                                            className="px-4 py-2.5 rounded-xl bg-[var(--bg-card-hover)] border border-[var(--border)] text-xs font-bold text-primary hover:bg-primary/5 transition-all shadow-sm flex items-center gap-2"
+                                        >
+                                            <Save size={14} />
+                                            Copiar Link PDF
+                                        </button>
+                                    )}
+                                    {profile?.role === 'admin' && (
+                                        <>
+                                            <button
+                                                onClick={() => {
+                                                    setFormState({
+                                                        title: selectedItem.title,
+                                                        content: selectedItem.content,
+                                                        category: selectedItem.category || 'Geral',
+                                                        file_url: selectedItem.file_url || ''
+                                                    });
+                                                    setIsEditing(true);
+                                                }}
+                                                className="p-2.5 rounded-xl bg-[var(--bg-card-hover)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-primary transition-all shadow-sm"
+                                                title="Editar"
+                                            >
+                                                <Edit2 size={18} />
+                                            </button>
+                                            <button
+                                                onClick={() => handleDelete(selectedItem.id)}
+                                                className="p-2.5 rounded-xl bg-[var(--bg-card-hover)] border border-[var(--border)] text-[var(--text-muted)] hover:text-red-400 hover:border-red-400/50 transition-all shadow-sm"
+                                                title="Excluir"
+                                            >
+                                                <Trash2 size={18} />
+                                            </button>
+                                        </>
+                                    )}
                                 </div>
                             </div>
 
@@ -292,11 +350,11 @@ export const KnowledgeBase: React.FC = () => {
                                                         id={id}
                                                         className={`font-black tracking-tight mb-4 mt-8 ${level === 1 ? 'text-3xl border-b border-[var(--border)] pb-2' : 'text-xl'}`}
                                                     >
-                                                        {title}
+                                                        {formatText(title)}
                                                     </HeadingTag>
                                                 );
                                             }
-                                            return <p key={idx} className="mb-4">{line}</p>;
+                                            return <p key={idx} className="mb-4">{formatText(line)}</p>;
                                         })}
                                     </div>
                                 </div>
@@ -353,6 +411,16 @@ export const KnowledgeBase: React.FC = () => {
                                             placeholder="Ex: Vendas, RH, Processos..."
                                         />
                                     </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest ml-1">Link do PDF Original (Opcional)</label>
+                                    <input
+                                        type="text"
+                                        className="w-full bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4 text-[var(--text-main)] focus:border-primary outline-none transition-all font-bold"
+                                        value={formState.file_url}
+                                        onChange={(e) => setFormState({ ...formState, file_url: e.target.value })}
+                                        placeholder="https://exemplo.com/arquivo.pdf"
+                                    />
                                 </div>
                                 <div className="space-y-2 flex-1 flex flex-col min-h-[400px]">
                                     <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest ml-1">Conteúdo (Texto Corrido)</label>
