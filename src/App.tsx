@@ -617,7 +617,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                             <NavItem icon={LayoutDashboard} label="Visão Geral" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
                             {(profile?.role === 'admin') && <NavItem icon={Users} label="Agentes" active={activeTab === 'agents'} onClick={() => setActiveTab('agents')} />}
                             {(profile?.role === 'agent') && <NavItem icon={Award} label="Meu Desempenho" active={activeTab === 'performance'} onClick={() => setActiveTab('performance')} />}
-                            <NavItem icon={Target} label="Metas" active={activeTab === 'goals'} onClick={() => setActiveTab('goals')} />
+                            {(profile?.role === 'admin') && <NavItem icon={Target} label="Metas" active={activeTab === 'goals'} onClick={() => setActiveTab('goals')} />}
                             {(profile?.role === 'admin') && <NavItem icon={FileUp} label="Uploads" active={activeTab === 'uploads'} onClick={() => setActiveTab('uploads')} />}
                             <NavItem icon={BookOpen} label="Base de Conhecimento" active={activeTab === 'knowledge'} onClick={() => setActiveTab('knowledge')} />
                             <NavItem icon={MessageSquare} label="Scripts" active={activeTab === 'scripts'} onClick={() => setActiveTab('scripts')} />
