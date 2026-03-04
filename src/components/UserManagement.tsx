@@ -203,7 +203,7 @@ export const UserManagement: React.FC = () => {
                     <motion.div
                         initial={{ scale: 0.9, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}
-                        className="w-full max-w-md glass-card p-8 shadow-2xl overflow-hidden relative"
+                        className="w-full max-w-md glass-card p-6 sm:p-8 shadow-2xl overflow-y-auto relative max-h-[90vh]"
                     >
                         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary to-accent" />
 
