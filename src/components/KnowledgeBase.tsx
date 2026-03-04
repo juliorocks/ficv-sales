@@ -11,7 +11,9 @@ import {
     ChevronRight,
     Edit2,
     X,
-    Layout
+    Layout,
+    ArrowUp,
+    List
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -31,6 +33,7 @@ export const KnowledgeBase: React.FC = () => {
     const [isEditing, setIsEditing] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [saving, setSaving] = useState(false);
+    const [showScrollTop, setShowScrollTop] = useState(false);
 
     // Form state
     const [formState, setFormState] = useState({
@@ -195,7 +198,14 @@ export const KnowledgeBase: React.FC = () => {
                 </div>
 
                 {/* Main Content Area */}
-                <div className="flex-1 flex flex-col h-full bg-transparent overflow-hidden">
+                <div
+                    id="kb-content-area"
+                    className="flex-1 flex flex-col h-full bg-transparent overflow-y-auto custom-scrollbar relative scroll-smooth"
+                    onScroll={(e) => {
+                        const target = e.currentTarget;
+                        setShowScrollTop(target.scrollTop > 400);
+                    }}
+                >
                     {selectedItem && !isEditing ? (
                         <div className="flex-1 flex flex-col overflow-hidden max-w-4xl mx-auto w-full">
                             <div className="mb-8 flex justify-between items-start">
@@ -235,13 +245,80 @@ export const KnowledgeBase: React.FC = () => {
                                 </div>
                             </div>
 
-                            <div className="flex-1 overflow-y-auto custom-scrollbar pr-4 pb-20">
+                            <div className="flex-1 max-w-4xl mx-auto w-full pb-20">
+                                {/* Auto-generated Table of Contents */}
+                                {selectedItem.content.includes('#') && (
+                                    <div className="mb-10 p-6 rounded-2xl bg-[var(--bg-card-hover)] border border-[var(--border)] shadow-sm">
+                                        <div className="flex items-center gap-2 mb-4 text-primary">
+                                            <List size={18} />
+                                            <h3 className="text-sm font-bold uppercase tracking-wider">Índice do Documento</h3>
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2">
+                                            {selectedItem.content.split('\n')
+                                                .filter(line => line.startsWith('#'))
+                                                .map((line, idx) => {
+                                                    const level = line.match(/^#+/)?.[0].length || 1;
+                                                    const title = line.replace(/^#+\s*/, '');
+                                                    const id = title.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+                                                    return (
+                                                        <a
+                                                            key={idx}
+                                                            href={`#${id}`}
+                                                            className={`text-sm transition-all hover:text-primary ${level === 1 ? 'font-bold text-[var(--text-main)]' : 'text-[var(--text-muted)] pl-4'}`}
+                                                            onClick={(e) => {
+                                                                e.preventDefault();
+                                                                document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
+                                                            }}
+                                                        >
+                                                            {title}
+                                                        </a>
+                                                    );
+                                                })}
+                                        </div>
+                                    </div>
+                                )}
+
                                 <div className="prose max-w-none">
-                                    <div className="text-lg leading-relaxed text-[var(--text-main)] whitespace-pre-wrap font-medium">
-                                        {selectedItem.content}
+                                    <div className="text-md leading-relaxed text-[var(--text-main)] whitespace-pre-wrap">
+                                        {selectedItem.content.split('\n').map((line, idx) => {
+                                            if (line.startsWith('#')) {
+                                                const level = line.match(/^#+/)?.[0].length || 1;
+                                                const title = line.replace(/^#+\s*/, '');
+                                                const id = title.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+                                                const HeadingTag = `h${Math.min(level, 4)}` as keyof JSX.IntrinsicElements;
+                                                return (
+                                                    <HeadingTag
+                                                        key={idx}
+                                                        id={id}
+                                                        className={`font-black tracking-tight mb-4 mt-8 ${level === 1 ? 'text-3xl border-b border-[var(--border)] pb-2' : 'text-xl'}`}
+                                                    >
+                                                        {title}
+                                                    </HeadingTag>
+                                                );
+                                            }
+                                            return <p key={idx} className="mb-4">{line}</p>;
+                                        })}
                                     </div>
                                 </div>
                             </div>
+
+                            {/* Scroll to Top Button */}
+                            <AnimatePresence>
+                                {showScrollTop && (
+                                    <motion.button
+                                        initial={{ opacity: 0, scale: 0.5 }}
+                                        animate={{ opacity: 1, scale: 1 }}
+                                        exit={{ opacity: 0, scale: 0.5 }}
+                                        onClick={() => {
+                                            document.getElementById('kb-content-area')?.scrollTo({ top: 0, behavior: 'smooth' });
+                                        }}
+                                        className="fixed bottom-10 right-10 p-4 rounded-full bg-primary text-white shadow-2xl hover:bg-primary/90 transition-all z-50 flex items-center gap-2 group"
+                                    >
+                                        <ArrowUp size={20} className="group-hover:-translate-y-1 transition-transform" />
+                                        <span className="text-xs font-bold mr-1">Topo</span>
+                                    </motion.button>
+                                )}
+                            </AnimatePresence>
                         </div>
                     ) : isEditing ? (
                         <div className="flex-1 flex flex-col max-w-4xl mx-auto w-full">
