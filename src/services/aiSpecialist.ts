@@ -66,7 +66,7 @@ export async function analyzeConversationWithAI(messages: { role: string, text: 
         const kbContext = kbData?.map(doc => `[${doc.title}]: ${doc.content}`).join('\n\n') || '';
         console.log(`[AI Specialist] KB Context Loaded: ${kbData?.length || 0} documents.`);
 
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
         const prompt = `${SYSTEM_PROMPT(kbContext)}\n\nAnalise a seguinte conversa:\n${messages.map((m, i) => `${i}. [${m.role.toUpperCase()}]: ${m.text}`).join('\n')}`;
 
@@ -103,7 +103,7 @@ export async function generateRefinedScript(originalContent: string, objective: 
         hot: "Adapte este script para um lead quente (pronto para comprar), focando em quebra de objeções finais e fechamento imediato."
     };
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     const prompt = `Você é um especialista em Copywriting de Vendas para Educação (FICV).
 Objetivo: ${objectivePrompts[objective] || objectivePrompts.persuasive}
 
