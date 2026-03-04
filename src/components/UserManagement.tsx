@@ -57,15 +57,41 @@ export const UserManagement: React.FC = () => {
         e.preventDefault();
         setFormLoading(true);
 
-        // NOTE: In a production environment with standard Supabase setup, 
-        // a regular client cannot create other users.
-        // This UI expects a backend function or service role integration.
-        // For now, we simulate the request or guide the user.
+        try {
+            // Attempt to create the user in Supabase Auth
+            const { data: authData, error: authError } = await supabase.auth.signUp({
+                email: newUser.email,
+                password: newUser.password,
+                options: {
+                    data: {
+                        full_name: newUser.full_name,
+                        role: newUser.role
+                    }
+                }
+            });
 
-        alert("Para criar usuários via interface, registre o e-mail no console do Supabase ou adicione uma Edge Function. O sistema está preparado para gerenciar os perfis assim que criados.");
+            if (authError) throw authError;
 
-        setFormLoading(false);
-        setIsAddingUser(false);
+            // Notice: Due to the trigger previously created in SQL `on_auth_user_created`,
+            // the profile record should be automatically created.
+            // But we can fallback to manual insert if needed or alert success.
+            if (authData.user) {
+                alert(`Usuário ${newUser.full_name} criado com sucesso!`);
+
+                // Reset form
+                setNewUser({ email: '', password: '', full_name: '', role: 'agent' });
+                setIsAddingUser(false);
+
+                // Refresh list
+                fetchProfiles();
+            }
+
+        } catch (error: any) {
+            console.error('Erro ao criar usuário:', error);
+            alert(`Erro ao criar usuário: ${error.message}`);
+        } finally {
+            setFormLoading(false);
+        }
     };
 
     const toggleRole = async (userId: string, currentRole: string) => {
