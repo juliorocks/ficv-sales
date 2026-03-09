@@ -22,8 +22,11 @@ import {
     Target,
     ArrowLeft,
     Sun,
-    Moon
+    Moon,
+    KanbanSquare,
+    Search
 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { recalculateAllScores } from './services/reprocessor';
 import { CSVUploader } from './components/CSVUploader';
 import { GoalDashboard } from './components/GoalDashboard';
@@ -45,6 +48,26 @@ import {
     PieChart, Pie, Legend
 } from 'recharts';
 import confetti from 'canvas-confetti';
+import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import { Toaster } from 'sonner';
+import { showSuccess, showError } from '@/utils/toast';
+import { KanbanBoard } from './components/kanban/KanbanBoard';
+import { CreateLeadFab } from './components/kanban/CreateLeadFab';
+import { CourseManagement } from './components/admin/CourseManagement';
+import { LeadSourceManagement } from './components/admin/LeadSourceManagement';
+import { LossReasonManagement } from './components/admin/LossReasonManagement';
+import { AuditLogPage } from './components/admin/AuditLogPage';
+import { WideChatHistory } from './components/kanban/WideChatHistory';
+import { TmaSettingsManagement } from './components/admin/TmaSettingsManagement';
+
+const queryClient = new QueryClient({
+    defaultOptions: {
+        queries: {
+            staleTime: 1000 * 60 * 5, // 5 minutes
+            retry: 1,
+        },
+    },
+});
 
 interface Profile {
     id: string;
@@ -90,6 +113,7 @@ StatCard.displayName = 'StatCard';
 
 
 function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode: boolean, setIsDarkMode: React.Dispatch<React.SetStateAction<boolean>> }) {
+    const queryClient = useQueryClient();
     const [activeTab, setActiveTab] = useState('dashboard');
     const [analysisData, setAnalysisData] = useState<ConversationAnalysis[]>([]);
     const [isTvMode, setIsTvMode] = useState(false);
@@ -105,6 +129,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     const [selectedAnalysis, setSelectedAnalysis] = useState<ConversationAnalysis | null>(null);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [refreshProgress, setRefreshProgress] = useState({ current: 0, total: 0 });
+    const [kanbanSearch, setKanbanSearch] = useState("");
 
     useEffect(() => {
         if (!session?.user?.id) return;
@@ -617,6 +642,66 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                         <p className="text-[10px] text-[var(--text-muted)] font-bold tracking-widest uppercase mb-4 px-2">Menu Principal</p>
                         <nav className="space-y-1">
                             <NavItem icon={LayoutDashboard} label="Visão Geral" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
+
+                            <div className="space-y-1">
+                                <NavItem
+                                    icon={KanbanSquare}
+                                    label="Leads (Kanban)"
+                                    active={activeTab.startsWith('kanban')}
+                                    onClick={() => setActiveTab('kanban')}
+                                />
+                                {activeTab.startsWith('kanban') && (
+                                    <div className="ml-6 flex flex-col gap-1 border-l border-primary/20 pl-2 mt-1 animate-in slide-in-from-left-2 duration-200">
+                                        <button
+                                            onClick={() => setActiveTab('kanban')}
+                                            className={`text-[11px] py-1.5 px-3 rounded-lg text-left transition-all ${activeTab === 'kanban' ? 'bg-primary/10 text-primary font-bold' : 'text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text-main)]'}`}
+                                        >
+                                            Quadro Kanban
+                                        </button>
+                                        <button
+                                            onClick={() => setActiveTab('kanban-courses')}
+                                            className={`text-[11px] py-1.5 px-3 rounded-lg text-left transition-all ${activeTab === 'kanban-courses' ? 'bg-primary/10 text-primary font-bold' : 'text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text-main)]'}`}
+                                        >
+                                            Cursos
+                                        </button>
+                                        <button
+                                            onClick={() => setActiveTab('kanban-sources')}
+                                            className={`text-[11px] py-1.5 px-3 rounded-lg text-left transition-all ${activeTab === 'kanban-sources' ? 'bg-primary/10 text-primary font-bold' : 'text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text-main)]'}`}
+                                        >
+                                            Canais de Aquisição
+                                        </button>
+                                        <button
+                                            onClick={() => setActiveTab('kanban-reasons')}
+                                            className={`text-[11px] py-1.5 px-3 rounded-lg text-left transition-all ${activeTab === 'kanban-reasons' ? 'bg-primary/10 text-primary font-bold' : 'text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text-main)]'}`}
+                                        >
+                                            Motivos de Perda
+                                        </button>
+                                        <button
+                                            onClick={() => setActiveTab('kanban-chat')}
+                                            className={`text-[11px] py-1.5 px-3 rounded-lg text-left transition-all ${activeTab === 'kanban-chat' ? 'bg-primary/10 text-primary font-bold' : 'text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text-main)]'}`}
+                                        >
+                                            Histórico WideChat
+                                        </button>
+                                        {profile?.role === 'admin' && (
+                                            <button
+                                                onClick={() => setActiveTab('kanban-audit')}
+                                                className={`text-[11px] py-1.5 px-3 rounded-lg text-left transition-all ${activeTab === 'kanban-audit' ? 'bg-primary/10 text-primary font-bold' : 'text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text-main)]'}`}
+                                            >
+                                                Logs de Auditoria
+                                            </button>
+                                        )}
+                                        {profile?.role === 'admin' && (
+                                            <button
+                                                onClick={() => setActiveTab('kanban-tma')}
+                                                className={`text-[11px] py-1.5 px-3 rounded-lg text-left transition-all ${activeTab === 'kanban-tma' ? 'bg-primary/10 text-primary font-bold' : 'text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text-main)]'}`}
+                                            >
+                                                Meta de TMA
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
                             {(profile?.role === 'admin') && <NavItem icon={Users} label="Agentes" active={activeTab === 'agents'} onClick={() => setActiveTab('agents')} />}
                             {(profile?.role === 'agent') && <NavItem icon={Award} label="Meu Desempenho" active={activeTab === 'performance'} onClick={() => setActiveTab('performance')} />}
                             {(profile?.role === 'admin') && <NavItem icon={Target} label="Metas" active={activeTab === 'goals'} onClick={() => setActiveTab('goals')} />}
@@ -677,16 +762,39 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
 
             {/* Main Content */}
             <main className={`flex-1 min-h-screen bg-[var(--bg-main)] p-8 transition-all overflow-x-hidden ${isTvMode ? 'ml-0' : 'ml-[240px]'}`}>
-                {(activeTab === 'dashboard' || activeTab === 'agents' || activeTab === 'history') && (
+                {(activeTab === 'dashboard' || activeTab === 'agents' || activeTab === 'history' || activeTab.startsWith('kanban')) && (
                     <header className="flex justify-between items-start mb-10 relative">
                         <div>
                             <div className="flex items-center gap-2 text-primary mb-2">
                                 <TrendingUp size={14} />
-                                <span className="text-[10px] font-bold uppercase tracking-widest">Dashboard em tempo real</span>
+                                <span className="text-[10px] font-bold uppercase tracking-widest">
+                                    {activeTab === 'kanban' ? 'Gestão de Funil' : 'Dashboard em tempo real'}
+                                </span>
                             </div>
-                            <h2 className="text-3xl font-bold tracking-tight mb-2 text-[var(--text-main)]">Visão Geral</h2>
-                            <p className="text-[var(--text-muted)] text-sm">Acompanhe a performance completa da conta com insights gerados.</p>
+                            <h2 className="text-3xl font-bold tracking-tight mb-2 text-[var(--text-main)]">
+                                {activeTab === 'kanban' ? 'Leads (Kanban)' : 'Visão Geral'}
+                            </h2>
+                            <p className="text-[var(--text-muted)] text-sm">
+                                {activeTab === 'kanban'
+                                    ? 'Acompanhe e organize suas oportunidades de vendas.'
+                                    : 'Acompanhe a performance completa da conta com insights gerados.'}
+                            </p>
                         </div>
+
+                        {activeTab === 'kanban' && !isTvMode && (
+                            <div className="flex gap-3 items-center mt-2">
+                                <div className="relative group">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--text-muted)] group-focus-within:text-primary transition-colors" />
+                                    <input
+                                        type="text"
+                                        placeholder="Pesquisar leads..."
+                                        value={kanbanSearch}
+                                        onChange={(e) => setKanbanSearch(e.target.value)}
+                                        className="h-10 w-64 pl-10 pr-4 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] text-sm text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm"
+                                    />
+                                </div>
+                            </div>
+                        )}
 
                         {!isTvMode && (
                             <div className="flex gap-3 items-center mt-2 filter-container relative">
@@ -1324,6 +1432,81 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                     </div>
                 )}
 
+                {/* Kanban/Leads View */}
+                {activeTab === 'kanban' && (
+                    <div className="animate-fade-in pt-4">
+                        <div className="flex justify-between items-center mb-6">
+                            <div>
+                                <h1 className="text-2xl font-bold text-[var(--text-main)]">Funil de Leads</h1>
+                                <p className="text-[var(--text-muted)] text-sm">Gerencie o progresso das suas oportunidades</p>
+                            </div>
+                            <Button
+                                variant="outline"
+                                className="bg-[#5946D2]/10 text-[#5946D2] hover:bg-[#5946D2]/20 border-[#5946D2]/20 hidden md:flex"
+                                onClick={async () => {
+                                    showSuccess("Buscando novos leads no SendPulse. Isso pode levar alguns segundos...");
+                                    try {
+                                        const { data, error } = await supabase.functions.invoke('sync-sendpulse-api');
+                                        if (error) throw error;
+                                        if (data?.success) {
+                                            showSuccess(`Sincronização concluída! ${data.newLeadsInserted} novos contatos baixados.`);
+                                            // Force React Query to refetch leads
+                                            queryClient.invalidateQueries({ queryKey: ['leads'] });
+                                        } else {
+                                            showError("Não foi possível puxar os dados, tente novamente.");
+                                        }
+                                    } catch (err: any) {
+                                        console.error(err);
+                                        showError("Erro ao sincronizar. " + err.message);
+                                    }
+                                }}
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                                Sincronização SendPulse
+                            </Button>
+                        </div>
+                        <KanbanBoard searchTerm={kanbanSearch} />
+                        <CreateLeadFab />
+                    </div>
+                )}
+
+                {/* Kanban Management Views */}
+                {activeTab === 'kanban-courses' && (
+                    <div className="animate-fade-in max-w-6xl mx-auto py-6">
+                        <CourseManagement />
+                    </div>
+                )}
+
+                {activeTab === 'kanban-sources' && (
+                    <div className="animate-fade-in max-w-6xl mx-auto py-6">
+                        <LeadSourceManagement />
+                    </div>
+                )}
+
+                {activeTab === 'kanban-reasons' && (
+                    <div className="animate-fade-in max-w-6xl mx-auto py-6">
+                        <LossReasonManagement />
+                    </div>
+                )}
+
+                {activeTab === 'kanban-chat' && (
+                    <div className="animate-fade-in max-w-6xl mx-auto py-6">
+                        <WideChatHistory widechatContactId="" />
+                    </div>
+                )}
+
+                {activeTab === 'kanban-audit' && profile?.role === 'admin' && (
+                    <div className="animate-fade-in max-w-6xl mx-auto py-6">
+                        <AuditLogPage />
+                    </div>
+                )}
+
+                {activeTab === 'kanban-tma' && profile?.role === 'admin' && (
+                    <div className="animate-fade-in max-w-6xl mx-auto py-6">
+                        <TmaSettingsManagement />
+                    </div>
+                )}
+
                 {/* Placeholder for other views */}
 
             </main>
@@ -1396,9 +1579,15 @@ const FullApp = () => {
         </div>
     );
 
+
     if (!session) return <Login />;
 
-    return <App session={session} isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} />;
+    return (
+        <QueryClientProvider client={queryClient}>
+            <App session={session} isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} />
+            <Toaster position="top-right" richColors theme={isDarkMode ? 'dark' : 'light'} />
+        </QueryClientProvider>
+    );
 };
 
 export default FullApp;

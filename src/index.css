@@ -38,7 +38,23 @@
 
 @theme {
   --color-primary: var(--primary);
+  --color-primary-foreground: #ffffff;
   --color-success-text: var(--success-text);
+  --color-background: var(--bg-card);
+  --color-foreground: var(--text-main);
+  --color-muted: var(--bg-main);
+  --color-muted-foreground: var(--text-muted);
+  --color-border: var(--border);
+  --color-input: var(--border);
+  --color-ring: var(--primary);
+  --color-accent: var(--bg-card-hover);
+  --color-accent-foreground: var(--text-main);
+  --color-popover: var(--bg-card);
+  --color-popover-foreground: var(--text-main);
+  --color-card: var(--bg-card);
+  --color-card-foreground: var(--text-main);
+  --color-destructive: var(--danger);
+  --color-destructive-foreground: #ffffff;
 }
 
 @layer base {
