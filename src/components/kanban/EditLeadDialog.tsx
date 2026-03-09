@@ -39,13 +39,15 @@ const formSchema = z.object({
     nome_completo: z.string().min(2, "O nome é obrigatório."),
     email: z.string().email("E-mail inválido.").or(z.literal("")).optional(),
     telefone: z.string().min(1, "O telefone é obrigatório."),
-    valor_oportunidade: z.coerce.number().min(0, "O valor deve ser positivo."),
+    valor_oportunidade: z.preprocess((val) => Number(val), z.number().min(0, "O valor deve ser positivo.")),
     observacoes: z.string().nullable().optional(),
     temperatura: z.enum(['frio', 'morno', 'quente']).nullable().optional(),
     assigned_to_id: z.string().nullable().optional(),
-    source_id: z.coerce.number().nullable().optional(),
-    curso_interesse: z.coerce.number().nullable().optional(),
+    source_id: z.preprocess((val) => val === "" || val === null ? null : Number(val), z.number().nullable()),
+    curso_interesse: z.preprocess((val) => val === "" || val === null ? null : Number(val), z.number().nullable()),
 })
+
+type FormValues = z.infer<typeof formSchema>
 
 interface EditLeadDialogProps {
     lead: Lead
@@ -91,7 +93,79 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange }:
         enabled: !isAuthLoading && !!user,
     })
 
-    const form = useForm<z.infer<typeof formSchema>>({
+    const updateLeadMutation = useMutation({
+        mutationFn: async (values: FormValues) => {
+            const { error: updateError } = await supabase
+                .from('leads')
+                .update({
+                    nome_completo: values.nome_completo,
+                    email: values.email || null,
+                    telefone: values.telefone,
+                    valor_oportunidade: values.valor_oportunidade,
+                    observacoes: values.observacoes,
+                    temperatura: values.temperatura,
+                    assigned_to_id: values.assigned_to_id,
+                    source_id: values.source_id,
+                    curso_interesse: values.curso_interesse,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', lead.id)
+
+            if (updateError) throw updateError
+
+            const changes = Object.entries(values)
+                .filter(([key, value]) => {
+                    // Special handling for number fields that might be stored as null but default to 0 in form
+                    if (key === 'valor_oportunidade' && lead[key as keyof Lead] === null && value === 0) {
+                        return false;
+                    }
+                    // Special handling for string fields that might be stored as null but default to "" in form
+                    if ((key === 'email' || key === 'observacoes') && lead[key as keyof Lead] === null && value === "") {
+                        return false;
+                    }
+                    // Special handling for select fields that might be stored as null but default to 'frio' or 'unassigned' or 'none' in form
+                    if (key === 'temperatura' && lead[key as keyof Lead] === null && value === 'frio') {
+                        return false;
+                    }
+                    if (key === 'assigned_to_id' && lead[key as keyof Lead] === null && value === undefined) {
+                        return false;
+                    }
+                    if (key === 'source_id' && lead[key as keyof Lead] === null && value === undefined) {
+                        return false;
+                    }
+                    if (key === 'curso_interesse' && lead[key as keyof Lead] === null && value === undefined) {
+                        return false;
+                    }
+                    return value !== lead[key as keyof Lead]
+                })
+                .map(([key, value]) => ({
+                    field: key,
+                    from: lead[key as keyof Lead],
+                    to: value
+                }))
+
+            if (changes.length > 0) {
+                await supabase.from('audit_logs').insert({
+                    user_id: user?.id,
+                    action: 'lead_updated',
+                    details: {
+                        lead_id: lead.id,
+                        lead_name: lead.nome_completo,
+                        changes
+                    }
+                })
+            }
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['leads'] })
+            queryClient.invalidateQueries({ queryKey: ['audit_logs', lead.id] })
+            showSuccess("Lead atualizado com sucesso!");
+            onOpenChange(false);
+        },
+        onError: (error: any) => showError(`Erro ao atualizar lead: ${error.message}`)
+    })
+
+    const form = useForm({
         resolver: zodResolver(formSchema),
         values: {
             nome_completo: lead.nome_completo,
@@ -100,9 +174,9 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange }:
             valor_oportunidade: lead.valor_oportunidade || 0,
             observacoes: lead.observacoes || "",
             temperatura: lead.temperatura || 'frio',
-            assigned_to_id: lead.assigned_to_id || undefined,
-            source_id: lead.source_id || undefined,
-            curso_interesse: lead.curso_interesse || undefined,
+            assigned_to_id: lead.assigned_to_id || null,
+            source_id: lead.source_id || null,
+            curso_interesse: lead.curso_interesse || null,
         },
     })
 
@@ -123,35 +197,15 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange }:
         onError: (error: any) => showError(`Erro ao mover lead: ${error.message}`)
     });
 
-    async function onSubmit(values: z.infer<typeof formSchema>) {
-        if (localSaving) return
-        setLocalSaving(true)
-
-        try {
-            const { error } = await supabase
-                .from('leads')
-                .update({
-                    ...values,
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', lead.id);
-
-            if (error) throw error;
-
-            showSuccess("Lead atualizado com sucesso!");
-            queryClient.invalidateQueries({ queryKey: ['leads'] });
-            onOpenChange(false);
-        } catch (err: any) {
-            showError(`Erro ao salvar lead: ${err.message}`);
-        } finally {
-            setLocalSaving(false);
-        }
+    function onSubmit(values: FormValues) {
+        updateLeadMutation.mutate(values)
     }
 
     const wonStage = stages.find(s => s.name.toLowerCase() === 'matriculado');
     const lostStage = stages.find(s => s.name.toLowerCase().includes('perdido'));
     const currentStage = stages.find(s => s.id === lead.stage_id);
     const isFinalStage = currentStage?.name.toLowerCase().includes('matriculado') || currentStage?.name.toLowerCase().includes('perdido');
+    const isAdmin = user?.role === 'admin';
 
     const deleteLeadMutation = useMutation({
         mutationFn: async () => {
@@ -202,7 +256,7 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange }:
                                         )} />
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <FormField control={form.control} name="valor_oportunidade" render={({ field }) => (
-                                                <FormItem><FormLabel>Valor da Oportunidade</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
+                                                <FormItem><FormLabel>Valor da Oportunidade</FormLabel><FormControl><Input type="number" {...field} value={field.value as any} /></FormControl><FormMessage /></FormItem>
                                             )} />
                                             <FormField control={form.control} name="temperatura" render={({ field }) => (
                                                 <FormItem><FormLabel>Temperatura</FormLabel><Select onValueChange={field.onChange} value={field.value || 'frio'}><FormControl><SelectTrigger><SelectValue placeholder="Selecione a temperatura" /></SelectTrigger></FormControl><SelectContent><SelectItem value="frio">Frio</SelectItem><SelectItem value="morno">Morno</SelectItem><SelectItem value="quente">Quente</SelectItem></SelectContent></Select><FormMessage /></FormItem>
@@ -220,7 +274,7 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange }:
                                                         disabled={isLoadingCourses}
                                                     >
                                                         <FormControl>
-                                                            <SelectTrigger>
+                                                            <SelectTrigger disabled={!isAdmin && user?.role !== 'agent'}>
                                                                 <SelectValue placeholder="Selecione o curso..." />
                                                             </SelectTrigger>
                                                         </FormControl>
@@ -238,7 +292,7 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange }:
                                             )}
                                         />
                                         <FormField control={form.control} name="assigned_to_id" render={({ field }) => (
-                                            <FormItem><FormLabel>Atendente Responsável</FormLabel><Select onValueChange={(v) => field.onChange(v === "unassigned" ? null : v)} value={field.value || "unassigned"} disabled={isLoadingUsers}><FormControl><SelectTrigger><SelectValue placeholder="Ninguém atribuído" /></SelectTrigger></FormControl><SelectContent><SelectItem value="unassigned">Ninguém atribuído</SelectItem>{users?.filter(u => u.role !== 'visualizador').map(atendente => (<SelectItem key={atendente.id} value={atendente.id}><div className="flex items-center gap-2"><Avatar className="h-6 w-6"><AvatarImage src={atendente.avatar_url || undefined} alt={atendente.full_name} /><AvatarFallback>{atendente.full_name.slice(0, 2).toUpperCase()}</AvatarFallback></Avatar><span>{atendente.full_name}</span></div></SelectItem>))}</SelectContent></Select><FormMessage /></FormItem>
+                                            <FormItem><FormLabel>Atendente Responsável</FormLabel><Select onValueChange={(v) => field.onChange(v === "unassigned" ? null : v)} value={field.value || "unassigned"} disabled={isLoadingUsers}><FormControl><SelectTrigger><SelectValue placeholder="Ninguém atribuído" /></SelectTrigger></FormControl><SelectContent><SelectItem value="unassigned">Ninguém atribuído</SelectItem>{users?.map(atendente => (<SelectItem key={atendente.id} value={atendente.id}><div className="flex items-center gap-2"><Avatar className="h-6 w-6"><AvatarImage src={atendente.avatar_url || undefined} alt={atendente.full_name} /><AvatarFallback>{atendente.full_name.slice(0, 2).toUpperCase()}</AvatarFallback></Avatar><span>{atendente.full_name}</span></div></SelectItem>))}</SelectContent></Select><FormMessage /></FormItem>
                                         )} />
                                         <FormField control={form.control} name="source_id" render={({ field }) => (
                                             <FormItem><FormLabel>Canal de Aquisição</FormLabel><Select onValueChange={(v) => field.onChange(v === "none" ? null : parseInt(v))} value={field.value?.toString() || "none"} disabled={isLoadingSources}><FormControl><SelectTrigger><SelectValue placeholder="Selecione o canal..." /></SelectTrigger></FormControl><SelectContent><SelectItem value="none">Nenhum</SelectItem>{leadSources?.map(source => (<SelectItem key={source.id} value={source.id.toString()}>{source.name}</SelectItem>))}</SelectContent></Select><FormMessage /></FormItem>

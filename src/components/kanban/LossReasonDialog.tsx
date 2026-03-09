@@ -28,6 +28,8 @@ const formSchema = z.object({
     motivo_perda_id: z.coerce.number().min(1, "A seleção do motivo é obrigatória."),
 })
 
+type FormValues = z.infer<typeof formSchema>
+
 interface LossReason {
     id: number;
     motivo: string;
@@ -55,12 +57,12 @@ export function LossReasonDialog({ isOpen, onOpenChange, onSuccess, leadId, lost
         enabled: !isAuthLoading && !!user,
     })
 
-    const form = useForm<z.infer<typeof formSchema>>({
+    const form = useForm({
         resolver: zodResolver(formSchema),
     })
 
     const moveLeadMutation = useMutation({
-        mutationFn: async (values: z.infer<typeof formSchema>) => {
+        mutationFn: async (values: FormValues) => {
             const { error } = await supabase
                 .from('leads')
                 .update({
@@ -79,7 +81,7 @@ export function LossReasonDialog({ isOpen, onOpenChange, onSuccess, leadId, lost
         onError: (error: any) => showError(`Erro ao mover lead: ${error.message}`)
     });
 
-    function onSubmit(values: z.infer<typeof formSchema>) {
+    function onSubmit(values: FormValues) {
         moveLeadMutation.mutate(values)
     }
 

@@ -23,16 +23,18 @@ const formSchema = z.object({
     nome_completo: z.string().min(2, "O nome é obrigatório."),
     email: z.string().email("E-mail inválido.").or(z.literal("")).optional(),
     telefone: z.string().min(1, "O telefone é obrigatório."),
-    valor_oportunidade: z.coerce.number().min(0, "O valor deve ser positivo.").optional().default(0),
+    valor_oportunidade: z.coerce.number().min(0, "O valor deve ser positivo.").default(0),
     observacoes: z.string().optional(),
     stage_id: z.coerce.number().min(1, "Selecione um estágio inicial."),
-    curso_interesse: z.coerce.number().optional().nullable(),
-    source_id: z.coerce.number().optional().nullable(),
+    curso_interesse: z.coerce.number().nullable(),
+    source_id: z.coerce.number().nullable(),
 })
 
 interface NewLeadFormProps {
     onSuccess?: () => void;
 }
+
+type NewLeadFormValues = z.infer<typeof formSchema>
 
 export function NewLeadForm({ onSuccess }: NewLeadFormProps) {
     const queryClient = useQueryClient()
@@ -68,7 +70,7 @@ export function NewLeadForm({ onSuccess }: NewLeadFormProps) {
         enabled: !isAuthLoading && !!user,
     })
 
-    const form = useForm<z.infer<typeof formSchema>>({
+    const form = useForm({
         resolver: zodResolver(formSchema),
         defaultValues: {
             nome_completo: "",
@@ -80,7 +82,7 @@ export function NewLeadForm({ onSuccess }: NewLeadFormProps) {
     })
 
     const createLeadMutation = useMutation({
-        mutationFn: async (values: z.infer<typeof formSchema>) => {
+        mutationFn: async (values: NewLeadFormValues) => {
             const { data: leadData, error } = await supabase
                 .from('leads')
                 .insert({
@@ -119,7 +121,7 @@ export function NewLeadForm({ onSuccess }: NewLeadFormProps) {
         }
     })
 
-    function onSubmit(values: z.infer<typeof formSchema>) {
+    function onSubmit(values: NewLeadFormValues) {
         createLeadMutation.mutate(values)
     }
 
@@ -150,7 +152,7 @@ export function NewLeadForm({ onSuccess }: NewLeadFormProps) {
                 <FormField control={form.control} name="valor_oportunidade" render={({ field }) => (
                     <FormItem>
                         <FormLabel>Valor da Oportunidade (R$)</FormLabel>
-                        <FormControl><Input type="number" {...field} /></FormControl>
+                        <FormControl><Input type="number" {...field} value={field.value as any} /></FormControl>
                         <FormMessage />
                     </FormItem>
                 )} />
