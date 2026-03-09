@@ -34,9 +34,9 @@ export function LeadCard({ lead, users, leadSources, stages, courses }: LeadCard
                         <AssignedUser userId={lead.assigned_to_id} users={users} />
                         <CardTitle className="text-base font-semibold truncate flex flex-col" title={lead.nome_completo}>
                             <span>{lead.nome_completo}</span>
-                            {course && (
+                            {(course || lead.observacoes?.includes('[O]')) && (
                                 <span className="text-[10px] font-normal text-muted-foreground bg-muted px-1.5 py-0.5 rounded w-fit mt-0.5">
-                                    {course.name}
+                                    {course ? course.name : lead.observacoes?.match(/\[O\]\s*([^:\n]+)/)?.[1] || 'SendPulse'}
                                 </span>
                             )}
                         </CardTitle>
