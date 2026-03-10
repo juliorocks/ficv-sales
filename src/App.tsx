@@ -115,7 +115,7 @@ StatCard.displayName = 'StatCard';
 
 function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode: boolean, setIsDarkMode: React.Dispatch<React.SetStateAction<boolean>> }) {
     const queryClient = useQueryClient();
-    const [activeTab, setActiveTab] = useState('dashboard');
+    const [activeTab, setActiveTab] = useState(() => localStorage.getItem('ficv_active_tab') || 'dashboard');
     const [analysisData, setAnalysisData] = useState<ConversationAnalysis[]>([]);
     const [isTvMode, setIsTvMode] = useState(false);
     const [profile, setProfile] = useState<Profile | null>(null);
@@ -131,6 +131,11 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [refreshProgress, setRefreshProgress] = useState({ current: 0, total: 0 });
     const [kanbanSearch, setKanbanSearch] = useState("");
+
+    // Persist activeTab in localStorage
+    useEffect(() => {
+        localStorage.setItem('ficv_active_tab', activeTab);
+    }, [activeTab]);
 
     useEffect(() => {
         if (!session?.user?.id) return;
