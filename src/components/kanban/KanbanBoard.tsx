@@ -101,6 +101,30 @@ export function KanbanBoard({ searchTerm }: { searchTerm: string }): JSX.Element
         }
     }, [stages, filteredLeads])
 
+    // Realtime subscription for Leads
+    useEffect(() => {
+        if (isAuthLoading || !user) return;
+
+        const channel = supabase
+            .channel('public:leads-changes')
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'leads'
+                },
+                () => {
+                    queryClient.invalidateQueries({ queryKey: ['leads'] });
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        }
+    }, [user, isAuthLoading, queryClient])
+
     const updateLeadStageMutation = useMutation({
         mutationFn: async ({ leadId, newStageId }: { leadId: number, newStageId: number }) => {
             const { error } = await supabase.from('leads').update({ stage_id: newStageId, stage_entry_date: new Date().toISOString() }).eq('id', leadId)
