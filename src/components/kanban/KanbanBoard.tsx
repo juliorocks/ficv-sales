@@ -114,11 +114,21 @@ export function KanbanBoard({ searchTerm }: { searchTerm: string }): JSX.Element
                     schema: 'public',
                     table: 'leads'
                 },
-                () => {
+                (payload) => {
+                    console.log('Realtime change detected in leads:', payload);
                     queryClient.invalidateQueries({ queryKey: ['leads'] });
+
+                    // Show a subtle notification if a new lead enters
+                    if (payload.eventType === 'INSERT') {
+                        // @ts-ignore
+                        const leadName = payload.new?.nome_completo || 'Novo Lead';
+                        showSuccess(`Novo lead: ${leadName}`);
+                    }
                 }
             )
-            .subscribe();
+            .subscribe((status) => {
+                console.log('Realtime subscription status:', status);
+            });
 
         return () => {
             supabase.removeChannel(channel);

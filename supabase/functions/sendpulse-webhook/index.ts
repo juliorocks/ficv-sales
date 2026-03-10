@@ -92,20 +92,34 @@ serve(async (req) => {
             }
         }
 
+        // Detect Source ID (Site)
+        let sourceId = 1; // Default to 1 (Site)
+        try {
+            const { data: existingSource } = await supabaseClient
+                .from('lead_sources')
+                .select('id')
+                .ilike('name', 'Site')
+                .single();
+
+            if (existingSource) {
+                sourceId = existingSource.id;
+            }
+        } catch (e) {
+            console.error("Erro ao buscar lead_source Site:", e);
+        }
+
         // Base properties that we always provide
         const leadInsertData: any = {
             nome_completo: nameStr,
             email: emailStr,
             telefone: phoneStr || "00000000000",
             stage_id: stageId,
+            source_id: sourceId,
             observacoes: observations,
             valor_oportunidade: courseDefaultVal,
             data_entrada: new Date().toISOString(),
             curso_interesse: courseId,
             temperatura: 'frio',
-            // Note: Since source_id is a foreign key, if 'origin' isn't an integer ID, 
-            // we should put it in observacoes or ensure it maps to the correct Source ID.
-            // For now omitting the string column 'fonte_lead' that no longer exists
         };
 
         // Insert into Leads table

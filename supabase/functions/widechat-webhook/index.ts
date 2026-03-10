@@ -85,38 +85,43 @@ serve(async (req) => {
 
         if (isMessage) {
 
+            // 1. Get or create 'Widechat' source
+            let sourceId = 8; // Default to 8 if known, but we'll fetch it
+            try {
+                const { data: existingSource } = await supabaseClient
+                    .from('lead_sources')
+                    .select('id')
+                    .ilike('name', 'Widechat')
+                    .single();
+
+                if (existingSource) {
+                    sourceId = existingSource.id;
+                } else {
+                    const { data: newSource } = await supabaseClient
+                        .from('lead_sources')
+                        .insert({ name: 'Widechat' })
+                        .select('id')
+                        .single();
+                    if (newSource) sourceId = newSource.id;
+                }
+            } catch (e) {
+                console.error("Erro ao gerenciar lead_source:", e);
+            }
+
             // Link or create the lead
             if (leadId) {
-                // If we found a matching lead (e.g., by phone), link the contact ID to it so future matches are instant
-                if (data.contact_id) {
-                    await supabaseClient
-                        .from('leads')
-                        .update({ widechat_contact_id: data.contact_id })
-                        .eq('id', leadId)
-                        .is('widechat_contact_id', null);
-                }
+                // Update existing lead with contact ID and source if missing
+                const updatePayload: any = {};
+                if (data.contact_id) updatePayload.widechat_contact_id = data.contact_id;
+                updatePayload.source_id = sourceId;
+
+                await supabaseClient
+                    .from('leads')
+                    .update(updatePayload)
+                    .eq('id', leadId);
             } else {
                 // Auto-create lead
                 try {
-                    // 1. Get or create 'Widechat' source
-                    let sourceId = null;
-                    const { data: existingSource } = await supabaseClient
-                        .from('lead_sources')
-                        .select('id')
-                        .ilike('name', 'Widechat')
-                        .single();
-
-                    if (existingSource) {
-                        sourceId = existingSource.id;
-                    } else {
-                        const { data: newSource } = await supabaseClient
-                            .from('lead_sources')
-                            .insert({ name: 'Widechat' })
-                            .select('id')
-                            .single();
-                        if (newSource) sourceId = newSource.id;
-                    }
-
                     // 2. Get first stage
                     const { data: firstStage } = await supabaseClient
                         .from('stages')
