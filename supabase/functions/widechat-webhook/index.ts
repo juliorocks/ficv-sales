@@ -35,7 +35,7 @@ serve(async (req) => {
         const { event, data } = payload;
         const webhookEvent = payload.webhook?.key;
         const msgData = data?.content || data || {}; // 'content' holds the message for "message" events
-        let messageText = msgData.message || "";
+        let messageText = msgData.message || msgData.interactive?.body?.text || msgData.text || "";
         let senderName = payload.vars?.name || data?.user?.name || data?.contact?.name || "Desconhecido";
         let messagePhone = payload.vars?.number || data?.contact?.telephone || "";
 
@@ -58,22 +58,32 @@ serve(async (req) => {
         if (!leadId && messagePhone) {
             const cleanPhone = String(messagePhone).replace(/\D/g, '');
             // Simple match for the last 8 digits
-            const { data: possibleLeads } = await supabaseClient
-                .from('leads')
-                .select('id, telefone');
+            if (cleanPhone.length >= 8) {
+                const { data: possibleLeads } = await supabaseClient
+                    .from('leads')
+                    .select('id, telefone');
 
-            if (possibleLeads) {
-                const match = possibleLeads.find((l: any) => {
-                    const lPhone = String(l.telefone).replace(/\D/g, '');
-                    return lPhone.endsWith(cleanPhone) || cleanPhone.endsWith(lPhone);
-                });
-                if (match) leadId = match.id;
+                if (possibleLeads) {
+                    const match = possibleLeads.find((l: any) => {
+                        if (!l.telefone) return false;
+                        const lPhone = String(l.telefone).replace(/\D/g, '');
+                        if (lPhone.length < 8) return false;
+                        return lPhone.endsWith(cleanPhone) || cleanPhone.endsWith(lPhone);
+                    });
+                    if (match) leadId = match.id;
+                }
             }
         }
 
         // We only care about message events for the real-time chat
-        // webhookEvent determines if it's agent_message, client_message, etc. Or data.event === "message"
-        if (data.event === "message" || webhookEvent === "client_message" || webhookEvent === "agent_message" || event === "message_received" || event === "message_sent") {
+        const isMessage =
+            String(data?.event || "").toLowerCase().includes("message") ||
+            webhookEvent === "client_message" ||
+            webhookEvent === "agent_message" ||
+            event === "message_received" ||
+            event === "message_sent";
+
+        if (isMessage) {
 
             // Link or create the lead
             if (leadId) {
