@@ -334,7 +334,7 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange }:
                         <TabsContent value="chat">
                             <div className="py-2">
                                 {lead.widechat_contact_id ? (
-                                    <WideChatHistory widechatContactId={lead.widechat_contact_id} />
+                                    <WideChatHistory widechatContactId={lead.widechat_contact_id} leadId={lead.id} />
                                 ) : (
                                     <div className="flex flex-col items-center justify-center py-10 text-muted-foreground bg-slate-50 dark:bg-slate-900 rounded-md border border-dashed text-center">
                                         <MessageCircle className="h-10 w-10 mb-2 opacity-20" />

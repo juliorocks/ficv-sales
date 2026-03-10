@@ -59,6 +59,7 @@ import { LossReasonManagement } from './components/admin/LossReasonManagement';
 import { AuditLogPage } from './components/admin/AuditLogPage';
 import { WideChatHistory } from './components/kanban/WideChatHistory';
 import { TmaSettingsManagement } from './components/admin/TmaSettingsManagement';
+import { UserWidechatConfig } from './components/admin/UserWidechatConfig';
 
 const queryClient = new QueryClient({
     defaultOptions: {
@@ -708,6 +709,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                             {(profile?.role === 'admin') && <NavItem icon={FileUp} label="Uploads" active={activeTab === 'uploads'} onClick={() => setActiveTab('uploads')} />}
                             <NavItem icon={BookOpen} label="Base de Conhecimento" active={activeTab === 'knowledge'} onClick={() => setActiveTab('knowledge')} />
                             <NavItem icon={MessageSquare} label="Scripts" active={activeTab === 'scripts'} onClick={() => setActiveTab('scripts')} />
+                            <NavItem icon={MessageSquare} label="Meu Widechat" active={activeTab === 'widechat'} onClick={() => setActiveTab('widechat')} />
                             {(profile?.role === 'admin') && <NavItem icon={Tv} label="Dashboard Live" active={isTvMode} onClick={() => setIsTvMode(!isTvMode)} />}
                         </nav>
 
@@ -1414,6 +1416,13 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                     </div>
                 )}
 
+                {/* Widechat Credentials Tab */}
+                {activeTab === 'widechat' && (
+                    <div className="animate-fade-in">
+                        <UserWidechatConfig />
+                    </div>
+                )}
+
                 {/* History/Reports View */}
                 {activeTab === 'history' && (
                     <div className="animate-fade-in">
@@ -1491,7 +1500,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
 
                 {activeTab === 'kanban-chat' && (
                     <div className="animate-fade-in max-w-6xl mx-auto py-6">
-                        <WideChatHistory widechatContactId="" />
+                        <WideChatHistory widechatContactId="" leadId="" />
                     </div>
                 )}
 

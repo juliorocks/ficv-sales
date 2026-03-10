@@ -29,11 +29,19 @@ serve(async (req) => {
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
         );
 
+        // DEBUG: Save payload to see the shape
+        await supabaseClient.from('widechat_webhook_logs').insert({ payload });
+
         const { event, data } = payload;
+        const webhookEvent = payload.webhook?.key;
+        const msgData = data?.content || data || {}; // 'content' holds the message for "message" events
+        let messageText = msgData.message || "";
+        let senderName = payload.vars?.name || data?.user?.name || data?.contact?.name || "Desconhecido";
+        let messagePhone = payload.vars?.number || data?.contact?.telephone || "";
 
         let leadId = null;
 
-        // Try to find the Lead based on the Widechat contact ID (assuming we saved it when we started the session)
+        // Try to find the Lead based on the Widechat contact ID
         // OR try to find by phone number
         if (data && data.contact_id) {
             const { data: leadData } = await supabaseClient
@@ -47,9 +55,9 @@ serve(async (req) => {
             }
         }
 
-        if (!leadId && data && data.contact?.telephone) {
-            const cleanPhone = String(data.contact.telephone).replace(/\D/g, '');
-            // Simple match for the last 8 digits (ignoring country code/DDD differences for now)
+        if (!leadId && messagePhone) {
+            const cleanPhone = String(messagePhone).replace(/\D/g, '');
+            // Simple match for the last 8 digits
             const { data: possibleLeads } = await supabaseClient
                 .from('leads')
                 .select('id, telefone');
@@ -64,18 +72,93 @@ serve(async (req) => {
         }
 
         // We only care about message events for the real-time chat
-        if (event === "message_received" || event === "message_sent") {
-            const origin = event === "message_received" ? "channel" : (data.user_id ? "agent" : "auto");
+        // webhookEvent determines if it's agent_message, client_message, etc. Or data.event === "message"
+        if (data.event === "message" || webhookEvent === "client_message" || webhookEvent === "agent_message" || event === "message_received" || event === "message_sent") {
+
+            // Link or create the lead
+            if (leadId) {
+                // If we found a matching lead (e.g., by phone), link the contact ID to it so future matches are instant
+                if (data.contact_id) {
+                    await supabaseClient
+                        .from('leads')
+                        .update({ widechat_contact_id: data.contact_id })
+                        .eq('id', leadId)
+                        .is('widechat_contact_id', null);
+                }
+            } else {
+                // Auto-create lead
+                try {
+                    // 1. Get or create 'Widechat' source
+                    let sourceId = null;
+                    const { data: existingSource } = await supabaseClient
+                        .from('lead_sources')
+                        .select('id')
+                        .ilike('name', 'Widechat')
+                        .single();
+
+                    if (existingSource) {
+                        sourceId = existingSource.id;
+                    } else {
+                        const { data: newSource } = await supabaseClient
+                            .from('lead_sources')
+                            .insert({ name: 'Widechat' })
+                            .select('id')
+                            .single();
+                        if (newSource) sourceId = newSource.id;
+                    }
+
+                    // 2. Get first stage
+                    const { data: firstStage } = await supabaseClient
+                        .from('stages')
+                        .select('id')
+                        .order('order', { ascending: true })
+                        .limit(1)
+                        .single();
+                    const stageId = firstStage?.id || 1;
+
+                    // 3. Insert Lead
+                    let newName = "Desconhecido (Widechat)";
+                    if (data.contact?.name && data.contact.name.trim() !== '') {
+                        newName = data.contact.name;
+                    } else if (data.contact?.telephone) {
+                        newName = `Lead WhatsApp - ${data.contact.telephone}`;
+                    }
+
+                    const newLeadData = {
+                        nome_completo: newName,
+                        telefone: data.contact?.telephone || "",
+                        stage_id: stageId,
+                        source_id: sourceId,
+                        widechat_contact_id: data.contact_id || null,
+                        temperatura: 'frio'
+                    };
+
+                    const { data: insertedLead } = await supabaseClient
+                        .from('leads')
+                        .insert(newLeadData)
+                        .select('id')
+                        .single();
+
+                    if (insertedLead) {
+                        leadId = insertedLead.id;
+                    }
+                } catch (e) {
+                    console.error("Erro ao auto-criar lead:", e);
+                }
+            }
+            let origin = "auto";
+            if (webhookEvent === "client_message" || msgData.origin === "contact") origin = "channel";
+            if (webhookEvent === "agent_message" || msgData.origin === "user") origin = "agent";
 
             const messageInsertData = {
                 lead_id: leadId,
                 session_id: data.session_id || "unknown",
-                message_id: data.message_id || data._id || null,
-                type: data.type || "text",
-                message: data.message || "",
+                message_id: msgData.message_id || data._id || null,
+                type: msgData.type || "text",
+                message: messageText,
                 origin: origin,
-                sender_name: data.user?.name || data.contact?.name || "Desconhecido",
-                created_at: data.created_at ? new Date(data.created_at).toISOString() : new Date().toISOString(),
+                sender_name: senderName,
+                created_at: msgData.created_at ? new Date(msgData.created_at).toISOString() : new Date().toISOString(),
                 raw_data: payload
             };
 
