@@ -7,7 +7,6 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-    // Handle CORS gracefully for preflight requests
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders });
     }
@@ -23,219 +22,156 @@ serve(async (req) => {
 
         console.log("Payload recebido do Widechat Webhook:", JSON.stringify(payload, null, 2));
 
-        // Initialize Supabase using Service Role to bypass RLS
         const supabaseClient = createClient(
             Deno.env.get('SUPABASE_URL') ?? '',
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
         );
 
-        // DEBUG: Save payload to see the shape
         await supabaseClient.from('widechat_webhook_logs').insert({ payload });
 
         const { event, data } = payload;
         const webhookEvent = payload.webhook?.key;
         const msgData = data?.content || data || {};
-        
-        // REFINED EXTRACTION
+
+        // Extract key fields
         let messageText = msgData.message || msgData.interactive?.body?.text || msgData.text || "";
-        let senderName = payload.vars?.name || data?.user?.name || data?.contact?.name || "Desconhecido";
+        let senderName = payload.vars?.name || data?.user?.name || data?.contact?.name || "";
         let messagePhone = payload.vars?.number || data?.contact?.telephone || data?.content?.to || msgData.platform_id || "";
 
-        // If template placeholders contain a name, try to extract it
-        if (senderName === "Desconhecido" && msgData.placeholders && Array.isArray(msgData.placeholders)) {
-            const possibleName = msgData.placeholders.find((p: any) => 
+        // Try to extract name from template placeholders
+        if (!senderName && msgData.placeholders && Array.isArray(msgData.placeholders)) {
+            const possibleName = msgData.placeholders.find((p: any) =>
                 typeof p === 'string' && p.length > 2 && p.includes(' ') && !p.includes(':')
             );
             if (possibleName) senderName = possibleName;
-            else if (msgData.placeholders[1]) senderName = msgData.placeholders[1];
+            else if (msgData.placeholders[1]) senderName = String(msgData.placeholders[1]);
         }
 
-        // IMPROVED isMessage filter (exclude notifications and meta-events)
+        // Filter out system notification events (not real messages)
         const eventName = String(data?.event || event || "");
-        const blacklistedEvents = ["Notification", "Read", "Delivered", "error"];
-        
-        const isNotification = blacklistedEvents.some(be => eventName.includes(be));
-        
-        const isMessage = !isNotification && (
+        const isSystemNotification = ["messageNotificationAgent", "Read", "Delivered"].includes(eventName);
+
+        const isMessage = !isSystemNotification && (
             eventName.toLowerCase().includes("message") ||
             webhookEvent === "client_message" ||
             webhookEvent === "agent_message" ||
-            event === "message_received" ||
-            event === "message_sent" ||
-            event === "templateMessage" ||
-            event === "messageContact" || 
-            event === "message" ||
             !!messageText
         );
 
         if (!isMessage) {
-            console.log(`Evento ignorado (não é mensagem): ${eventName}`);
+            console.log(`Evento ignorado: ${eventName}`);
             return new Response(JSON.stringify({ success: true, ignored: true, event: eventName }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
             });
         }
 
-        let leadId = null;
-        const sessionId = data.session_id || payload.data?.session_id || msgData.session_id;
+        // Require at minimum a valid phone or name to create/find lead
+        const hasPhone = messagePhone && !["00000000000", ""].includes(messagePhone);
+        const hasName = senderName && senderName.trim().length > 0;
 
-        // 1. Try to find the Lead based on the Widechat contact ID
-        if (data && data.contact_id) {
-            const { data: leadByContact } = await supabaseClient
-                .from('leads')
-                .select('id')
-                .eq('widechat_contact_id', data.contact_id)
-                .maybeSingle();
-
-            if (leadByContact) leadId = leadByContact.id;
+        if (!hasPhone && !hasName) {
+            console.log("Skipping: no phone or name available");
+            return new Response(JSON.stringify({ success: true, skipped: true }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
         }
 
-        // 2. Search by phone number if not found by contact_id
-        if (!leadId && messagePhone && messagePhone !== "00000000000") {
+        const sessionId = data.session_id || msgData.session_id;
+
+        // --- Find existing lead ---
+        let leadId = null;
+        let foundBy = "";
+
+        // 1. By contact_id
+        if (data?.contact_id) {
+            const { data: l } = await supabaseClient.from('leads').select('id').eq('widechat_contact_id', data.contact_id).maybeSingle();
+            if (l) { leadId = l.id; foundBy = "contact_id"; }
+        }
+
+        // 2. By phone
+        if (!leadId && hasPhone) {
             const cleanPhone = String(messagePhone).replace(/\D/g, '');
             if (cleanPhone.length >= 8) {
-                const phoneSuffix = cleanPhone.slice(-8);
-                const { data: phoneMatch } = await supabaseClient
-                    .from('leads')
-                    .select('id')
-                    .filter('telefone', 'ilike', `%${phoneSuffix}%`)
-                    .limit(1)
-                    .maybeSingle();
-
-                if (phoneMatch) leadId = phoneMatch.id;
+                const suffix = cleanPhone.slice(-8);
+                const { data: l } = await supabaseClient.from('leads').select('id').filter('telefone', 'ilike', `%${suffix}%`).limit(1).maybeSingle();
+                if (l) { leadId = l.id; foundBy = "phone"; }
             }
         }
 
-        // 3. Fallback to session_id matching
+        // 3. By session_id
         if (!leadId && sessionId) {
-            const { data: leadBySession } = await supabaseClient
-                .from('leads')
-                .select('id')
-                .eq('widechat_session_id', sessionId)
-                .maybeSingle();
-            
-            if (leadBySession) leadId = leadBySession.id;
+            const { data: l } = await supabaseClient.from('leads').select('id').eq('widechat_session_id', sessionId).maybeSingle();
+            if (l) { leadId = l.id; foundBy = "session"; }
         }
 
-        // Ensure Widechat exists in lead_sources
+        console.log(`Lead encontrado por: ${foundBy || "nenhum"}, leadId: ${leadId}`);
+
+        // --- Get sourceId ---
         let sourceId = 8;
-        try {
-            const { data: existingSource } = await supabaseClient
-                .from('lead_sources')
-                .select('id')
-                .ilike('name', 'Widechat')
-                .maybeSingle();
+        const { data: src } = await supabaseClient.from('lead_sources').select('id').ilike('name', 'Widechat').maybeSingle();
+        if (src) sourceId = src.id;
 
-            if (existingSource) {
-                sourceId = existingSource.id;
-            } else {
-                const { data: newSource } = await supabaseClient
-                    .from('lead_sources')
-                    .insert({ name: 'Widechat' })
-                    .select('id')
-                    .single();
-                if (newSource) sourceId = newSource.id;
-            }
-        } catch (e) {
-            console.error("Erro ao gerenciar lead_source:", e);
-        }
+        // --- Get first stage ---
+        const { data: firstStage } = await supabaseClient.from('stages').select('id').order('order', { ascending: true }).limit(1).maybeSingle();
+        const stageId = firstStage?.id || 1;
 
         if (leadId) {
-            // Update existing lead
-            const updatePayload: any = {
-                source_id: sourceId,
-                fonte_lead: 'Widechat',
-                updated_at: new Date().toISOString()
-            };
-            if (data.contact_id) updatePayload.widechat_contact_id = data.contact_id;
-            if (sessionId) updatePayload.widechat_session_id = sessionId;
-
-            await supabaseClient
-                .from('leads')
-                .update(updatePayload)
-                .eq('id', leadId);
+            // Update existing
+            const updateData: any = { source_id: sourceId, fonte_lead: 'Widechat', updated_at: new Date().toISOString() };
+            if (data?.contact_id) updateData.widechat_contact_id = data.contact_id;
+            if (sessionId) updateData.widechat_session_id = sessionId;
+            await supabaseClient.from('leads').update(updateData).eq('id', leadId);
         } else {
-            // Check if we have enough info to create a lead
-            const hasPhone = messagePhone && messagePhone !== "00000000000";
-            const hasName = senderName && senderName !== "Desconhecido";
+            // UPSERT - prevents duplicates on concurrent calls via DB unique constraint
+            const finalName = senderName.trim() || (messagePhone ? `Lead WhatsApp - ${messagePhone}` : "Desconhecido");
+            const finalPhone = messagePhone || "00000000000";
 
-            if (!hasPhone && !hasName) {
-                console.log("Skipping lead creation for anonymous/empty payload");
-                return new Response(JSON.stringify({ success: true, skipped: true, reason: "Insufficient data" }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 200,
-                });
-            }
-
-            // CREATE LEAD
-            try {
-                const { data: firstStage } = await supabaseClient
-                    .from('stages')
-                    .select('id')
-                    .order('order', { ascending: true })
-                    .limit(1)
-                    .maybeSingle();
-                const stageId = firstStage?.id || 1;
-
-                let newName = senderName;
-                if (newName === "Desconhecido" && messagePhone) {
-                    newName = `Lead WhatsApp - ${messagePhone}`;
-                }
-
-                const newLeadData = {
-                    nome_completo: newName,
-                    telefone: messagePhone || "00000000000",
+            const { data: upserted, error: upsertError } = await supabaseClient
+                .from('leads')
+                .upsert({
+                    nome_completo: finalName,
+                    telefone: finalPhone,
                     stage_id: stageId,
                     source_id: sourceId,
                     fonte_lead: 'Widechat',
-                    widechat_contact_id: data.contact_id || null,
+                    widechat_contact_id: data?.contact_id || null,
                     widechat_session_id: sessionId || null,
                     temperatura: 'frio',
                     data_entrada: new Date().toISOString(),
                     valor_oportunidade: 0
-                };
+                }, {
+                    onConflict: 'telefone',  // Uses the unique index we just created
+                    ignoreDuplicates: false  // Update on conflict
+                })
+                .select('id')
+                .maybeSingle();
 
-                const { data: insertedLead, error: insertLeadErr } = await supabaseClient
-                    .from('leads')
-                    .insert(newLeadData)
-                    .select('id')
-                    .single();
-
-                if (insertLeadErr) {
-                    console.error("ERRO AO INSERIR LEAD:", insertLeadErr);
-                } else if (insertedLead) {
-                    leadId = insertedLead.id;
-                }
-            } catch (e) {
-                console.error("Erro no fluxo de auto-criação de lead:", e);
+            if (upsertError) {
+                console.error("Erro upsert lead:", upsertError);
+            } else if (upserted) {
+                leadId = upserted.id;
             }
         }
 
-        // Insert message log if we have a lead
+        // --- Store message ---
         if (leadId) {
             let origin = "auto";
-            if (webhookEvent === "client_message" || msgData.origin === "contact" || event === "message_received" || event === "messageContact") origin = "channel";
-            if (webhookEvent === "agent_message" || msgData.origin === "user" || event === "message_sent") origin = "agent";
+            if (eventName === "messageContact" || msgData.origin === "contact") origin = "channel";
+            if (msgData.origin === "user" || msgData.origin === "agent") origin = "agent";
 
-            const messageInsertData = {
+            await supabaseClient.from('widechat_messages').insert({
                 lead_id: leadId,
                 session_id: sessionId || "unknown",
-                message_id: msgData.message_id || data._id || null,
+                message_id: msgData.message_id || null,
                 type: msgData.type || "text",
-                message: messageText || "[Mídia/Outro]",
-                origin: origin,
-                sender_name: senderName,
+                message: messageText || "[Mídia]",
+                origin,
+                sender_name: senderName || "Desconhecido",
                 created_at: msgData.created_at ? new Date(msgData.created_at).toISOString() : new Date().toISOString(),
                 raw_data: payload
-            };
-
-            const { error: msgInsertError } = await supabaseClient
-                .from('widechat_messages')
-                .insert(messageInsertData);
-
-            if (msgInsertError) {
-                console.error("Erro inserindo Widechat Message:", msgInsertError);
-            }
+            });
         }
 
         return new Response(JSON.stringify({ success: true, lead_id: leadId }), {
