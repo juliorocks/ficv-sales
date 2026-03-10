@@ -30,6 +30,15 @@ serve(async (req) => {
 
         console.log("Payload recebido do SendPulse:", JSON.stringify(payload, null, 2));
 
+        // Initialize Supabase using Service Role to bypass RLS
+        const supabaseClient = createClient(
+            Deno.env.get('SUPABASE_URL') ?? '',
+            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+        );
+
+        // DEBUG: Save payload to log table
+        await supabaseClient.from('sendpulse_webhook_logs').insert({ payload });
+
         const contact = Array.isArray(payload) ? payload[0] : payload;
 
         // Mapping SendPulse's potentially nested variables structure to standard fields
@@ -56,25 +65,15 @@ serve(async (req) => {
 
         const observations = `Origem SendPulse: ${origin}\n\n=== Status Payload ===\n${JSON.stringify(contact, null, 2)}`;
 
-        // Initialize Supabase using Service Role to bypass RLS since Webhooks are unauthenticated
-        const supabaseClient = createClient(
-            Deno.env.get('SUPABASE_URL') ?? '',
-            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-        );
-
-        // Find the first Stage in the Kanban (order = 0 typically)
-        const { data: stages, error: stagesError } = await supabaseClient
+        // Find the first Stage in the Kanban
+        const { data: stages } = await supabaseClient
             .from('stages')
             .select('id')
             .order('order', { ascending: true })
             .limit(1)
-            .single();
+            .maybeSingle();
 
-        if (stagesError || !stages) {
-            throw new Error("Não foi possível encontrar o estágio inicial do Kanban: " + (stagesError?.message || ""));
-        }
-
-        const stageId = stages.id;
+        const stageId = stages?.id || 1;
 
         // Detect Course ID by scraping the form name
         let courseId = null;
@@ -99,7 +98,7 @@ serve(async (req) => {
                 .from('lead_sources')
                 .select('id')
                 .ilike('name', 'Site')
-                .single();
+                .maybeSingle();
 
             if (existingSource) {
                 sourceId = existingSource.id;
@@ -115,6 +114,7 @@ serve(async (req) => {
             telefone: phoneStr || "00000000000",
             stage_id: stageId,
             source_id: sourceId,
+            fonte_lead: 'Site', // CRITICAL: This was missing and is NOT NULL in DB
             observacoes: observations,
             valor_oportunidade: courseDefaultVal,
             data_entrada: new Date().toISOString(),
@@ -127,10 +127,10 @@ serve(async (req) => {
             .from('leads')
             .insert(leadInsertData)
             .select()
-            .single();
+            .maybeSingle();
 
         if (insertError) {
-            console.error("Erro inserindo Lead:", insertError);
+            console.error("Erro inserindo Lead SendPulse:", insertError);
             throw insertError;
         }
 
