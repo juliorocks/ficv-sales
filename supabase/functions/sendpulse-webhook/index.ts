@@ -103,7 +103,9 @@ serve(async (req) => {
             data_entrada: new Date().toISOString(),
             curso_interesse: courseId,
             temperatura: 'frio',
-            fonte_lead: origin
+            // Note: Since source_id is a foreign key, if 'origin' isn't an integer ID, 
+            // we should put it in observacoes or ensure it maps to the correct Source ID.
+            // For now omitting the string column 'fonte_lead' that no longer exists
         };
 
         // Insert into Leads table
