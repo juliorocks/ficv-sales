@@ -43,10 +43,14 @@ serve(async (req) => {
         const activeBooks = booksData.filter((b: any) => b.all_email_qty && b.all_email_qty > 0);
 
         // 3. Fetch all current Leads from Supabase to avoid duplicates
-        // Using simple phone OR email local set matching
         const { data: currentLeads } = await supabaseClient.from('leads').select('email, telefone');
         const existingEmails = new Set(currentLeads?.filter((l: any) => l.email).map((l: any) => String(l.email).toLowerCase().trim()));
-        const existingPhones = new Set(currentLeads?.filter((l: any) => l.telefone).map((l: any) => String(l.telefone).replace(/\D/g, '')));
+        const existingPhones = new Set(currentLeads?.filter((l: any) => l.telefone && l.telefone !== '00000000000').map((l: any) => String(l.telefone).replace(/\D/g, '')));
+
+        // 4b. Detect source_id for 'Site'
+        let sourceId = 1;
+        const { data: siteSource } = await supabaseClient.from('lead_sources').select('id').ilike('name', 'Site').maybeSingle();
+        if (siteSource) sourceId = siteSource.id;
 
         // 4. Fetch the initial stage ID
         const { data: stages } = await supabaseClient.from('stages').select('id').order('order', { ascending: true }).limit(1).single();
@@ -124,12 +128,13 @@ serve(async (req) => {
                         email: emailLower,
                         telefone: phoneRaw || "00000000000",
                         stage_id: stageId,
+                        source_id: sourceId,
                         observacoes: `Origem API Oficial SendPulse: ${origin}`,
                         valor_oportunidade: courseDefaultVal,
                         data_entrada: dateEntrada,
                         curso_interesse: courseId,
                         temperatura: 'frio',
-                        fonte_lead: origin
+                        fonte_lead: origin || 'Site'
                     });
                 }
 
@@ -139,14 +144,33 @@ serve(async (req) => {
 
         await Promise.all(listsPromises);
 
-        // 7. Insert new leads
-        if (leadsToInsert.length > 0) {
-            const { error: insertError } = await supabaseClient.from('leads').insert(leadsToInsert);
-            if (insertError) {
-                console.error("Erro inserindo leads em lote:", insertError);
-                throw insertError;
+        // 7. Insert new leads in smaller batches to avoid timeout
+        // Split into leads with unique phone vs leads without phone (can't use phone as conflict key)
+        const leadsWithPhone = leadsToInsert.filter((l: any) => l.telefone && l.telefone !== '00000000000');
+        const leadsWithoutPhone = leadsToInsert.filter((l: any) => !l.telefone || l.telefone === '00000000000');
+
+        const BATCH_SIZE = 50;
+        for (let i = 0; i < leadsWithPhone.length; i += BATCH_SIZE) {
+            const batch = leadsWithPhone.slice(i, i + BATCH_SIZE);
+            const { error: upsertError } = await supabaseClient
+                .from('leads')
+                .upsert(batch, { onConflict: 'telefone', ignoreDuplicates: true });
+            if (upsertError) {
+                console.error(`Erro upsert leads batch ${i}:`, upsertError);
+            } else {
+                totalInserted += batch.length;
             }
-            totalInserted = leadsToInsert.length;
+        }
+
+        // For leads without phone, use email as duplicate-check (done in-memory above)
+        for (let i = 0; i < leadsWithoutPhone.length; i += BATCH_SIZE) {
+            const batch = leadsWithoutPhone.slice(i, i + BATCH_SIZE);
+            const { error: insertError } = await supabaseClient.from('leads').insert(batch);
+            if (insertError) {
+                console.error(`Erro insert leads sem telefone batch ${i}:`, insertError);
+            } else {
+                totalInserted += batch.length;
+            }
         }
 
         return new Response(JSON.stringify({
