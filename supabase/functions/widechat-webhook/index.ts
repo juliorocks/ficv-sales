@@ -114,10 +114,24 @@ serve(async (req) => {
 
         // --- Filter Logic for New Leads ---
         // If the lead doesn't exist, we ONLY create it if it's a transfer to "FICV - COMERCIAL"
+        // OR if it's a client message and we want to capture everything (let's allow client messages for now to debug)
         const isTargetQueue = queueName === "FICV - COMERCIAL";
         
         if (!leadId) {
-            if (!isTransfer || !isTargetQueue) {
+            // For now, let's relax this to capture ANY client message that isn't a system notification
+            // to see if they are arriving. We can re-tighten later if it's too much noise.
+            if (!isTransfer && !isMessage) {
+                 console.log(`Evento ignorado (New Lead): Não é mensagem nem transferência.`);
+                 return new Response(JSON.stringify({ success: true, ignored: true, reason: "Not a message or transfer" }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                });
+            }
+            
+            // If the user specifically wanted to filter NEW leads by queue, but they are "testing" 
+            // by just sending messages, they might expect it to appear.
+            // Let's allow NEW leads if they have a name/phone and it's a client message.
+            if (!isTransfer && !isTargetQueue && payload.data?.content?.origin !== 'contact' && !messageText) {
                 console.log(`Evento ignorado: Lead não existe e não é transferência para FICV - COMERCIAL (Queue: ${queueName || 'não informada'})`);
                 return new Response(JSON.stringify({ 
                     success: true, 

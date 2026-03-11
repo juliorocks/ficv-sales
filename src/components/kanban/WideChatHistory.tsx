@@ -31,12 +31,10 @@ export function WideChatHistory({ widechatContactId, leadId }: WideChatHistoryPr
     const scrollRef = useRef<HTMLDivElement>(null)
     const [newMessage, setNewMessage] = useState("")
 
-    // 1. Fetch from Local Database instead of Edge Function
     const { data: messages, isLoading, error } = useQuery<WideChatMessage[]>({
-        queryKey: ['widechat-messages', widechatContactId],
+        queryKey: ['widechat-messages', leadId, widechatContactId],
         queryFn: async () => {
-            // First we try fetching by leadId to be safer and get all history mapped to the lead 
-            // but the webhook will mostly use contact_id
+            // Fetching by leadId to get all history mapped to this lead
             const { data, error } = await supabase
                 .from('widechat_messages')
                 .select('*')
@@ -44,7 +42,6 @@ export function WideChatHistory({ widechatContactId, leadId }: WideChatHistoryPr
                 .order('created_at', { ascending: true })
 
             if (error) throw error
-
             return data || []
         },
         enabled: !!leadId,
@@ -92,12 +89,14 @@ export function WideChatHistory({ widechatContactId, leadId }: WideChatHistoryPr
     // 3. Send Message Mutation
     const sendMessageMutation = useMutation({
         mutationFn: async (text: string) => {
+            if (!widechatContactId) throw new Error("Não é possível enviar mensagens: Identificador do contato ausente.")
+            
             const { data, error } = await supabase.functions.invoke('widechat-api', {
                 body: {
                     action: 'send_message',
                     contact_id: widechatContactId,
                     message: text,
-                    lead_id: leadId // passing lead id so we can save it to the DB optionally
+                    lead_id: leadId
                 }
             })
 
@@ -107,13 +106,9 @@ export function WideChatHistory({ widechatContactId, leadId }: WideChatHistoryPr
             return data
         },
         onMutate: async (text) => {
-            // Cancel any outgoing refetches so they don't overwrite our optimistic update
-            await queryClient.cancelQueries({ queryKey: ['widechat-messages', widechatContactId] })
+            await queryClient.cancelQueries({ queryKey: ['widechat-messages', leadId, widechatContactId] })
+            const previousMessages = queryClient.getQueryData(['widechat-messages', leadId, widechatContactId])
 
-            // Snapshot the previous value
-            const previousMessages = queryClient.getQueryData(['widechat-messages', widechatContactId])
-
-            // Optimistically update to the new value
             const tempId = crypto.randomUUID()
             const optimisticMsg: WideChatMessage = {
                 id: tempId,
@@ -126,19 +121,17 @@ export function WideChatHistory({ widechatContactId, leadId }: WideChatHistoryPr
                 sender_name: 'Você (Enviando...)'
             }
 
-            queryClient.setQueryData(['widechat-messages', widechatContactId], (old: any) => [...(old || []), optimisticMsg])
+            queryClient.setQueryData(['widechat-messages', leadId, widechatContactId], (old: any) => [...(old || []), optimisticMsg])
 
             return { previousMessages, tempId }
         },
         onError: (err, newTodo, context: any) => {
-            // Rollback optimistic update
             if (context?.previousMessages) {
-                queryClient.setQueryData(['widechat-messages', widechatContactId], context.previousMessages)
+                queryClient.setQueryData(['widechat-messages', leadId, widechatContactId], context.previousMessages)
             }
         },
         onSuccess: (data, variables, context) => {
-            // If the backend also inserts it, we might want to refresh to get the true ID.
-            queryClient.invalidateQueries({ queryKey: ['widechat-messages', widechatContactId] })
+            queryClient.invalidateQueries({ queryKey: ['widechat-messages', leadId, widechatContactId] })
         }
     })
 
@@ -174,12 +167,21 @@ export function WideChatHistory({ widechatContactId, leadId }: WideChatHistoryPr
 
     return (
         <div className="flex flex-col border border-[var(--border)] rounded-xl overflow-hidden bg-[var(--bg-card)] shadow-sm">
+            {!widechatContactId && (
+                <Alert className="rounded-none border-x-0 border-t-0 bg-blue-50/50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800">
+                    <AlertCircle className="h-4 w-4 text-blue-600" />
+                    <AlertDescription className="text-xs text-blue-700 dark:text-blue-400">
+                        Exibindo histórico vinculado pelo telefone. O envio de mensagens será habilitado no próximo contato do cliente.
+                    </AlertDescription>
+                </Alert>
+            )}
             <ScrollArea className="h-[400px] w-full p-4 bg-slate-50 dark:bg-[#0D1117]">
                 {!messages || messages.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-muted-foreground opacity-50">
                         <MessageSquare className="h-8 w-8 mb-2" />
                         <p className="text-sm font-medium">Nenhuma mensagem no histórico local.</p>
-                        <p className="text-xs mt-1">Envie a primeira mensagem para iniciar.</p>
+                        {!widechatContactId && <p className="text-xs mt-1">Este lead ainda não interagiu pelo WhatsApp.</p>}
+                        {widechatContactId && <p className="text-xs mt-1">Envie a primeira mensagem para iniciar.</p>}
                     </div>
                 ) : (
                     <div className="flex flex-col space-y-4">
@@ -220,20 +222,20 @@ export function WideChatHistory({ widechatContactId, leadId }: WideChatHistoryPr
                 )}
             </ScrollArea>
 
-            <div className="p-3 bg-[var(--bg-card-hover)] border-t border-[var(--border)]">
+            <div className={`p-3 border-t border-[var(--border)] ${!widechatContactId ? 'bg-slate-100/50 dark:bg-slate-900/50 opacity-60 grayscale' : 'bg-[var(--bg-card-hover)]'}`}>
                 <form onSubmit={handleSend} className="flex gap-2 items-center">
                     <Input
                         value={newMessage}
                         onChange={(e) => setNewMessage(e.target.value)}
-                        placeholder="Digite sua mensagem via WhatsApp..."
+                        placeholder={!widechatContactId ? "Envio desabilitado (falta ID do contato)..." : "Digite sua mensagem via WhatsApp..."}
                         className="flex-1 bg-white dark:bg-[#0D1117] border-[var(--border)] focus-visible:ring-primary shadow-sm rounded-full px-4"
-                        disabled={sendMessageMutation.isPending}
+                        disabled={sendMessageMutation.isPending || !widechatContactId}
                     />
                     <Button
                         type="submit"
                         size="icon"
                         className="rounded-full shadow-md bg-primary hover:bg-primary/90 text-white transition-all w-10 h-10 shrink-0"
-                        disabled={!newMessage.trim() || sendMessageMutation.isPending}
+                        disabled={!newMessage.trim() || sendMessageMutation.isPending || !widechatContactId}
                     >
                         {sendMessageMutation.isPending ? (
                             <Loader2 className="h-4 w-4 animate-spin" />

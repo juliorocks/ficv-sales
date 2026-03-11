@@ -144,30 +144,28 @@ serve(async (req) => {
 
         await Promise.all(listsPromises);
 
-        // 7. Insert new leads in smaller batches to avoid timeout
-        // Split into leads with unique phone vs leads without phone (can't use phone as conflict key)
+        // 7. Insert new leads in smaller batches
         const leadsWithPhone = leadsToInsert.filter((l: any) => l.telefone && l.telefone !== '00000000000');
         const leadsWithoutPhone = leadsToInsert.filter((l: any) => !l.telefone || l.telefone === '00000000000');
 
         const BATCH_SIZE = 50;
         for (let i = 0; i < leadsWithPhone.length; i += BATCH_SIZE) {
             const batch = leadsWithPhone.slice(i, i + BATCH_SIZE);
-            const { error: upsertError } = await supabaseClient
+            const { error: insertError } = await supabaseClient
                 .from('leads')
-                .upsert(batch, { onConflict: 'telefone', ignoreDuplicates: true });
-            if (upsertError) {
-                console.error(`Erro upsert leads batch ${i}:`, upsertError);
+                .insert(batch);
+            if (insertError) {
+                console.error(`Erro insert leads batch ${i}:`, JSON.stringify(insertError, null, 2));
             } else {
                 totalInserted += batch.length;
             }
         }
 
-        // For leads without phone, use email as duplicate-check (done in-memory above)
         for (let i = 0; i < leadsWithoutPhone.length; i += BATCH_SIZE) {
             const batch = leadsWithoutPhone.slice(i, i + BATCH_SIZE);
             const { error: insertError } = await supabaseClient.from('leads').insert(batch);
             if (insertError) {
-                console.error(`Erro insert leads sem telefone batch ${i}:`, insertError);
+                console.error(`Erro insert leads sem telefone batch ${i}:`, JSON.stringify(insertError, null, 2));
             } else {
                 totalInserted += batch.length;
             }
