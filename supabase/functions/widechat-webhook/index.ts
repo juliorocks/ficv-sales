@@ -80,7 +80,7 @@ serve(async (req) => {
 
         const sessionId = data.session_id || msgData.session_id;
 
-        // --- Filter by Queue ---
+        const TARGET_QUEUE = "FICV - COMERCIAL";
         const queueName = payload.data?.transferHistory?.value;
         const isTransfer = webhookEvent === "attendance_transfer" || payload.data?.event === "humanTransfer";
 
@@ -88,13 +88,19 @@ serve(async (req) => {
         let leadId = null;
         let foundBy = "";
 
-        // 1. By contact_id
-        if (data?.contact_id) {
+        // 1. By session_id (Strongest link for active interactions)
+        if (sessionId) {
+            const { data: l } = await supabaseClient.from('leads').select('id').eq('widechat_session_id', sessionId).maybeSingle();
+            if (l) { leadId = l.id; foundBy = "session"; }
+        }
+
+        // 2. By contact_id
+        if (!leadId && data?.contact_id) {
             const { data: l } = await supabaseClient.from('leads').select('id').eq('widechat_contact_id', data.contact_id).maybeSingle();
             if (l) { leadId = l.id; foundBy = "contact_id"; }
         }
 
-        // 2. By phone
+        // 3. By phone (Fuzzy matching)
         if (!leadId && hasPhone) {
             const cleanPhone = String(messagePhone).replace(/\D/g, '');
             if (cleanPhone.length >= 8) {
@@ -104,40 +110,28 @@ serve(async (req) => {
             }
         }
 
-        // 3. By session_id
-        if (!leadId && sessionId) {
-            const { data: l } = await supabaseClient.from('leads').select('id').eq('widechat_session_id', sessionId).maybeSingle();
-            if (l) { leadId = l.id; foundBy = "session"; }
+        console.log(`Lead status: leadId=${leadId}, foundBy=${foundBy}, isTransfer=${isTransfer}, queue=${queueName}`);
+
+        // --- Filter Logic ---
+        // 1. If it's a transfer to a DIFFERENT queue, stop here (important to avoid pulling wrong leads)
+        if (isTransfer && queueName && queueName !== TARGET_QUEUE) {
+            console.log(`Ignorando: Transferência para fila diferente: ${queueName}`);
+            return new Response(JSON.stringify({ success: true, ignored: true, reason: `Queue ${queueName} is not ${TARGET_QUEUE}` }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
         }
 
-        console.log(`Lead encontrado por: ${foundBy || "nenhum"}, leadId: ${leadId}`);
-
-        // --- Filter Logic for New Leads ---
-        // If the lead doesn't exist, we ONLY create it if it's a transfer to "FICV - COMERCIAL"
-        // OR if it's a client message and we want to capture everything (let's allow client messages for now to debug)
-        const isTargetQueue = queueName === "FICV - COMERCIAL";
-        
+        // 2. If lead doesn't exist, ONLY create it if it's a transfer to our target queue
         if (!leadId) {
-            // For now, let's relax this to capture ANY client message that isn't a system notification
-            // to see if they are arriving. We can re-tighten later if it's too much noise.
-            if (!isTransfer && !isMessage) {
-                 console.log(`Evento ignorado (New Lead): Não é mensagem nem transferência.`);
-                 return new Response(JSON.stringify({ success: true, ignored: true, reason: "Not a message or transfer" }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 200,
-                });
-            }
-            
-            // If the user specifically wanted to filter NEW leads by queue, but they are "testing" 
-            // by just sending messages, they might expect it to appear.
-            // Let's allow NEW leads if they have a name/phone and it's a client message.
-            if (!isTransfer && !isTargetQueue && payload.data?.content?.origin !== 'contact' && !messageText) {
-                console.log(`Evento ignorado: Lead não existe e não é transferência para FICV - COMERCIAL (Queue: ${queueName || 'não informada'})`);
+            if (isTransfer && queueName === TARGET_QUEUE) {
+                console.log("Admitindo novo lead via transferência para FICV - COMERCIAL");
+            } else {
+                console.log(`Ignorando: Lead não encontrado e evento não é transferência para ${TARGET_QUEUE} (Queue: ${queueName || 'n/a'})`);
                 return new Response(JSON.stringify({ 
                     success: true, 
                     ignored: true, 
-                    reason: "Lead not found and not a transfer to target queue",
-                    queue: queueName 
+                    reason: "Lead admission denied: Not a transfer to target queue" 
                 }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 200,
