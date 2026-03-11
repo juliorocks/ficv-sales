@@ -153,7 +153,7 @@ serve(async (req) => {
 
             const { data: upserted, error: upsertError } = await supabaseClient
                 .from('leads')
-                .upsert({
+                .insert({
                     nome_completo: finalName,
                     telefone: finalPhone,
                     stage_id: stageId,
@@ -164,9 +164,6 @@ serve(async (req) => {
                     temperatura: 'frio',
                     data_entrada: new Date().toISOString(),
                     valor_oportunidade: 0
-                }, {
-                    onConflict: 'telefone',
-                    ignoreDuplicates: false
                 })
                 .select('id')
                 .maybeSingle();
