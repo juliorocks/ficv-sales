@@ -114,7 +114,7 @@ serve(async (req) => {
             telefone: phoneStr || "00000000000",
             stage_id: stageId,
             source_id: sourceId,
-            fonte_lead: 'Site', // CRITICAL: This was missing and is NOT NULL in DB
+            fonte_lead: 'Site',
             observacoes: observations,
             valor_oportunidade: courseDefaultVal,
             data_entrada: new Date().toISOString(),
@@ -130,7 +130,7 @@ serve(async (req) => {
             .maybeSingle();
 
         if (insertError) {
-            console.error("Erro inserindo Lead SendPulse:", insertError);
+            console.error("Erro inserindo Lead SendPulse:", JSON.stringify(insertError, null, 2));
             throw insertError;
         }
 
