@@ -80,6 +80,10 @@ serve(async (req) => {
 
         const sessionId = data.session_id || msgData.session_id;
 
+        // --- Filter by Queue ---
+        const queueName = payload.data?.transferHistory?.value;
+        const isTransfer = webhookEvent === "attendance_transfer" || payload.data?.event === "humanTransfer";
+
         // --- Find existing lead ---
         let leadId = null;
         let foundBy = "";
@@ -108,6 +112,25 @@ serve(async (req) => {
 
         console.log(`Lead encontrado por: ${foundBy || "nenhum"}, leadId: ${leadId}`);
 
+        // --- Filter Logic for New Leads ---
+        // If the lead doesn't exist, we ONLY create it if it's a transfer to "FICV - COMERCIAL"
+        const isTargetQueue = queueName === "FICV - COMERCIAL";
+        
+        if (!leadId) {
+            if (!isTransfer || !isTargetQueue) {
+                console.log(`Evento ignorado: Lead não existe e não é transferência para FICV - COMERCIAL (Queue: ${queueName || 'não informada'})`);
+                return new Response(JSON.stringify({ 
+                    success: true, 
+                    ignored: true, 
+                    reason: "Lead not found and not a transfer to target queue",
+                    queue: queueName 
+                }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                });
+            }
+        }
+
         // --- Get sourceId ---
         let sourceId = 8;
         const { data: src } = await supabaseClient.from('lead_sources').select('id').ilike('name', 'Widechat').maybeSingle();
@@ -124,7 +147,7 @@ serve(async (req) => {
             if (sessionId) updateData.widechat_session_id = sessionId;
             await supabaseClient.from('leads').update(updateData).eq('id', leadId);
         } else {
-            // UPSERT - prevents duplicates on concurrent calls via DB unique constraint
+            // Create new lead ONLY if it was approved by the filter above
             const finalName = senderName.trim() || (messagePhone ? `Lead WhatsApp - ${messagePhone}` : "Desconhecido");
             const finalPhone = messagePhone || "00000000000";
 
@@ -142,8 +165,8 @@ serve(async (req) => {
                     data_entrada: new Date().toISOString(),
                     valor_oportunidade: 0
                 }, {
-                    onConflict: 'telefone',  // Uses the unique index we just created
-                    ignoreDuplicates: false  // Update on conflict
+                    onConflict: 'telefone',
+                    ignoreDuplicates: false
                 })
                 .select('id')
                 .maybeSingle();
