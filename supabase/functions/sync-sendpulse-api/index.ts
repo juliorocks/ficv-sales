@@ -40,7 +40,21 @@ serve(async (req) => {
         if (!Array.isArray(booksData)) throw new Error("Invalid addressbooks response");
 
         // Only process books that actually have emails to save API requests
-        const activeBooks = booksData.filter((b: any) => b.all_email_qty && b.all_email_qty > 0);
+        const allActiveBooks = booksData.filter((b: any) => b.all_email_qty && b.all_email_qty > 0);
+
+        // 5b. Fetch courses early to filter addressbooks BEFORE fetching emails
+        const { data: coursesForFilter } = await supabaseClient.from('courses').select('id, name, default_value');
+
+        // Only sync addressbooks whose name matches a known course (lead gen forms).
+        // This prevents importing student lists like "ALUNOS FICV 206.1".
+        const activeBooks = allActiveBooks.filter((b: any) => {
+            if (!coursesForFilter || coursesForFilter.length === 0) return false;
+            const bookNameUpper = String(b.name || '').toUpperCase();
+            return coursesForFilter.some((c: any) => bookNameUpper.includes(String(c.name).toUpperCase()));
+        });
+
+        console.log(`Addressbooks encontrados: ${allActiveBooks.length}, elegíveis (match curso): ${activeBooks.length}`);
+        console.log("Books ignorados:", allActiveBooks.filter((b: any) => !activeBooks.includes(b)).map((b: any) => b.name));
 
         // 3. Fetch all current Leads from Supabase to avoid duplicates
         const { data: currentLeads } = await supabaseClient.from('leads').select('email, telefone');
@@ -57,8 +71,8 @@ serve(async (req) => {
         const stageId = stages?.id;
         if (!stageId) throw new Error("No initial stage found in Kanban");
 
-        // 5. Fetch courses WITH default_value
-        const { data: courses } = await supabaseClient.from('courses').select('id, name, default_value');
+        // 5. Use courses already fetched above
+        const courses = coursesForFilter;
 
         // 6. Fetch all emails from all active books
         let totalInserted = 0;
