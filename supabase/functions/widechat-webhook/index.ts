@@ -47,8 +47,23 @@ serve(async (req) => {
             else if (msgData.placeholders[1]) senderName = String(msgData.placeholders[1]);
         }
 
-        // Filter out system notification events (not real messages)
         const eventName = String(data?.event || event || "");
+
+        // Detect conversation end events (before isMessage filter)
+        const isConversationEnd =
+            webhookEvent === "attendance_end" ||
+            webhookEvent === "finalize" ||
+            webhookEvent === "attendance_closed" ||
+            eventName === "attendanceEnd" ||
+            eventName === "finalize" ||
+            eventName === "closed" ||
+            eventName === "attendance_end" ||
+            eventName === "finalized" ||
+            eventName === "attendanceClosed" ||
+            (eventName.toLowerCase().includes("finali") && eventName.toLowerCase().includes("attend")) ||
+            (eventName.toLowerCase().includes("end") && eventName.toLowerCase().includes("attend"));
+
+        // Filter out system notification events (not real messages)
         const isSystemNotification = ["messageNotificationAgent", "Read", "Delivered"].includes(eventName);
 
         const isMessage = !isSystemNotification && (
@@ -58,7 +73,8 @@ serve(async (req) => {
             !!messageText
         );
 
-        if (!isMessage) {
+        // Skip if not a message and not a conversation end
+        if (!isMessage && !isConversationEnd) {
             console.log(`Evento ignorado: ${eventName}`);
             return new Response(JSON.stringify({ success: true, ignored: true, event: eventName }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -66,11 +82,11 @@ serve(async (req) => {
             });
         }
 
-        // Require at minimum a valid phone or name to create/find lead
+        // Require at minimum a valid phone or name to find lead
         const hasPhone = messagePhone && !["00000000000", ""].includes(messagePhone);
         const hasName = senderName && senderName.trim().length > 0;
 
-        if (!hasPhone && !hasName) {
+        if (!hasPhone && !hasName && !isConversationEnd) {
             console.log("Skipping: no phone or name available");
             return new Response(JSON.stringify({ success: true, skipped: true }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -110,10 +126,37 @@ serve(async (req) => {
             }
         }
 
-        console.log(`Lead status: leadId=${leadId}, foundBy=${foundBy}, isTransfer=${isTransfer}, queue=${queueName}`);
+        console.log(`Lead status: leadId=${leadId}, foundBy=${foundBy}, isTransfer=${isTransfer}, queue=${queueName}, isConversationEnd=${isConversationEnd}`);
 
-        // --- Filter Logic ---
-        // 1. If it's a transfer to a DIFFERENT queue, stop here (important to avoid pulling wrong leads)
+        // --- Handle conversation end ---
+        if (isConversationEnd) {
+            if (leadId) {
+                const { data: finalStage } = await supabaseClient
+                    .from('stages')
+                    .select('id, name')
+                    .or('name.ilike.%finaliza%,name.ilike.%encerra%,name.ilike.%conclu%')
+                    .order('order', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+
+                if (finalStage) {
+                    await supabaseClient.from('leads').update({
+                        stage_id: finalStage.id,
+                        stage_entry_date: new Date().toISOString()
+                    }).eq('id', leadId);
+                    console.log(`Lead ${leadId} movido para estágio "${finalStage.name}" (Finalizados)`);
+                } else {
+                    console.log("Estágio 'Finalizados' não encontrado no banco");
+                }
+            }
+            return new Response(JSON.stringify({ success: true, lead_id: leadId, action: "conversation_ended" }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
+        }
+
+        // --- Filter Logic for new leads ---
+        // 1. If it's a transfer to a DIFFERENT queue, stop here
         if (isTransfer && queueName && queueName !== TARGET_QUEUE) {
             console.log(`Ignorando: Transferência para fila diferente: ${queueName}`);
             return new Response(JSON.stringify({ success: true, ignored: true, reason: `Queue ${queueName} is not ${TARGET_QUEUE}` }), {
@@ -128,10 +171,10 @@ serve(async (req) => {
                 console.log("Admitindo novo lead via transferência para FICV - COMERCIAL");
             } else {
                 console.log(`Ignorando: Lead não encontrado e evento não é transferência para ${TARGET_QUEUE} (Queue: ${queueName || 'n/a'})`);
-                return new Response(JSON.stringify({ 
-                    success: true, 
-                    ignored: true, 
-                    reason: "Lead admission denied: Not a transfer to target queue" 
+                return new Response(JSON.stringify({
+                    success: true,
+                    ignored: true,
+                    reason: "Lead admission denied: Not a transfer to target queue"
                 }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 200,
@@ -184,11 +227,11 @@ serve(async (req) => {
         }
 
         // --- Store message ---
-        if (leadId) {
-            let origin = "auto";
-            if (eventName === "messageContact" || msgData.origin === "contact") origin = "channel";
-            if (msgData.origin === "user" || msgData.origin === "agent") origin = "agent";
+        let origin = "auto";
+        if (eventName === "messageContact" || msgData.origin === "contact") origin = "channel";
+        if (msgData.origin === "user" || msgData.origin === "agent" || webhookEvent === "agent_message") origin = "agent";
 
+        if (leadId) {
             await supabaseClient.from('widechat_messages').insert({
                 lead_id: leadId,
                 session_id: sessionId || "unknown",
@@ -200,6 +243,65 @@ serve(async (req) => {
                 created_at: msgData.created_at ? new Date(msgData.created_at).toISOString() : new Date().toISOString(),
                 raw_data: payload
             });
+
+            // --- INTELLIGENT CRM UPDATES ---
+            const { data: currentLead } = await supabaseClient
+                .from('leads')
+                .select('assigned_to_id, curso_interesse, valor_oportunidade')
+                .eq('id', leadId)
+                .maybeSingle();
+
+            const intelligentUpdates: any = {};
+
+            // 1. AUTO-ASSIGN AGENT: When an agent sends a message, match their name to a profile
+            if (origin === 'agent' && senderName && senderName !== 'Desconhecido' && !currentLead?.assigned_to_id) {
+                const firstName = senderName.trim().split(' ')[0];
+                const { data: profile } = await supabaseClient
+                    .from('profiles')
+                    .select('id, full_name')
+                    .or(`full_name.ilike.%${senderName.trim()}%,full_name.ilike.%${firstName}%`)
+                    .limit(1)
+                    .maybeSingle();
+
+                if (profile) {
+                    intelligentUpdates.assigned_to_id = profile.id;
+                    console.log(`[CRM Auto] Atendente detectado: ${profile.full_name} → lead ${leadId}`);
+                } else {
+                    console.log(`[CRM Auto] Agente "${senderName}" não encontrado em profiles`);
+                }
+            }
+
+            // 2. AUTO-DETECT COURSE: Scan all messages for course keywords
+            if (!currentLead?.curso_interesse && messageText) {
+                const { data: courses } = await supabaseClient
+                    .from('courses')
+                    .select('id, name, default_value');
+
+                if (courses && courses.length > 0) {
+                    const msgLower = messageText.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                    const matchedCourse = courses.find((c: any) => {
+                        const courseLower = c.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                        // Match full name or significant words (>4 chars)
+                        if (msgLower.includes(courseLower)) return true;
+                        const words = courseLower.split(/\s+/).filter((w: string) => w.length > 4);
+                        return words.length > 0 && words.every((w: string) => msgLower.includes(w));
+                    });
+
+                    if (matchedCourse) {
+                        intelligentUpdates.curso_interesse = matchedCourse.id;
+                        if (matchedCourse.default_value && !currentLead?.valor_oportunidade) {
+                            intelligentUpdates.valor_oportunidade = matchedCourse.default_value;
+                        }
+                        console.log(`[CRM Auto] Curso detectado: "${matchedCourse.name}" → lead ${leadId}`);
+                    }
+                }
+            }
+
+            // Apply intelligent updates if any
+            if (Object.keys(intelligentUpdates).length > 0) {
+                await supabaseClient.from('leads').update(intelligentUpdates).eq('id', leadId);
+                console.log(`[CRM Auto] Updates aplicados ao lead ${leadId}:`, intelligentUpdates);
+            }
         }
 
         return new Response(JSON.stringify({ success: true, lead_id: leadId }), {
