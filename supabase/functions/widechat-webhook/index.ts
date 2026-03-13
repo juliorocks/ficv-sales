@@ -50,18 +50,13 @@ serve(async (req) => {
         const eventName = String(data?.event || event || "");
 
         // Detect conversation end events (before isMessage filter)
+        // IMPORTANT: Use exact matches only — "attendance" contains "end" and "attend" as substrings,
+        // so substring checks would incorrectly flag attendance_transfer as a conversation end.
+        const CONVERSATION_END_WEBHOOK_EVENTS = ["attendance_end", "finalize", "attendance_closed"];
+        const CONVERSATION_END_EVENT_NAMES = ["attendanceEnd", "finalize", "closed", "attendance_end", "finalized", "attendanceClosed"];
         const isConversationEnd =
-            webhookEvent === "attendance_end" ||
-            webhookEvent === "finalize" ||
-            webhookEvent === "attendance_closed" ||
-            eventName === "attendanceEnd" ||
-            eventName === "finalize" ||
-            eventName === "closed" ||
-            eventName === "attendance_end" ||
-            eventName === "finalized" ||
-            eventName === "attendanceClosed" ||
-            (eventName.toLowerCase().includes("finali") && eventName.toLowerCase().includes("attend")) ||
-            (eventName.toLowerCase().includes("end") && eventName.toLowerCase().includes("attend"));
+            CONVERSATION_END_WEBHOOK_EVENTS.includes(webhookEvent) ||
+            CONVERSATION_END_EVENT_NAMES.includes(eventName);
 
         // Filter out system notification events (not real messages)
         const isSystemNotification = ["messageNotificationAgent", "Read", "Delivered"].includes(eventName);
