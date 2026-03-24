@@ -160,16 +160,18 @@ serve(async (req) => {
             });
         }
 
-        // 2. If lead doesn't exist, ONLY create it if it's a transfer to our target queue
+        // 2. If lead doesn't exist, create it for any event that belongs to our queue
+        // Accept: transfers to FICV - COMERCIAL, messages with valid phone/name, or events without queue info (default to our queue)
         if (!leadId) {
-            if (isTransfer && queueName === TARGET_QUEUE) {
-                console.log("Admitindo novo lead via transferência para FICV - COMERCIAL");
+            const belongsToTargetQueue = !queueName || queueName === TARGET_QUEUE;
+            if (belongsToTargetQueue && (hasPhone || hasName)) {
+                console.log(`Admitindo novo lead (queue=${queueName || 'default'}, phone=${hasPhone}, name=${hasName})`);
             } else {
-                console.log(`Ignorando: Lead não encontrado e evento não é transferência para ${TARGET_QUEUE} (Queue: ${queueName || 'n/a'})`);
+                console.log(`Ignorando: Lead não encontrado, sem dados suficientes ou fila diferente (queue=${queueName || 'n/a'}, phone=${hasPhone}, name=${hasName})`);
                 return new Response(JSON.stringify({
                     success: true,
                     ignored: true,
-                    reason: "Lead admission denied: Not a transfer to target queue"
+                    reason: "Lead admission denied: insufficient data or wrong queue"
                 }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 200,
