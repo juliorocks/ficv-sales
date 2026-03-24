@@ -12,6 +12,9 @@ serve(async (req) => {
     }
 
     try {
+        const startTime = Date.now();
+        const MAX_EXECUTION_MS = 25000; // 25s safety limit (Supabase edge functions timeout at ~30s)
+
         const supabaseClient = createClient(
             Deno.env.get('SUPABASE_URL') ?? '',
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
@@ -24,66 +27,74 @@ serve(async (req) => {
             body: JSON.stringify({
                 grant_type: 'client_credentials',
                 client_id: '2cac91a87f0304d8cc5ba849431c260b',
-                client_secret: '15653f34547a43aeaf40f602cf15ebe3' // Set explicitly as requested
+                client_secret: '15653f34547a43aeaf40f602cf15ebe3'
             })
         });
 
         const authData = await authRes.json();
         const token = authData.access_token;
-        if (!token) throw new Error("Could not authenticate with Sendpulse API. Verifica as credenciais.");
+        if (!token) throw new Error("Could not authenticate with Sendpulse API.");
 
-        // 2. Fetch all Addressbooks (mailing lists/forms)
+        // 2. Fetch all Addressbooks
         const booksRes = await fetch('https://api.sendpulse.com/addressbooks', {
             headers: { Authorization: `Bearer ${token}` }
         });
         const booksData = await booksRes.json();
         if (!Array.isArray(booksData)) throw new Error("Invalid addressbooks response");
 
-        // Only process books that actually have emails to save API requests
         const allActiveBooks = booksData.filter((b: any) => b.all_email_qty && b.all_email_qty > 0);
 
-        // 5b. Fetch courses early for course matching during lead creation
+        // Fetch courses for filtering and matching
         const { data: coursesForFilter } = await supabaseClient.from('courses').select('id, name, default_value');
 
-        // Exclude only obvious student/alumni lists (e.g. "ALUNOS FICV 206.1")
-        // All other addressbooks are synced as potential lead sources
+        // Exclude obvious student/alumni lists
         const EXCLUDE_PATTERNS = ['ALUNOS', 'ALUMNI', 'FORMADOS', 'EGRESSOS', 'MATRICULADOS'];
         const activeBooks = allActiveBooks.filter((b: any) => {
             const bookNameUpper = String(b.name || '').toUpperCase();
             return !EXCLUDE_PATTERNS.some(pattern => bookNameUpper.includes(pattern));
         });
 
-        console.log(`Addressbooks encontrados: ${allActiveBooks.length}, elegíveis: ${activeBooks.length}`);
-        console.log("Books ignorados:", allActiveBooks.filter((b: any) => !activeBooks.includes(b)).map((b: any) => b.name));
+        console.log(`Addressbooks: ${allActiveBooks.length} total, ${activeBooks.length} elegíveis`);
 
-        // 3. Fetch all current Leads from Supabase to avoid duplicates
+        // 3. Build dedup sets from existing leads (only email and phone, lightweight)
         const { data: currentLeads } = await supabaseClient.from('leads').select('email, telefone');
         const existingEmails = new Set(currentLeads?.filter((l: any) => l.email).map((l: any) => String(l.email).toLowerCase().trim()));
         const existingPhones = new Set(currentLeads?.filter((l: any) => l.telefone && l.telefone !== '00000000000').map((l: any) => String(l.telefone).replace(/\D/g, '')));
 
-        // 4b. Detect source_id for 'Site'
+        // 4. Get source and stage IDs
         let sourceId = 1;
         const { data: siteSource } = await supabaseClient.from('lead_sources').select('id').ilike('name', 'Site').maybeSingle();
         if (siteSource) sourceId = siteSource.id;
 
-        // 4. Fetch the initial stage ID
-        const { data: stages } = await supabaseClient.from('stages').select('id').order('order', { ascending: true }).limit(1).single();
-        const stageId = stages?.id;
+        const { data: stageData } = await supabaseClient.from('stages').select('id').order('order', { ascending: true }).limit(1).single();
+        const stageId = stageData?.id;
         if (!stageId) throw new Error("No initial stage found in Kanban");
 
-        // 5. Use courses already fetched above
         const courses = coursesForFilter;
 
-        // 6. Fetch all emails from all active books
+        // 5. Process books SEQUENTIALLY (not Promise.all) to avoid memory/CPU limits
         let totalInserted = 0;
-        const leadsToInsert: any[] = [];
+        let totalSkipped = 0;
+        let booksProcessed = 0;
+        let timedOut = false;
 
-        // Promise.all to fetch lists concurrently
-        const listsPromises = activeBooks.map(async (book: any) => {
+        for (const book of activeBooks) {
+            // Check time budget before each book
+            if (Date.now() - startTime > MAX_EXECUTION_MS) {
+                timedOut = true;
+                console.log(`Tempo limite atingido após ${booksProcessed} books. Continuará na próxima execução.`);
+                break;
+            }
+
             let offset = 0;
             let hasMore = true;
 
             while (hasMore) {
+                if (Date.now() - startTime > MAX_EXECUTION_MS) {
+                    timedOut = true;
+                    break;
+                }
+
                 const emailsRes = await fetch(`https://api.sendpulse.com/addressbooks/${book.id}/emails?limit=100&offset=${offset}`, {
                     headers: { Authorization: `Bearer ${token}` }
                 });
@@ -94,36 +105,35 @@ serve(async (req) => {
                     break;
                 }
 
+                const leadsToInsert: any[] = [];
+
                 for (const contact of emailsData) {
                     const emailLower = contact.email ? String(contact.email).toLowerCase().trim() : "";
                     const phoneRaw = contact.phone ? String(contact.phone) : "";
                     const phoneCleanStr = phoneRaw.replace(/\D/g, '');
 
-                    // Prevent duplicate by generic email or phone match
-                    if ((emailLower && existingEmails.has(emailLower)) || (phoneCleanStr && String(phoneCleanStr).length >= 8 && existingPhones.has(phoneCleanStr))) {
-                        continue; // Already exists
+                    // Dedup check
+                    if ((emailLower && existingEmails.has(emailLower)) || (phoneCleanStr && phoneCleanStr.length >= 8 && existingPhones.has(phoneCleanStr))) {
+                        totalSkipped++;
+                        continue;
                     }
 
                     if (emailLower) existingEmails.add(emailLower);
-                    if (phoneCleanStr && String(phoneCleanStr).length >= 8) existingPhones.add(phoneCleanStr);
+                    if (phoneCleanStr && phoneCleanStr.length >= 8) existingPhones.add(phoneCleanStr);
 
-                    // Parse variables (name)
+                    // Parse name
                     let nameStr = "Novo Contato (SendPulse)";
-
                     if (contact.variables && Array.isArray(contact.variables)) {
-                        // Tenta achar variavel com 'nome', 'name'
                         const nameVar = contact.variables.find((v: any) => v.name?.toLowerCase().includes('nome') || v.name?.toLowerCase() === 'name');
                         if (nameVar && nameVar.value) nameStr = String(nameVar.value).trim();
                     }
-
-                    // Handle case where sometimes only name is provided and it might be email prefix
                     if (nameStr === "Novo Contato (SendPulse)" && emailLower) {
                         nameStr = emailLower.split('@')[0];
                     }
 
-                    const origin = book.name || ""; // Form name like "[O] POS LC"
+                    const origin = book.name || "";
 
-                    // Detect course mapping
+                    // Course matching
                     let courseId = null;
                     let courseDefaultVal = 0;
                     if (courses && courses.length > 0) {
@@ -131,7 +141,7 @@ serve(async (req) => {
                         const matchedCourse = courses.find((c: any) => formNameUpper.includes(String(c.name).toUpperCase()));
                         if (matchedCourse) {
                             courseId = matchedCourse.id;
-                            courseDefaultVal = matchedCourse.default_value || 0; // Agora default_value veio na query!
+                            courseDefaultVal = matchedCourse.default_value || 0;
                         }
                     }
 
@@ -152,43 +162,37 @@ serve(async (req) => {
                     });
                 }
 
+                // Insert this batch immediately instead of accumulating
+                if (leadsToInsert.length > 0) {
+                    const { error: insertError } = await supabaseClient.from('leads').insert(leadsToInsert);
+                    if (insertError) {
+                        console.error(`Erro insert batch (book ${book.name}):`, insertError.message);
+                    } else {
+                        totalInserted += leadsToInsert.length;
+                    }
+                }
+
                 offset += 100;
+                if (emailsData.length < 100) hasMore = false;
             }
-        });
 
-        await Promise.all(listsPromises);
-
-        // 7. Insert new leads in smaller batches
-        const leadsWithPhone = leadsToInsert.filter((l: any) => l.telefone && l.telefone !== '00000000000');
-        const leadsWithoutPhone = leadsToInsert.filter((l: any) => !l.telefone || l.telefone === '00000000000');
-
-        const BATCH_SIZE = 50;
-        for (let i = 0; i < leadsWithPhone.length; i += BATCH_SIZE) {
-            const batch = leadsWithPhone.slice(i, i + BATCH_SIZE);
-            const { error: insertError } = await supabaseClient
-                .from('leads')
-                .insert(batch);
-            if (insertError) {
-                console.error(`Erro insert leads batch ${i}:`, JSON.stringify(insertError, null, 2));
-            } else {
-                totalInserted += batch.length;
-            }
+            if (timedOut) break;
+            booksProcessed++;
         }
 
-        for (let i = 0; i < leadsWithoutPhone.length; i += BATCH_SIZE) {
-            const batch = leadsWithoutPhone.slice(i, i + BATCH_SIZE);
-            const { error: insertError } = await supabaseClient.from('leads').insert(batch);
-            if (insertError) {
-                console.error(`Erro insert leads sem telefone batch ${i}:`, JSON.stringify(insertError, null, 2));
-            } else {
-                totalInserted += batch.length;
-            }
-        }
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        console.log(`Sync concluída em ${elapsed}s: ${totalInserted} inseridos, ${totalSkipped} duplicados, ${booksProcessed}/${activeBooks.length} books processados`);
 
         return new Response(JSON.stringify({
             success: true,
-            message: "Sincronização via API Oficial concluída com sucesso!",
-            newLeadsInserted: totalInserted
+            message: timedOut
+                ? `Sincronização parcial (${booksProcessed}/${activeBooks.length} books). Continuará na próxima execução.`
+                : "Sincronização concluída com sucesso!",
+            newLeadsInserted: totalInserted,
+            skipped: totalSkipped,
+            booksProcessed,
+            totalBooks: activeBooks.length,
+            partial: timedOut
         }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 200,
