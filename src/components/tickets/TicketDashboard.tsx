@@ -8,6 +8,7 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../hooks/use-auth'
 import type { Ticket, TicketCategoria, TicketStatus, TicketEvaluation } from '../../types/database'
 import { TicketDetail } from './TicketDetail'
+import { AlunoHistorico } from './AlunoHistorico'
 import { Input } from '../ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { Badge } from '../ui/badge'
@@ -161,6 +162,7 @@ export function TicketDashboard() {
   const isAdmin = user?.role === 'admin'
 
   const [selected, setSelected] = useState<Ticket | null>(null)
+  const [selectedAluno, setSelectedAluno] = useState<{ id: string; nome: string; email: string } | null>(null)
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState<TicketStatus | 'todos'>('todos')
   const [filterCat, setFilterCat] = useState<TicketCategoria | 'todos'>('todos')
@@ -450,9 +452,16 @@ export function TicketDashboard() {
                       <td className="px-4 py-3">
                         <span className="font-mono text-xs text-[var(--primary)]">{t.protocolo}</span>
                       </td>
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-[var(--text-main)] whitespace-nowrap">{t.aluno_nome}</p>
-                        <p className="text-xs text-[var(--text-muted)]">{t.aluno_email}</p>
+                      <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                        <button
+                          onClick={() => setSelectedAluno({ id: t.aluno_id, nome: t.aluno_nome, email: t.aluno_email })}
+                          className="text-left hover:text-[var(--primary)] transition-colors group/aluno"
+                        >
+                          <p className="font-medium text-[var(--text-main)] whitespace-nowrap group-hover/aluno:text-[var(--primary)] group-hover/aluno:underline">
+                            {t.aluno_nome}
+                          </p>
+                          <p className="text-xs text-[var(--text-muted)]">{t.aluno_email}</p>
+                        </button>
                       </td>
                       <td className="px-4 py-3 max-w-48">
                         <p className="text-[var(--text-main)] truncate">{t.titulo}</p>
@@ -508,6 +517,15 @@ export function TicketDashboard() {
       )}
 
       {selected && <TicketDetail ticket={selected} onClose={() => setSelected(null)} />}
+
+      {selectedAluno && (
+        <AlunoHistorico
+          alunoId={selectedAluno.id}
+          alunoNome={selectedAluno.nome}
+          alunoEmail={selectedAluno.email}
+          onClose={() => setSelectedAluno(null)}
+        />
+      )}
     </div>
   )
 }
