@@ -137,10 +137,24 @@ export function AlunoAuth({ onAuth }: { onAuth: () => void }) {
       if (existing) { setError('CPF já cadastrado. Faça login.'); return }
       const { data: authData, error: authErr } = await supabase.auth.signUp({ email: fakeEmail, password })
       if (authErr || !authData.user) { setError(authErr?.message ?? 'Erro ao criar conta.'); return }
+
+      // Insere na tabela alunos
       const { error: dbErr } = await supabase.from('alunos').insert({
         id: authData.user.id, cpf, nome: nome.trim(), email: email.trim().toLowerCase(),
       })
       if (dbErr) { setError('Erro ao salvar dados. Tente novamente.'); return }
+
+      // Se confirmação de email está ativa, signUp não cria sessão automaticamente
+      // Fazemos login explícito logo após o cadastro
+      if (!authData.session) {
+        const { error: loginErr } = await supabase.auth.signInWithPassword({ email: fakeEmail, password })
+        if (loginErr) {
+          setSuccess('Conta criada! Faça login para continuar.')
+          setMode('login')
+          return
+        }
+      }
+
       onAuth()
     } finally { setLoading(false) }
   }
