@@ -172,7 +172,7 @@ export function TicketDashboard() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('tickets')
-        .select('*, atendente:profiles!tickets_atendente_id_fkey(full_name), curso:courses(name, type)')
+        .select('*, atendente:profiles!tickets_atendente_profile_fkey(full_name), curso:courses(name, type)')
         .order('created_at', { ascending: false })
       if (error) throw error
       return data
@@ -225,7 +225,8 @@ export function TicketDashboard() {
     if (filterStatus !== 'todos' && t.status !== filterStatus) return false
     if (filterCat !== 'todos' && t.categoria !== filterCat) return false
     if (filterAtendente !== 'todos' && t.atendente_id !== filterAtendente) return false
-    if (filterCurso !== 'todos' && String(t.curso_id ?? '') !== filterCurso) return false
+    if (filterCurso !== 'todos' && filterCurso === '__sem_curso__' && t.curso_id !== null) return false
+    if (filterCurso !== 'todos' && filterCurso !== '__sem_curso__' && String(t.curso_id ?? '') !== filterCurso) return false
     if (search) {
       const q = search.toLowerCase()
       if (!t.titulo.toLowerCase().includes(q) &&
@@ -381,7 +382,7 @@ export function TicketDashboard() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="todos">Todos os cursos</SelectItem>
-            <SelectItem value="">Sem curso</SelectItem>
+            <SelectItem value="__sem_curso__">Sem curso</SelectItem>
             {['Graduação', 'Pós-Graduação', 'Curso Livre'].map(tipo => {
               const grupo = cursos.filter((c: any) => c.type === tipo)
               if (!grupo.length) return null
