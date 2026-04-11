@@ -24,7 +24,8 @@ import {
     Sun,
     Moon,
     KanbanSquare,
-    Search
+    Search,
+    Ticket as TicketIcon
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { recalculateAllScores } from './services/reprocessor';
@@ -60,6 +61,8 @@ import { AuditLogPage } from './components/admin/AuditLogPage';
 import { WideChatHistory } from './components/kanban/WideChatHistory';
 import { TmaSettingsManagement } from './components/admin/TmaSettingsManagement';
 import { UserWidechatConfig } from './components/admin/UserWidechatConfig';
+import { TicketDashboard } from './components/tickets/TicketDashboard';
+import { TicketPortal } from './components/tickets/TicketPortal';
 
 const queryClient = new QueryClient({
     defaultOptions: {
@@ -715,6 +718,10 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                             <NavItem icon={BookOpen} label="Base de Conhecimento" active={activeTab === 'knowledge'} onClick={() => setActiveTab('knowledge')} />
                             <NavItem icon={MessageSquare} label="Scripts" active={activeTab === 'scripts'} onClick={() => setActiveTab('scripts')} />
                             <NavItem icon={MessageSquare} label="Meu Widechat" active={activeTab === 'widechat'} onClick={() => setActiveTab('widechat')} />
+                            {(profile?.role === 'admin' || profile?.role === 'agent')
+                                ? <NavItem icon={TicketIcon} label="Tickets" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
+                                : <NavItem icon={TicketIcon} label="Atendimento" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
+                            }
                             {(profile?.role === 'admin') && <NavItem icon={Tv} label="Dashboard Live" active={isTvMode} onClick={() => setIsTvMode(!isTvMode)} />}
                         </nav>
 
@@ -1521,7 +1528,15 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                     </div>
                 )}
 
-                {/* Placeholder for other views */}
+                {/* Tickets */}
+                {activeTab === 'tickets' && (
+                    <div className="animate-fade-in">
+                        {(profile?.role === 'admin' || profile?.role === 'agent')
+                            ? <TicketDashboard />
+                            : <TicketPortal />
+                        }
+                    </div>
+                )}
 
             </main>
             {

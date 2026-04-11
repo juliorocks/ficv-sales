@@ -144,3 +144,68 @@ export interface AuditLog {
     };
     users?: { name: string } | null;
 }
+
+// ============================================================
+// MÓDULO DE TICKETS
+// ============================================================
+
+export type TicketCategoria =
+  | 'financeiro'
+  | 'academico'
+  | 'secretaria'
+  | 'suporte_tecnico'
+  | 'certificado'
+  | 'cancelamento'
+  | 'outros'
+
+export type TicketStatus =
+  | 'aberto'
+  | 'em_atendimento'
+  | 'aguardando_aluno'
+  | 'resolvido'
+  | 'fechado'
+
+export type TicketPrioridade = 'baixa' | 'media' | 'alta' | 'urgente'
+
+export interface Ticket {
+  id: number
+  protocolo: string
+  titulo: string
+  categoria: TicketCategoria
+  prioridade: TicketPrioridade
+  status: TicketStatus
+  aluno_id: string
+  aluno_nome: string
+  aluno_email: string
+  atendente_id: string | null
+  created_at: string
+  updated_at: string
+  first_response_at: string | null
+  resolved_at: string | null
+  avaliado: boolean
+  // joins
+  atendente?: { full_name: string } | null
+}
+
+export interface TicketMessage {
+  id: number
+  ticket_id: number
+  autor_id: string
+  autor_nome: string
+  autor_role: 'aluno' | 'atendente' | 'admin'
+  conteudo: string
+  interno: boolean
+  created_at: string
+}
+
+export interface TicketEvaluation {
+  id: number
+  ticket_id: number
+  aluno_id: string
+  csat_nota: number      // 1-5
+  ces_nota: number       // 1-7
+  fcr_resolvido: boolean
+  nps_nota: number | null // 0-10
+  comentario: string | null
+  created_at: string
+}
