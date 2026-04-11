@@ -1,37 +1,36 @@
 /**
  * TicketPortal — visão do ALUNO
  * Permite abrir novos tickets e acompanhar os seus.
+ * Props passadas pelo AlunoPortalPage (auth separado do sistema interno).
  */
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
-import { useAuth } from '../../hooks/use-auth'
 import type { Ticket, TicketCategoria, TicketPrioridade } from '../../types/database'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Textarea } from '../ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
-import { Badge } from '../ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog'
 import { TicketDetail } from './TicketDetail'
 import { showSuccess, showError } from '../../utils/toast'
 import {
-  Plus, Ticket as TicketIcon, Clock, CheckCircle2, MessageSquare,
-  AlertCircle, ChevronRight, Loader2, Search, Star
+  Plus, Ticket as TicketIcon, Clock, CheckCircle2,
+  AlertCircle, ChevronRight, Loader2, Search, Star, LogOut, GraduationCap
 } from 'lucide-react'
-import { formatDistanceToNow, format } from 'date-fns'
+import { formatDistanceToNow } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
 // ── Constants ────────────────────────────────────────────────
 
 const CATEGORIAS: { value: TicketCategoria; label: string; desc: string; icon: string }[] = [
-  { value: 'financeiro',     label: 'Financeiro',       desc: 'Boleto, pagamento, desconto',       icon: '💳' },
-  { value: 'academico',      label: 'Acadêmico',        desc: 'Notas, conteúdo, dúvidas do curso', icon: '📚' },
-  { value: 'secretaria',     label: 'Secretaria',       desc: 'Matrícula, documentos, declarações', icon: '📋' },
-  { value: 'suporte_tecnico',label: 'Suporte Técnico',  desc: 'Acesso à plataforma, login, erros', icon: '🔧' },
-  { value: 'certificado',    label: 'Certificado',      desc: 'Emissão, prazo, reenvio',           icon: '🎓' },
-  { value: 'cancelamento',   label: 'Cancelamento',     desc: 'Cancelar matrícula ou curso',       icon: '❌' },
-  { value: 'outros',         label: 'Outros',           desc: 'Outros assuntos',                   icon: '💬' },
+  { value: 'financeiro',      label: 'Financeiro',      desc: 'Boleto, pagamento, desconto',        icon: '💳' },
+  { value: 'academico',       label: 'Acadêmico',       desc: 'Notas, conteúdo, dúvidas do curso',  icon: '📚' },
+  { value: 'secretaria',      label: 'Secretaria',      desc: 'Matrícula, documentos, declarações', icon: '📋' },
+  { value: 'suporte_tecnico', label: 'Suporte Técnico', desc: 'Acesso à plataforma, login, erros',  icon: '🔧' },
+  { value: 'certificado',     label: 'Certificado',     desc: 'Emissão, prazo, reenvio',            icon: '🎓' },
+  { value: 'cancelamento',    label: 'Cancelamento',    desc: 'Cancelar matrícula ou curso',        icon: '❌' },
+  { value: 'outros',          label: 'Outros',          desc: 'Outros assuntos',                    icon: '💬' },
 ]
 
 const STATUS_LABELS: Record<string, string> = {
@@ -52,15 +51,21 @@ const STATUS_COLORS: Record<string, string> = {
 
 // ── New Ticket Form ──────────────────────────────────────────
 
-function NewTicketDialog({ onClose }: { onClose: () => void }) {
-  const { user } = useAuth()
+interface NewTicketDialogProps {
+  alunoId: string
+  alunoNome: string
+  alunoEmail: string
+  onClose: () => void
+}
+
+function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose }: NewTicketDialogProps) {
   const qc = useQueryClient()
   const [step, setStep] = useState<'categoria' | 'detalhes'>('categoria')
   const [categoria, setCategoria] = useState<TicketCategoria | null>(null)
   const [titulo, setTitulo] = useState('')
   const [descricao, setDescricao] = useState('')
   const [prioridade, setPrioridade] = useState<TicketPrioridade>('media')
-  const [cursoId, setCursoId] = useState<string>('')
+  const [cursoId, setCursoId] = useState<string>('__nenhum__')
   const [saving, setSaving] = useState(false)
 
   const { data: cursos = [] } = useQuery({
@@ -73,30 +78,28 @@ function NewTicketDialog({ onClose }: { onClose: () => void }) {
 
   const submit = async () => {
     if (!titulo.trim() || !descricao.trim() || !categoria) {
-      showError('Preencha todos os campos.')
+      showError('Preencha todos os campos obrigatórios.')
       return
     }
     setSaving(true)
     try {
-      // Criar ticket
       const { data: ticketData, error: tErr } = await supabase.from('tickets').insert({
         protocolo: '',   // trigger preencherá
         titulo: titulo.trim(),
         categoria,
         prioridade,
         status: 'aberto',
-        aluno_id: user!.id,
-        aluno_nome: user!.full_name,
-        aluno_email: user!.email ?? '',
-        curso_id: cursoId ? Number(cursoId) : null,
+        aluno_id: alunoId,
+        aluno_nome: alunoNome,
+        aluno_email: alunoEmail,
+        curso_id: (cursoId && cursoId !== '__nenhum__') ? Number(cursoId) : null,
       }).select().single()
       if (tErr) throw tErr
 
-      // Primeira mensagem = descrição do problema
       const { error: mErr } = await supabase.from('ticket_messages').insert({
         ticket_id: ticketData.id,
-        autor_id: user!.id,
-        autor_nome: user!.full_name,
+        autor_id: alunoId,
+        autor_nome: alunoNome,
         autor_role: 'aluno',
         conteudo: descricao.trim(),
         interno: false,
@@ -179,7 +182,7 @@ function NewTicketDialog({ onClose }: { onClose: () => void }) {
                   <SelectValue placeholder="Selecione o curso relacionado..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">— Não se aplica —</SelectItem>
+                  <SelectItem value="__nenhum__">— Não se aplica —</SelectItem>
                   {['Graduação', 'Pós-Graduação', 'Curso Livre'].map(tipo => {
                     const grupo = cursos.filter((c: any) => c.type === tipo)
                     if (!grupo.length) return null
@@ -229,19 +232,25 @@ function NewTicketDialog({ onClose }: { onClose: () => void }) {
 
 // ── Main ─────────────────────────────────────────────────────
 
-export function TicketPortal() {
-  const { user } = useAuth()
+interface TicketPortalProps {
+  alunoId: string
+  alunoNome: string
+  alunoEmail: string
+  onLogout?: () => void
+}
+
+export function TicketPortal({ alunoId, alunoNome, alunoEmail, onLogout }: TicketPortalProps) {
   const [showNew, setShowNew] = useState(false)
   const [selected, setSelected] = useState<Ticket | null>(null)
   const [search, setSearch] = useState('')
 
   const { data: tickets = [], isLoading } = useQuery<Ticket[]>({
-    queryKey: ['tickets', 'aluno', user?.id],
+    queryKey: ['tickets', 'aluno', alunoId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('tickets')
         .select('*, curso:courses(name, type)')
-        .eq('aluno_id', user!.id)
+        .eq('aluno_id', alunoId)
         .order('created_at', { ascending: false })
       if (error) throw error
       return data
@@ -254,106 +263,143 @@ export function TicketPortal() {
     t.protocolo.toLowerCase().includes(search.toLowerCase())
   )
 
-  const open = tickets.filter(t => !['fechado'].includes(t.status)).length
+  const open = tickets.filter(t => !['resolvido', 'fechado'].includes(t.status)).length
   const aguardando = tickets.filter(t => t.status === 'aguardando_aluno').length
-  const fechados = tickets.filter(t => t.status === 'fechado').length
+  const fechados = tickets.filter(t => ['resolvido', 'fechado'].includes(t.status)).length
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-[var(--text-main)]">Central de Atendimento</h1>
-          <p className="text-sm text-[var(--text-muted)] mt-1">Abra solicitações e acompanhe o status dos seus tickets</p>
-        </div>
-        <Button onClick={() => setShowNew(true)} className="btn-primary gap-2">
-          <Plus className="w-4 h-4" /> Novo Ticket
-        </Button>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
-        {[
-          { label: 'Em aberto', value: open, icon: Clock, color: 'text-blue-400' },
-          { label: 'Aguardando você', value: aguardando, icon: AlertCircle, color: 'text-purple-400' },
-          { label: 'Encerrados', value: fechados, icon: CheckCircle2, color: 'text-green-400' },
-        ].map(stat => (
-          <div key={stat.label} className="glass-card p-4 flex items-center gap-3">
-            <stat.icon className={`w-6 h-6 ${stat.color}`} />
-            <div>
-              <p className="text-2xl font-bold text-[var(--text-main)]">{stat.value}</p>
-              <p className="text-xs text-[var(--text-muted)]">{stat.label}</p>
-            </div>
+    <div className="min-h-screen bg-[var(--bg-main)]">
+      {/* Top bar */}
+      <header className="border-b border-[var(--border)] bg-[var(--bg-card)] px-6 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-[var(--primary)]/15 flex items-center justify-center">
+            <GraduationCap className="w-4 h-4 text-[var(--primary)]" />
           </div>
-        ))}
-      </div>
-
-      {/* Search */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
-        <Input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Buscar por título ou protocolo..."
-          className="pl-9 bg-[var(--bg-card)] border-[var(--border)] text-[var(--text-main)]"
-        />
-      </div>
-
-      {/* Tickets list */}
-      {isLoading ? (
-        <div className="flex justify-center py-12">
-          <Loader2 className="w-6 h-6 animate-spin text-[var(--text-muted)]" />
+          <div>
+            <p className="text-sm font-semibold text-[var(--text-main)]">FICV — Portal do Aluno</p>
+            <p className="text-xs text-[var(--text-muted)]">{alunoNome}</p>
+          </div>
         </div>
-      ) : filtered.length === 0 ? (
-        <div className="text-center py-16">
-          <TicketIcon className="w-12 h-12 mx-auto mb-3 text-[var(--text-muted)] opacity-40" />
-          <p className="text-[var(--text-main)] font-medium">Nenhum ticket encontrado</p>
-          <p className="text-sm text-[var(--text-muted)] mt-1">Clique em "Novo Ticket" para abrir uma solicitação</p>
+        {onLogout && (
+          <button
+            onClick={onLogout}
+            className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-red-400 transition-colors"
+          >
+            <LogOut className="w-3.5 h-3.5" /> Sair
+          </button>
+        )}
+      </header>
+
+      <div className="p-6 max-w-3xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-[var(--text-main)]">Meus Tickets</h1>
+            <p className="text-sm text-[var(--text-muted)] mt-0.5">Abra solicitações e acompanhe o atendimento</p>
+          </div>
+          <Button onClick={() => setShowNew(true)} className="btn-primary gap-2">
+            <Plus className="w-4 h-4" /> Novo Ticket
+          </Button>
         </div>
-      ) : (
-        <div className="space-y-2">
-          {filtered.map(t => (
-            <button
-              key={t.id}
-              onClick={() => setSelected(t)}
-              className="w-full glass-card p-4 text-left hover:border-[var(--primary)]/40 transition-all group"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1 flex-wrap">
-                    <span className="text-xs font-mono text-[var(--primary)]">{t.protocolo}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded border ${STATUS_COLORS[t.status]}`}>
-                      {STATUS_LABELS[t.status]}
-                    </span>
-                    {t.status === 'aguardando_aluno' && (
-                      <span className="text-xs bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded animate-pulse">
-                        Sua resposta é esperada
-                      </span>
-                    )}
-                    {t.avaliado && (
-                      <span className="flex items-center gap-1 text-xs text-amber-400">
-                        <Star className="w-3 h-3 fill-current" /> Avaliado
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-sm font-medium text-[var(--text-main)] truncate group-hover:text-[var(--primary)]">
-                    {t.titulo}
-                  </p>
-                  <p className="text-xs text-[var(--text-muted)] mt-1">
-                    {CATEGORIAS.find(c => c.value === t.categoria)?.label}
-                    {t.curso && <> · <span className="text-[var(--primary)]/70">{t.curso.name}</span></>}
-                    {' · '}{formatDistanceToNow(new Date(t.updated_at), { addSuffix: true, locale: ptBR })}
-                  </p>
-                </div>
-                <ChevronRight className="w-4 h-4 text-[var(--text-muted)] group-hover:text-[var(--primary)] mt-1 shrink-0" />
+
+        {/* Stats */}
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { label: 'Em aberto', value: open, icon: Clock, color: 'text-blue-400' },
+            { label: 'Aguardando você', value: aguardando, icon: AlertCircle, color: 'text-purple-400' },
+            { label: 'Encerrados', value: fechados, icon: CheckCircle2, color: 'text-green-400' },
+          ].map(stat => (
+            <div key={stat.label} className="glass-card p-4 flex items-center gap-3">
+              <stat.icon className={`w-5 h-5 ${stat.color}`} />
+              <div>
+                <p className="text-xl font-bold text-[var(--text-main)]">{stat.value}</p>
+                <p className="text-xs text-[var(--text-muted)]">{stat.label}</p>
               </div>
-            </button>
+            </div>
           ))}
         </div>
-      )}
 
-      {showNew && <NewTicketDialog onClose={() => setShowNew(false)} />}
-      {selected && <TicketDetail ticket={selected} onClose={() => setSelected(null)} />}
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
+          <Input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar por título ou protocolo..."
+            className="pl-9 bg-[var(--bg-card)] border-[var(--border)] text-[var(--text-main)]"
+          />
+        </div>
+
+        {/* Tickets list */}
+        {isLoading ? (
+          <div className="flex justify-center py-12">
+            <Loader2 className="w-6 h-6 animate-spin text-[var(--text-muted)]" />
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-16 glass-card">
+            <TicketIcon className="w-12 h-12 mx-auto mb-3 text-[var(--text-muted)] opacity-40" />
+            <p className="text-[var(--text-main)] font-medium">Nenhum ticket encontrado</p>
+            <p className="text-sm text-[var(--text-muted)] mt-1">Clique em "Novo Ticket" para abrir uma solicitação</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {filtered.map(t => (
+              <button
+                key={t.id}
+                onClick={() => setSelected(t)}
+                className="w-full glass-card p-4 text-left hover:border-[var(--primary)]/40 transition-all group"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <span className="text-xs font-mono text-[var(--primary)]">{t.protocolo}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded border ${STATUS_COLORS[t.status]}`}>
+                        {STATUS_LABELS[t.status]}
+                      </span>
+                      {t.status === 'aguardando_aluno' && (
+                        <span className="text-xs bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded animate-pulse">
+                          Sua resposta é esperada
+                        </span>
+                      )}
+                      {t.avaliado && (
+                        <span className="flex items-center gap-1 text-xs text-amber-400">
+                          <Star className="w-3 h-3 fill-current" /> Avaliado
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm font-medium text-[var(--text-main)] truncate group-hover:text-[var(--primary)]">
+                      {t.titulo}
+                    </p>
+                    <p className="text-xs text-[var(--text-muted)] mt-1">
+                      {CATEGORIAS.find(c => c.value === t.categoria)?.label}
+                      {t.curso && <> · <span className="text-[var(--primary)]/70">{t.curso.name}</span></>}
+                      {' · '}{formatDistanceToNow(new Date(t.updated_at), { addSuffix: true, locale: ptBR })}
+                    </p>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-[var(--text-muted)] group-hover:text-[var(--primary)] mt-1 shrink-0" />
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showNew && (
+        <NewTicketDialog
+          alunoId={alunoId}
+          alunoNome={alunoNome}
+          alunoEmail={alunoEmail}
+          onClose={() => setShowNew(false)}
+        />
+      )}
+      {selected && (
+        <TicketDetail
+          ticket={selected}
+          onClose={() => setSelected(null)}
+          alunoId={alunoId}
+          alunoNome={alunoNome}
+        />
+      )}
     </div>
   )
 }

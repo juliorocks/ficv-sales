@@ -36,9 +36,10 @@ const STATUS_COLORS: Record<TicketStatus, string> = {
 
 // ── Evaluation Form ──────────────────────────────────────────
 
-function EvaluationForm({ ticket, onDone }: { ticket: Ticket; onDone: () => void }) {
+function EvaluationForm({ ticket, onDone, alunoId }: { ticket: Ticket; onDone: () => void; alunoId?: string }) {
   const { user } = useAuth()
   const qc = useQueryClient()
+  const evaluatorId = alunoId ?? user?.id
   const [csat, setCsat] = useState(0)
   const [ces, setCes] = useState(0)
   const [fcr, setFcr] = useState<boolean | null>(null)
@@ -55,7 +56,7 @@ function EvaluationForm({ ticket, onDone }: { ticket: Ticket; onDone: () => void
     try {
       const { error: evErr } = await supabase.from('ticket_evaluations').insert({
         ticket_id: ticket.id,
-        aluno_id: user!.id,
+        aluno_id: evaluatorId,
         csat_nota: csat,
         ces_nota: ces,
         fcr_resolvido: fcr,
@@ -213,13 +214,20 @@ function EvaluationForm({ ticket, onDone }: { ticket: Ticket; onDone: () => void
 interface Props {
   ticket: Ticket
   onClose: () => void
+  /** Passado pelo AlunoPortalPage — quando presente, trata como sessão de aluno */
+  alunoId?: string
+  alunoNome?: string
 }
 
-export function TicketDetail({ ticket, onClose }: Props) {
+export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   const { user } = useAuth()
   const qc = useQueryClient()
   const bottomRef = useRef<HTMLDivElement>(null)
-  const isStaff = user?.role === 'admin' || user?.role === 'agent'
+
+  // Se alunoId foi passado (portal do aluno), nunca é staff
+  const isStaff = alunoId ? false : (user?.role === 'admin' || user?.role === 'agent')
+  const currentUserId = alunoId ?? user?.id
+  const currentUserName = alunoNome ?? user?.full_name ?? ''
 
   const [msg, setMsg] = useState('')
   const [interno, setInterno] = useState(false)
@@ -285,8 +293,8 @@ export function TicketDetail({ ticket, onClose }: Props) {
       const role = isStaff ? (user?.role === 'admin' ? 'admin' : 'atendente') : 'aluno'
       const { error } = await supabase.from('ticket_messages').insert({
         ticket_id: ticket.id,
-        autor_id: user!.id,
-        autor_nome: user!.full_name,
+        autor_id: currentUserId,
+        autor_nome: currentUserName,
         autor_role: role,
         conteudo: msg.trim(),
         interno: isStaff ? interno : false,
@@ -298,10 +306,10 @@ export function TicketDetail({ ticket, onClose }: Props) {
         await supabase.from('tickets').update({
           first_response_at: new Date().toISOString(),
           status: 'em_atendimento',
-          atendente_id: user!.id,
+          atendente_id: currentUserId,
         }).eq('id', ticket.id)
       }
-      // Se aluno respondeu → aguardando_aluno vira aberto novamente
+      // Se aluno respondeu → aguardando_aluno vira em_atendimento novamente
       if (!isStaff && t.status === 'aguardando_aluno') {
         await supabase.from('tickets').update({ status: 'em_atendimento' }).eq('id', ticket.id)
       }
@@ -411,7 +419,7 @@ export function TicketDetail({ ticket, onClose }: Props) {
             <h3 className="font-semibold text-[var(--text-main)] mb-4 flex items-center gap-2">
               <Star className="w-4 h-4 text-amber-400" /> Avaliação do Atendimento
             </h3>
-            <EvaluationForm ticket={t} onDone={() => { setShowEval(false); onClose() }} />
+            <EvaluationForm ticket={t} onDone={() => { setShowEval(false); onClose() }} alunoId={alunoId} />
           </div>
         )}
 
@@ -429,7 +437,7 @@ export function TicketDetail({ ticket, onClose }: Props) {
               </div>
             ) : (
               messages.map(m => {
-                const isMine = m.autor_id === user?.id
+                const isMine = m.autor_id === currentUserId
                 const isInterno = m.interno
 
                 return (
