@@ -248,7 +248,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
       if (error) throw error
       return data
     },
-    refetchInterval: 10000,
+    refetchInterval: 5000,
   })
 
   // Fetch ticket (para status atualizado)
@@ -263,7 +263,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
       if (error) throw error
       return data
     },
-    refetchInterval: 15000,
+    refetchInterval: 8000,
     initialData: ticket,
   })
 

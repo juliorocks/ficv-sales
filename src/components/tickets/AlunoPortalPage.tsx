@@ -12,7 +12,7 @@ import type { Session } from '@supabase/supabase-js'
 import { Loader2 } from 'lucide-react'
 
 const portalQueryClient = new QueryClient({
-  defaultOptions: { queries: { staleTime: 1000 * 60 * 2, retry: 1 } },
+  defaultOptions: { queries: { staleTime: 0, retry: 1 } },
 })
 
 export function AlunoPortalPage() {
