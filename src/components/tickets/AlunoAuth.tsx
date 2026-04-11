@@ -1,15 +1,102 @@
 /**
  * AlunoAuth — login / cadastro / recuperação de senha do aluno
  * Rota pública: /atendimento
+ * Visual: identidade FICV (fundo escuro, dourado #C9A84C)
  */
 import { useState } from 'react'
 import { supabase } from '../../lib/supabase'
-import { Input } from '../ui/input'
-import { Button } from '../ui/button'
 import { formatCPF, validateCPF } from '../../utils/cpf'
-import { Loader2, GraduationCap, Eye, EyeOff } from 'lucide-react'
+import { Loader2, Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react'
+
+// Cores FICV
+const GOLD = '#C9A84C'
+const GOLD_LIGHT = '#E0BF6A'
+const BG = '#0A0C10'
+const CARD = '#13161D'
+const BORDER = '#2A2D36'
+const TEXT = '#F0EDE8'
+const MUTED = '#8A8A9A'
 
 type Mode = 'login' | 'register' | 'forgot'
+
+// ── Subcomponentes de campo ──────────────────────────────────
+
+function Label({ children }: { children: React.ReactNode }) {
+  return (
+    <label style={{ color: MUTED }} className="text-xs font-medium mb-1.5 block tracking-wide uppercase">
+      {children}
+    </label>
+  )
+}
+
+function Field({
+  type = 'text', value, onChange, placeholder, autoComplete, suffix
+}: {
+  type?: string; value: string; onChange: (v: string) => void
+  placeholder?: string; autoComplete?: string; suffix?: React.ReactNode
+}) {
+  return (
+    <div className="relative">
+      <input
+        type={type}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        autoComplete={autoComplete}
+        style={{
+          background: '#0D0F14',
+          border: `1px solid ${BORDER}`,
+          color: TEXT,
+          borderRadius: 8,
+          padding: suffix ? '10px 40px 10px 14px' : '10px 14px',
+          width: '100%',
+          fontSize: 14,
+          outline: 'none',
+        }}
+        onFocus={e => { e.currentTarget.style.borderColor = GOLD }}
+        onBlur={e => { e.currentTarget.style.borderColor = BORDER }}
+      />
+      {suffix && (
+        <div className="absolute right-3 top-1/2 -translate-y-1/2">{suffix}</div>
+      )}
+    </div>
+  )
+}
+
+function GoldButton({ children, onClick, type = 'button', loading = false }: {
+  children: React.ReactNode; onClick?: () => void
+  type?: 'button' | 'submit'; loading?: boolean
+}) {
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={loading}
+      style={{
+        background: loading ? '#7A6020' : `linear-gradient(135deg, ${GOLD}, ${GOLD_LIGHT})`,
+        color: '#0A0C10',
+        border: 'none',
+        borderRadius: 8,
+        padding: '12px 20px',
+        width: '100%',
+        fontWeight: 700,
+        fontSize: 14,
+        cursor: loading ? 'not-allowed' : 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        transition: 'opacity 0.15s',
+        letterSpacing: '0.02em',
+      }}
+    >
+      {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+      {children}
+    </button>
+  )
+}
+
+// ── Main ─────────────────────────────────────────────────────
 
 export function AlunoAuth({ onAuth }: { onAuth: () => void }) {
   const [mode, setMode] = useState<Mode>('login')
@@ -22,41 +109,23 @@ export function AlunoAuth({ onAuth }: { onAuth: () => void }) {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
-  function reset() {
-    setError(null)
-    setSuccess(null)
-  }
-
-  function handleCpfChange(v: string) {
-    setCpf(formatCPF(v))
-  }
+  function reset() { setError(null); setSuccess(null) }
 
   async function handleLogin(e: React.FormEvent) {
-    e.preventDefault()
-    reset()
+    e.preventDefault(); reset()
     if (!validateCPF(cpf)) { setError('CPF inválido.'); return }
     if (!password) { setError('Informe a senha.'); return }
     setLoading(true)
     try {
-      // O "email" no Supabase Auth é cpf@aluno.ficv.br (nunca exposto ao usuário)
       const fakeEmail = `${cpf.replace(/\D/g, '')}@aluno.ficv.br`
-      const { error: authErr } = await supabase.auth.signInWithPassword({
-        email: fakeEmail,
-        password,
-      })
-      if (authErr) {
-        setError('CPF ou senha incorretos.')
-        return
-      }
+      const { error: authErr } = await supabase.auth.signInWithPassword({ email: fakeEmail, password })
+      if (authErr) { setError('CPF ou senha incorretos.'); return }
       onAuth()
-    } finally {
-      setLoading(false)
-    }
+    } finally { setLoading(false) }
   }
 
   async function handleRegister(e: React.FormEvent) {
-    e.preventDefault()
-    reset()
+    e.preventDefault(); reset()
     if (!nome.trim()) { setError('Informe seu nome completo.'); return }
     if (!validateCPF(cpf)) { setError('CPF inválido.'); return }
     if (!email.trim() || !email.includes('@')) { setError('Informe um e-mail válido.'); return }
@@ -64,148 +133,119 @@ export function AlunoAuth({ onAuth }: { onAuth: () => void }) {
     setLoading(true)
     try {
       const fakeEmail = `${cpf.replace(/\D/g, '')}@aluno.ficv.br`
-
-      // Verifica se CPF já existe
-      const { data: existing } = await supabase
-        .from('alunos')
-        .select('id')
-        .eq('cpf', cpf)
-        .maybeSingle()
+      const { data: existing } = await supabase.from('alunos').select('id').eq('cpf', cpf).maybeSingle()
       if (existing) { setError('CPF já cadastrado. Faça login.'); return }
-
-      // Cria usuário no Supabase Auth
-      const { data: authData, error: authErr } = await supabase.auth.signUp({
-        email: fakeEmail,
-        password,
-      })
-      if (authErr || !authData.user) {
-        setError(authErr?.message ?? 'Erro ao criar conta.')
-        return
-      }
-
-      // Insere na tabela alunos
+      const { data: authData, error: authErr } = await supabase.auth.signUp({ email: fakeEmail, password })
+      if (authErr || !authData.user) { setError(authErr?.message ?? 'Erro ao criar conta.'); return }
       const { error: dbErr } = await supabase.from('alunos').insert({
-        id: authData.user.id,
-        cpf,
-        nome: nome.trim(),
-        email: email.trim().toLowerCase(),
+        id: authData.user.id, cpf, nome: nome.trim(), email: email.trim().toLowerCase(),
       })
-      if (dbErr) {
-        setError('Erro ao salvar dados. Tente novamente.')
-        return
-      }
-
+      if (dbErr) { setError('Erro ao salvar dados. Tente novamente.'); return }
       onAuth()
-    } finally {
-      setLoading(false)
-    }
+    } finally { setLoading(false) }
   }
 
   async function handleForgot(e: React.FormEvent) {
-    e.preventDefault()
-    reset()
+    e.preventDefault(); reset()
     if (!validateCPF(cpf)) { setError('CPF inválido.'); return }
     if (!email.trim() || !email.includes('@')) { setError('Informe o e-mail cadastrado.'); return }
     setLoading(true)
     try {
-      // Busca se o CPF+email batem
-      const { data: aluno } = await supabase
-        .from('alunos')
-        .select('id')
-        .eq('cpf', cpf)
-        .eq('email', email.trim().toLowerCase())
-        .maybeSingle()
-      if (!aluno) {
-        setError('CPF e e-mail não correspondem a nenhuma conta.')
-        return
-      }
+      const { data: aluno } = await supabase.from('alunos').select('id')
+        .eq('cpf', cpf).eq('email', email.trim().toLowerCase()).maybeSingle()
+      if (!aluno) { setError('CPF e e-mail não correspondem a nenhuma conta.'); return }
       const fakeEmail = `${cpf.replace(/\D/g, '')}@aluno.ficv.br`
       const { error: resetErr } = await supabase.auth.resetPasswordForEmail(fakeEmail, {
         redirectTo: `${window.location.origin}/atendimento`,
       })
       if (resetErr) { setError('Erro ao enviar e-mail. Tente novamente.'); return }
-      setSuccess(`Enviamos um link de redefinição para ${email}. Verifique sua caixa de entrada.`)
-    } finally {
-      setLoading(false)
-    }
+      setSuccess(`Link enviado para ${email}. Verifique sua caixa de entrada.`)
+    } finally { setLoading(false) }
   }
 
   return (
-    <div className="min-h-screen bg-[var(--bg-main)] flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        {/* Logo / Header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[var(--primary)]/15 mb-4">
-            <GraduationCap className="w-7 h-7 text-[var(--primary)]" />
-          </div>
-          <h1 className="text-2xl font-bold text-[var(--text-main)]">Portal do Aluno</h1>
-          <p className="text-sm text-[var(--text-muted)] mt-1">FICV — Atendimento e Suporte</p>
+    <div style={{ minHeight: '100vh', background: BG, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div style={{ width: '100%', maxWidth: 420 }}>
+
+        {/* Logo */}
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <img
+            src="https://siteficv.vercel.app/images/test-logo.png"
+            alt="FICV"
+            style={{ height: 80, width: 'auto', margin: '0 auto 16px', display: 'block', objectFit: 'contain' }}
+            onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+          />
+          <h1 style={{ color: TEXT, fontSize: 22, fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>
+            Portal do Aluno
+          </h1>
+          <p style={{ color: MUTED, fontSize: 13, marginTop: 4 }}>
+            Central de Atendimento e Suporte
+          </p>
         </div>
 
-        <div className="glass-card p-6">
-          {/* Tabs */}
-          <div className="flex gap-1 mb-6 bg-[var(--bg-main)] rounded-lg p-1">
-            {(['login', 'register'] as const).map(m => (
-              <button
-                key={m}
-                onClick={() => { setMode(m); reset() }}
-                className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${
-                  mode === m
-                    ? 'bg-[var(--primary)] text-white shadow-sm'
-                    : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
-                }`}
-              >
-                {m === 'login' ? 'Entrar' : 'Criar conta'}
-              </button>
-            ))}
-          </div>
+        {/* Card */}
+        <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 16, padding: 28 }}>
+
+          {/* Tabs — não aparece em forgot */}
+          {mode !== 'forgot' && (
+            <div style={{ display: 'flex', gap: 4, marginBottom: 24, background: '#0D0F14', borderRadius: 10, padding: 4 }}>
+              {(['login', 'register'] as const).map(m => (
+                <button
+                  key={m}
+                  onClick={() => { setMode(m); reset() }}
+                  style={{
+                    flex: 1, padding: '8px 0', borderRadius: 8, border: 'none',
+                    background: mode === m ? GOLD : 'transparent',
+                    color: mode === m ? '#0A0C10' : MUTED,
+                    fontWeight: mode === m ? 700 : 500,
+                    fontSize: 13, cursor: 'pointer', transition: 'all 0.15s',
+                  }}
+                >
+                  {m === 'login' ? 'Entrar' : 'Criar conta'}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* LOGIN */}
           {mode === 'login' && (
-            <form onSubmit={handleLogin} className="space-y-4">
+            <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
-                <label className="text-xs font-medium text-[var(--text-muted)] mb-1.5 block">CPF</label>
-                <Input
+                <Label>CPF</Label>
+                <Field
                   value={cpf}
-                  onChange={e => handleCpfChange(e.target.value)}
+                  onChange={v => setCpf(formatCPF(v))}
                   placeholder="000.000.000-00"
-                  className="bg-[var(--bg-card)] border-[var(--border)] text-[var(--text-main)]"
                   autoComplete="username"
                 />
               </div>
               <div>
-                <label className="text-xs font-medium text-[var(--text-muted)] mb-1.5 block">Senha</label>
-                <div className="relative">
-                  <Input
-                    type={showPw ? 'text' : 'password'}
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="bg-[var(--bg-card)] border-[var(--border)] text-[var(--text-main)] pr-10"
-                    autoComplete="current-password"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPw(v => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-main)]"
-                  >
-                    {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
+                <Label>Senha</Label>
+                <Field
+                  type={showPw ? 'text' : 'password'}
+                  value={password}
+                  onChange={setPassword}
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                  suffix={
+                    <button type="button" onClick={() => setShowPw(v => !v)} style={{ color: MUTED, background: 'none', border: 'none', cursor: 'pointer', display: 'flex' }}>
+                      {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  }
+                />
               </div>
 
-              {error && <p className="text-sm text-red-400 bg-red-400/10 px-3 py-2 rounded-lg">{error}</p>}
+              {error && (
+                <div style={{ background: 'rgba(220,38,38,0.1)', border: '1px solid rgba(220,38,38,0.3)', borderRadius: 8, padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <AlertCircle className="w-4 h-4 shrink-0" style={{ color: '#F87171' }} />
+                  <p style={{ color: '#F87171', fontSize: 13, margin: 0 }}>{error}</p>
+                </div>
+              )}
 
-              <Button type="submit" disabled={loading} className="w-full">
-                {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                Entrar
-              </Button>
+              <GoldButton type="submit" loading={loading}>Entrar</GoldButton>
 
-              <button
-                type="button"
-                onClick={() => { setMode('forgot'); reset() }}
-                className="w-full text-xs text-[var(--text-muted)] hover:text-[var(--primary)] transition-colors text-center"
-              >
+              <button type="button" onClick={() => { setMode('forgot'); reset() }}
+                style={{ background: 'none', border: 'none', color: MUTED, fontSize: 12, cursor: 'pointer', textAlign: 'center', marginTop: -4 }}>
                 Esqueci minha senha
               </button>
             </form>
@@ -213,113 +253,91 @@ export function AlunoAuth({ onAuth }: { onAuth: () => void }) {
 
           {/* REGISTER */}
           {mode === 'register' && (
-            <form onSubmit={handleRegister} className="space-y-4">
+            <form onSubmit={handleRegister} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div>
-                <label className="text-xs font-medium text-[var(--text-muted)] mb-1.5 block">Nome completo</label>
-                <Input
-                  value={nome}
-                  onChange={e => setNome(e.target.value)}
-                  placeholder="Seu nome completo"
-                  className="bg-[var(--bg-card)] border-[var(--border)] text-[var(--text-main)]"
-                />
+                <Label>Nome completo</Label>
+                <Field value={nome} onChange={setNome} placeholder="Seu nome completo" />
               </div>
               <div>
-                <label className="text-xs font-medium text-[var(--text-muted)] mb-1.5 block">CPF</label>
-                <Input
-                  value={cpf}
-                  onChange={e => handleCpfChange(e.target.value)}
-                  placeholder="000.000.000-00"
-                  className="bg-[var(--bg-card)] border-[var(--border)] text-[var(--text-main)]"
-                />
+                <Label>CPF</Label>
+                <Field value={cpf} onChange={v => setCpf(formatCPF(v))} placeholder="000.000.000-00" />
               </div>
               <div>
-                <label className="text-xs font-medium text-[var(--text-muted)] mb-1.5 block">E-mail</label>
-                <Input
-                  type="email"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  placeholder="seu@email.com"
-                  className="bg-[var(--bg-card)] border-[var(--border)] text-[var(--text-main)]"
-                />
-                <p className="text-xs text-[var(--text-muted)] mt-1">Usado para receber atualizações dos seus tickets</p>
+                <Label>E-mail</Label>
+                <Field type="email" value={email} onChange={setEmail} placeholder="seu@email.com" autoComplete="email" />
+                <p style={{ color: MUTED, fontSize: 11, marginTop: 4 }}>Usado para receber atualizações dos seus tickets</p>
               </div>
               <div>
-                <label className="text-xs font-medium text-[var(--text-muted)] mb-1.5 block">Senha</label>
-                <div className="relative">
-                  <Input
-                    type={showPw ? 'text' : 'password'}
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    placeholder="Mínimo 8 caracteres"
-                    className="bg-[var(--bg-card)] border-[var(--border)] text-[var(--text-main)] pr-10"
-                    autoComplete="new-password"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPw(v => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-main)]"
-                  >
-                    {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+                <Label>Senha</Label>
+                <Field
+                  type={showPw ? 'text' : 'password'}
+                  value={password}
+                  onChange={setPassword}
+                  placeholder="Mínimo 8 caracteres"
+                  autoComplete="new-password"
+                  suffix={
+                    <button type="button" onClick={() => setShowPw(v => !v)} style={{ color: MUTED, background: 'none', border: 'none', cursor: 'pointer', display: 'flex' }}>
+                      {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  }
+                />
+              </div>
+
+              {error && (
+                <div style={{ background: 'rgba(220,38,38,0.1)', border: '1px solid rgba(220,38,38,0.3)', borderRadius: 8, padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <AlertCircle className="w-4 h-4 shrink-0" style={{ color: '#F87171' }} />
+                  <p style={{ color: '#F87171', fontSize: 13, margin: 0 }}>{error}</p>
                 </div>
-              </div>
+              )}
 
-              {error && <p className="text-sm text-red-400 bg-red-400/10 px-3 py-2 rounded-lg">{error}</p>}
-
-              <Button type="submit" disabled={loading} className="w-full">
-                {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                Criar conta
-              </Button>
+              <GoldButton type="submit" loading={loading}>Criar conta</GoldButton>
             </form>
           )}
 
           {/* FORGOT */}
           {mode === 'forgot' && (
-            <form onSubmit={handleForgot} className="space-y-4">
-              <p className="text-sm text-[var(--text-muted)]">
-                Informe seu CPF e o e-mail cadastrado. Enviaremos um link para redefinir sua senha.
-              </p>
+            <form onSubmit={handleForgot} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
-                <label className="text-xs font-medium text-[var(--text-muted)] mb-1.5 block">CPF</label>
-                <Input
-                  value={cpf}
-                  onChange={e => handleCpfChange(e.target.value)}
-                  placeholder="000.000.000-00"
-                  className="bg-[var(--bg-card)] border-[var(--border)] text-[var(--text-main)]"
-                />
+                <h2 style={{ color: TEXT, fontSize: 16, fontWeight: 700, margin: '0 0 4px' }}>Recuperar senha</h2>
+                <p style={{ color: MUTED, fontSize: 13, margin: 0 }}>
+                  Informe seu CPF e e-mail cadastrado. Enviaremos um link de redefinição.
+                </p>
               </div>
               <div>
-                <label className="text-xs font-medium text-[var(--text-muted)] mb-1.5 block">E-mail cadastrado</label>
-                <Input
-                  type="email"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  placeholder="seu@email.com"
-                  className="bg-[var(--bg-card)] border-[var(--border)] text-[var(--text-main)]"
-                />
+                <Label>CPF</Label>
+                <Field value={cpf} onChange={v => setCpf(formatCPF(v))} placeholder="000.000.000-00" />
+              </div>
+              <div>
+                <Label>E-mail cadastrado</Label>
+                <Field type="email" value={email} onChange={setEmail} placeholder="seu@email.com" />
               </div>
 
-              {error && <p className="text-sm text-red-400 bg-red-400/10 px-3 py-2 rounded-lg">{error}</p>}
-              {success && <p className="text-sm text-green-400 bg-green-400/10 px-3 py-2 rounded-lg">{success}</p>}
+              {error && (
+                <div style={{ background: 'rgba(220,38,38,0.1)', border: '1px solid rgba(220,38,38,0.3)', borderRadius: 8, padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <AlertCircle className="w-4 h-4 shrink-0" style={{ color: '#F87171' }} />
+                  <p style={{ color: '#F87171', fontSize: 13, margin: 0 }}>{error}</p>
+                </div>
+              )}
+              {success && (
+                <div style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 8, padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: '#4ADE80' }} />
+                  <p style={{ color: '#4ADE80', fontSize: 13, margin: 0 }}>{success}</p>
+                </div>
+              )}
 
-              <Button type="submit" disabled={loading} className="w-full">
-                {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                Enviar link de redefinição
-              </Button>
+              <GoldButton type="submit" loading={loading}>Enviar link de redefinição</GoldButton>
 
-              <button
-                type="button"
-                onClick={() => { setMode('login'); reset() }}
-                className="w-full text-xs text-[var(--text-muted)] hover:text-[var(--primary)] transition-colors text-center"
-              >
+              <button type="button" onClick={() => { setMode('login'); reset() }}
+                style={{ background: 'none', border: 'none', color: MUTED, fontSize: 12, cursor: 'pointer', textAlign: 'center' }}>
                 Voltar ao login
               </button>
             </form>
           )}
         </div>
 
-        <p className="text-center text-xs text-[var(--text-muted)] mt-6">
-          FICV — Faculdade Integrada do Ceará e Vale
+        {/* Footer */}
+        <p style={{ textAlign: 'center', color: MUTED, fontSize: 11, marginTop: 20 }}>
+          © {new Date().getFullYear()} FICV — Faculdade Internacional Cidade Viva
         </p>
       </div>
     </div>

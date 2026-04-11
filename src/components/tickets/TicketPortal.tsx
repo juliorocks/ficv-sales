@@ -16,7 +16,7 @@ import { TicketDetail } from './TicketDetail'
 import { showSuccess, showError } from '../../utils/toast'
 import {
   Plus, Ticket as TicketIcon, Clock, CheckCircle2,
-  AlertCircle, ChevronRight, Loader2, Search, Star, LogOut, GraduationCap
+  AlertCircle, ChevronRight, Loader2, Search, Star, LogOut
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -270,20 +270,23 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, onLogout }: Ticke
   return (
     <div className="min-h-screen bg-[var(--bg-main)]">
       {/* Top bar */}
-      <header className="border-b border-[var(--border)] bg-[var(--bg-card)] px-6 py-3 flex items-center justify-between">
+      <header className="border-b border-[#2A2D36] bg-[#13161D] px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-[var(--primary)]/15 flex items-center justify-center">
-            <GraduationCap className="w-4 h-4 text-[var(--primary)]" />
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-[var(--text-main)]">FICV — Portal do Aluno</p>
-            <p className="text-xs text-[var(--text-muted)]">{alunoNome}</p>
+          <img
+            src="https://siteficv.vercel.app/images/test-logo.png"
+            alt="FICV"
+            className="h-9 w-auto object-contain"
+            onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+          />
+          <div className="border-l border-[#2A2D36] pl-3">
+            <p className="text-xs font-semibold text-[#F0EDE8]">Portal do Aluno</p>
+            <p className="text-xs text-[#8A8A9A]">{alunoNome}</p>
           </div>
         </div>
         {onLogout && (
           <button
             onClick={onLogout}
-            className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-red-400 transition-colors"
+            className="flex items-center gap-1.5 text-xs text-[#8A8A9A] hover:text-red-400 transition-colors"
           >
             <LogOut className="w-3.5 h-3.5" /> Sair
           </button>
