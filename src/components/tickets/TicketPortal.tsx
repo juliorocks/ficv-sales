@@ -3,7 +3,7 @@
  * Permite abrir novos tickets e acompanhar os seus.
  */
 import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../hooks/use-auth'
 import type { Ticket, TicketCategoria, TicketPrioridade } from '../../types/database'
@@ -60,7 +60,16 @@ function NewTicketDialog({ onClose }: { onClose: () => void }) {
   const [titulo, setTitulo] = useState('')
   const [descricao, setDescricao] = useState('')
   const [prioridade, setPrioridade] = useState<TicketPrioridade>('media')
+  const [cursoId, setCursoId] = useState<string>('')
   const [saving, setSaving] = useState(false)
+
+  const { data: cursos = [] } = useQuery({
+    queryKey: ['courses'],
+    queryFn: async () => {
+      const { data } = await supabase.from('courses').select('id, name, type').order('type').order('name')
+      return data ?? []
+    },
+  })
 
   const submit = async () => {
     if (!titulo.trim() || !descricao.trim() || !categoria) {
@@ -79,6 +88,7 @@ function NewTicketDialog({ onClose }: { onClose: () => void }) {
         aluno_id: user!.id,
         aluno_nome: user!.full_name,
         aluno_email: user!.email ?? '',
+        curso_id: cursoId ? Number(cursoId) : null,
       }).select().single()
       if (tErr) throw tErr
 
@@ -163,6 +173,30 @@ function NewTicketDialog({ onClose }: { onClose: () => void }) {
             </div>
 
             <div>
+              <label className="text-xs font-medium text-[var(--text-muted)] mb-1 block">Curso (opcional)</label>
+              <Select value={cursoId} onValueChange={setCursoId}>
+                <SelectTrigger className="bg-[var(--bg-main)] border-[var(--border)] text-[var(--text-main)]">
+                  <SelectValue placeholder="Selecione o curso relacionado..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">— Não se aplica —</SelectItem>
+                  {['Graduação', 'Pós-Graduação', 'Curso Livre'].map(tipo => {
+                    const grupo = cursos.filter((c: any) => c.type === tipo)
+                    if (!grupo.length) return null
+                    return (
+                      <div key={tipo}>
+                        <div className="px-2 py-1.5 text-xs font-bold text-[var(--text-muted)] uppercase tracking-wide">{tipo}</div>
+                        {grupo.map((c: any) => (
+                          <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                        ))}
+                      </div>
+                    )
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
               <label className="text-xs font-medium text-[var(--text-muted)] mb-1 block">Urgência</label>
               <Select value={prioridade} onValueChange={v => setPrioridade(v as TicketPrioridade)}>
                 <SelectTrigger className="bg-[var(--bg-main)] border-[var(--border)] text-[var(--text-main)]">
@@ -206,7 +240,7 @@ export function TicketPortal() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('tickets')
-        .select('*')
+        .select('*, curso:courses(name, type)')
         .eq('aluno_id', user!.id)
         .order('created_at', { ascending: false })
       if (error) throw error
@@ -306,8 +340,9 @@ export function TicketPortal() {
                     {t.titulo}
                   </p>
                   <p className="text-xs text-[var(--text-muted)] mt-1">
-                    {CATEGORIAS.find(c => c.value === t.categoria)?.label} ·{' '}
-                    {formatDistanceToNow(new Date(t.updated_at), { addSuffix: true, locale: ptBR })}
+                    {CATEGORIAS.find(c => c.value === t.categoria)?.label}
+                    {t.curso && <> · <span className="text-[var(--primary)]/70">{t.curso.name}</span></>}
+                    {' · '}{formatDistanceToNow(new Date(t.updated_at), { addSuffix: true, locale: ptBR })}
                   </p>
                 </div>
                 <ChevronRight className="w-4 h-4 text-[var(--text-muted)] group-hover:text-[var(--primary)] mt-1 shrink-0" />

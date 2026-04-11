@@ -17,7 +17,7 @@ import {
   ChevronRight, Loader2, RefreshCw
 } from 'lucide-react'
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell, Legend
 } from 'recharts'
 import { formatDistanceToNow, format, differenceInMinutes, subDays, startOfDay } from 'date-fns'
@@ -165,13 +165,14 @@ export function TicketDashboard() {
   const [filterStatus, setFilterStatus] = useState<TicketStatus | 'todos'>('todos')
   const [filterCat, setFilterCat] = useState<TicketCategoria | 'todos'>('todos')
   const [filterAtendente, setFilterAtendente] = useState<string>('todos')
+  const [filterCurso, setFilterCurso] = useState<string>('todos')
 
   const { data: tickets = [], isLoading, refetch, isFetching } = useQuery<Ticket[]>({
     queryKey: ['tickets', 'dashboard'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('tickets')
-        .select('*, atendente:profiles!tickets_atendente_id_fkey(full_name)')
+        .select('*, atendente:profiles!tickets_atendente_id_fkey(full_name), curso:courses(name, type)')
         .order('created_at', { ascending: false })
       if (error) throw error
       return data
@@ -197,14 +198,34 @@ export function TicketDashboard() {
     },
   })
 
+  const { data: cursos = [] } = useQuery({
+    queryKey: ['courses'],
+    queryFn: async () => {
+      const { data } = await supabase.from('courses').select('id, name, type').order('type').order('name')
+      return data ?? []
+    },
+  })
+
   const metrics = useMemo(() => calcMetrics(tickets, evaluations), [tickets, evaluations])
   const chartData = useMemo(() => buildChartData(tickets), [tickets])
   const catData = useMemo(() => buildCatData(tickets), [tickets])
+  const cursoData = useMemo(() => {
+    const counts: Record<string, number> = {}
+    tickets.forEach(t => {
+      const nome = (t as any).curso?.name ?? 'Sem curso'
+      counts[nome] = (counts[nome] ?? 0) + 1
+    })
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([name, value]) => ({ name, value }))
+  }, [tickets])
 
   const filtered = tickets.filter(t => {
     if (filterStatus !== 'todos' && t.status !== filterStatus) return false
     if (filterCat !== 'todos' && t.categoria !== filterCat) return false
     if (filterAtendente !== 'todos' && t.atendente_id !== filterAtendente) return false
+    if (filterCurso !== 'todos' && String(t.curso_id ?? '') !== filterCurso) return false
     if (search) {
       const q = search.toLowerCase()
       if (!t.titulo.toLowerCase().includes(q) &&
@@ -272,7 +293,7 @@ export function TicketDashboard() {
           </ResponsiveContainer>
         </div>
 
-        {/* Pie */}
+        {/* Pie — Por Categoria */}
         <div className="glass-card p-5">
           <h3 className="text-sm font-semibold text-[var(--text-main)] mb-4">Por Categoria</h3>
           {catData.length === 0 ? (
@@ -291,6 +312,31 @@ export function TicketDashboard() {
             </ResponsiveContainer>
           )}
         </div>
+      </div>
+
+      {/* Bar chart — Por Curso */}
+      <div className="glass-card p-5">
+        <h3 className="text-sm font-semibold text-[var(--text-main)] mb-1">Tickets por Curso</h3>
+        <p className="text-xs text-[var(--text-muted)] mb-4">Top 10 cursos com mais solicitações</p>
+        {cursoData.length === 0 ? (
+          <div className="flex items-center justify-center h-24 text-[var(--text-muted)] text-sm">Sem dados</div>
+        ) : (
+          <ResponsiveContainer width="100%" height={cursoData.length * 36 + 20}>
+            <BarChart data={cursoData} layout="vertical" margin={{ left: 8, right: 24 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+              <XAxis type="number" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
+              <YAxis type="category" dataKey="name" width={110} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
+              <Tooltip
+                contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8 }}
+                labelStyle={{ color: 'var(--text-main)', fontWeight: 600 }}
+                cursor={{ fill: 'var(--primary)', opacity: 0.08 }}
+              />
+              <Bar dataKey="value" name="Tickets" radius={[0, 4, 4, 0]}>
+                {cursoData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        )}
       </div>
 
       {/* Filters */}
@@ -329,6 +375,28 @@ export function TicketDashboard() {
           </SelectContent>
         </Select>
 
+        <Select value={filterCurso} onValueChange={setFilterCurso}>
+          <SelectTrigger className="w-44 h-9 text-sm bg-[var(--bg-card)] border-[var(--border)]">
+            <SelectValue placeholder="Curso" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todos os cursos</SelectItem>
+            <SelectItem value="">Sem curso</SelectItem>
+            {['Graduação', 'Pós-Graduação', 'Curso Livre'].map(tipo => {
+              const grupo = cursos.filter((c: any) => c.type === tipo)
+              if (!grupo.length) return null
+              return (
+                <div key={tipo}>
+                  <div className="px-2 py-1 text-xs font-bold text-[var(--text-muted)] uppercase tracking-wide">{tipo}</div>
+                  {grupo.map((c: any) => (
+                    <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                  ))}
+                </div>
+              )
+            })}
+          </SelectContent>
+        </Select>
+
         {isAdmin && (
           <Select value={filterAtendente} onValueChange={setFilterAtendente}>
             <SelectTrigger className="w-44 h-9 text-sm bg-[var(--bg-card)] border-[var(--border)]">
@@ -364,7 +432,7 @@ export function TicketDashboard() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[var(--border)]">
-                  {['Protocolo', 'Aluno', 'Assunto', 'Categoria', 'Prioridade', 'Status', 'Atendente', 'Criado', 'Avaliação', ''].map(h => (
+                  {['Protocolo', 'Aluno', 'Assunto', 'Curso', 'Categoria', 'Prioridade', 'Status', 'Atendente', 'Criado', 'Avaliação', ''].map(h => (
                     <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-[var(--text-muted)] whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -387,6 +455,16 @@ export function TicketDashboard() {
                       </td>
                       <td className="px-4 py-3 max-w-48">
                         <p className="text-[var(--text-main)] truncate">{t.titulo}</p>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {t.curso ? (
+                          <div>
+                            <p className="text-xs font-medium text-[var(--text-main)]">{t.curso.name}</p>
+                            <p className="text-xs text-[var(--text-muted)]">{t.curso.type}</p>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-[var(--text-muted)] italic">—</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <span>{CATEGORIA_ICON[t.categoria]} {CATEGORIAS_LABEL[t.categoria]}</span>

@@ -178,6 +178,7 @@ export interface Ticket {
   aluno_nome: string
   aluno_email: string
   atendente_id: string | null
+  curso_id: number | null
   created_at: string
   updated_at: string
   first_response_at: string | null
@@ -185,6 +186,7 @@ export interface Ticket {
   avaliado: boolean
   // joins
   atendente?: { full_name: string } | null
+  curso?: { name: string; type: string } | null
 }
 
 export interface TicketMessage {

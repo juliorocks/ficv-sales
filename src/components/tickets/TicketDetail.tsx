@@ -249,7 +249,7 @@ export function TicketDetail({ ticket, onClose }: Props) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('tickets')
-        .select('*, atendente:profiles!tickets_atendente_id_fkey(full_name)')
+        .select('*, atendente:profiles!tickets_atendente_id_fkey(full_name), curso:courses(name, type)')
         .eq('id', ticket.id)
         .single()
       if (error) throw error
@@ -359,6 +359,7 @@ export function TicketDetail({ ticket, onClose }: Props) {
               </DialogTitle>
               <p className="text-xs text-[var(--text-muted)] mt-1">
                 Aberto por <strong>{t.aluno_nome}</strong> · {format(new Date(t.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                {t.curso && <> · <span className="text-[var(--primary)]/80">{t.curso.name}</span></>}
               </p>
             </div>
 
