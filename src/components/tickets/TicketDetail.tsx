@@ -329,27 +329,31 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
     setSending(true)
     try {
       const role = isStaff ? (user?.role === 'admin' ? 'admin' : 'atendente') : 'aluno'
-      // Insere a mensagem primeiro para ter o ID
-      const { data: msgData, error } = await supabase.from('ticket_messages').insert({
+
+      // Faz upload dos arquivos ANTES de inserir a mensagem
+      let uploaded: { name: string; url: string; type: string; size: number }[] = []
+      if (files.length > 0) {
+        // Upload para path temporário usando timestamp como ID provisório
+        const tempId = Date.now()
+        uploaded = await uploadFiles(ticket.id, tempId)
+        if (uploaded.length === 0 && files.length > 0) {
+          showError('Falha ao enviar os arquivos. Verifique se o bucket foi configurado e tente novamente.')
+          setSending(false)
+          return
+        }
+      }
+
+      // Insere a mensagem já com os anexos
+      const { error } = await supabase.from('ticket_messages').insert({
         ticket_id: ticket.id,
         autor_id: currentUserId,
         autor_nome: currentUserName,
         autor_role: role,
-        conteudo: msg.trim() || (files.length > 0 ? '📎 Arquivo(s) anexado(s)' : ''),
+        conteudo: msg.trim() || (uploaded.length > 0 ? '📎 Arquivo(s) anexado(s)' : ''),
         interno: isStaff ? interno : false,
-        attachments: [],
-      }).select().single()
+        attachments: uploaded,
+      })
       if (error) throw error
-
-      // Faz upload dos arquivos e atualiza a mensagem com as URLs
-      if (files.length > 0) {
-        const uploaded = await uploadFiles(ticket.id, msgData.id)
-        if (uploaded.length > 0) {
-          await supabase.from('ticket_messages')
-            .update({ attachments: uploaded })
-            .eq('id', msgData.id)
-        }
-      }
 
       // Se staff respondeu pela 1ª vez → registrar first_response_at e mudar status
       if (isStaff && !t.first_response_at) {
