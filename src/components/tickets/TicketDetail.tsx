@@ -11,7 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { showSuccess, showError } from '../../utils/toast'
 import {
   X, Send, Lock, Clock, CheckCircle2, Star, ChevronRight,
-  MessageSquare, Shield, Loader2, UserCircle2, AlertCircle
+  MessageSquare, Shield, Loader2, UserCircle2, AlertCircle,
+  Paperclip, FileText, ImageIcon, Download, XCircle
 } from 'lucide-react'
 import { formatDistanceToNow, format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -233,6 +234,43 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   const [interno, setInterno] = useState(false)
   const [sending, setSending] = useState(false)
   const [showEval, setShowEval] = useState(false)
+  const [files, setFiles] = useState<File[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const selected = Array.from(e.target.files ?? [])
+    const valid = selected.filter(f => {
+      if (f.size > MAX_FILE_SIZE) {
+        showError(`"${f.name}" excede o limite de 10MB.`)
+        return false
+      }
+      return true
+    })
+    setFiles(prev => {
+      const all = [...prev, ...valid]
+      return all.slice(0, 5) // máximo 5 arquivos por mensagem
+    })
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  function removeFile(idx: number) {
+    setFiles(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  async function uploadFiles(ticketId: number, messageId: number): Promise<{ name: string; url: string; type: string; size: number }[]> {
+    const results = []
+    for (const file of files) {
+      const ext = file.name.split('.').pop()
+      const path = `${ticketId}/${messageId}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+      const { error } = await supabase.storage.from('ticket-attachments').upload(path, file)
+      if (error) { showError(`Erro ao enviar "${file.name}".`); continue }
+      const { data: { publicUrl } } = supabase.storage.from('ticket-attachments').getPublicUrl(path)
+      results.push({ name: file.name, url: publicUrl, type: file.type, size: file.size })
+    }
+    return results
+  }
 
   // Fetch messages
   const { data: messages = [], isLoading } = useQuery<TicketMessage[]>({
@@ -287,19 +325,31 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   }, [messages])
 
   const sendMessage = async () => {
-    if (!msg.trim()) return
+    if (!msg.trim() && files.length === 0) return
     setSending(true)
     try {
       const role = isStaff ? (user?.role === 'admin' ? 'admin' : 'atendente') : 'aluno'
-      const { error } = await supabase.from('ticket_messages').insert({
+      // Insere a mensagem primeiro para ter o ID
+      const { data: msgData, error } = await supabase.from('ticket_messages').insert({
         ticket_id: ticket.id,
         autor_id: currentUserId,
         autor_nome: currentUserName,
         autor_role: role,
-        conteudo: msg.trim(),
+        conteudo: msg.trim() || (files.length > 0 ? '📎 Arquivo(s) anexado(s)' : ''),
         interno: isStaff ? interno : false,
-      })
+        attachments: [],
+      }).select().single()
       if (error) throw error
+
+      // Faz upload dos arquivos e atualiza a mensagem com as URLs
+      if (files.length > 0) {
+        const uploaded = await uploadFiles(ticket.id, msgData.id)
+        if (uploaded.length > 0) {
+          await supabase.from('ticket_messages')
+            .update({ attachments: uploaded })
+            .eq('id', msgData.id)
+        }
+      }
 
       // Se staff respondeu pela 1ª vez → registrar first_response_at e mudar status
       if (isStaff && !t.first_response_at) {
@@ -315,6 +365,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
       }
 
       setMsg('')
+      setFiles([])
       setInterno(false)
       qc.invalidateQueries({ queryKey: ['ticket-messages', ticket.id] })
       qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
@@ -469,6 +520,27 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                             : 'bg-[var(--bg-main)] border border-[var(--border)] text-[var(--text-main)] rounded-tl-sm'
                         }`}>
                         {m.conteudo}
+                        {/* Anexos */}
+                        {Array.isArray((m as any).attachments) && (m as any).attachments.length > 0 && (
+                          <div className="mt-2 space-y-1.5">
+                            {(m as any).attachments.map((a: any, i: number) => {
+                              const isImage = a.type?.startsWith('image/')
+                              return isImage ? (
+                                <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" className="block">
+                                  <img src={a.url} alt={a.name} className="max-w-xs rounded-lg border border-white/20 mt-1" />
+                                  <span className="text-xs opacity-70 mt-0.5 block">{a.name}</span>
+                                </a>
+                              ) : (
+                                <a key={i} href={a.url} target="_blank" rel="noopener noreferrer"
+                                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-black/20 hover:bg-black/30 transition-colors">
+                                  <FileText className="w-4 h-4 shrink-0" />
+                                  <span className="text-xs truncate flex-1">{a.name}</span>
+                                  <Download className="w-3 h-3 shrink-0 opacity-60" />
+                                </a>
+                              )
+                            })}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -502,6 +574,22 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                 </button>
               </div>
             )}
+            {/* Preview de arquivos selecionados */}
+            {files.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {files.map((f, i) => (
+                  <div key={i} className="flex items-center gap-1.5 bg-[var(--bg-main)] border border-[var(--border)] rounded-lg px-2 py-1 text-xs text-[var(--text-main)]">
+                    {f.type.startsWith('image/') ? <ImageIcon className="w-3.5 h-3.5 text-blue-400" /> : <FileText className="w-3.5 h-3.5 text-[var(--text-muted)]" />}
+                    <span className="max-w-32 truncate">{f.name}</span>
+                    <span className="text-[var(--text-muted)]">({(f.size / 1024).toFixed(0)}KB)</span>
+                    <button onClick={() => removeFile(i)} className="text-[var(--text-muted)] hover:text-red-400 transition-colors ml-0.5">
+                      <XCircle className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="flex gap-2">
               <Textarea
                 value={msg}
@@ -515,15 +603,34 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
                 }}
               />
-              <Button
-                onClick={sendMessage}
-                disabled={sending || !msg.trim()}
-                className="self-end btn-primary h-10 w-10 p-0"
-              >
-                {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-              </Button>
+              <div className="flex flex-col gap-1.5 self-end">
+                {/* Botão de anexo */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="h-10 w-10 flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--bg-main)] text-[var(--text-muted)] hover:text-[var(--primary)] hover:border-[var(--primary)] transition-colors"
+                  title="Anexar arquivo (máx. 10MB)"
+                >
+                  <Paperclip className="w-4 h-4" />
+                </button>
+                <Button
+                  onClick={sendMessage}
+                  disabled={sending || (!msg.trim() && files.length === 0)}
+                  className="btn-primary h-10 w-10 p-0"
+                >
+                  {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                </Button>
+              </div>
             </div>
-            <p className="text-xs text-[var(--text-muted)] mt-1">Enter para enviar · Shift+Enter para nova linha</p>
+            <p className="text-xs text-[var(--text-muted)] mt-1">Enter para enviar · Shift+Enter para nova linha · máx. 10MB por arquivo</p>
           </div>
         )}
 
