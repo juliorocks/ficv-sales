@@ -276,12 +276,12 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   const { data: messages = [], isLoading } = useQuery<TicketMessage[]>({
     queryKey: ['ticket-messages', ticket.id],
     queryFn: async () => {
-      const q = supabase
+      let q = supabase
         .from('ticket_messages')
         .select('*')
         .eq('ticket_id', ticket.id)
         .order('created_at', { ascending: true })
-      if (!isStaff) q.eq('interno', false)
+      if (!isStaff) q = q.eq('interno', false)
       const { data, error } = await q
       if (error) throw error
       return data
