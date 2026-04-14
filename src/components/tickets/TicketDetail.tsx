@@ -12,7 +12,7 @@ import { showSuccess, showError } from '../../utils/toast'
 import {
   X, Send, Lock, Clock, CheckCircle2, Star, ChevronRight,
   MessageSquare, Shield, Loader2, UserCircle2, AlertCircle,
-  Paperclip, FileText, ImageIcon, Download, XCircle
+  Paperclip, FileText, ImageIcon, Download, XCircle, Mic, MicOff, Play
 } from 'lucide-react'
 import { formatDistanceToNow, format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -239,6 +239,13 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploadProgress, setUploadProgress] = useState<string | null>(null)
 
+  // Gravação de áudio
+  const [recording, setRecording] = useState(false)
+  const [recordingSeconds, setRecordingSeconds] = useState(0)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
   const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
@@ -270,6 +277,97 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
     if (previews[idx]) URL.revokeObjectURL(previews[idx])
     setFiles(prev => prev.filter((_, i) => i !== idx))
     setPreviews(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : 'audio/webm'
+      const mr = new MediaRecorder(stream, { mimeType })
+      audioChunksRef.current = []
+      mr.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
+      mr.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop())
+        const blob = new Blob(audioChunksRef.current, { type: mimeType })
+        await sendAudio(blob, mimeType)
+      }
+      mr.start(200)
+      mediaRecorderRef.current = mr
+      setRecording(true)
+      setRecordingSeconds(0)
+      recordingTimerRef.current = setInterval(() => setRecordingSeconds(s => s + 1), 1000)
+    } catch {
+      showError('Não foi possível acessar o microfone. Verifique as permissões do navegador.')
+    }
+  }
+
+  function stopRecording() {
+    if (mediaRecorderRef.current && recording) {
+      mediaRecorderRef.current.stop()
+      setRecording(false)
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current)
+      setRecordingSeconds(0)
+    }
+  }
+
+  function cancelRecording() {
+    if (mediaRecorderRef.current && recording) {
+      mediaRecorderRef.current.ondataavailable = null
+      mediaRecorderRef.current.onstop = null
+      mediaRecorderRef.current.stop()
+      mediaRecorderRef.current.stream?.getTracks().forEach(t => t.stop())
+      setRecording(false)
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current)
+      setRecordingSeconds(0)
+    }
+  }
+
+  async function sendAudio(blob: Blob, mimeType: string) {
+    setSending(true)
+    try {
+      const ext = mimeType.includes('ogg') ? 'ogg' : 'webm'
+      const ts = Date.now()
+      const path = `${ticket.id}/audio-${ts}.${ext}`
+      setUploadProgress('Enviando áudio...')
+      const { error: upErr } = await supabase.storage
+        .from('ticket-attachments')
+        .upload(path, blob, { contentType: mimeType, cacheControl: '3600' })
+      setUploadProgress(null)
+      if (upErr) { showError('Erro ao enviar áudio.'); return }
+      const { data: { publicUrl } } = supabase.storage.from('ticket-attachments').getPublicUrl(path)
+
+      const role = isStaff ? (user?.role === 'admin' ? 'admin' : 'atendente') : 'aluno'
+      const { error } = await supabase.from('ticket_messages').insert({
+        ticket_id: ticket.id,
+        autor_id: currentUserId,
+        autor_nome: currentUserName,
+        autor_role: role,
+        conteudo: '🎵 Mensagem de voz',
+        interno: isStaff ? interno : false,
+        attachments: [{ name: `audio-${ts}.${ext}`, url: publicUrl, type: mimeType, size: blob.size }],
+      })
+      if (error) throw error
+
+      if (isStaff && !t.first_response_at) {
+        await supabase.from('tickets').update({
+          first_response_at: new Date().toISOString(),
+          status: 'em_atendimento',
+          atendente_id: currentUserId,
+        }).eq('id', ticket.id)
+      }
+      if (!isStaff && t.status === 'aguardando_aluno') {
+        await supabase.from('tickets').update({ status: 'em_atendimento' }).eq('id', ticket.id)
+      }
+      qc.invalidateQueries({ queryKey: ['ticket-messages', ticket.id] })
+      qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
+      qc.invalidateQueries({ queryKey: ['tickets'] })
+    } catch {
+      showError('Erro ao enviar mensagem de voz.')
+    } finally {
+      setSending(false)
+    }
   }
 
   async function uploadFiles(ticketId: number): Promise<{ name: string; url: string; type: string; size: number }[]> {
@@ -548,12 +646,24 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                           <div className="mt-2 space-y-1.5">
                             {(m as any).attachments.map((a: any, i: number) => {
                               const isImage = a.type?.startsWith('image/')
-                              return isImage ? (
+                              const isAudio = a.type?.startsWith('audio/')
+                              if (isAudio) return (
+                                <div key={i} className="mt-1">
+                                  <audio
+                                    controls
+                                    src={a.url}
+                                    className="w-full max-w-xs h-10"
+                                    style={{ filter: 'invert(0)', accentColor: '#C9A84C' }}
+                                  />
+                                </div>
+                              )
+                              if (isImage) return (
                                 <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" className="block">
                                   <img src={a.url} alt={a.name} className="max-w-xs rounded-lg border border-white/20 mt-1" />
                                   <span className="text-xs opacity-70 mt-0.5 block">{a.name}</span>
                                 </a>
-                              ) : (
+                              )
+                              return (
                                 <a key={i} href={a.url} target="_blank" rel="noopener noreferrer"
                                   className="flex items-center gap-2 px-3 py-2 rounded-lg bg-black/20 hover:bg-black/30 transition-colors">
                                   <FileText className="w-4 h-4 shrink-0" />
@@ -636,47 +746,82 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
               </div>
             )}
 
-            <div className="flex gap-2">
-              <Textarea
-                value={msg}
-                onChange={e => setMsg(e.target.value)}
-                placeholder={interno ? 'Nota interna (não visível ao aluno)...' : 'Digite sua mensagem...'}
-                className={`resize-none flex-1 bg-[var(--bg-main)] border-[var(--border)] text-[var(--text-main)] ${
-                  interno ? 'border-amber-500/50' : ''
-                }`}
-                rows={2}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
-                }}
-              />
-              <div className="flex flex-col gap-1.5 self-end">
-                {/* Botão de anexo */}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
-                  onChange={handleFileSelect}
-                  className="hidden"
-                />
+            {/* Gravando áudio */}
+            {recording && (
+              <div className="flex items-center gap-3 mb-2 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg">
+                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shrink-0" />
+                <span className="text-sm text-red-400 font-medium flex-1">
+                  Gravando... {Math.floor(recordingSeconds / 60).toString().padStart(2, '0')}:{(recordingSeconds % 60).toString().padStart(2, '0')}
+                </span>
                 <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="h-10 w-10 flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--bg-main)] text-[var(--text-muted)] hover:text-[var(--primary)] hover:border-[var(--primary)] transition-colors"
-                  title="Anexar arquivo (máx. 10MB)"
+                  onClick={cancelRecording}
+                  className="text-xs text-[var(--text-muted)] hover:text-red-400 transition-colors"
                 >
-                  <Paperclip className="w-4 h-4" />
+                  Cancelar
                 </button>
-                <Button
-                  onClick={sendMessage}
-                  disabled={sending || (!msg.trim() && files.length === 0)}
-                  className="btn-primary h-10 w-10 p-0"
+                <button
+                  onClick={stopRecording}
+                  className="flex items-center gap-1.5 text-xs bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg transition-colors font-medium"
                 >
-                  {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                </Button>
+                  <MicOff className="w-3 h-3" /> Enviar
+                </button>
               </div>
-            </div>
-            <p className="text-xs text-[var(--text-muted)] mt-1">Enter para enviar · Shift+Enter para nova linha · máx. 10MB por arquivo</p>
+            )}
+
+            {!recording && (
+              <div className="flex gap-2">
+                <Textarea
+                  value={msg}
+                  onChange={e => setMsg(e.target.value)}
+                  placeholder={interno ? 'Nota interna (não visível ao aluno)...' : 'Digite sua mensagem...'}
+                  className={`resize-none flex-1 bg-[var(--bg-main)] border-[var(--border)] text-[var(--text-main)] ${
+                    interno ? 'border-amber-500/50' : ''
+                  }`}
+                  rows={2}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
+                  }}
+                />
+                <div className="flex flex-col gap-1.5 self-end">
+                  {/* Botão de anexo */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+                    onChange={handleFileSelect}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="h-10 w-10 flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--bg-main)] text-[var(--text-muted)] hover:text-[var(--primary)] hover:border-[var(--primary)] transition-colors"
+                    title="Anexar arquivo (máx. 10MB)"
+                  >
+                    <Paperclip className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={startRecording}
+                    disabled={sending}
+                    className="h-10 w-10 flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--bg-main)] text-[var(--text-muted)] hover:text-red-400 hover:border-red-400 transition-colors disabled:opacity-40"
+                    title="Gravar mensagem de voz"
+                  >
+                    <Mic className="w-4 h-4" />
+                  </button>
+                  <Button
+                    onClick={sendMessage}
+                    disabled={sending || (!msg.trim() && files.length === 0)}
+                    className="btn-primary h-10 w-10 p-0"
+                  >
+                    {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  </Button>
+                </div>
+              </div>
+            )}
+            <p className="text-xs text-[var(--text-muted)] mt-1">
+              {recording ? 'Clique em "Enviar" para finalizar a gravação' : 'Enter para enviar · Shift+Enter para nova linha · máx. 10MB por arquivo'}
+            </p>
           </div>
         )}
 

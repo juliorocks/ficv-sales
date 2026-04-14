@@ -190,10 +190,10 @@ export function AlunoAuth({ onAuth }: { onAuth: () => void }) {
             onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
           />
           <h1 style={{ color: TEXT, fontSize: 22, fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>
-            Portal do Aluno
+            Central de Atendimento
           </h1>
           <p style={{ color: MUTED, fontSize: 13, marginTop: 4 }}>
-            Central de Atendimento e Suporte
+            Abra o seu chamado
           </p>
         </div>
 
