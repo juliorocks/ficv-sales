@@ -235,7 +235,9 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   const [sending, setSending] = useState(false)
   const [showEval, setShowEval] = useState(false)
   const [files, setFiles] = useState<File[]>([])
+  const [previews, setPreviews] = useState<string[]>([]) // object URLs para preview local
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null)
 
   const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 
@@ -250,26 +252,43 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
     })
     setFiles(prev => {
       const all = [...prev, ...valid]
-      return all.slice(0, 5) // máximo 5 arquivos por mensagem
+      return all.slice(0, 5)
+    })
+    // Gera preview local para imagens
+    valid.forEach(f => {
+      if (f.type.startsWith('image/')) {
+        const url = URL.createObjectURL(f)
+        setPreviews(prev => [...prev, url])
+      } else {
+        setPreviews(prev => [...prev, ''])
+      }
     })
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   function removeFile(idx: number) {
+    if (previews[idx]) URL.revokeObjectURL(previews[idx])
     setFiles(prev => prev.filter((_, i) => i !== idx))
+    setPreviews(prev => prev.filter((_, i) => i !== idx))
   }
 
-  async function uploadFiles(ticketId: number, messageId: number): Promise<{ name: string; url: string; type: string; size: number }[]> {
-    const results = []
-    for (const file of files) {
-      const ext = file.name.split('.').pop()
-      const path = `${ticketId}/${messageId}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
-      const { error } = await supabase.storage.from('ticket-attachments').upload(path, file)
-      if (error) { showError(`Erro ao enviar "${file.name}".`); continue }
+  async function uploadFiles(ticketId: number): Promise<{ name: string; url: string; type: string; size: number }[]> {
+    const ts = Date.now()
+    const uploads = files.map(async (file, idx) => {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+      const path = `${ticketId}/${ts}-${idx}-${safeName}`
+      setUploadProgress(`Enviando ${idx + 1}/${files.length}: ${file.name}`)
+      const { error } = await supabase.storage.from('ticket-attachments').upload(path, file, {
+        cacheControl: '3600',
+        upsert: false,
+      })
+      if (error) { showError(`Erro ao enviar "${file.name}": ${error.message}`); return null }
       const { data: { publicUrl } } = supabase.storage.from('ticket-attachments').getPublicUrl(path)
-      results.push({ name: file.name, url: publicUrl, type: file.type, size: file.size })
-    }
-    return results
+      return { name: file.name, url: publicUrl, type: file.type, size: file.size }
+    })
+    const results = await Promise.all(uploads)
+    setUploadProgress(null)
+    return results.filter(Boolean) as { name: string; url: string; type: string; size: number }[]
   }
 
   // Fetch messages
@@ -330,14 +349,12 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
     try {
       const role = isStaff ? (user?.role === 'admin' ? 'admin' : 'atendente') : 'aluno'
 
-      // Faz upload dos arquivos ANTES de inserir a mensagem
+      // Faz upload dos arquivos ANTES de inserir a mensagem (paralelo)
       let uploaded: { name: string; url: string; type: string; size: number }[] = []
       if (files.length > 0) {
-        // Upload para path temporário usando timestamp como ID provisório
-        const tempId = Date.now()
-        uploaded = await uploadFiles(ticket.id, tempId)
+        uploaded = await uploadFiles(ticket.id)
         if (uploaded.length === 0 && files.length > 0) {
-          showError('Falha ao enviar os arquivos. Verifique se o bucket foi configurado e tente novamente.')
+          showError('Falha ao enviar os arquivos. Verifique sua conexão e tente novamente.')
           setSending(false)
           return
         }
@@ -369,7 +386,9 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
       }
 
       setMsg('')
+      previews.forEach(p => { if (p) URL.revokeObjectURL(p) })
       setFiles([])
+      setPreviews([])
       setInterno(false)
       qc.invalidateQueries({ queryKey: ['ticket-messages', ticket.id] })
       qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
@@ -582,15 +601,38 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
             {files.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-2">
                 {files.map((f, i) => (
-                  <div key={i} className="flex items-center gap-1.5 bg-[var(--bg-main)] border border-[var(--border)] rounded-lg px-2 py-1 text-xs text-[var(--text-main)]">
-                    {f.type.startsWith('image/') ? <ImageIcon className="w-3.5 h-3.5 text-blue-400" /> : <FileText className="w-3.5 h-3.5 text-[var(--text-muted)]" />}
-                    <span className="max-w-32 truncate">{f.name}</span>
-                    <span className="text-[var(--text-muted)]">({(f.size / 1024).toFixed(0)}KB)</span>
-                    <button onClick={() => removeFile(i)} className="text-[var(--text-muted)] hover:text-red-400 transition-colors ml-0.5">
-                      <XCircle className="w-3.5 h-3.5" />
-                    </button>
+                  <div key={i} className="relative group">
+                    {previews[i] ? (
+                      // Preview de imagem
+                      <div className="relative w-16 h-16 rounded-lg overflow-hidden border border-[var(--border)]">
+                        <img src={previews[i]} alt={f.name} className="w-full h-full object-cover" />
+                        <button
+                          onClick={() => removeFile(i)}
+                          className="absolute top-0.5 right-0.5 w-4 h-4 bg-black/70 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <XCircle className="w-3 h-3 text-white" />
+                        </button>
+                      </div>
+                    ) : (
+                      // Preview de arquivo não-imagem
+                      <div className="flex items-center gap-1.5 bg-[var(--bg-main)] border border-[var(--border)] rounded-lg px-2 py-1 text-xs text-[var(--text-main)]">
+                        <FileText className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0" />
+                        <span className="max-w-28 truncate">{f.name}</span>
+                        <span className="text-[var(--text-muted)] shrink-0">({(f.size / 1024).toFixed(0)}KB)</span>
+                        <button onClick={() => removeFile(i)} className="text-[var(--text-muted)] hover:text-red-400 transition-colors ml-0.5 shrink-0">
+                          <XCircle className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
+              </div>
+            )}
+            {/* Progresso de upload */}
+            {uploadProgress && (
+              <div className="flex items-center gap-2 mb-2 text-xs text-[var(--text-muted)]">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                <span>{uploadProgress}</span>
               </div>
             )}
 
