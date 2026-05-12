@@ -320,7 +320,7 @@ export const AnalysisDetail: React.FC<AnalysisDetailProps> = ({
                                     </div>
                                     {hasChanges && (
                                         <button
-                                            onClick={handleSave}
+                                            onClick={() => handleSave()}
                                             disabled={isSaving}
                                             className="mt-6 btn-primary w-full py-3 text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 animate-bounce-subtle"
                                         >
