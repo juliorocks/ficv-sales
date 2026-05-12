@@ -21,6 +21,8 @@ export interface AIConversationAnalysis {
         agility: number;
     };
     isCommercial: boolean;
+    shouldInvalidate: boolean;
+    invalidateReason?: string;
     overallConclusion: string;
     improvements: string[];
 }
@@ -30,13 +32,31 @@ DIRETRIZES DA BASE DE CONHECIMENTO (CONTEXTO):
 ${kbContext || 'Padrões FICV de atendimento humanizado e resolução.'}
 
 ---
-CLASSIFICAÇÃO OBRIGATÓRIA (isCommercial):
-- MARQUE "isCommercial": false se: O cliente já é aluno, tem dúvidas de direito, dúvidas sobre aulas, matrícula, processos acadêmicos, institucional ou suporte técnico. 
+PASSO 1 — INVALIDAÇÃO (shouldInvalidate):
+Antes de avaliar, decida se este atendimento MERECE ser avaliado.
+
+INVALIDE (shouldInvalidate: true) quando:
+- A conversa é uma TRANSFERÊNCIA pura: o agente apenas passou o contato para outra fila/setor sem nenhuma troca substantiva
+- Houve menos de 2 trocas reais entre agente e cliente (uma pergunta e uma resposta no mínimo)
+- A conversa é de bot/automação sem participação humana real do agente
+- O atendimento terminou antes de qualquer interação significativa
+
+NÃO INVALIDE (shouldInvalidate: false) quando:
+- Houve pelo menos 1 pergunta do cliente E 1 resposta real do agente
+- O agente fez atendimento real, mesmo que curto
+- É um atendimento de suporte legítimo (aluno com dúvida + agente respondeu)
+
+Quando shouldInvalidate for true, preencha "invalidateReason" com o motivo em 1 frase.
+Quando shouldInvalidate for true, ainda preencha os demais campos com valores neutros (scores 5, isCommercial: false).
+
+---
+PASSO 2 — CLASSIFICAÇÃO OBRIGATÓRIA (isCommercial):
+- MARQUE "isCommercial": false se: O cliente já é aluno, tem dúvidas de direito, dúvidas sobre aulas, matrícula, processos acadêmicos, institucional ou suporte técnico.
 - MARQUE "isCommercial": true somente se: O objetivo central da conversa for a venda de um NOVO curso ou produto para um lead.
 - REGRA DE OURO: No Suporte Técnico/Direito (isCommercial: false), o pilar CONVENCIONAL-COMERCIAL deve ser anulado (dê nota 5 neutra). A nota final será a média apenas de Empatia, Clareza, Profundidade e Agilidade.
 
 ---
-REGRAS DE PONTUAÇÃO (Rigidez Auditora):
+PASSO 3 — REGRAS DE PONTUAÇÃO (Rigidez Auditora):
 1. SE Suporte (isCommercial: false): Resolveu o problema? Deu a resposta técnica correta? Nota 9-10. Foi robótico ou não resolveu? Nota < 5.
 2. SE Vendas (isCommercial: true): Houve tentativa real de fechamento? Se sim, nota alta. Se ignorou o cliente, nota baixa.
 
@@ -46,6 +66,8 @@ FORMATO DE RETORNO (JSON OBRIGATÓRIO):
   "messagesFeedback": [ { "index": number, "score": "excelente"|"bom"|"melhorar", "feedback": "texto", "suggestion": "texto" } ],
   "globalScores": { "empathy": 0-10, "clarity": 0-10, "depth": 0-10, "commercial": 0-10, "agility": 0-10 },
   "isCommercial": boolean,
+  "shouldInvalidate": boolean,
+  "invalidateReason": "string ou null",
   "overallConclusion": "Explique detalhadamente por que este atendimento foi excelente em suporte ou falho em vendas.",
   "improvements": ["Ação 1"]
 }

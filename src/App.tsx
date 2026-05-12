@@ -28,7 +28,7 @@ import {
     Ticket as TicketIcon
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { recalculateAllScores } from './services/reprocessor';
+import { reprocessAllAnalyses } from './services/reprocessor';
 import { CSVUploader } from './components/CSVUploader';
 import { GoalDashboard } from './components/GoalDashboard';
 import { AgentProfile } from './components/AgentProfile';
@@ -1299,7 +1299,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                     onClick={async () => {
                                         setIsRefreshing(true);
                                         setRefreshProgress({ current: 0, total: 0 });
-                                        await recalculateAllScores(async (curr, tot) => {
+                                        await reprocessAllAnalyses(async (curr, tot) => {
                                             setRefreshProgress({ current: curr, total: tot });
                                             if (curr % 20 === 0 || curr === tot) await fetchData();
                                         });

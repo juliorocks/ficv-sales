@@ -99,15 +99,29 @@ export const AnalysisDetail: React.FC<AnalysisDetailProps> = ({
         setScores(prev => ({ ...prev, [key]: numValue }));
     };
 
-    const handleSave = async () => {
+    const handleSave = async (currentScores = scores, currentFinalScore = finalScore) => {
         if (!initialAnalysis || !onScoreUpdate) return;
         setIsSaving(true);
         try {
-            await onScoreUpdate(initialAnalysis.protocol, { ...scores, finalScore });
+            await onScoreUpdate(initialAnalysis.protocol, { ...currentScores, finalScore: currentFinalScore });
         } finally {
             setIsSaving(false);
         }
     };
+
+    // Auto-save 800ms after any score change (avoids stale closure issues with onBlur)
+    React.useEffect(() => {
+        if (!hasChanges) return;
+        const capturedScores = { ...scores };
+        const capturedFinal = finalScore;
+        const timer = setTimeout(() => {
+            if (!initialAnalysis || !onScoreUpdate) return;
+            setIsSaving(true);
+            onScoreUpdate(initialAnalysis.protocol, { ...capturedScores, finalScore: capturedFinal })
+                .finally(() => setIsSaving(false));
+        }, 800);
+        return () => clearTimeout(timer);
+    }, [scores]);
 
 
     const [transcript, setTranscript] = React.useState<any[]>(initialAnalysis?.transcript || []);
@@ -176,7 +190,9 @@ export const AnalysisDetail: React.FC<AnalysisDetailProps> = ({
                             <input
                                 type="checkbox"
                                 checked={scores.isCommercial}
-                                onChange={(e) => setScores(prev => ({ ...prev, isCommercial: e.target.checked }))}
+                                onChange={(e) => {
+                                    setScores(prev => ({ ...prev, isCommercial: e.target.checked }));
+                                }}
                                 className="w-3 h-3 rounded border-[#30363D] accent-primary"
                             />
                         </label>

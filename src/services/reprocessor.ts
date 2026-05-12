@@ -1,6 +1,17 @@
 import { analyzeConversationWithAI, AIConversationAnalysis } from './aiSpecialist';
 import { supabase } from '../lib/supabase';
 
+const SYSTEM_MESSAGE_PATTERNS = [
+    'sessão irá expirar', 'sessão expirou', 'sua sessão',
+    'atendimento encerrado', 'atendimento finalizado', 'atendimento transferido',
+    'em fila de espera', 'aguarde na fila', '[sistema]', '[bot]',
+];
+function isSystemMessageText(text: string): boolean {
+    const lower = (text || '').toLowerCase().trim();
+    if (!lower) return true;
+    return SYSTEM_MESSAGE_PATTERNS.some(p => lower.includes(p));
+}
+
 /**
  * FAST RECALCULATOR: Recalculates the final score using EXISTING scores from the DB.
  * Does NOT call the AI. Instant and reliable.
@@ -127,18 +138,47 @@ export async function reprocessAnalysis(protocol: string): Promise<AIConversatio
 
     if (!transcript || transcript.length === 0) {
         console.warn(`[Reprocessor] ⚠️ Empty transcript for ${protocol}, skipping AI call`);
-        // Fall back to score recalculation
         await recalculateScore(protocol);
         return null;
     }
 
-    const aiMessages = transcript.map((m: any) => ({ role: m.role, text: m.text }));
+    // Pre-flight: if client never responded, auto-invalidate without calling AI
+    const realClientMessages = transcript.filter((m: any) =>
+        m.role === 'client' && !isSystemMessageText(m.text)
+    );
+    if (realClientMessages.length === 0) {
+        console.log(`[Reprocessor] 🚫 Auto-invalidated ${protocol}: client sent 0 real messages.`);
+        await supabase.from('messages_logs').update({
+            status: 'invalidated',
+            overall_conclusion: 'Invalidado automaticamente: o cliente não enviou nenhuma mensagem neste atendimento.',
+            final_score: 0,
+        }).eq('protocol', protocol);
+        return null;
+    }
+
+    // Filter system messages before sending to AI
+    const aiMessages = transcript
+        .filter((m: any) => !isSystemMessageText(m.text))
+        .map((m: any) => ({ role: m.role, text: m.text }));
+
     const aiResult = await analyzeConversationWithAI(aiMessages);
 
     if (!aiResult) {
         console.error(`[Reprocessor] ❌ AI returned null for ${protocol}. Falling back to recalculation.`);
         await recalculateScore(protocol);
         return null;
+    }
+
+    // AI-driven invalidation (transfers, bot-only, no real exchange, etc.)
+    if (aiResult.shouldInvalidate) {
+        const reason = aiResult.invalidateReason || 'Atendimento sem interação real avaliável.';
+        console.log(`[Reprocessor] 🚫 AI-invalidated ${protocol}: ${reason}`);
+        await supabase.from('messages_logs').update({
+            status: 'invalidated',
+            overall_conclusion: `Invalidado automaticamente: ${reason}`,
+            final_score: 0,
+        }).eq('protocol', protocol);
+        return aiResult;
     }
 
     const contactLower = (logEntry.contact || '').toLowerCase();
@@ -159,6 +199,7 @@ export async function reprocessAnalysis(protocol: string): Promise<AIConversatio
     await supabase
         .from('messages_logs')
         .update({
+            status: 'approved',
             final_score: finalScore,
             empathy_score: e,
             clarity_score: cl,
