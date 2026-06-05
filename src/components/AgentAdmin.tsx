@@ -14,6 +14,8 @@ export interface AgentProfileData {
     phone: string | null;
     notes: string | null;
     active: boolean;
+    team_id?: string | null;
+    team?: { id: string; name: string; icon: string; color: string } | null;
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -23,7 +25,10 @@ export const useAgentProfiles = () => {
 
     const fetch = useCallback(async () => {
         setLoading(true);
-        const { data } = await supabase.from('agent_profiles').select('*').order('name');
+        const { data } = await supabase
+            .from('agent_profiles')
+            .select('*, team:teams(id, name, icon, color)')
+            .order('name');
         setProfiles(data ?? []);
         setLoading(false);
     }, []);
@@ -71,12 +76,14 @@ const AgentCard: React.FC<{
     onGenerateReport: (agent: AgentProfileData) => void;
 }> = ({ agent, agentStats, isAdmin, onRefresh, onGenerateReport }) => {
     const [editing, setEditing] = useState(false);
+    const [teams, setTeams] = useState<Array<{ id: string; name: string; icon: string; color: string }>>([]);
     const [form, setForm] = useState({
         photo_url: agent.photo_url ?? '',
         score_target: String(agent.score_target),
         email: agent.email ?? '',
         phone: agent.phone ?? '',
         notes: agent.notes ?? '',
+        team_id: agent.team_id ?? null,
     });
 
     useEffect(() => {
@@ -86,8 +93,17 @@ const AgentCard: React.FC<{
             email: agent.email ?? '',
             phone: agent.phone ?? '',
             notes: agent.notes ?? '',
+            team_id: agent.team_id ?? null,
         });
     }, [agent]);
+
+    useEffect(() => {
+        const fetchTeams = async () => {
+            const { data } = await supabase.from('teams').select('id, name, icon, color').eq('active', true);
+            setTeams(data ?? []);
+        };
+        fetchTeams();
+    }, []);
     const [saving, setSaving] = useState(false);
     const [uploading, setUploading] = useState(false);
 
@@ -99,6 +115,7 @@ const AgentCard: React.FC<{
             email: form.email || null,
             phone: form.phone || null,
             notes: form.notes || null,
+            team_id: form.team_id || null,
         }).eq('id', agent.id);
         setSaving(false);
         setEditing(false);
@@ -203,14 +220,32 @@ const AgentCard: React.FC<{
                                 <input placeholder="Email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} className="bg-[var(--bg-card-hover)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-main)] focus:outline-none focus:border-primary" />
                                 <input placeholder="Telefone" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} className="bg-[var(--bg-card-hover)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-main)] focus:outline-none focus:border-primary" />
                             </div>
-                            <div className="flex items-center gap-2">
-                                <label className="text-[10px] text-[var(--text-muted)]">Meta Score:</label>
-                                <input type="number" min={0} max={10} step={0.1} value={form.score_target} onChange={e => setForm(f => ({ ...f, score_target: e.target.value }))} className="w-20 bg-[var(--bg-card-hover)] border border-[var(--border)] rounded-lg px-2 py-1 text-xs text-[var(--text-main)] focus:outline-none focus:border-primary" />
+                            <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label className="text-[10px] text-[var(--text-muted)] font-bold uppercase">Equipe:</label>
+                                    <select value={form.team_id || ''} onChange={e => setForm(f => ({ ...f, team_id: e.target.value || null }))} className="w-full bg-[var(--bg-card-hover)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-main)] focus:outline-none focus:border-primary mt-1">
+                                        <option value="">Sem equipe</option>
+                                        {teams.map(team => (
+                                            <option key={team.id} value={team.id}>{team.icon} {team.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] text-[var(--text-muted)] font-bold uppercase">Meta Score:</label>
+                                    <input type="number" min={0} max={10} step={0.1} value={form.score_target} onChange={e => setForm(f => ({ ...f, score_target: e.target.value }))} className="w-full bg-[var(--bg-card-hover)] border border-[var(--border)] rounded-lg px-3 py-1 text-xs text-[var(--text-main)] focus:outline-none focus:border-primary mt-1" />
+                                </div>
                             </div>
                             <textarea placeholder="Notas internas..." value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={2} className="w-full bg-[var(--bg-card-hover)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-main)] focus:outline-none focus:border-primary resize-none" />
                         </div>
                     ) : (
-                        agent.notes && <p className="text-[10px] text-[var(--text-muted)] truncate">{agent.notes}</p>
+                        <div className="flex items-center gap-2">
+                            {agent.team && (
+                                <span className="text-[10px] px-2 py-1 rounded-full" style={{ background: agent.team.color + '20', color: agent.team.color }}>
+                                    {agent.team.icon} {agent.team.name}
+                                </span>
+                            )}
+                            {agent.notes && <p className="text-[10px] text-[var(--text-muted)] truncate">{agent.notes}</p>}
+                        </div>
                     )}
                 </div>
             </div>

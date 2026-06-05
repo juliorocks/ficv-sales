@@ -211,3 +211,31 @@ export interface TicketEvaluation {
   comentario: string | null
   created_at: string
 }
+
+// ============================================================
+// MÓDULO DE EQUIPES
+// ============================================================
+
+export interface Team {
+  id: string
+  name: string
+  description?: string | null
+  color: string
+  icon: string
+  active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface AgentProfile {
+  id: string
+  name: string
+  photo_url?: string | null
+  score_target: number
+  email?: string | null
+  phone?: string | null
+  notes?: string | null
+  team_id?: string | null
+  active: boolean
+  team?: Team | null
+}

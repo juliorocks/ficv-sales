@@ -30,6 +30,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { reprocessAllAnalyses } from './services/reprocessor';
 import { CSVUploader } from './components/CSVUploader';
+import { TeamFilter } from './components/TeamFilter';
 import { GoalDashboard } from './components/GoalDashboard';
 import { AgentProfile } from './components/AgentProfile';
 import { Login } from './components/Login';
@@ -125,6 +126,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
 
     // Filter states
     const [selectedAgents, setSelectedAgents] = useState<string[]>([]);
+    const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
     const [dateRange, setDateRange] = useState<{ start: string; end: string }>({ start: '', end: '' });
     const [isAgentFilterOpen, setIsAgentFilterOpen] = useState(false);
     const [isDateFilterOpen, setIsDateFilterOpen] = useState(false);
@@ -427,9 +429,17 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 }
             }
 
-            return matchesAgent && matchesDate;
+            // Team filter: check if agent belongs to selected team
+            let matchesTeam = true;
+            if (selectedTeamId) {
+                // This will be updated once we have team info in analysisData
+                // For now, this is a placeholder
+                matchesTeam = true;
+            }
+
+            return matchesAgent && matchesDate && matchesTeam;
         });
-    }, [analysisData, selectedAgents, dateRange]);
+    }, [analysisData, selectedAgents, selectedTeamId, dateRange]);
 
     // Valid data for scores (exclude invalidated)
     const validData = useMemo(() => filteredData.filter(d => d.status === 'approved'), [filteredData]);
@@ -859,6 +869,13 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                         </div>
                                     )}
                                 </div>
+
+                                {/* Team Filter */}
+                                <TeamFilter
+                                    selectedTeamId={selectedTeamId}
+                                    onTeamChange={setSelectedTeamId}
+                                    label="Equipe"
+                                />
 
                                 {/* Date Presets Dropdown */}
                                 <div className="relative">
