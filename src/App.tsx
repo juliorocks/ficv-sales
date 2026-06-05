@@ -410,6 +410,16 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
         });
     };
 
+    // Get agent-to-team mapping
+    const { profiles } = useAgentProfiles();
+    const agentTeamMap = useMemo(() => {
+        const map: Record<string, string | null> = {};
+        profiles.forEach(p => {
+            map[p.name] = p.team_id ?? null;
+        });
+        return map;
+    }, [profiles]);
+
     // Filter results
     const filteredData = useMemo(() => {
         return analysisData.filter(d => {
@@ -433,14 +443,13 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
             // Team filter: check if agent belongs to selected team
             let matchesTeam = true;
             if (selectedTeamId) {
-                // This will be updated once we have team info in analysisData
-                // For now, this is a placeholder
-                matchesTeam = true;
+                const agentTeamId = agentTeamMap[d.agent];
+                matchesTeam = agentTeamId === selectedTeamId;
             }
 
             return matchesAgent && matchesDate && matchesTeam;
         });
-    }, [analysisData, selectedAgents, selectedTeamId, dateRange]);
+    }, [analysisData, selectedAgents, selectedTeamId, dateRange, agentTeamMap]);
 
     // Valid data for scores (exclude invalidated)
     const validData = useMemo(() => filteredData.filter(d => d.status === 'approved'), [filteredData]);
