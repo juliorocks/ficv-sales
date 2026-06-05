@@ -11,7 +11,8 @@ import {
     ArrowUpDown,
     Hash,
     RefreshCcw,
-    Loader2
+    Loader2,
+    CheckCircle2
 } from 'lucide-react';
 import { recalculateScore } from '../services/reprocessor';
 import { ConversationAnalysis } from '../utils/csvProcessor';
@@ -25,6 +26,7 @@ interface HistoryLogProps {
 export const HistoryLog: React.FC<HistoryLogProps> = ({ data, onSelect, onRefresh }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedAgent, setSelectedAgent] = useState('all');
+    const [statusFilter, setStatusFilter] = useState<'all' | 'approved' | 'invalidated'>('all');
     const [minScore, setMinScore] = useState(0);
     const [maxScore, setMaxScore] = useState(10);
     const [sortConfig, setSortConfig] = useState<{ key: keyof ConversationAnalysis, direction: 'asc' | 'desc' } | null>(null);
@@ -59,10 +61,11 @@ export const HistoryLog: React.FC<HistoryLogProps> = ({ data, onSelect, onRefres
 
             const matchesAgent = selectedAgent === 'all' || item.agent === selectedAgent;
             const matchesScore = item.finalScore >= minScore && item.finalScore <= maxScore;
+            const matchesStatus = statusFilter === 'all' || item.status === statusFilter;
 
-            return matchesSearch && matchesAgent && matchesScore;
+            return matchesSearch && matchesAgent && matchesScore && matchesStatus;
         });
-    }, [sortedData, searchTerm, selectedAgent, minScore, maxScore]);
+    }, [sortedData, searchTerm, selectedAgent, statusFilter, minScore, maxScore]);
 
 
     return (
@@ -110,6 +113,22 @@ export const HistoryLog: React.FC<HistoryLogProps> = ({ data, onSelect, onRefres
 
                         <div>
                             <div className="flex items-center gap-2 mb-4 text-[var(--text-muted)]">
+                                <CheckCircle2 size={14} className="text-primary" />
+                                <span className="text-[10px] font-bold uppercase tracking-widest">Status do Atendimento</span>
+                            </div>
+                            <select
+                                className="w-full bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-3 text-xs text-[var(--text-main)] outline-none focus:border-primary transition-all [color-scheme:light] dark:[color-scheme:dark]"
+                                value={statusFilter}
+                                onChange={(e) => setStatusFilter(e.target.value as 'all' | 'approved' | 'invalidated')}
+                            >
+                                <option value="all">Todos</option>
+                                <option value="approved">✅ Válidos</option>
+                                <option value="invalidated">❌ Inválidos</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <div className="flex items-center gap-2 mb-4 text-[var(--text-muted)]">
                                 <TrendingUp size={14} className="text-primary" />
                                 <span className="text-[10px] font-bold uppercase tracking-widest">Score Qualidade ({minScore} - {maxScore})</span>
                             </div>
@@ -134,6 +153,7 @@ export const HistoryLog: React.FC<HistoryLogProps> = ({ data, onSelect, onRefres
                             onClick={() => {
                                 setSearchTerm('');
                                 setSelectedAgent('all');
+                                setStatusFilter('all');
                                 setMinScore(0);
                                 setMaxScore(10);
                             }}
