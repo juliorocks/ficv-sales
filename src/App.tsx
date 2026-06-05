@@ -127,7 +127,11 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
 
     // Filter states
     const [selectedAgents, setSelectedAgents] = useState<string[]>([]);
-    const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+    const [selectedTeamId, setSelectedTeamId] = useState<string | null>(() => {
+        // Default to "Comercial" team on first load, but allow localStorage override
+        const saved = localStorage.getItem('ficv_selected_team');
+        return saved || null; // Will need to set default after teams load
+    });
     const [dateRange, setDateRange] = useState<{ start: string; end: string }>({ start: '', end: '' });
     const [isAgentFilterOpen, setIsAgentFilterOpen] = useState(false);
     const [isDateFilterOpen, setIsDateFilterOpen] = useState(false);
@@ -141,6 +145,34 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     useEffect(() => {
         localStorage.setItem('ficv_active_tab', activeTab);
     }, [activeTab]);
+
+    // Load default team (Comercial) and persist team selection
+    useEffect(() => {
+        const setDefaultTeam = async () => {
+            const saved = localStorage.getItem('ficv_selected_team');
+            if (!saved) {
+                // First time: fetch Comercial team ID and set as default
+                const { data: teams } = await supabase
+                    .from('teams')
+                    .select('id, name')
+                    .eq('name', 'Comercial')
+                    .single();
+
+                if (teams?.id) {
+                    setSelectedTeamId(teams.id);
+                    localStorage.setItem('ficv_selected_team', teams.id);
+                }
+            }
+        };
+        setDefaultTeam();
+    }, []);
+
+    // Persist team selection in localStorage
+    useEffect(() => {
+        if (selectedTeamId) {
+            localStorage.setItem('ficv_selected_team', selectedTeamId);
+        }
+    }, [selectedTeamId]);
 
     useEffect(() => {
         if (!session?.user?.id) return;
