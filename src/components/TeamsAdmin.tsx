@@ -222,16 +222,27 @@ export const TeamsAdmin: React.FC<TeamsAdminProps> = ({ isAdmin }) => {
     const addTeam = async () => {
         if (!addingName.trim()) return;
         setAdding(true);
-        const { error } = await supabase.from('teams').insert({
-            name: addingName.trim(),
-            icon: '👥',
-            color: '#5551FF',
-            active: true,
-        });
-        if (!error) {
-            setAddingName('');
-            setAddingOpen(false);
-            refresh();
+        try {
+            const { data, error } = await supabase.from('teams').insert({
+                name: addingName.trim(),
+                icon: '👥',
+                color: '#5551FF',
+                active: true,
+            }).select();
+
+            if (error) {
+                console.error('❌ Erro ao criar equipe:', error);
+                alert(`Erro: ${error.message}`);
+            } else {
+                console.log('✅ Equipe criada:', data);
+                setAddingName('');
+                setAddingOpen(false);
+                await new Promise(r => setTimeout(r, 500)); // pequeno delay
+                refresh();
+            }
+        } catch (err: any) {
+            console.error('❌ Erro ao criar equipe:', err);
+            alert(`Erro: ${err.message}`);
         }
         setAdding(false);
     };
