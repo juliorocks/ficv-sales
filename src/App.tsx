@@ -39,6 +39,7 @@ import { KnowledgeBase } from './components/KnowledgeBase';
 import { Scripts } from './components/Scripts';
 import { ArcGauge, GoalsPage, useFinancialGoals } from './components/GoalGauge';
 import { AgentAdmin, useAgentProfiles, AgentAvatar } from './components/AgentAdmin';
+import { TeamsAdmin } from './components/TeamsAdmin';
 import { HistoryLog } from './components/HistoryLog';
 import { UserManagement } from './components/UserManagement';
 import { ConversationAnalysis } from './utils/csvProcessor';
@@ -737,6 +738,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                             <>
                                 <p className="text-[10px] text-[var(--text-muted)] font-bold tracking-widest uppercase mt-8 mb-4 px-2">Gestão</p>
                                 <nav className="space-y-1">
+                                    <NavItem icon={Users} label="Equipes" active={activeTab === 'teams'} onClick={() => setActiveTab('teams')} />
                                     <NavItem icon={Users} label="Usuários" active={activeTab === 'users'} onClick={() => setActiveTab('users')} />
                                     <NavItem icon={Settings} label="Configurações" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
                                     <NavItem icon={History} label="Relatórios (Admin)" active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
@@ -1280,6 +1282,13 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {activeTab === 'agents' && profile?.role === 'admin' && (
                     <div className="animate-fade-in">
                         <AgentAdmin isAdmin={profile?.role === 'admin'} analysisData={filteredData} />
+                    </div>
+                )}
+
+                {/* Teams Admin View (Admin) */}
+                {activeTab === 'teams' && profile?.role === 'admin' && (
+                    <div className="animate-fade-in">
+                        <TeamsAdmin isAdmin={profile?.role === 'admin'} />
                     </div>
                 )}
 
