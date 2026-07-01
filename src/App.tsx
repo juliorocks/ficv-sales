@@ -538,6 +538,28 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
 
     const totalSales = useMemo(() => validData.filter(d => d.closingAttempt).length, [validData]);
 
+    // Enrollment count from matriculas table (for real conversion rate)
+    const [enrollmentCount, setEnrollmentCount] = useState<number | null>(null);
+    useEffect(() => {
+        const fetchEnrollments = async () => {
+            let query = supabase.from('matriculas').select('id', { count: 'exact', head: true });
+            if (dateRange.start) {
+                query = query.gte('data_matricula', dateRange.start);
+            }
+            if (dateRange.end) {
+                query = query.lte('data_matricula', dateRange.end);
+            }
+            const { count, error } = await query;
+            if (!error) setEnrollmentCount(count ?? 0);
+        };
+        fetchEnrollments();
+    }, [dateRange]);
+
+    const conversionRate = useMemo(() => {
+        if (enrollmentCount === null) return null;
+        if (filteredData.length === 0) return 0;
+        return (enrollmentCount / filteredData.length) * 100;
+    }, [enrollmentCount, filteredData.length]);
 
     const avgScore = useMemo(() => {
         return validData.length > 0
@@ -1096,7 +1118,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 items-stretch">
                             <StatCard icon={MessageSquare} title="Total Atendimentos" value={filteredData.length > 0 ? filteredData.length.toLocaleString() : "0"} subtext="Baseado em dados reais" />
                             <StatCard icon={Award} title="Score Qualidade" value={avgScore} subtext="Média dos protoc." />
-                            <StatCard icon={Target} title="Média de Conversão" value={filteredData.length > 0 ? `${((totalSales / filteredData.length) * 100).toFixed(1)}%` : "0%"} subtext="Objetivo: 15%" />
+                            <StatCard icon={Target} title="Média de Conversão" value={conversionRate !== null ? `${conversionRate.toFixed(1)}%` : enrollmentCount === null ? '...' : '0.0%'} subtext={enrollmentCount !== null ? `${enrollmentCount} matrículas no período · Obj: 15%` : 'Objetivo: 15%'} />
 
                             {/* 2 compact gauges */}
                             <div className="glass-card p-4 flex flex-col items-center justify-center">
