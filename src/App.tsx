@@ -486,6 +486,21 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     // Valid data for scores (exclude invalidated)
     const validData = useMemo(() => filteredData.filter(d => d.status === 'approved'), [filteredData]);
 
+    // Date-only filtered data for HistoryLog (no agent/team filter — it has its own)
+    const dateFilteredData = useMemo(() => {
+        if (!dateRange.start && !dateRange.end) return analysisData;
+        return analysisData.filter(d => {
+            const itemDate = new Date(d.date).getTime();
+            if (dateRange.start && itemDate < new Date(dateRange.start).getTime()) return false;
+            if (dateRange.end) {
+                const endDate = new Date(dateRange.end);
+                endDate.setHours(23, 59, 59, 999);
+                if (itemDate > endDate.getTime()) return false;
+            }
+            return true;
+        });
+    }, [analysisData, dateRange]);
+
 
     const agentsList = useMemo(() => Array.from(new Set(analysisData.map(d => d.agent))), [analysisData]);
 
@@ -826,7 +841,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
             }
 
             {/* Main Content */}
-            <main className={`flex-1 min-h-screen bg-[var(--bg-main)] p-8 transition-all overflow-x-hidden ${isTvMode ? 'ml-0' : 'ml-[240px]'}`}>
+            <main className={`flex-1 min-h-screen bg-[var(--bg-main)] p-8 transition-all overflow-x-clip ${isTvMode ? 'ml-0' : 'ml-[240px]'}`}>
                 {(activeTab === 'dashboard' || activeTab === 'agents' || activeTab === 'history' || activeTab.startsWith('kanban')) && (
                     <header className="flex justify-between items-start mb-10 relative">
                         <div>
@@ -1504,7 +1519,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {activeTab === 'history' && (
                     <div className="animate-fade-in">
                         <HistoryLog
-                            data={analysisData}
+                            data={dateFilteredData}
                             onSelect={(analysis) => setSelectedAnalysis(analysis)}
                             onRefresh={fetchData}
                         />

@@ -92,7 +92,7 @@ export const HistoryLog: React.FC<HistoryLogProps> = ({ data, onSelect, onRefres
 
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
                 {/* Filters Sidebar */}
-                <div className="space-y-6 lg:col-span-1">
+                <div className="space-y-6 lg:col-span-1 lg:sticky lg:top-6 lg:self-start">
                     <div className="glass-card p-6 space-y-8">
                         <div>
                             <div className="flex items-center gap-2 mb-4 text-[var(--text-muted)]">
