@@ -19,10 +19,8 @@ interface GaugeProps {
 
 export const ArcGauge: React.FC<GaugeProps> = ({ percent, label, achieved, target, color, size = 160 }) => {
     const [anim, setAnim] = useState(0);
-    // Allow over 100% — cap needle at 110% visually so it doesn't go wild
     const displayPercent = Math.max(0, percent);
-    const needlePercent = Math.min(110, displayPercent); // visual cap for needle travel
-    const clamped = Math.min(100, displayPercent);       // arc fill still maxes at 100%
+    const needlePercent = Math.min(110, displayPercent);
 
     useEffect(() => {
         const t = setTimeout(() => setAnim(needlePercent), 350);
@@ -38,9 +36,11 @@ export const ArcGauge: React.FC<GaugeProps> = ({ percent, label, achieved, targe
         return `M ${s.x} ${s.y} A ${R} ${R} 0 ${b - a > 180 ? 1 : 0} 1 ${e.x} ${e.y}`;
     };
 
-    const needleAng = START + (anim / 110) * TOTAL; // needle uses 110% scale
-    const arcFillAng = START + (clamped / 100) * TOTAL; // arc fill uses 100% scale
-    const nLen = R - size * 0.1;
+    // strokeDashoffset drives the arc fill — animates smoothly along the arc path
+    const arcTotalLength = (TOTAL / 360) * 2 * Math.PI * R;
+    const arcFillOffset = arcTotalLength * (1 - Math.min(100, anim) / 100);
+
+    const needleAng = START + (anim / 110) * TOTAL;
     const np = pt(needleAng);
 
     const gaugeColor = displayPercent >= 100 ? '#00D4AA' : displayPercent >= 70 ? '#5551FF' : displayPercent >= 40 ? '#FFB347' : '#FF6B4A';
@@ -51,9 +51,14 @@ export const ArcGauge: React.FC<GaugeProps> = ({ percent, label, achieved, targe
             <svg width={size} height={size * 0.72} viewBox={`0 0 ${size} ${size}`} style={{ overflow: 'visible' }}>
                 <path d={arc(START, END)} fill="none" stroke="var(--border)" strokeWidth={size * 0.055} strokeLinecap="round" />
                 <path
-                    d={arc(START, arcFillAng)}
-                    fill="none" stroke={gaugeColor} strokeWidth={size * 0.055} strokeLinecap="round"
-                    style={{ filter: `drop-shadow(0 0 5px ${gaugeColor}88)`, transition: 'all 1.3s cubic-bezier(0.34,1.56,0.64,1)' }}
+                    d={arc(START, END)}
+                    fill="none"
+                    stroke={gaugeColor}
+                    strokeWidth={size * 0.055}
+                    strokeLinecap="round"
+                    strokeDasharray={arcTotalLength}
+                    strokeDashoffset={arcFillOffset}
+                    style={{ filter: `drop-shadow(0 0 5px ${gaugeColor}88)`, transition: 'stroke-dashoffset 1.3s cubic-bezier(0.34,1.56,0.64,1), stroke 0.5s ease, filter 0.5s ease' }}
                 />
                 <line
                     x1={cx} y1={cy} x2={np.x} y2={np.y}
@@ -64,7 +69,7 @@ export const ArcGauge: React.FC<GaugeProps> = ({ percent, label, achieved, targe
                 <text x={cx} y={cy - size * 0.14} textAnchor="middle" fill="var(--text-main)" fontSize={size * 0.14} fontWeight="bold" fontFamily="Inter,sans-serif">
                     {Math.round(displayPercent)}%
                 </text>
-                <text x={cx} y={cy - size * 0.01} textAnchor="middle" fill="var(--text-muted)" fontSize={size * 0.07} fontFamily="Inter,sans-serif">
+                <text x={cx} y={cy + size * 0.14} textAnchor="middle" fill="var(--text-muted)" fontSize={size * 0.07} fontFamily="Inter,sans-serif">
                     {formatCurrency(achieved)}
                 </text>
             </svg>
@@ -111,6 +116,14 @@ export const useFinancialGoals = (year: number) => {
     }, [year]);
 
     useEffect(() => { fetch(); }, [fetch]);
+
+    useEffect(() => {
+        const channel = supabase
+            .channel('financial_goals_realtime')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'financial_goals' }, () => { fetch(); })
+            .subscribe();
+        return () => { supabase.removeChannel(channel); };
+    }, [fetch]);
 
     return { goals, loading, refresh: fetch };
 };
