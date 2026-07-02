@@ -153,6 +153,7 @@ interface Props { isAdmin: boolean; }
 export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
     const [matriculas, setMatriculas] = useState<SponteMatricula[]>([]);
     const [parcelas, setParcelas] = useState<SponteParcela[]>([]);
+    const [parcelasPendentes, setParcelasPendentes] = useState<SponteParcela[]>([]);
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
     const [lastSync, setLastSync] = useState<string | null>(null);
@@ -172,7 +173,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
     const loadData = useCallback(async () => {
         setLoading(true);
         try {
-            const [matRes, parcRes, syncRes] = await Promise.all([
+            const [matRes, parcRes, pendRes, syncRes] = await Promise.all([
                 supabase
                     .from('sponte_matriculas')
                     .select('*')
@@ -186,6 +187,12 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                     .gte('data_pagamento', dateStart)
                     .lte('data_pagamento', dateEnd),
                 supabase
+                    .from('sponte_parcelas')
+                    .select('*')
+                    .eq('situacao_parcela', 'Pendente')
+                    .gte('vencimento', dateStart)
+                    .lte('vencimento', dateEnd),
+                supabase
                     .from('sponte_matriculas')
                     .select('synced_at')
                     .order('synced_at', { ascending: false })
@@ -195,6 +202,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
 
             if (matRes.data) setMatriculas(matRes.data);
             if (parcRes.data) setParcelas(parcRes.data);
+            if (pendRes.data) setParcelasPendentes(pendRes.data);
             if (syncRes.data) setLastSync(syncRes.data.synced_at);
         } catch (e) {
             console.error('loadData error:', e);
@@ -268,6 +276,17 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
 
     const totalPago = useMemo(() =>
         filteredParcelas.reduce((s, p) => s + (p.valor_pago || 0), 0), [filteredParcelas]
+    );
+
+    const filteredParcelasPendentes = useMemo(() => {
+        const hasExtraFilter = selectedCurso !== 'all' || selectedTurma !== 'all' || selectedSituacao !== 'all' || !!search;
+        return hasExtraFilter
+            ? parcelasPendentes.filter(p => p.aluno_id !== null && filteredAlunoIds.has(p.aluno_id))
+            : parcelasPendentes;
+    }, [parcelasPendentes, filteredAlunoIds, selectedCurso, selectedTurma, selectedSituacao, search]);
+
+    const totalAReceber = useMemo(() =>
+        filteredParcelasPendentes.reduce((s, p) => s + (p.valor_parcela || 0), 0), [filteredParcelasPendentes]
     );
     const vigentes = useMemo(() =>
         filtered.filter(m => m.situacao_id === 1).length, [filtered]
@@ -440,7 +459,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
             {/* Stats cards */}
             {matriculas.length > 0 && (
                 <>
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
                         <StatCard
                             icon={GraduationCap}
                             title="Total Matrículas"
@@ -468,6 +487,13 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                             value={fmt(totalPago)}
                             sub="parcelas quitadas"
                             color="#00D4AA"
+                        />
+                        <StatCard
+                            icon={Calendar}
+                            title="Valor a Receber"
+                            value={fmt(totalAReceber)}
+                            sub={`${filteredParcelasPendentes.length} parcela${filteredParcelasPendentes.length !== 1 ? 's' : ''} pendente${filteredParcelasPendentes.length !== 1 ? 's' : ''}`}
+                            color="#FFB347"
                         />
                     </div>
 
