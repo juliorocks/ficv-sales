@@ -25,7 +25,8 @@ import {
     Moon,
     KanbanSquare,
     Search,
-    Ticket as TicketIcon
+    Ticket as TicketIcon,
+    GraduationCap
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { reprocessAllAnalyses } from './services/reprocessor';
@@ -64,6 +65,7 @@ import { WideChatHistory } from './components/kanban/WideChatHistory';
 import { TmaSettingsManagement } from './components/admin/TmaSettingsManagement';
 import { UserWidechatConfig } from './components/admin/UserWidechatConfig';
 import { TicketDashboard } from './components/tickets/TicketDashboard';
+import { SponteDashboard } from './components/SponteDashboard';
 
 const queryClient = new QueryClient({
     defaultOptions: {
@@ -808,6 +810,9 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                             <NavItem icon={MessageSquare} label="Meu Widechat" active={activeTab === 'widechat'} onClick={() => setActiveTab('widechat')} />
                             {(profile?.role === 'admin' || profile?.role === 'agent') && (
                                 <NavItem icon={TicketIcon} label="Tickets" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
+                            )}
+                            {(profile?.role === 'admin') && (
+                                <NavItem icon={GraduationCap} label="Matrículas" active={activeTab === 'matriculas'} onClick={() => setActiveTab('matriculas')} />
                             )}
                             {(profile?.role === 'admin') && <NavItem icon={Tv} label="Dashboard Live" active={isTvMode} onClick={() => setIsTvMode(!isTvMode)} />}
                         </nav>
@@ -1634,6 +1639,13 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {activeTab === 'tickets' && (profile?.role === 'admin' || profile?.role === 'agent') && (
                     <div className="animate-fade-in">
                         <TicketDashboard />
+                    </div>
+                )}
+
+                {/* Matrículas — integração Sponte CRM */}
+                {activeTab === 'matriculas' && profile?.role === 'admin' && (
+                    <div className="animate-fade-in">
+                        <SponteDashboard isAdmin={profile?.role === 'admin'} />
                     </div>
                 )}
 
