@@ -169,54 +169,74 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
 
     const { start: dateStart, end: dateEnd } = periodToDates(period, customStart, customEnd);
 
+    const hasActiveFilters = selectedCurso !== 'all' || selectedTurma !== 'all' || selectedSituacao !== 'all' || !!search;
+
+    const clearFilters = () => {
+        setSelectedCurso('all');
+        setSelectedTurma('all');
+        setSelectedSituacao('all');
+        setSearch('');
+    };
+
     // ─── Load data from Supabase ───────────────────────────────────────────────
     const loadData = useCallback(async () => {
         setLoading(true);
         try {
-            // Supabase caps at 1000 rows — paginate to fetch everything
-            const fetchAll = async (table: string, filters: (q: any) => any) => {
-                const PAGE = 1000;
-                let rows: any[] = [];
-                let from = 0;
-                while (true) {
-                    const { data, error } = await filters(
-                        supabase.from(table).select('*')
-                    ).range(from, from + PAGE - 1);
-                    if (error) throw error;
-                    if (data) rows = rows.concat(data);
-                    if (!data || data.length < PAGE) break;
-                    from += PAGE;
-                }
-                return rows;
-            };
-
-            const [matRows, parcRows, pendRows, syncRes] = await Promise.all([
-                fetchAll('sponte_matriculas', q =>
-                    q.gte('data_matricula', dateStart)
-                     .lte('data_matricula', dateEnd)
-                     .order('data_matricula', { ascending: false })
-                ),
-                fetchAll('sponte_parcelas', q =>
-                    q.eq('situacao_parcela', 'Quitada')
-                     .gte('data_pagamento', dateStart)
-                     .lte('data_pagamento', dateEnd)
-                ),
-                fetchAll('sponte_parcelas', q =>
-                    q.eq('situacao_parcela', 'Pendente')
-                     .gte('vencimento', dateStart)
-                     .lte('vencimento', dateEnd)
-                ),
-                supabase
+            // Paginate matriculas (Supabase default cap = 1000 rows)
+            const allMatriculas: SponteMatricula[] = [];
+            for (let from = 0; ; from += 1000) {
+                const { data, error } = await supabase
                     .from('sponte_matriculas')
-                    .select('synced_at')
-                    .order('synced_at', { ascending: false })
-                    .limit(1)
-                    .single()
-            ]);
+                    .select('*')
+                    .gte('data_matricula', dateStart)
+                    .lte('data_matricula', dateEnd)
+                    .order('data_matricula', { ascending: false })
+                    .range(from, from + 999);
+                if (error) throw error;
+                if (data?.length) allMatriculas.push(...data);
+                if (!data || data.length < 1000) break;
+            }
 
-            setMatriculas(matRows);
-            setParcelas(parcRows);
-            setParcelasPendentes(pendRows);
+            // Paginate paid parcelas
+            const allParcelas: SponteParcela[] = [];
+            for (let from = 0; ; from += 1000) {
+                const { data, error } = await supabase
+                    .from('sponte_parcelas')
+                    .select('*')
+                    .eq('situacao_parcela', 'Quitada')
+                    .gte('data_pagamento', dateStart)
+                    .lte('data_pagamento', dateEnd)
+                    .range(from, from + 999);
+                if (error) throw error;
+                if (data?.length) allParcelas.push(...data);
+                if (!data || data.length < 1000) break;
+            }
+
+            // Paginate pending parcelas
+            const allPendentes: SponteParcela[] = [];
+            for (let from = 0; ; from += 1000) {
+                const { data, error } = await supabase
+                    .from('sponte_parcelas')
+                    .select('*')
+                    .eq('situacao_parcela', 'Pendente')
+                    .gte('vencimento', dateStart)
+                    .lte('vencimento', dateEnd)
+                    .range(from, from + 999);
+                if (error) throw error;
+                if (data?.length) allPendentes.push(...data);
+                if (!data || data.length < 1000) break;
+            }
+
+            const syncRes = await supabase
+                .from('sponte_matriculas')
+                .select('synced_at')
+                .order('synced_at', { ascending: false })
+                .limit(1)
+                .single();
+
+            setMatriculas(allMatriculas);
+            setParcelas(allParcelas);
+            setParcelasPendentes(allPendentes);
             if (syncRes.data) setLastSync(syncRes.data.synced_at);
         } catch (e) {
             console.error('loadData error:', e);
@@ -455,6 +475,20 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                         className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-main)] focus:outline-none focus:border-primary"
                     />
                 </div>
+
+                {/* Clear filters */}
+                {hasActiveFilters && (
+                    <div className="flex flex-col gap-1 justify-end">
+                        <span className="text-[9px] font-bold text-transparent uppercase tracking-widest select-none">.</span>
+                        <button
+                            onClick={clearFilters}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-[var(--text-muted)] hover:text-[var(--text-main)] border border-[var(--border)] hover:border-primary/50 transition-all whitespace-nowrap"
+                        >
+                            <XCircle size={12} />
+                            Limpar filtros
+                        </button>
+                    </div>
+                )}
             </div>
 
             {/* Empty state when no data */}
