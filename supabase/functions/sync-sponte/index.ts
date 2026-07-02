@@ -130,83 +130,107 @@ async function syncMatriculas(
     return { synced };
 }
 
-// ─── Sync parcelas + update financial_goals ───────────────────────────────────
+// ─── Sync parcelas for a date range + update financial_goals per month ────────
 async function syncParcelas(
     supabase: ReturnType<typeof createClient>,
-    year: number,
-    month: number
-): Promise<{ synced: number; achieved: number; error?: string }> {
-    const y = year;
-    const m = String(month).padStart(2, '0');
-    const lastDay = new Date(year, month, 0).getDate();
-    const start = `${y}/${m}/01`;
-    const end   = `${y}/${m}/${lastDay}`;
+    startDate: string, // YYYY-MM-DD
+    endDate: string    // YYYY-MM-DD
+): Promise<{ synced: number; byMonth: Record<string, number>; error?: string }> {
 
-    let xml: string;
-    try {
-        xml = await soapCall("GetParcelas",
-            `<sParametrosBusca>DataPagamento=${start} e ${end}</sParametrosBusca>`);
-    } catch (e: any) {
-        return { synced: 0, achieved: 0, error: e.message };
+    // Sponte limits queries to ~6 months — split into 6-month chunks
+    const chunks: { start: string; end: string }[] = [];
+    const cursor = new Date(startDate + 'T12:00:00');
+    const last   = new Date(endDate   + 'T12:00:00');
+    while (cursor <= last) {
+        const chunkStart = cursor.toISOString().split('T')[0];
+        cursor.setMonth(cursor.getMonth() + 6);
+        cursor.setDate(0); // last day of previous month
+        const chunkEnd = cursor < last ? cursor.toISOString().split('T')[0] : endDate;
+        chunks.push({ start: chunkStart, end: chunkEnd });
+        cursor.setDate(cursor.getDate() + 1); // move to next day
     }
 
-    const records = extractAll(xml, 'wsParcela');
-    if (records.length === 0) return { synced: 0, achieved: 0 };
+    let totalSynced = 0;
+    const allRows: any[] = [];
 
-    const rows = records
-        .filter(r => extractFirst(r, 'ContaReceberID') !== '0')
-        .map(r => ({
-            conta_receber_id: parseInt(extractFirst(r, 'ContaReceberID')) || 0,
-            numero_parcela:   extractFirst(r, 'NumeroParcela') || '0',
-            aluno_id:         parseInt(extractFirst(r, 'AlunoID')) || null,
-            situacao_parcela: extractFirst(r, 'SituacaoParcela') || null,
-            data_pagamento:   parseBrDate(extractFirst(r, 'DataPagamento')),
-            vencimento:       parseBrDate(extractFirst(r, 'Vencimento')),
-            valor_parcela:    parseBrNumber(extractFirst(r, 'ValorParcela')),
-            valor_pago:       parseBrNumber(extractFirst(r, 'ValorPago')),
-            forma_cobranca:   extractFirst(r, 'FormaCobranca') || null,
-            categoria:        extractFirst(r, 'Categoria') || null,
-            categoria_id:     parseInt(extractFirst(r, 'CategoriaID')) || null,
-            sacado:           extractFirst(r, 'Sacado') || null,
-            conta_creditar:   extractFirst(r, 'ContaCreditar') || null,
-            synced_at:        new Date().toISOString(),
-        }))
-        .filter(r => r.conta_receber_id > 0);
+    for (const chunk of chunks) {
+        const start = chunk.start.replace(/-/g, '/');
+        const end   = chunk.end.replace(/-/g, '/');
 
-    if (rows.length === 0) return { synced: 0, achieved: 0 };
-
-    let synced = 0;
-    for (let i = 0; i < rows.length; i += 200) {
-        const batch = rows.slice(i, i + 200);
-        const { error } = await supabase
-            .from('sponte_parcelas')
-            .upsert(batch, { onConflict: 'conta_receber_id,numero_parcela' });
-        if (error) {
-            console.error('upsert parcelas error:', error);
-            return { synced, achieved: 0, error: error.message };
+        let xml: string;
+        try {
+            xml = await soapCall("GetParcelas",
+                `<sParametrosBusca>DataPagamento=${start} e ${end}</sParametrosBusca>`);
+        } catch (e: any) {
+            console.error(`syncParcelas chunk ${start}→${end} error:`, e.message);
+            continue;
         }
-        synced += batch.length;
+
+        const records = extractAll(xml, 'wsParcela');
+        const rows = records
+            .filter(r => extractFirst(r, 'ContaReceberID') !== '0')
+            .map(r => ({
+                conta_receber_id: parseInt(extractFirst(r, 'ContaReceberID')) || 0,
+                numero_parcela:   extractFirst(r, 'NumeroParcela') || '0',
+                aluno_id:         parseInt(extractFirst(r, 'AlunoID')) || null,
+                situacao_parcela: extractFirst(r, 'SituacaoParcela') || null,
+                data_pagamento:   parseBrDate(extractFirst(r, 'DataPagamento')),
+                vencimento:       parseBrDate(extractFirst(r, 'Vencimento')),
+                valor_parcela:    parseBrNumber(extractFirst(r, 'ValorParcela')),
+                valor_pago:       parseBrNumber(extractFirst(r, 'ValorPago')),
+                forma_cobranca:   extractFirst(r, 'FormaCobranca') || null,
+                categoria:        extractFirst(r, 'Categoria') || null,
+                categoria_id:     parseInt(extractFirst(r, 'CategoriaID')) || null,
+                sacado:           extractFirst(r, 'Sacado') || null,
+                conta_creditar:   extractFirst(r, 'ContaCreditar') || null,
+                synced_at:        new Date().toISOString(),
+            }))
+            .filter(r => r.conta_receber_id > 0);
+
+        for (let i = 0; i < rows.length; i += 200) {
+            const batch = rows.slice(i, i + 200);
+            const { error } = await supabase
+                .from('sponte_parcelas')
+                .upsert(batch, { onConflict: 'conta_receber_id,numero_parcela' });
+            if (error) console.error('upsert parcelas error:', error);
+            else totalSynced += batch.length;
+        }
+        allRows.push(...rows);
     }
 
-    // Total paid in this month (from DB, now that we've synced)
-    const { data: agg } = await supabase
-        .from('sponte_parcelas')
-        .select('valor_pago')
-        .eq('situacao_parcela', 'Quitada')
-        .gte('data_pagamento', `${y}-${m}-01`)
-        .lte('data_pagamento', `${y}-${m}-${lastDay}`);
+    // Group quitadas by year-month and update financial_goals for each month
+    const monthKeys = new Set<string>();
+    allRows.forEach(r => {
+        if (r.situacao_parcela === 'Quitada' && r.data_pagamento) {
+            monthKeys.add(r.data_pagamento.slice(0, 7)); // YYYY-MM
+        }
+    });
 
-    const achieved = (agg ?? []).reduce((sum: number, r: any) => sum + (r.valor_pago || 0), 0);
+    const byMonth: Record<string, number> = {};
+    for (const ym of monthKeys) {
+        const [y, m] = ym.split('-').map(Number);
+        const lastDay = new Date(y, m, 0).getDate();
+        const pad = String(m).padStart(2, '0');
 
-    // Update financial_goals.monthly_achieved
-    await supabase
-        .from('financial_goals')
-        .upsert(
-            { year, month, monthly_achieved: achieved },
-            { onConflict: 'year,month', ignoreDuplicates: false }
-        );
+        const { data: agg } = await supabase
+            .from('sponte_parcelas')
+            .select('valor_pago')
+            .eq('situacao_parcela', 'Quitada')
+            .gte('data_pagamento', `${y}-${pad}-01`)
+            .lte('data_pagamento', `${y}-${pad}-${lastDay}`);
 
-    return { synced, achieved };
+        const achieved = (agg ?? []).reduce((s: number, r: any) => s + (r.valor_pago || 0), 0);
+        byMonth[ym] = achieved;
+
+        await supabase
+            .from('financial_goals')
+            .upsert(
+                { year: y, month: m, monthly_achieved: achieved },
+                { onConflict: 'year,month', ignoreDuplicates: false }
+            );
+    }
+
+    return { synced: totalSynced, byMonth };
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
@@ -224,19 +248,16 @@ serve(async (req) => {
         const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
         const url  = new URL(req.url);
 
-        // Params: year, month, mode (matriculas | parcelas | full), start_date, end_date
-        const now   = new Date();
-        const year  = parseInt(body.year  ?? url.searchParams.get('year')  ?? String(now.getFullYear()));
-        const month = parseInt(body.month ?? url.searchParams.get('month') ?? String(now.getMonth() + 1));
-        const mode  = body.mode  ?? url.searchParams.get('mode') ?? 'full';
+        // Params: mode (matriculas | parcelas | full), start_date, end_date
+        const now  = new Date();
+        const year = now.getFullYear();
+        const mode = body.mode ?? url.searchParams.get('mode') ?? 'full';
 
-        // Date range for matriculas: default = full current year
-        const startDate = body.start_date ?? url.searchParams.get('start_date')
-            ?? `${year}-01-01`;
-        const endDate   = body.end_date   ?? url.searchParams.get('end_date')
-            ?? `${year}-12-31`;
+        // Date range — default = current year
+        const startDate = body.start_date ?? url.searchParams.get('start_date') ?? `${year}-01-01`;
+        const endDate   = body.end_date   ?? url.searchParams.get('end_date')   ?? `${year}-12-31`;
 
-        const result: Record<string, any> = { year, month, mode };
+        const result: Record<string, any> = { mode, startDate, endDate };
 
         if (mode === 'matriculas' || mode === 'full') {
             const r = await syncMatriculas(supabase, startDate, endDate);
@@ -245,9 +266,9 @@ serve(async (req) => {
         }
 
         if (mode === 'parcelas' || mode === 'full') {
-            const r = await syncParcelas(supabase, year, month);
+            const r = await syncParcelas(supabase, startDate, endDate);
             result.parcelas = r;
-            console.log(`Parcelas synced: ${r.synced}, achieved: ${r.achieved}`, r.error ?? '');
+            console.log(`Parcelas synced: ${r.synced}, by month:`, r.byMonth);
         }
 
         return new Response(JSON.stringify({ ok: true, ...result }), {

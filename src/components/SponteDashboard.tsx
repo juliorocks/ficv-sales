@@ -154,8 +154,6 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                     mode: 'full',
                     start_date: dateStart,
                     end_date: dateEnd,
-                    year: new Date(dateStart).getFullYear(),
-                    month: new Date(dateStart).getMonth() + 1,
                 },
             });
             if (error) throw error;
