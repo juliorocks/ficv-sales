@@ -324,10 +324,10 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                     <select
                         value={selectedCurso}
                         onChange={e => { setSelectedCurso(e.target.value); setSelectedTurma('all'); }}
-                        className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-main)] focus:outline-none focus:border-primary min-w-[180px]"
+                        className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-main)] focus:outline-none focus:border-primary min-w-[340px]"
                     >
                         <option value="all">Todos os cursos</option>
-                        {cursos.map(c => <option key={c} value={c}>{c.length > 40 ? c.slice(0, 38) + '…' : c}</option>)}
+                        {cursos.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                 </div>
 
