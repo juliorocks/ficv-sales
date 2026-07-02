@@ -197,8 +197,19 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
     }), [matriculas, selectedCurso, selectedTurma, selectedSituacao, search]);
 
     // ─── Stats ────────────────────────────────────────────────────────────────
+    // Filter parcelas by the aluno_ids of the filtered matriculas so turma/curso filters apply
+    const filteredAlunoIds = useMemo(() =>
+        new Set(filtered.map(m => m.aluno_id)), [filtered]
+    );
+    const filteredParcelas = useMemo(() => {
+        const hasExtraFilter = selectedCurso !== 'all' || selectedTurma !== 'all' || selectedSituacao !== 'all' || !!search;
+        return hasExtraFilter
+            ? parcelas.filter(p => p.aluno_id !== null && filteredAlunoIds.has(p.aluno_id))
+            : parcelas;
+    }, [parcelas, filteredAlunoIds, selectedCurso, selectedTurma, selectedSituacao, search]);
+
     const totalPago = useMemo(() =>
-        parcelas.reduce((s, p) => s + (p.valor_pago || 0), 0), [parcelas]
+        filteredParcelas.reduce((s, p) => s + (p.valor_pago || 0), 0), [filteredParcelas]
     );
     const vigentes = useMemo(() =>
         filtered.filter(m => m.situacao_id === 1).length, [filtered]
