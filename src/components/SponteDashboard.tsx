@@ -281,6 +281,10 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
         )).sort(),
         [matriculas, selectedCurso]
     );
+    const situacoes = useMemo(() =>
+        Array.from(new Set(matriculas.map(m => m.situacao).filter(Boolean))).sort(),
+        [matriculas]
+    );
 
     // ─── Filtered data ─────────────────────────────────────────────────────────
     const filtered = useMemo(() => matriculas.filter(m => {
@@ -458,19 +462,13 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                 />
 
                 {/* Status */}
-                <div className="flex flex-col gap-1">
-                    <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Situação</span>
-                    <select
-                        value={selectedSituacao}
-                        onChange={e => setSelectedSituacao(e.target.value)}
-                        className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-main)] focus:outline-none focus:border-primary"
-                    >
-                        <option value="all">Todas</option>
-                        <option value="Vigente">Vigente</option>
-                        <option value="Encerrado">Encerrado</option>
-                        <option value="Cancelado">Cancelado</option>
-                    </select>
-                </div>
+                <AutoWidthSelect
+                    label="Situação"
+                    value={selectedSituacao}
+                    options={situacoes.map(s => ({ value: s, label: s }))}
+                    onChange={setSelectedSituacao}
+                    placeholder="Todas as situações"
+                />
 
                 {/* Search */}
                 <div className="flex flex-col gap-1 flex-1 min-w-[180px]">
