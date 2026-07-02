@@ -344,14 +344,22 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
 
     // ─── Chart: matrículas por mês ────────────────────────────────────────────
     const chartByMonth = useMemo(() => {
-        const counts: Record<string, number> = {};
+        const counts: Record<string, { label: string; value: number }> = {};
         filtered.forEach(m => {
             if (!m.data_matricula) return;
             const d = new Date(m.data_matricula + 'T12:00:00');
-            const key = d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
-            counts[key] = (counts[key] || 0) + 1;
+            const sortKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            if (!counts[sortKey]) {
+                counts[sortKey] = {
+                    label: d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }),
+                    value: 0,
+                };
+            }
+            counts[sortKey].value += 1;
         });
-        return Object.entries(counts).map(([name, value]) => ({ name, value }));
+        return Object.entries(counts)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([, { label, value }]) => ({ name: label, value }));
     }, [filtered]);
 
     const PERIOD_OPTIONS = [
