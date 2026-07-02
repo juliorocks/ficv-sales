@@ -137,6 +137,9 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     const [dateRange, setDateRange] = useState<{ start: string; end: string }>({ start: '', end: '' });
     const [isAgentFilterOpen, setIsAgentFilterOpen] = useState(false);
     const [isDateFilterOpen, setIsDateFilterOpen] = useState(false);
+    const [isCourseFilterOpen, setIsCourseFilterOpen] = useState(false);
+    const [availableCourses, setAvailableCourses] = useState<string[]>([]);
+    const [selectedCourses, setSelectedCourses] = useState<string[]>([]);
     const [uploadLogs, setUploadLogs] = useState<any[]>([]);
     const [selectedAnalysis, setSelectedAnalysis] = useState<ConversationAnalysis | null>(null);
     const [isRefreshing, setIsRefreshing] = useState(false);
@@ -540,22 +543,21 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
 
     const totalSales = useMemo(() => validData.filter(d => d.closingAttempt).length, [validData]);
 
-    // Enrollment count from matriculas table (for real conversion rate)
+    // Enrollment count from Sponte (for real conversion rate), filtered by selected courses
     const [enrollmentCount, setEnrollmentCount] = useState<number | null>(null);
     useEffect(() => {
         const fetchEnrollments = async () => {
-            let query = supabase.from('matriculas').select('id', { count: 'exact', head: true });
-            if (dateRange.start) {
-                query = query.gte('data_matricula', dateRange.start);
-            }
-            if (dateRange.end) {
-                query = query.lte('data_matricula', dateRange.end);
-            }
+            let query = supabase
+                .from('sponte_matriculas')
+                .select('contrato_id', { count: 'exact', head: true });
+            if (dateRange.start) query = query.gte('data_matricula', dateRange.start);
+            if (dateRange.end)   query = query.lte('data_matricula', dateRange.end);
+            if (selectedCourses.length > 0) query = query.in('nome_curso', selectedCourses);
             const { count, error } = await query;
             if (!error) setEnrollmentCount(count ?? 0);
         };
         fetchEnrollments();
-    }, [dateRange]);
+    }, [dateRange, selectedCourses]);
 
     const conversionRate = useMemo(() => {
         if (enrollmentCount === null) return null;
@@ -572,12 +574,30 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
 
 
 
+    // Fetch distinct courses from Sponte for the course filter
+    useEffect(() => {
+        const fetchCourses = async () => {
+            const all = new Set<string>();
+            for (let from = 0; ; from += 1000) {
+                const { data } = await supabase
+                    .from('sponte_matriculas')
+                    .select('nome_curso')
+                    .range(from, from + 999);
+                data?.forEach((r: any) => r.nome_curso && all.add(r.nome_curso));
+                if (!data || data.length < 1000) break;
+            }
+            setAvailableCourses(Array.from(all).sort());
+        };
+        fetchCourses();
+    }, []);
+
     // Close dropdowns on click outside
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
             if (!(event.target as Element).closest('.filter-container')) {
                 setIsAgentFilterOpen(false);
                 setIsDateFilterOpen(false);
+                setIsCourseFilterOpen(false);
             }
         };
         document.addEventListener('mousedown', handleClickOutside);
@@ -961,6 +981,70 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                     onTeamChange={setSelectedTeamId}
                                     label="Equipe"
                                 />
+
+                                {/* Course Filter (Sponte) */}
+                                {availableCourses.length > 0 && (
+                                    <div className="relative">
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setIsCourseFilterOpen(!isCourseFilterOpen);
+                                                setIsAgentFilterOpen(false);
+                                                setIsDateFilterOpen(false);
+                                            }}
+                                            className="btn-pill flex items-center gap-2"
+                                        >
+                                            <GraduationCap size={14} className="text-primary" />
+                                            <span className="text-xs">
+                                                {selectedCourses.length === 0 ? 'Todos Cursos' : `${selectedCourses.length} curso${selectedCourses.length > 1 ? 's' : ''}`}
+                                            </span>
+                                        </button>
+
+                                        {isCourseFilterOpen && (
+                                            <div className="absolute top-full mt-2 right-0 w-72 bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl z-[100] p-2 animate-fade-in">
+                                                <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                                                    <label className="flex items-center gap-2 p-2 hover:bg-white/5 rounded-lg cursor-pointer transition-colors group">
+                                                        <input
+                                                            type="checkbox"
+                                                            className="w-4 h-4 rounded border-[var(--border)] accent-primary cursor-pointer"
+                                                            checked={selectedCourses.length === 0}
+                                                            onChange={() => setSelectedCourses([])}
+                                                        />
+                                                        <span className="text-xs group-hover:text-primary transition-colors text-[var(--text-main)] font-bold">Todos os Cursos</span>
+                                                    </label>
+                                                    <div className="h-px bg-[var(--border)] my-1" />
+                                                    {availableCourses.map(course => (
+                                                        <label key={course} className="flex items-center gap-2 p-2 hover:bg-white/5 rounded-lg cursor-pointer transition-colors group">
+                                                            <input
+                                                                type="checkbox"
+                                                                className="w-4 h-4 rounded border-[var(--border)] accent-primary cursor-pointer"
+                                                                checked={selectedCourses.includes(course)}
+                                                                onChange={() => {
+                                                                    setSelectedCourses(prev =>
+                                                                        prev.includes(course)
+                                                                            ? prev.filter(c => c !== course)
+                                                                            : [...prev, course]
+                                                                    );
+                                                                }}
+                                                            />
+                                                            <span className="text-xs group-hover:text-primary transition-colors text-[var(--text-main)] leading-tight">{course}</span>
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                                {selectedCourses.length > 0 && (
+                                                    <div className="border-t border-[var(--border)] mt-1 pt-1">
+                                                        <button
+                                                            onClick={() => setSelectedCourses([])}
+                                                            className="w-full text-center text-[10px] text-[var(--text-muted)] hover:text-primary py-1.5 transition-colors"
+                                                        >
+                                                            Limpar seleção
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
 
                                 {/* Date Presets Dropdown */}
                                 <div className="relative">
