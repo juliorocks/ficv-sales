@@ -173,25 +173,39 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
     const loadData = useCallback(async () => {
         setLoading(true);
         try {
-            const [matRes, parcRes, pendRes, syncRes] = await Promise.all([
-                supabase
-                    .from('sponte_matriculas')
-                    .select('*')
-                    .gte('data_matricula', dateStart)
-                    .lte('data_matricula', dateEnd)
-                    .order('data_matricula', { ascending: false }),
-                supabase
-                    .from('sponte_parcelas')
-                    .select('*')
-                    .eq('situacao_parcela', 'Quitada')
-                    .gte('data_pagamento', dateStart)
-                    .lte('data_pagamento', dateEnd),
-                supabase
-                    .from('sponte_parcelas')
-                    .select('*')
-                    .eq('situacao_parcela', 'Pendente')
-                    .gte('vencimento', dateStart)
-                    .lte('vencimento', dateEnd),
+            // Supabase caps at 1000 rows — paginate to fetch everything
+            const fetchAll = async (table: string, filters: (q: any) => any) => {
+                const PAGE = 1000;
+                let rows: any[] = [];
+                let from = 0;
+                while (true) {
+                    const { data, error } = await filters(
+                        supabase.from(table).select('*')
+                    ).range(from, from + PAGE - 1);
+                    if (error) throw error;
+                    if (data) rows = rows.concat(data);
+                    if (!data || data.length < PAGE) break;
+                    from += PAGE;
+                }
+                return rows;
+            };
+
+            const [matRows, parcRows, pendRows, syncRes] = await Promise.all([
+                fetchAll('sponte_matriculas', q =>
+                    q.gte('data_matricula', dateStart)
+                     .lte('data_matricula', dateEnd)
+                     .order('data_matricula', { ascending: false })
+                ),
+                fetchAll('sponte_parcelas', q =>
+                    q.eq('situacao_parcela', 'Quitada')
+                     .gte('data_pagamento', dateStart)
+                     .lte('data_pagamento', dateEnd)
+                ),
+                fetchAll('sponte_parcelas', q =>
+                    q.eq('situacao_parcela', 'Pendente')
+                     .gte('vencimento', dateStart)
+                     .lte('vencimento', dateEnd)
+                ),
                 supabase
                     .from('sponte_matriculas')
                     .select('synced_at')
@@ -200,9 +214,9 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                     .single()
             ]);
 
-            if (matRes.data) setMatriculas(matRes.data);
-            if (parcRes.data) setParcelas(parcRes.data);
-            if (pendRes.data) setParcelasPendentes(pendRes.data);
+            setMatriculas(matRows);
+            setParcelas(parcRows);
+            setParcelasPendentes(pendRows);
             if (syncRes.data) setLastSync(syncRes.data.synced_at);
         } catch (e) {
             console.error('loadData error:', e);
