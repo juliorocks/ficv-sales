@@ -157,10 +157,11 @@ export const GoalsPage: React.FC<GoalsPageProps> = ({ isAdmin }) => {
 
     const saveAll = async () => {
         setSaving(true);
+        // Only save monthly_target — monthly_achieved comes from Sponte sync
         const rows = Array.from({ length: 12 }, (_, i) => {
             const m = i + 1;
             const tgt = parseFloat(getVal(m, 'monthly_target').replace(',', '.') || '0') || 0;
-            const ach = parseFloat(getVal(m, 'monthly_achieved').replace(',', '.') || '0') || 0;
+            const ach = goals.find(g => g.month === m)?.monthly_achieved ?? 0;
             return { year, month: m, monthly_target: tgt, monthly_achieved: ach };
         });
 
@@ -182,7 +183,7 @@ export const GoalsPage: React.FC<GoalsPageProps> = ({ isAdmin }) => {
             <div className="flex items-center justify-between">
                 <div>
                     <h2 className="text-2xl font-black text-[var(--text-main)] tracking-tight">Metas Financeiras</h2>
-                    <p className="text-[var(--text-muted)] text-sm mt-1">Preencha as metas mensais e os valores atingidos.</p>
+                    <p className="text-[var(--text-muted)] text-sm mt-1">Preencha a meta mensal. O valor atingido é atualizado automaticamente pelo Sponte.</p>
                 </div>
                 <div className="flex items-center gap-3">
                     <select
@@ -228,7 +229,7 @@ export const GoalsPage: React.FC<GoalsPageProps> = ({ isAdmin }) => {
             {[1, 2].map(sem => {
                 const months = Array.from({ length: 6 }, (_, i) => (sem - 1) * 6 + i + 1);
                 const stgt = months.reduce((a, m) => a + (parseFloat(getVal(m, 'monthly_target').replace(',', '.') || '0') || 0), 0);
-                const sach = months.reduce((a, m) => a + (parseFloat(getVal(m, 'monthly_achieved').replace(',', '.') || '0') || 0), 0);
+                const sach = months.reduce((a, m) => a + (goals.find(g => g.month === m)?.monthly_achieved ?? 0), 0);
 
                 return (
                     <div key={sem} className="glass-card overflow-hidden">
@@ -253,7 +254,7 @@ export const GoalsPage: React.FC<GoalsPageProps> = ({ isAdmin }) => {
                             <tbody className="divide-y divide-[var(--border)]/50">
                                 {months.map(m => {
                                     const tgt = parseFloat(getVal(m, 'monthly_target').replace(',', '.') || '0') || 0;
-                                    const ach = parseFloat(getVal(m, 'monthly_achieved').replace(',', '.') || '0') || 0;
+                                    const ach = goals.find(g => g.month === m)?.monthly_achieved ?? 0;
                                     const pct = tgt > 0 ? Math.round((ach / tgt) * 100) : null;
                                     const isCurrentMonth = m === currentMonth && year === currentYear;
 
@@ -279,19 +280,11 @@ export const GoalsPage: React.FC<GoalsPageProps> = ({ isAdmin }) => {
                                                     <span className="text-sm text-right block text-[var(--text-main)]">{tgt ? formatCurrency(tgt) : '—'}</span>
                                                 )}
                                             </td>
-                                            <td className="px-8 py-4">
-                                                {isAdmin ? (
-                                                    <input
-                                                        type="number"
-                                                        min={0}
-                                                        value={getVal(m, 'monthly_achieved')}
-                                                        onChange={e => setVal(m, 'monthly_achieved', e.target.value)}
-                                                        placeholder="0"
-                                                        className="w-full text-right bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm text-[var(--text-main)] focus:outline-none focus:border-primary transition-colors"
-                                                    />
-                                                ) : (
-                                                    <span className="text-sm text-right block text-[var(--text-main)]">{ach ? formatCurrency(ach) : '—'}</span>
-                                                )}
+                                            <td className="px-8 py-4 text-right">
+                                                <span className={`text-sm font-semibold ${ach > 0 ? 'text-[var(--text-main)]' : 'text-[var(--text-muted)]'}`}>
+                                                    {ach > 0 ? formatCurrency(ach) : '—'}
+                                                </span>
+                                                <span className="block text-[9px] text-[var(--text-muted)] mt-0.5">via Sponte</span>
                                             </td>
                                             <td className="px-8 py-4 text-right">
                                                 {pct !== null ? (
