@@ -757,7 +757,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                         />
                     </div>
 
-                    <div className="px-4 py-2 flex-1">
+                    <div className="px-4 py-2 flex-1 overflow-y-auto custom-scrollbar">
                         <p className="text-[10px] text-[var(--text-muted)] font-bold tracking-widest uppercase mb-4 px-2">Menu Principal</p>
                         <nav className="space-y-1">
                             <NavItem icon={LayoutDashboard} label="Visão Geral" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
