@@ -37,7 +37,9 @@ async function soapCall(method: string, params: string): Promise<string> {
         body: soapEnvelope(method, params),
     });
     if (!res.ok) throw new Error(`Sponte HTTP ${res.status}`);
-    return res.text();
+    // Force UTF-8 decode regardless of Content-Type charset header
+    const buf = await res.arrayBuffer();
+    return new TextDecoder('utf-8').decode(buf);
 }
 
 // ─── XML parsing helpers ──────────────────────────────────────────────────────
