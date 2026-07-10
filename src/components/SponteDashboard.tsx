@@ -162,21 +162,32 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
     const [period, setPeriod] = useState('year');
     const [customStart, setCustomStart] = useState('');
     const [customEnd, setCustomEnd] = useState('');
-    const [selectedCurso, setSelectedCurso] = useState('all');
+    const [selectedCursos, setSelectedCursos] = useState<string[]>([]);
     const [selectedTurma, setSelectedTurma] = useState('all');
     const [selectedSituacao, setSelectedSituacao] = useState('all');
     const [search, setSearch] = useState('');
+    const [cursoDropdownOpen, setCursoDropdownOpen] = useState(false);
+    const cursoDropdownRef = useRef<HTMLDivElement>(null);
 
     const { start: dateStart, end: dateEnd } = periodToDates(period, customStart, customEnd);
 
-    const hasActiveFilters = selectedCurso !== 'all' || selectedTurma !== 'all' || selectedSituacao !== 'all' || !!search;
+    const hasActiveFilters = selectedCursos.length > 0 || selectedTurma !== 'all' || selectedSituacao !== 'all' || !!search;
 
     const clearFilters = () => {
-        setSelectedCurso('all');
+        setSelectedCursos([]);
         setSelectedTurma('all');
         setSelectedSituacao('all');
         setSearch('');
     };
+
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (cursoDropdownRef.current && !cursoDropdownRef.current.contains(e.target as Node))
+                setCursoDropdownOpen(false);
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, []);
 
     // ─── Load data from Supabase ───────────────────────────────────────────────
     const loadData = useCallback(async () => {
@@ -276,10 +287,10 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
     const turmas = useMemo(() =>
         Array.from(new Set(
             matriculas
-                .filter(m => selectedCurso === 'all' || m.nome_curso === selectedCurso)
+                .filter(m => selectedCursos.length === 0 || selectedCursos.includes(m.nome_curso))
                 .map(m => m.nome_turma).filter(Boolean)
         )).sort(),
-        [matriculas, selectedCurso]
+        [matriculas, selectedCursos]
     );
     const situacoes = useMemo(() =>
         Array.from(new Set(matriculas.map(m => m.situacao).filter(Boolean))).sort(),
@@ -288,7 +299,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
 
     // ─── Filtered data ─────────────────────────────────────────────────────────
     const filtered = useMemo(() => matriculas.filter(m => {
-        if (selectedCurso !== 'all' && m.nome_curso !== selectedCurso) return false;
+        if (selectedCursos.length > 0 && !selectedCursos.includes(m.nome_curso)) return false;
         if (selectedTurma !== 'all' && m.nome_turma !== selectedTurma) return false;
         if (selectedSituacao !== 'all' && m.situacao !== selectedSituacao) return false;
         if (search) {
@@ -298,7 +309,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                 m.numero_contrato?.toLowerCase().includes(q));
         }
         return true;
-    }), [matriculas, selectedCurso, selectedTurma, selectedSituacao, search]);
+    }), [matriculas, selectedCursos, selectedTurma, selectedSituacao, search]);
 
     // ─── Stats ────────────────────────────────────────────────────────────────
     // Filter parcelas by the aluno_ids of the filtered matriculas so turma/curso filters apply
@@ -306,22 +317,22 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
         new Set(filtered.map(m => m.aluno_id)), [filtered]
     );
     const filteredParcelas = useMemo(() => {
-        const hasExtraFilter = selectedCurso !== 'all' || selectedTurma !== 'all' || selectedSituacao !== 'all' || !!search;
+        const hasExtraFilter = selectedCursos.length > 0 || selectedTurma !== 'all' || selectedSituacao !== 'all' || !!search;
         return hasExtraFilter
             ? parcelas.filter(p => p.aluno_id !== null && filteredAlunoIds.has(p.aluno_id))
             : parcelas;
-    }, [parcelas, filteredAlunoIds, selectedCurso, selectedTurma, selectedSituacao, search]);
+    }, [parcelas, filteredAlunoIds, selectedCursos, selectedTurma, selectedSituacao, search]);
 
     const totalPago = useMemo(() =>
         filteredParcelas.reduce((s, p) => s + (p.valor_pago || 0), 0), [filteredParcelas]
     );
 
     const filteredParcelasPendentes = useMemo(() => {
-        const hasExtraFilter = selectedCurso !== 'all' || selectedTurma !== 'all' || selectedSituacao !== 'all' || !!search;
+        const hasExtraFilter = selectedCursos.length > 0 || selectedTurma !== 'all' || selectedSituacao !== 'all' || !!search;
         return hasExtraFilter
             ? parcelasPendentes.filter(p => p.aluno_id !== null && filteredAlunoIds.has(p.aluno_id))
             : parcelasPendentes;
-    }, [parcelasPendentes, filteredAlunoIds, selectedCurso, selectedTurma, selectedSituacao, search]);
+    }, [parcelasPendentes, filteredAlunoIds, selectedCursos, selectedTurma, selectedSituacao, search]);
 
     const totalAReceber = useMemo(() =>
         filteredParcelasPendentes.reduce((s, p) => s + (p.valor_parcela || 0), 0), [filteredParcelasPendentes]
@@ -443,14 +454,56 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                     </div>
                 )}
 
-                {/* Course */}
-                <AutoWidthSelect
-                    label="Curso"
-                    value={selectedCurso}
-                    options={cursos.map(c => ({ value: c, label: c }))}
-                    onChange={v => { setSelectedCurso(v); setSelectedTurma('all'); }}
-                    placeholder="Todos os cursos"
-                />
+                {/* Course — multi-select with checkboxes */}
+                <div className="flex flex-col gap-1" ref={cursoDropdownRef}>
+                    <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Curso</span>
+                    <div className="relative">
+                        <button
+                            onClick={() => setCursoDropdownOpen(o => !o)}
+                            className="flex items-center gap-2 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-main)] focus:outline-none focus:border-primary min-w-[220px] w-full text-left"
+                        >
+                            <span className="flex-1 truncate">
+                                {selectedCursos.length === 0
+                                    ? 'Todos os cursos'
+                                    : selectedCursos.length === 1
+                                        ? selectedCursos[0]
+                                        : `${selectedCursos.length} cursos selecionados`}
+                            </span>
+                            <ChevronDown size={12} className={`shrink-0 text-[var(--text-muted)] transition-transform ${cursoDropdownOpen ? 'rotate-180' : ''}`} />
+                        </button>
+                        {cursoDropdownOpen && (
+                            <div className="absolute top-full mt-1 left-0 z-[200] bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl overflow-y-auto max-h-72"
+                                style={{ minWidth: '100%', width: 'max-content', maxWidth: '520px' }}>
+                                <label className="flex items-center gap-2 px-4 py-2 hover:bg-[var(--bg-card-hover)] cursor-pointer transition-colors">
+                                    <input
+                                        type="checkbox"
+                                        className="w-3.5 h-3.5 accent-primary cursor-pointer"
+                                        checked={selectedCursos.length === 0}
+                                        onChange={() => { setSelectedCursos([]); setSelectedTurma('all'); }}
+                                    />
+                                    <span className="text-xs font-bold text-[var(--text-main)] whitespace-nowrap">Todos os cursos</span>
+                                </label>
+                                <div className="h-px bg-[var(--border)] mx-2" />
+                                {cursos.map(c => (
+                                    <label key={c} className="flex items-center gap-2 px-4 py-2 hover:bg-[var(--bg-card-hover)] cursor-pointer transition-colors">
+                                        <input
+                                            type="checkbox"
+                                            className="w-3.5 h-3.5 accent-primary cursor-pointer shrink-0"
+                                            checked={selectedCursos.includes(c)}
+                                            onChange={() => {
+                                                setSelectedCursos(prev =>
+                                                    prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c]
+                                                );
+                                                setSelectedTurma('all');
+                                            }}
+                                        />
+                                        <span className={`text-xs whitespace-nowrap ${selectedCursos.includes(c) ? 'text-primary font-bold' : 'text-[var(--text-main)]'}`}>{c}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
 
                 {/* Class */}
                 <AutoWidthSelect
