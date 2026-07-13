@@ -26,7 +26,8 @@ import {
     KanbanSquare,
     Search,
     Ticket as TicketIcon,
-    GraduationCap
+    GraduationCap,
+    Megaphone
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { reprocessAllAnalyses } from './services/reprocessor';
@@ -66,6 +67,7 @@ import { TmaSettingsManagement } from './components/admin/TmaSettingsManagement'
 import { UserWidechatConfig } from './components/admin/UserWidechatConfig';
 import { TicketDashboard } from './components/tickets/TicketDashboard';
 import { SponteDashboard } from './components/SponteDashboard';
+import { CampaignsDashboard } from './components/CampaignsDashboard';
 
 const queryClient = new QueryClient({
     defaultOptions: {
@@ -833,6 +835,9 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                             )}
                             {(profile?.role === 'admin') && (
                                 <NavItem icon={GraduationCap} label="Matrículas" active={activeTab === 'matriculas'} onClick={() => setActiveTab('matriculas')} />
+                            )}
+                            {(profile?.role === 'admin') && (
+                                <NavItem icon={Megaphone} label="Campanhas (Ads)" active={activeTab === 'campanhas'} onClick={() => setActiveTab('campanhas')} />
                             )}
                             {(profile?.role === 'admin') && <NavItem icon={Tv} label="Dashboard Live" active={isTvMode} onClick={() => setIsTvMode(!isTvMode)} />}
                         </nav>
@@ -1730,6 +1735,13 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {activeTab === 'matriculas' && profile?.role === 'admin' && (
                     <div className="animate-fade-in">
                         <SponteDashboard isAdmin={profile?.role === 'admin'} />
+                    </div>
+                )}
+
+                {/* Campanhas — integração Meta Ads */}
+                {activeTab === 'campanhas' && profile?.role === 'admin' && (
+                    <div className="animate-fade-in">
+                        <CampaignsDashboard isAdmin={profile?.role === 'admin'} />
                     </div>
                 )}
 
