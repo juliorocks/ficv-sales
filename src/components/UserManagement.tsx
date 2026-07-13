@@ -11,7 +11,10 @@ import {
     Loader2,
     Search,
     UserCheck,
-    Lock
+    Lock,
+    Pencil,
+    User as UserIcon,
+    KeyRound
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -35,6 +38,9 @@ export const UserManagement: React.FC = () => {
         full_name: '',
         role: 'agent' as 'admin' | 'agent'
     });
+    const [editingUser, setEditingUser] = useState<Profile | null>(null);
+    const [editForm, setEditForm] = useState({ full_name: '', email: '', role: 'agent' as 'admin' | 'agent', newPassword: '' });
+    const [editLoading, setEditLoading] = useState(false);
 
     useEffect(() => {
         fetchProfiles();
@@ -42,15 +48,65 @@ export const UserManagement: React.FC = () => {
 
     const fetchProfiles = async () => {
         setLoading(true);
-        const { data, error } = await supabase
-            .from('profiles')
-            .select('*')
-            .order('full_name');
+        const { data, error } = await supabase.functions.invoke('admin-manage-users', {
+            body: { action: 'list' }
+        });
 
-        if (!error && data) {
-            setProfiles(data);
+        if (!error && data?.success) {
+            setProfiles(data.profiles);
+        } else {
+            // Fallback: at least show names/roles if the function is unavailable
+            const { data: fallback } = await supabase.from('profiles').select('*').order('full_name');
+            if (fallback) setProfiles(fallback);
         }
         setLoading(false);
+    };
+
+    const openEditUser = (p: Profile) => {
+        setEditingUser(p);
+        setEditForm({ full_name: p.full_name || '', email: p.email || '', role: p.role, newPassword: '' });
+    };
+
+    const handleUpdateUser = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!editingUser) return;
+        setEditLoading(true);
+
+        try {
+            const { data, error } = await supabase.functions.invoke('admin-manage-users', {
+                body: {
+                    action: 'update_profile',
+                    payload: {
+                        userId: editingUser.id,
+                        full_name: editForm.full_name,
+                        email: editForm.email,
+                        role: editForm.role
+                    }
+                }
+            });
+            if (error) throw error;
+            if (data?.error) throw new Error(data.error);
+
+            if (editForm.newPassword) {
+                if (editForm.newPassword.length < 6) throw new Error('A nova senha deve ter no mínimo 6 caracteres.');
+                const { data: pwData, error: pwError } = await supabase.functions.invoke('admin-manage-users', {
+                    body: {
+                        action: 'reset_password',
+                        payload: { userId: editingUser.id, password: editForm.newPassword }
+                    }
+                });
+                if (pwError) throw pwError;
+                if (pwData?.error) throw new Error(pwData.error);
+            }
+
+            setEditingUser(null);
+            fetchProfiles();
+        } catch (error: any) {
+            console.error('Erro ao atualizar usuário:', error);
+            alert(`Erro ao atualizar usuário: ${error.message}`);
+        } finally {
+            setEditLoading(false);
+        }
     };
 
     const handleCreateUser = async (e: React.FormEvent) => {
@@ -184,6 +240,13 @@ export const UserManagement: React.FC = () => {
                                         </td>
                                         <td className="py-4 px-4 text-right">
                                             <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button
+                                                    onClick={() => openEditUser(p)}
+                                                    className="p-2 text-[var(--text-muted)] hover:text-primary transition-colors"
+                                                    title="Editar usuário"
+                                                >
+                                                    <Pencil size={16} />
+                                                </button>
                                                 <button className="p-2 text-[var(--text-muted)] hover:text-red-400 transition-colors">
                                                     <Trash2 size={16} />
                                                 </button>
@@ -295,6 +358,110 @@ export const UserManagement: React.FC = () => {
                                 >
                                     {formLoading ? <Loader2 size={18} className="animate-spin" /> : <UserCheck size={18} />}
                                     Finalizar Convite
+                                </button>
+                            </div>
+                        </form>
+                    </motion.div>
+                </div>
+            )}
+
+            {/* Modal de Edição */}
+            {editingUser && (
+                <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+                    <motion.div
+                        initial={{ scale: 0.9, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        className="w-full max-w-md glass-card p-6 sm:p-8 shadow-2xl overflow-y-auto relative max-h-[90vh]"
+                    >
+                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary to-accent" />
+
+                        <div className="flex items-center gap-3 mb-8">
+                            <div className="p-2.5 bg-primary/10 rounded-xl text-primary">
+                                <UserIcon size={24} />
+                            </div>
+                            <div>
+                                <h3 className="text-xl font-bold text-[var(--text-main)]">Editar Usuário</h3>
+                                <p className="text-xs text-[var(--text-muted)] font-medium">Atualize os dados de {editingUser.full_name || 'usuário'}.</p>
+                            </div>
+                        </div>
+
+                        <form onSubmit={handleUpdateUser} className="space-y-6">
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest ml-1">Nome Completo</label>
+                                <input
+                                    className="w-full bg-[var(--bg-card-hover)] border border-[var(--border)] rounded-xl p-4 text-sm text-[var(--text-main)] focus:border-primary outline-none transition-all placeholder:opacity-30"
+                                    placeholder="Ex: João Silva"
+                                    value={editForm.full_name}
+                                    onChange={e => setEditForm({ ...editForm, full_name: e.target.value })}
+                                    required
+                                />
+                            </div>
+
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest ml-1">E-mail</label>
+                                <div className="relative">
+                                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--text-muted)] opacity-50" size={16} />
+                                    <input
+                                        type="email"
+                                        className="w-full bg-[var(--bg-card-hover)] border border-[var(--border)] rounded-xl py-4 pl-12 pr-4 text-sm text-[var(--text-main)] focus:border-primary outline-none transition-all placeholder:opacity-30 font-medium"
+                                        placeholder="email@ficv.com.br"
+                                        value={editForm.email}
+                                        onChange={e => setEditForm({ ...editForm, email: e.target.value })}
+                                        required
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest ml-1">Nível de Acesso</label>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setEditForm({ ...editForm, role: 'agent' })}
+                                        className={`flex items-center justify-center gap-2 py-3 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${editForm.role === 'agent' ? 'bg-primary/20 border-primary/50 text-white' : 'bg-transparent border-[var(--border)] text-[var(--text-muted)] hover:border-primary/30'}`}
+                                    >
+                                        <Shield size={14} /> Agente
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setEditForm({ ...editForm, role: 'admin' })}
+                                        className={`flex items-center justify-center gap-2 py-3 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${editForm.role === 'admin' ? 'bg-primary/20 border-primary/50 text-white' : 'bg-transparent border-[var(--border)] text-[var(--text-muted)] hover:border-primary/30'}`}
+                                    >
+                                        <ShieldCheck size={14} /> Admin
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest ml-1">Nova Senha (opcional)</label>
+                                <div className="relative">
+                                    <KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--text-muted)] opacity-50" size={16} />
+                                    <input
+                                        type="password"
+                                        className="w-full bg-[var(--bg-card-hover)] border border-[var(--border)] rounded-xl py-4 pl-12 pr-4 text-sm text-[var(--text-main)] focus:border-primary outline-none transition-all placeholder:opacity-30 font-medium"
+                                        placeholder="Deixe em branco para manter a atual"
+                                        value={editForm.newPassword}
+                                        onChange={e => setEditForm({ ...editForm, newPassword: e.target.value })}
+                                        minLength={6}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="flex gap-3 pt-4">
+                                <button
+                                    type="button"
+                                    onClick={() => setEditingUser(null)}
+                                    className="flex-1 py-4 text-[var(--text-muted)] hover:text-[var(--text-main)] font-bold text-sm transition-all"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={editLoading}
+                                    className="flex-[2] btn-primary py-4 flex items-center justify-center gap-2"
+                                >
+                                    {editLoading ? <Loader2 size={18} className="animate-spin" /> : <UserCheck size={18} />}
+                                    Salvar Alterações
                                 </button>
                             </div>
                         </form>
