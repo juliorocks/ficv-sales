@@ -163,8 +163,8 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
     }, []);
 
     // ─── Load period data ──────────────────────────────────────────────────────
-    const loadData = useCallback(async () => {
-        setLoading(true);
+    const loadData = useCallback(async (opts?: { silent?: boolean }) => {
+        if (!opts?.silent) setLoading(true);
         try {
             const { start: prevStart, end: prevEnd } = previousPeriod(dateStart, dateEnd);
             const insightCols = 'campaign_id,campaign_name,date,spend,impressions,clicks,leads_count';
@@ -200,7 +200,7 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
         } catch (e) {
             console.error('loadData error:', e);
         } finally {
-            setLoading(false);
+            if (!opts?.silent) setLoading(false);
         }
     }, [dateStart, dateEnd, selectedCampaigns]);
 
@@ -251,6 +251,16 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
     }, []);
 
     useEffect(() => { loadMonthly(); }, [loadMonthly]);
+
+    // Atualiza em segundo plano (sem loading spinner) pra refletir os syncs
+    // automáticos do cron sem precisar dar refresh na página.
+    useEffect(() => {
+        const id = setInterval(() => {
+            loadData({ silent: true });
+            loadMonthly();
+        }, 3 * 60 * 1000);
+        return () => clearInterval(id);
+    }, [loadData, loadMonthly]);
 
     // ─── Sync via Edge Function ────────────────────────────────────────────────
     const handleSync = async () => {

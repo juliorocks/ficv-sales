@@ -91,8 +91,8 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
     }, []);
 
     // ─── Load data from Supabase ───────────────────────────────────────────────
-    const loadData = useCallback(async () => {
-        setLoading(true);
+    const loadData = useCallback(async (opts?: { silent?: boolean }) => {
+        if (!opts?.silent) setLoading(true);
         try {
             // Paginate matriculas (Supabase default cap = 1000 rows)
             const allMatriculas: SponteMatricula[] = [];
@@ -153,11 +153,18 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
         } catch (e) {
             console.error('loadData error:', e);
         } finally {
-            setLoading(false);
+            if (!opts?.silent) setLoading(false);
         }
     }, [dateStart, dateEnd]);
 
     useEffect(() => { loadData(); }, [loadData]);
+
+    // Atualiza em segundo plano (sem loading spinner) pra refletir os syncs
+    // automáticos do cron sem precisar dar refresh na página.
+    useEffect(() => {
+        const id = setInterval(() => { loadData({ silent: true }); }, 3 * 60 * 1000);
+        return () => clearInterval(id);
+    }, [loadData]);
 
     // ─── Trigger sync via Edge Function ───────────────────────────────────────
     const handleSync = async () => {
