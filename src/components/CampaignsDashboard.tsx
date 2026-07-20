@@ -153,14 +153,24 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
         return () => document.removeEventListener('mousedown', handler);
     }, []);
 
-    // ─── Load campaign list (for filter) ───────────────────────────────────────
+    // ─── Load campaign list (for filter) — só campanhas com atividade no período
     useEffect(() => {
         const loadCampaigns = async () => {
-            const { data } = await supabase.from('meta_campaigns').select('campaign_id,name,status').order('name');
-            setCampaignsList(data ?? []);
+            const rows = await paginateAll<{ campaign_id: string; campaign_name: string | null }>((from, to) =>
+                supabase.from('meta_campaign_insights_daily').select('campaign_id,campaign_name')
+                    .gte('date', dateStart).lte('date', dateEnd).range(from, to)
+            );
+            const byId = new Map<string, string>();
+            rows.forEach(r => { if (!byId.has(r.campaign_id)) byId.set(r.campaign_id, r.campaign_name || r.campaign_id); });
+            const options = Array.from(byId.entries())
+                .map(([campaign_id, name]) => ({ campaign_id, name, status: null }))
+                .sort((a, b) => a.name.localeCompare(b.name));
+            setCampaignsList(options);
+            // Remove da seleção campanhas que não tiveram atividade neste período
+            setSelectedCampaigns(prev => prev.filter(id => byId.has(id)));
         };
         loadCampaigns();
-    }, []);
+    }, [dateStart, dateEnd]);
 
     // ─── Load period data ──────────────────────────────────────────────────────
     const loadData = useCallback(async (opts?: { silent?: boolean }) => {
