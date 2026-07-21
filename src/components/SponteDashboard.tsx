@@ -40,6 +40,33 @@ interface SponteParcela {
     categoria: string;
 }
 
+// ─── Cruzamento leads x matrículas (atribuição por agente) ───────────────────
+interface MinimalLead {
+    id: number;
+    nome_completo: string;
+    assigned_to_id: string | null;
+    data_entrada: string;
+}
+
+interface MinimalMatriculaAluno {
+    aluno: string;
+    data_matricula: string;
+}
+
+/** Normaliza nome pra comparação: minúsculas, sem acento, espaços colapsados */
+function normalizeName(name: string): string {
+    return (name || '')
+        .normalize('NFD').replace(/\p{Diacritic}/gu, '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+/** Extrai só a parte YYYY-MM-DD de um timestamp ISO, pra comparar com colunas DATE */
+function dateOnly(s: string | null | undefined): string {
+    return s ? s.slice(0, 10) : '';
+}
+
 const fmt = (v: number) =>
     v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
 
@@ -55,6 +82,10 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
     const [matriculas, setMatriculas] = useState<SponteMatricula[]>([]);
     const [parcelas, setParcelas] = useState<SponteParcela[]>([]);
     const [parcelasPendentes, setParcelasPendentes] = useState<SponteParcela[]>([]);
+    // Cruzamento leads x matrículas (atribuição por agente) — carregado 1x, independente do período
+    const [allLeads, setAllLeads] = useState<MinimalLead[]>([]);
+    const [allMatriculasAluno, setAllMatriculasAluno] = useState<MinimalMatriculaAluno[]>([]);
+    const [agentNames, setAgentNames] = useState<Record<string, string>>({});
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
     const [lastSync, setLastSync] = useState<string | null>(null);
@@ -165,6 +196,46 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
         const id = setInterval(() => { loadData({ silent: true }); }, 3 * 60 * 1000);
         return () => clearInterval(id);
     }, [loadData]);
+
+    // ─── Carrega leads + matrículas (todo o histórico) + perfis pra atribuição por agente ─
+    useEffect(() => {
+        const loadAttributionData = async () => {
+            try {
+                const leadsRows: MinimalLead[] = [];
+                for (let from = 0; ; from += 1000) {
+                    const { data, error } = await supabase
+                        .from('leads')
+                        .select('id, nome_completo, assigned_to_id, data_entrada')
+                        .range(from, from + 999);
+                    if (error) throw error;
+                    if (data?.length) leadsRows.push(...data);
+                    if (!data || data.length < 1000) break;
+                }
+                setAllLeads(leadsRows);
+
+                const matriculaRows: MinimalMatriculaAluno[] = [];
+                for (let from = 0; ; from += 1000) {
+                    const { data, error } = await supabase
+                        .from('sponte_matriculas')
+                        .select('aluno, data_matricula')
+                        .range(from, from + 999);
+                    if (error) throw error;
+                    if (data?.length) matriculaRows.push(...data);
+                    if (!data || data.length < 1000) break;
+                }
+                setAllMatriculasAluno(matriculaRows);
+
+                const { data: profs, error: profError } = await supabase.from('profiles').select('id, full_name');
+                if (profError) throw profError;
+                const map: Record<string, string> = {};
+                (profs ?? []).forEach((p: any) => { map[p.id] = p.full_name; });
+                setAgentNames(map);
+            } catch (e) {
+                console.error('loadAttributionData error:', e);
+            }
+        };
+        loadAttributionData();
+    }, []);
 
     // ─── Trigger sync via Edge Function ───────────────────────────────────────
     const handleSync = async () => {
@@ -284,6 +355,74 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
             .sort(([a], [b]) => a.localeCompare(b))
             .map(([, { label, value }]) => ({ name: label, value }));
     }, [filtered]);
+
+    // ─── Chart: matrículas por agente (cruzamento com leads) ──────────────────
+    // Uma matrícula só conta pro agente responsável pelo lead se a pessoa NÃO
+    // tinha nenhuma matrícula (em qualquer curso) antes da entrada do lead no
+    // funil — quem já estava na base antes do atendimento é desconsiderado.
+    const earliestMatriculaByName = useMemo(() => {
+        const map = new Map<string, string>();
+        allMatriculasAluno.forEach(m => {
+            if (!m.aluno || !m.data_matricula) return;
+            const key = normalizeName(m.aluno);
+            const curr = map.get(key);
+            if (!curr || m.data_matricula < curr) map.set(key, m.data_matricula);
+        });
+        return map;
+    }, [allMatriculasAluno]);
+
+    const leadsByName = useMemo(() => {
+        const map = new Map<string, MinimalLead[]>();
+        allLeads.forEach(l => {
+            if (!l.nome_completo) return;
+            const key = normalizeName(l.nome_completo);
+            if (!map.has(key)) map.set(key, []);
+            map.get(key)!.push(l);
+        });
+        return map;
+    }, [allLeads]);
+
+    const chartByAgente = useMemo(() => {
+        const counts: Record<string, number> = {};
+        const seenPerAgent = new Set<string>(); // dedupe: 1 matrícula por pessoa por agente
+        let semAtribuicao = 0;
+        let jaExistente = 0;
+
+        filtered.forEach(m => {
+            if (!m.aluno || !m.data_matricula) { semAtribuicao++; return; }
+            const key = normalizeName(m.aluno);
+
+            // Só considera leads cuja entrada no funil é anterior (ou no mesmo dia) à matrícula
+            const eligible = (leadsByName.get(key) || [])
+                .filter(l => l.assigned_to_id && l.data_entrada && dateOnly(l.data_entrada) <= m.data_matricula);
+
+            if (eligible.length === 0) { semAtribuicao++; return; }
+
+            // Atendimento mais recente antes da matrícula
+            const lead = eligible.reduce((a, b) => (dateOnly(a.data_entrada) > dateOnly(b.data_entrada) ? a : b));
+
+            const earliest = earliestMatriculaByName.get(key);
+            if (earliest && earliest < dateOnly(lead.data_entrada)) {
+                jaExistente++; // já matriculado(a) antes do atendimento — desconsidera
+                return;
+            }
+
+            const dedupeKey = `${lead.assigned_to_id}::${key}`;
+            if (seenPerAgent.has(dedupeKey)) return;
+            seenPerAgent.add(dedupeKey);
+
+            const agentName = agentNames[lead.assigned_to_id as string] || 'Desconhecido';
+            counts[agentName] = (counts[agentName] || 0) + 1;
+        });
+
+        return {
+            data: Object.entries(counts)
+                .sort((a, b) => b[1] - a[1])
+                .map(([name, value]) => ({ name, value })),
+            semAtribuicao,
+            jaExistente,
+        };
+    }, [filtered, leadsByName, earliestMatriculaByName, agentNames]);
 
     return (
         <div className="space-y-8 animate-fade-in">
@@ -563,6 +702,53 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                                 </div>
                             )}
                         </div>
+                    </div>
+
+                    {/* By agent — cruzamento leads x matrículas */}
+                    <div className="glass-card p-6">
+                        <div className="flex items-center justify-between mb-4 gap-4">
+                            <h3 className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-widest whitespace-nowrap">
+                                Matrículas por Agente
+                            </h3>
+                            <span className="text-[10px] text-[var(--text-muted)] text-right">
+                                Conta 1x por aluno; ignora quem já estava matriculado antes do atendimento
+                            </span>
+                        </div>
+                        {loading ? (
+                            <div className="h-64 flex items-center justify-center">
+                                <Loader2 size={24} className="animate-spin text-primary" />
+                            </div>
+                        ) : chartByAgente.data.length === 0 ? (
+                            <p className="text-center py-12 text-[var(--text-muted)] text-sm">
+                                Nenhuma matrícula pôde ser atribuída a um agente neste período.
+                            </p>
+                        ) : (
+                            <div className="h-64">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={chartByAgente.data} layout="vertical" margin={{ left: 8, right: 24 }}>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+                                        <XAxis type="number" allowDecimals={false} axisLine={false} tickLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 10 }} />
+                                        <YAxis type="category" dataKey="name" width={140} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} />
+                                        <Tooltip
+                                            contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }}
+                                            itemStyle={{ color: 'var(--text-main)' }}
+                                            formatter={(v: any) => [`${v} matrícula${v !== 1 ? 's' : ''}`, '']}
+                                        />
+                                        <Bar dataKey="value" radius={[0, 6, 6, 0]}>
+                                            {chartByAgente.data.map((_, i) => (
+                                                <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                                            ))}
+                                        </Bar>
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        )}
+                        {!loading && (chartByAgente.semAtribuicao > 0 || chartByAgente.jaExistente > 0) && (
+                            <p className="text-[10px] text-[var(--text-muted)] mt-3">
+                                {chartByAgente.semAtribuicao > 0 && `${chartByAgente.semAtribuicao} matrícula${chartByAgente.semAtribuicao !== 1 ? 's' : ''} sem lead correspondente ou sem agente responsável. `}
+                                {chartByAgente.jaExistente > 0 && `${chartByAgente.jaExistente} desconsiderada${chartByAgente.jaExistente !== 1 ? 's' : ''} por já constar matriculado(a) antes do atendimento.`}
+                            </p>
+                        )}
                     </div>
 
                     {/* Table */}
