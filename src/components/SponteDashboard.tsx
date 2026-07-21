@@ -384,7 +384,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
 
     const chartByAgente = useMemo(() => {
         const counts: Record<string, number> = {};
-        const seenPerAgent = new Set<string>(); // dedupe: 1 matrícula por pessoa por agente
+        const seenPerAgent = new Set<string>(); // dedupe: 1 matrícula por pessoa por curso por agente
         let semAtribuicao = 0;
         let jaExistente = 0;
 
@@ -407,7 +407,10 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                 return;
             }
 
-            const dedupeKey = `${lead.assigned_to_id}::${key}`;
+            // Dedup por pessoa+curso (não por pessoa sozinha): matrícula em cursos
+            // diferentes conta mais de uma vez pro agente.
+            const cursoKey = normalizeName(m.nome_curso?.split('(')[0] || m.nome_curso);
+            const dedupeKey = `${lead.assigned_to_id}::${key}::${cursoKey}`;
             if (seenPerAgent.has(dedupeKey)) return;
             seenPerAgent.add(dedupeKey);
 
