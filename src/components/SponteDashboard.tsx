@@ -41,8 +41,16 @@ interface SponteParcela {
 }
 
 // ─── Matrículas por agente (RPC no banco — cruza com messages_logs) ──────────
+interface MatriculaDetalhe {
+    agentName: string;
+    aluno: string;
+    curso: string;
+    dataMatricula: string;
+}
+
 interface MatriculasPorAgenteResult {
     porAgente: { agentName: string; matriculas: number }[];
+    detalhes: MatriculaDetalhe[];
     semAtribuicao: number;
     jaExistente: number;
 }
@@ -64,8 +72,9 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
     const [parcelasPendentes, setParcelasPendentes] = useState<SponteParcela[]>([]);
     // Matrículas por agente — vem de uma função no banco (matriculas_por_agente),
     // recalculada sempre que os filtros da página mudam.
-    const [agentAttribution, setAgentAttribution] = useState<MatriculasPorAgenteResult>({ porAgente: [], semAtribuicao: 0, jaExistente: 0 });
+    const [agentAttribution, setAgentAttribution] = useState<MatriculasPorAgenteResult>({ porAgente: [], detalhes: [], semAtribuicao: 0, jaExistente: 0 });
     const [porAgenteLoading, setPorAgenteLoading] = useState(true);
+    const [selectedAgentDrillDown, setSelectedAgentDrillDown] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
     const [lastSync, setLastSync] = useState<string | null>(null);
@@ -193,9 +202,11 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                 if (error) throw error;
                 setAgentAttribution({
                     porAgente: data?.porAgente ?? [],
+                    detalhes: data?.detalhes ?? [],
                     semAtribuicao: data?.semAtribuicao ?? 0,
                     jaExistente: data?.jaExistente ?? 0,
                 });
+                setSelectedAgentDrillDown(null);
             } catch (e) {
                 console.error('loadPorAgente error:', e);
             } finally {
@@ -204,6 +215,22 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
         };
         loadPorAgente();
     }, [dateStart, dateEnd, selectedCursos, selectedTurma, selectedSituacao]);
+
+    // ─── Drill-down: matrículas do agente selecionado, agrupadas por curso ────
+    const drillDownByCurso = useMemo(() => {
+        if (!selectedAgentDrillDown) return [];
+        const grupos = new Map<string, MatriculaDetalhe[]>();
+        agentAttribution.detalhes
+            .filter(d => d.agentName === selectedAgentDrillDown)
+            .forEach(d => {
+                const cursoKey = d.curso?.split('(')[0]?.trim() || 'Sem curso';
+                if (!grupos.has(cursoKey)) grupos.set(cursoKey, []);
+                grupos.get(cursoKey)!.push(d);
+            });
+        return Array.from(grupos.entries())
+            .map(([curso, alunos]) => ({ curso, alunos: alunos.sort((a, b) => a.aluno.localeCompare(b.aluno)) }))
+            .sort((a, b) => b.alunos.length - a.alunos.length);
+    }, [agentAttribution.detalhes, selectedAgentDrillDown]);
 
     // ─── Trigger sync via Edge Function ───────────────────────────────────────
     const handleSync = async () => {
@@ -611,7 +638,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                                 Matrículas por Agente
                             </h3>
                             <span className="text-[10px] text-[var(--text-muted)] text-right">
-                                Conta 1x por aluno; ignora quem já estava matriculado antes do atendimento
+                                Conta 1x por aluno+curso; ignora atendimento com mais de 30 dias ou quem já estava matriculado antes
                             </span>
                         </div>
                         {porAgenteLoading ? (
@@ -632,11 +659,20 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                                         <Tooltip
                                             contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }}
                                             itemStyle={{ color: 'var(--text-main)' }}
-                                            formatter={(v: any) => [`${v} matrícula${v !== 1 ? 's' : ''}`, '']}
+                                            formatter={(v: any) => [`${v} matrícula${v !== 1 ? 's' : ''}`, 'Clique pra ver detalhes']}
                                         />
-                                        <Bar dataKey="matriculas" radius={[0, 6, 6, 0]}>
-                                            {agentAttribution.porAgente.map((_, i) => (
-                                                <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                                        <Bar
+                                            dataKey="matriculas"
+                                            radius={[0, 6, 6, 0]}
+                                            cursor="pointer"
+                                            onClick={(d: any) => setSelectedAgentDrillDown(prev => prev === d.agentName ? null : d.agentName)}
+                                        >
+                                            {agentAttribution.porAgente.map((a, i) => (
+                                                <Cell
+                                                    key={i}
+                                                    fill={CHART_COLORS[i % CHART_COLORS.length]}
+                                                    opacity={selectedAgentDrillDown && selectedAgentDrillDown !== a.agentName ? 0.35 : 1}
+                                                />
                                             ))}
                                         </Bar>
                                     </BarChart>
@@ -648,6 +684,40 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                                 {agentAttribution.semAtribuicao > 0 && `${agentAttribution.semAtribuicao} matrícula${agentAttribution.semAtribuicao !== 1 ? 's' : ''} sem lead correspondente ou sem agente responsável. `}
                                 {agentAttribution.jaExistente > 0 && `${agentAttribution.jaExistente} desconsiderada${agentAttribution.jaExistente !== 1 ? 's' : ''} por já constar matriculado(a) antes do atendimento.`}
                             </p>
+                        )}
+
+                        {/* Drill-down: matrículas do agente selecionado, por curso */}
+                        {selectedAgentDrillDown && (
+                            <div className="mt-6 pt-6 border-t border-[var(--border)]">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h4 className="text-xs font-bold text-[var(--text-main)]">
+                                        {selectedAgentDrillDown} — {drillDownByCurso.reduce((s, g) => s + g.alunos.length, 0)} matrícula{drillDownByCurso.reduce((s, g) => s + g.alunos.length, 0) !== 1 ? 's' : ''}
+                                    </h4>
+                                    <button
+                                        onClick={() => setSelectedAgentDrillDown(null)}
+                                        className="text-[10px] text-[var(--text-muted)] hover:text-primary transition-colors"
+                                    >
+                                        Fechar
+                                    </button>
+                                </div>
+                                <div className="space-y-4">
+                                    {drillDownByCurso.map(grupo => (
+                                        <div key={grupo.curso}>
+                                            <p className="text-[10px] font-bold text-primary uppercase tracking-wider mb-2">
+                                                {grupo.curso} <span className="text-[var(--text-muted)]">({grupo.alunos.length})</span>
+                                            </p>
+                                            <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-1">
+                                                {grupo.alunos.map((a, i) => (
+                                                    <li key={i} className="text-xs text-[var(--text-main)] flex justify-between gap-2">
+                                                        <span className="truncate">{a.aluno}</span>
+                                                        <span className="text-[var(--text-muted)] shrink-0">{fmtDate(a.dataMatricula)}</span>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
                         )}
                     </div>
 
