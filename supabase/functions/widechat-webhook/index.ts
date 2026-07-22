@@ -52,11 +52,14 @@ serve(async (req) => {
         // Detect conversation end events (before isMessage filter)
         // IMPORTANT: Use exact matches only — "attendance" contains "end" and "attend" as substrings,
         // so substring checks would incorrectly flag attendance_transfer as a conversation end.
-        const CONVERSATION_END_WEBHOOK_EVENTS = ["attendance_end", "finalize", "attendance_closed"];
-        const CONVERSATION_END_EVENT_NAMES = ["attendanceEnd", "finalize", "closed", "attendance_end", "finalized", "attendanceClosed"];
+        const CONVERSATION_END_WEBHOOK_EVENTS = ["attendance_end", "finalize", "attendance_closed", "attendance_finish"];
+        const CONVERSATION_END_EVENT_NAMES = ["attendanceEnd", "finalize", "closed", "attendance_end", "finalized", "attendanceClosed", "autoFinish", "humanFinish"];
         const isConversationEnd =
             CONVERSATION_END_WEBHOOK_EVENTS.includes(webhookEvent) ||
             CONVERSATION_END_EVENT_NAMES.includes(eventName);
+
+        // Agente aceitou um atendimento da fila de espera (webhook.key=accept_attendance, data.event=humanStart)
+        const isAcceptAttendance = webhookEvent === "accept_attendance" || eventName === "humanStart";
 
         // Filter out system notification events (not real messages)
         const isSystemNotification = ["messageNotificationAgent", "Read", "Delivered"].includes(eventName);
@@ -68,8 +71,8 @@ serve(async (req) => {
             !!messageText
         );
 
-        // Skip if not a message and not a conversation end
-        if (!isMessage && !isConversationEnd) {
+        // Skip if not a message, not a conversation end, and not an attendance acceptance
+        if (!isMessage && !isConversationEnd && !isAcceptAttendance) {
             console.log(`Evento ignorado: ${eventName}`);
             return new Response(JSON.stringify({ success: true, ignored: true, event: eventName }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -81,7 +84,7 @@ serve(async (req) => {
         const hasPhone = messagePhone && !["00000000000", ""].includes(messagePhone);
         const hasName = senderName && senderName.trim().length > 0;
 
-        if (!hasPhone && !hasName && !isConversationEnd) {
+        if (!hasPhone && !hasName && !isConversationEnd && !isAcceptAttendance) {
             console.log("Skipping: no phone or name available");
             return new Response(JSON.stringify({ success: true, skipped: true }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -121,7 +124,24 @@ serve(async (req) => {
             }
         }
 
-        console.log(`Lead status: leadId=${leadId}, foundBy=${foundBy}, isTransfer=${isTransfer}, queue=${queueName}, isConversationEnd=${isConversationEnd}`);
+        console.log(`Lead status: leadId=${leadId}, foundBy=${foundBy}, isTransfer=${isTransfer}, queue=${queueName}, isConversationEnd=${isConversationEnd}, isAcceptAttendance=${isAcceptAttendance}`);
+
+        // --- Handle attendance acceptance (agent picked up the contact from the queue) ---
+        if (isAcceptAttendance) {
+            await supabaseClient.from('widechat_atendimentos').insert({
+                lead_id: leadId,
+                protocol: data?.protocol || null,
+                widechat_agent_id: data?.agent_id || null,
+                session_id: sessionId || null,
+                contact_id: data?.contact_id || null,
+                aceito_em: new Date().toISOString(),
+            });
+            console.log(`Atendimento aceito registrado: lead_id=${leadId}, protocol=${data?.protocol}, agent_id=${data?.agent_id}`);
+            return new Response(JSON.stringify({ success: true, lead_id: leadId, action: "attendance_accepted" }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
+        }
 
         // --- Handle conversation end ---
         if (isConversationEnd) {
