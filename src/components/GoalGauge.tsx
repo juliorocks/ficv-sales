@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Check, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
@@ -93,6 +93,8 @@ export interface MonthGoal {
 export const useFinancialGoals = (year: number) => {
     const [goals, setGoals] = useState<MonthGoal[]>([]);
     const [loading, setLoading] = useState(true);
+    // Unique channel name per hook instance to avoid subscription collisions
+    const channelName = useRef(`financial_goals_rt_${year}_${Math.random().toString(36).slice(2)}`);
 
     const fetch = useCallback(async () => {
         setLoading(true);
@@ -119,7 +121,7 @@ export const useFinancialGoals = (year: number) => {
 
     useEffect(() => {
         const channel = supabase
-            .channel('financial_goals_realtime')
+            .channel(channelName.current)
             .on('postgres_changes', { event: '*', schema: 'public', table: 'financial_goals' }, () => { fetch(); })
             .subscribe();
         return () => { supabase.removeChannel(channel); };
