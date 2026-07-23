@@ -111,17 +111,24 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
     }, []);
 
     // ─── Load data from Supabase ───────────────────────────────────────────────
+    // Matriculas: load the full year so counts match Sponte (students who enrolled
+    // before the selected month still appear in their turma/curso). Financial data
+    // (parcelas) keeps the period filter — only those two need date precision.
+    const selectedYear = dateStart ? new Date(dateStart + 'T00:00:00').getFullYear() : new Date().getFullYear();
+    const yearStart = `${selectedYear}-01-01`;
+    const yearEnd   = `${selectedYear}-12-31`;
+
     const loadData = useCallback(async (opts?: { silent?: boolean }) => {
         if (!opts?.silent) setLoading(true);
         try {
-            // Paginate matriculas (Supabase default cap = 1000 rows)
+            // Paginate ALL matriculas for the year (no period restriction)
             const allMatriculas: SponteMatricula[] = [];
             for (let from = 0; ; from += 1000) {
                 const { data, error } = await supabase
                     .from('sponte_matriculas')
                     .select('*')
-                    .gte('data_matricula', dateStart)
-                    .lte('data_matricula', dateEnd)
+                    .gte('data_matricula', yearStart)
+                    .lte('data_matricula', yearEnd)
                     .order('data_matricula', { ascending: false })
                     .range(from, from + 999);
                 if (error) throw error;
@@ -175,7 +182,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
         } finally {
             if (!opts?.silent) setLoading(false);
         }
-    }, [dateStart, dateEnd]);
+    }, [yearStart, yearEnd, dateStart, dateEnd]);
 
     useEffect(() => { loadData(); }, [loadData]);
 
@@ -536,7 +543,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                             icon={GraduationCap}
                             title="Total Matrículas"
                             value={filtered.length.toLocaleString()}
-                            sub={`no período selecionado`}
+                            sub={`em ${selectedYear}`}
                             color="#5551FF"
                         />
                         <StatCard
