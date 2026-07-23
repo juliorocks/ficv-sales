@@ -279,7 +279,14 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
     );
 
     // ─── Filtered data ─────────────────────────────────────────────────────────
+    // When a specific turma/curso is selected we show ALL students in it (matching Sponte).
+    // When browsing without those filters the period date range applies client-side.
+    const hasSpecificFilter = selectedCursos.length > 0 || selectedTurma !== 'all';
+
     const filtered = useMemo(() => matriculas.filter(m => {
+        // Apply date filter only when there's no turma/curso selection
+        if (!hasSpecificFilter && dateStart && m.data_matricula < dateStart) return false;
+        if (!hasSpecificFilter && dateEnd   && m.data_matricula > dateEnd)   return false;
         if (selectedCursos.length > 0 && !selectedCursos.includes(m.nome_curso)) return false;
         if (selectedTurma !== 'all' && m.nome_turma !== selectedTurma) return false;
         if (selectedSituacao !== 'all' && m.situacao !== selectedSituacao) return false;
@@ -290,7 +297,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                 m.numero_contrato?.toLowerCase().includes(q));
         }
         return true;
-    }), [matriculas, selectedCursos, selectedTurma, selectedSituacao, search]);
+    }), [matriculas, hasSpecificFilter, dateStart, dateEnd, selectedCursos, selectedTurma, selectedSituacao, search]);
 
     // ─── Stats ────────────────────────────────────────────────────────────────
     // Filter parcelas by the aluno_ids of the filtered matriculas so turma/curso filters apply
