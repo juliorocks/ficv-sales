@@ -833,7 +833,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                             {(profile?.role === 'admin' || profile?.role === 'agent') && (
                                 <NavItem icon={TicketIcon} label="Tickets" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
                             )}
-                            {(profile?.role === 'admin') && (
+                            {(profile?.role === 'admin' || profile?.role === 'agent') && (
                                 <NavItem icon={GraduationCap} label="Matrículas" active={activeTab === 'matriculas'} onClick={() => setActiveTab('matriculas')} />
                             )}
                             {(profile?.role === 'admin') && (
@@ -1732,7 +1732,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 )}
 
                 {/* Matrículas — integração Sponte CRM */}
-                {activeTab === 'matriculas' && profile?.role === 'admin' && (
+                {activeTab === 'matriculas' && (profile?.role === 'admin' || profile?.role === 'agent') && (
                     <div className="animate-fade-in">
                         <SponteDashboard isAdmin={profile?.role === 'admin'} />
                     </div>
