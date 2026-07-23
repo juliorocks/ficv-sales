@@ -319,10 +319,16 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
         filteredParcelasPendentes.reduce((s, p) => s + (p.valor_parcela || 0), 0), [filteredParcelasPendentes]
     );
     const vigentes = useMemo(() =>
-        filtered.filter(m => m.situacao_id === 1).length, [filtered]
+        filtered.filter(m => m.situacao?.toLowerCase() === 'vigente').length, [filtered]
+    );
+    const preMatriculas = useMemo(() =>
+        filtered.filter(m => m.situacao?.toLowerCase().includes('pr')).length, [filtered]
     );
     const encerrados = useMemo(() =>
-        filtered.filter(m => m.situacao_id !== 1).length, [filtered]
+        filtered.filter(m => {
+            const s = m.situacao?.toLowerCase() ?? '';
+            return s.includes('encerr') || s.includes('cancel');
+        }).length, [filtered]
     );
 
     // ─── Chart: matrículas por curso ──────────────────────────────────────────
@@ -538,7 +544,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
             {/* Stats cards */}
             {matriculas.length > 0 && (
                 <>
-                    <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                    <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
                         <StatCard
                             icon={GraduationCap}
                             title="Total Matrículas"
@@ -554,11 +560,18 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                             color="#00D4AA"
                         />
                         <StatCard
+                            icon={Users}
+                            title="Pré-Matrícula"
+                            value={preMatriculas.toLocaleString()}
+                            sub={filtered.length > 0 ? `${((preMatriculas / filtered.length) * 100).toFixed(0)}% do total` : ''}
+                            color="#5551FF"
+                        />
+                        <StatCard
                             icon={XCircle}
                             title="Encerradas/Canceladas"
                             value={encerrados.toLocaleString()}
                             sub={filtered.length > 0 ? `${((encerrados / filtered.length) * 100).toFixed(0)}% do total` : ''}
-                            color="#FFB347"
+                            color="#FF6B4A"
                         />
                         <StatCard
                             icon={DollarSign}
@@ -774,9 +787,11 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                                                 </td>
                                                 <td className="py-2.5 px-2">
                                                     <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider
-                                                        ${m.situacao_id === 1
+                                                        ${m.situacao?.toLowerCase() === 'vigente'
                                                             ? 'bg-[#00D4AA]/10 text-[#00D4AA]'
-                                                            : 'bg-[var(--bg-card-hover)] text-[var(--text-muted)]'}`}>
+                                                            : m.situacao?.toLowerCase().includes('pr')
+                                                                ? 'bg-[#5551FF]/10 text-[#5551FF]'
+                                                                : 'bg-[#FF6B4A]/10 text-[#FF6B4A]'}`}>
                                                         {m.situacao || '—'}
                                                     </span>
                                                 </td>
