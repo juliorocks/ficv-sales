@@ -218,6 +218,7 @@ async function syncParcelas(
             .from('sponte_parcelas')
             .select('valor_pago')
             .eq('situacao_parcela', 'Quitada')
+            .ilike('categoria', '%matr%')
             .gte('data_pagamento', `${y}-${pad}-01`)
             .lte('data_pagamento', `${y}-${pad}-${lastDay}`);
 
