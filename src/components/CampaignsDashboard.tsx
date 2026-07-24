@@ -12,6 +12,8 @@ import { showSuccess, showError } from '@/utils/toast';
 import { periodToDates, PERIOD_OPTIONS } from '@/utils/dashboardFilters';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+type AdSource = 'meta' | 'google' | 'all';
+
 interface MetaInsight {
     campaign_id: string;
     campaign_name: string | null;
@@ -20,6 +22,16 @@ interface MetaInsight {
     impressions: number;
     clicks: number;
     leads_count: number;
+}
+
+interface GoogleInsight {
+    campaign_id: string;
+    campaign_name: string | null;
+    date: string;
+    spend: number;
+    impressions: number;
+    clicks: number;
+    conversions: number;
 }
 
 interface MetaDemographic {
@@ -33,6 +45,7 @@ interface MetaCampaignOption {
     campaign_id: string;
     name: string;
     status: string | null;
+    source: AdSource;
 }
 
 const fmt = (v: number) =>
@@ -119,21 +132,37 @@ const KpiCard: React.FC<{
     );
 };
 
+// ─── Source toggle button ─────────────────────────────────────────────────────
+const SourceTab: React.FC<{ label: string; active: boolean; color: string; onClick: () => void }> = ({ label, active, color, onClick }) => (
+    <button
+        onClick={onClick}
+        className={`px-4 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all border ${
+            active ? 'text-white border-transparent shadow-lg' : 'bg-transparent border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-main)]'
+        }`}
+        style={active ? { background: color, boxShadow: `0 4px 14px ${color}40` } : {}}
+    >
+        {label}
+    </button>
+);
+
 // ─── Main component ───────────────────────────────────────────────────────────
 interface Props { isAdmin: boolean; }
 
 export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
     const [insights, setInsights] = useState<MetaInsight[]>([]);
     const [prevInsights, setPrevInsights] = useState<MetaInsight[]>([]);
+    const [gInsights, setGInsights] = useState<GoogleInsight[]>([]);
+    const [prevGInsights, setPrevGInsights] = useState<GoogleInsight[]>([]);
     const [demographics, setDemographics] = useState<MetaDemographic[]>([]);
     const [campaignsList, setCampaignsList] = useState<MetaCampaignOption[]>([]);
     const [matriculasCount, setMatriculasCount] = useState<number | null>(null);
     const [monthly, setMonthly] = useState<{ label: string; spend: number; leads: number; matriculas: number }[]>([]);
     const [loading, setLoading] = useState(true);
-    const [syncing, setSyncing] = useState(false);
+    const [syncing, setSyncing] = useState<'meta' | 'google' | null>(null);
     const [lastSync, setLastSync] = useState<string | null>(null);
 
     // Filters
+    const [source, setSource] = useState<AdSource>('all');
     const [period, setPeriod] = useState('month');
     const [customStart, setCustomStart] = useState('');
     const [customEnd, setCustomEnd] = useState('');
@@ -153,21 +182,32 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
         return () => document.removeEventListener('mousedown', handler);
     }, []);
 
-    // ─── Load campaign list (for filter) — só campanhas com atividade no período
+    // ─── Load campaign list (for filter) — campanhas Meta + Google com atividade
     useEffect(() => {
         const loadCampaigns = async () => {
-            const rows = await paginateAll<{ campaign_id: string; campaign_name: string | null }>((from, to) =>
-                supabase.from('meta_campaign_insights_daily').select('campaign_id,campaign_name')
-                    .gte('date', dateStart).lte('date', dateEnd).range(from, to)
-            );
-            const byId = new Map<string, string>();
-            rows.forEach(r => { if (!byId.has(r.campaign_id)) byId.set(r.campaign_id, r.campaign_name || r.campaign_id); });
-            const options = Array.from(byId.entries())
-                .map(([campaign_id, name]) => ({ campaign_id, name, status: null }))
-                .sort((a, b) => a.name.localeCompare(b.name));
+            const [metaRows, googleRows] = await Promise.all([
+                paginateAll<{ campaign_id: string; campaign_name: string | null }>((from, to) =>
+                    supabase.from('meta_campaign_insights_daily').select('campaign_id,campaign_name')
+                        .gte('date', dateStart).lte('date', dateEnd).range(from, to)
+                ),
+                paginateAll<{ campaign_id: string; campaign_name: string | null }>((from, to) =>
+                    supabase.from('google_ads_insights_daily').select('campaign_id,campaign_name')
+                        .gte('date', dateStart).lte('date', dateEnd).range(from, to)
+                ),
+            ]);
+            const options: MetaCampaignOption[] = [];
+            const seen = new Set<string>();
+            metaRows.forEach(r => {
+                const key = `meta_${r.campaign_id}`;
+                if (!seen.has(key)) { seen.add(key); options.push({ campaign_id: r.campaign_id, name: r.campaign_name || r.campaign_id, status: null, source: 'meta' }); }
+            });
+            googleRows.forEach(r => {
+                const key = `google_${r.campaign_id}`;
+                if (!seen.has(key)) { seen.add(key); options.push({ campaign_id: r.campaign_id, name: r.campaign_name || r.campaign_id, status: null, source: 'google' }); }
+            });
+            options.sort((a, b) => a.name.localeCompare(b.name));
             setCampaignsList(options);
-            // Remove da seleção campanhas que não tiveram atividade neste período
-            setSelectedCampaigns(prev => prev.filter(id => byId.has(id)));
+            setSelectedCampaigns(prev => prev.filter(id => options.some(o => o.campaign_id === id)));
         };
         loadCampaigns();
     }, [dateStart, dateEnd]);
@@ -177,21 +217,40 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
         if (!opts?.silent) setLoading(true);
         try {
             const { start: prevStart, end: prevEnd } = previousPeriod(dateStart, dateEnd);
-            const insightCols = 'campaign_id,campaign_name,date,spend,impressions,clicks,leads_count';
+            const metaCols   = 'campaign_id,campaign_name,date,spend,impressions,clicks,leads_count';
+            const googleCols = 'campaign_id,campaign_name,date,spend,impressions,clicks,conversions';
 
-            const [insightRows, prevRows, demoRows, matriculasRes, syncRes] = await Promise.all([
-                paginateAll<MetaInsight>((from, to) => {
-                    let q = supabase.from('meta_campaign_insights_daily').select(insightCols)
+            // Determine which campaign IDs belong to which source for filtering
+            const metaCampaignIds   = selectedCampaigns.filter(id => campaignsList.find(c => c.campaign_id === id && c.source === 'meta'));
+            const googleCampaignIds = selectedCampaigns.filter(id => campaignsList.find(c => c.campaign_id === id && c.source === 'google'));
+            const filterMeta   = selectedCampaigns.length === 0 || metaCampaignIds.length > 0;
+            const filterGoogle = selectedCampaigns.length === 0 || googleCampaignIds.length > 0;
+
+            const [metaRows, prevMetaRows, gRows, prevGRows, demoRows, matriculasRes, syncRes] = await Promise.all([
+                filterMeta ? paginateAll<MetaInsight>((from, to) => {
+                    let q = supabase.from('meta_campaign_insights_daily').select(metaCols)
                         .gte('date', dateStart).lte('date', dateEnd);
-                    if (selectedCampaigns.length > 0) q = q.in('campaign_id', selectedCampaigns);
+                    if (metaCampaignIds.length > 0) q = q.in('campaign_id', metaCampaignIds);
                     return q.range(from, to);
-                }),
-                paginateAll<MetaInsight>((from, to) => {
-                    let q = supabase.from('meta_campaign_insights_daily').select(insightCols)
+                }) : Promise.resolve([] as MetaInsight[]),
+                filterMeta ? paginateAll<MetaInsight>((from, to) => {
+                    let q = supabase.from('meta_campaign_insights_daily').select(metaCols)
                         .gte('date', prevStart).lte('date', prevEnd);
-                    if (selectedCampaigns.length > 0) q = q.in('campaign_id', selectedCampaigns);
+                    if (metaCampaignIds.length > 0) q = q.in('campaign_id', metaCampaignIds);
                     return q.range(from, to);
-                }),
+                }) : Promise.resolve([] as MetaInsight[]),
+                filterGoogle ? paginateAll<GoogleInsight>((from, to) => {
+                    let q = supabase.from('google_ads_insights_daily').select(googleCols)
+                        .gte('date', dateStart).lte('date', dateEnd);
+                    if (googleCampaignIds.length > 0) q = q.in('campaign_id', googleCampaignIds);
+                    return q.range(from, to);
+                }) : Promise.resolve([] as GoogleInsight[]),
+                filterGoogle ? paginateAll<GoogleInsight>((from, to) => {
+                    let q = supabase.from('google_ads_insights_daily').select(googleCols)
+                        .gte('date', prevStart).lte('date', prevEnd);
+                    if (googleCampaignIds.length > 0) q = q.in('campaign_id', googleCampaignIds);
+                    return q.range(from, to);
+                }) : Promise.resolve([] as GoogleInsight[]),
                 paginateAll<MetaDemographic>((from, to) =>
                     supabase.from('meta_demographics_daily').select('date,age_range,gender,spend')
                         .gte('date', dateStart).lte('date', dateEnd).range(from, to)
@@ -202,8 +261,10 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                     .order('synced_at', { ascending: false }).limit(1).single(),
             ]);
 
-            setInsights(insightRows);
-            setPrevInsights(prevRows);
+            setInsights(metaRows);
+            setPrevInsights(prevMetaRows);
+            setGInsights(gRows);
+            setPrevGInsights(prevGRows);
             setDemographics(demoRows);
             setMatriculasCount(matriculasRes.count ?? 0);
             if (syncRes.data) setLastSync((syncRes.data as any).synced_at);
@@ -212,7 +273,7 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
         } finally {
             if (!opts?.silent) setLoading(false);
         }
-    }, [dateStart, dateEnd, selectedCampaigns]);
+    }, [dateStart, dateEnd, selectedCampaigns, campaignsList]);
 
     useEffect(() => { loadData(); }, [loadData]);
 
@@ -272,46 +333,89 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
         return () => clearInterval(id);
     }, [loadData, loadMonthly]);
 
-    // ─── Sync via Edge Function ────────────────────────────────────────────────
-    const handleSync = async () => {
-        setSyncing(true);
+    // ─── Sync via Edge Functions ───────────────────────────────────────────────
+    const handleSyncMeta = async () => {
+        setSyncing('meta');
         try {
             const { data, error } = await supabase.functions.invoke('sync-meta-ads', {
                 body: { start_date: dateStart, end_date: dateEnd },
             });
             if (error) throw error;
-            showSuccess(`Sincronizado: ${data?.campaigns?.synced ?? 0} campanhas, ${data?.insights?.synced ?? 0} registros diários`);
+            showSuccess(`Meta: ${data?.campaigns?.synced ?? 0} campanhas, ${data?.insights?.synced ?? 0} registros`);
             await Promise.all([loadData(), loadMonthly()]);
         } catch (e: any) {
-            showError('Erro na sincronização: ' + e.message);
+            showError('Erro Meta Ads: ' + e.message);
         } finally {
-            setSyncing(false);
+            setSyncing(null);
+        }
+    };
+
+    const handleSyncGoogle = async () => {
+        setSyncing('google');
+        try {
+            const { data, error } = await supabase.functions.invoke('sync-google-ads', {
+                body: { start_date: dateStart, end_date: dateEnd },
+            });
+            if (error) throw error;
+            showSuccess(`Google Ads: ${data?.campaigns?.synced ?? 0} campanhas, ${data?.insights?.synced ?? 0} registros`);
+            await Promise.all([loadData(), loadMonthly()]);
+        } catch (e: any) {
+            showError('Erro Google Ads: ' + e.message);
+        } finally {
+            setSyncing(null);
         }
     };
 
     // ─── Aggregations ──────────────────────────────────────────────────────────
-    const aggregate = (rows: MetaInsight[]) => {
-        const spend = rows.reduce((s, r) => s + (r.spend || 0), 0);
-        const impressions = rows.reduce((s, r) => s + (r.impressions || 0), 0);
-        const clicks = rows.reduce((s, r) => s + (r.clicks || 0), 0);
-        const leads = rows.reduce((s, r) => s + (r.leads_count || 0), 0);
+    // Unified row type for combined analysis
+    const activeInsights = useMemo(() => {
+        const metaRows = (source === 'google' ? [] : insights).map(r => ({
+            campaign_id: r.campaign_id, campaign_name: r.campaign_name,
+            date: r.date, spend: r.spend || 0, impressions: r.impressions || 0,
+            clicks: r.clicks || 0, leads: r.leads_count || 0, source: 'Meta' as const,
+        }));
+        const googleRows = (source === 'meta' ? [] : gInsights).map(r => ({
+            campaign_id: r.campaign_id, campaign_name: r.campaign_name,
+            date: r.date, spend: r.spend || 0, impressions: r.impressions || 0,
+            clicks: r.clicks || 0, leads: r.conversions || 0, source: 'Google' as const,
+        }));
+        return [...metaRows, ...googleRows];
+    }, [insights, gInsights, source]);
+
+    const prevActiveInsights = useMemo(() => {
+        const metaRows = (source === 'google' ? [] : prevInsights).map(r => ({
+            spend: r.spend || 0, impressions: r.impressions || 0,
+            clicks: r.clicks || 0, leads: r.leads_count || 0,
+        }));
+        const googleRows = (source === 'meta' ? [] : prevGInsights).map(r => ({
+            spend: r.spend || 0, impressions: r.impressions || 0,
+            clicks: r.clicks || 0, leads: r.conversions || 0,
+        }));
+        return [...metaRows, ...googleRows];
+    }, [prevInsights, prevGInsights, source]);
+
+    const aggregate = (rows: { spend: number; impressions: number; clicks: number; leads: number }[]) => {
+        const spend = rows.reduce((s, r) => s + r.spend, 0);
+        const impressions = rows.reduce((s, r) => s + r.impressions, 0);
+        const clicks = rows.reduce((s, r) => s + r.clicks, 0);
+        const leads = rows.reduce((s, r) => s + r.leads, 0);
         const ctr = impressions > 0 ? (clicks / impressions) * 100 : 0;
         const cpm = impressions > 0 ? (spend / impressions) * 1000 : 0;
         const cpa = leads > 0 ? spend / leads : 0;
         return { spend, impressions, clicks, leads, ctr, cpm, cpa };
     };
 
-    const totals = useMemo(() => aggregate(insights), [insights]);
-    const prevTotals = useMemo(() => aggregate(prevInsights), [prevInsights]);
+    const totals = useMemo(() => aggregate(activeInsights), [activeInsights]);
+    const prevTotals = useMemo(() => aggregate(prevActiveInsights), [prevActiveInsights]);
 
     const dailySeries = useMemo(() => {
         const byDate: Record<string, { spend: number; leads: number; impressions: number; clicks: number }> = {};
-        insights.forEach(r => {
+        activeInsights.forEach(r => {
             if (!byDate[r.date]) byDate[r.date] = { spend: 0, leads: 0, impressions: 0, clicks: 0 };
-            byDate[r.date].spend += r.spend || 0;
-            byDate[r.date].leads += r.leads_count || 0;
-            byDate[r.date].impressions += r.impressions || 0;
-            byDate[r.date].clicks += r.clicks || 0;
+            byDate[r.date].spend += r.spend;
+            byDate[r.date].leads += r.leads;
+            byDate[r.date].impressions += r.impressions;
+            byDate[r.date].clicks += r.clicks;
         });
         return enumerateDays(dateStart, dateEnd).map(d => {
             const v = byDate[d] || { spend: 0, leads: 0, impressions: 0, clicks: 0 };
@@ -324,7 +428,7 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                 cpm: v.impressions > 0 ? Number(((v.spend / v.impressions) * 1000).toFixed(2)) : 0,
             };
         });
-    }, [insights, dateStart, dateEnd]);
+    }, [activeInsights, dateStart, dateEnd]);
 
     const avgSpend = useMemo(() => {
         if (dailySeries.length === 0) return 0;
@@ -337,14 +441,14 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
     const cpmSeries = useMemo(() => dailySeries.map(d => ({ label: d.label, value: d.cpm })), [dailySeries]);
 
     const campaignRows = useMemo(() => {
-        const byCampaign: Record<string, { name: string; spend: number; leads: number; impressions: number; clicks: number }> = {};
-        insights.forEach(r => {
-            const key = r.campaign_id;
-            if (!byCampaign[key]) byCampaign[key] = { name: r.campaign_name || key, spend: 0, leads: 0, impressions: 0, clicks: 0 };
-            byCampaign[key].spend += r.spend || 0;
-            byCampaign[key].leads += r.leads_count || 0;
-            byCampaign[key].impressions += r.impressions || 0;
-            byCampaign[key].clicks += r.clicks || 0;
+        const byCampaign: Record<string, { name: string; spend: number; leads: number; impressions: number; clicks: number; source: string }> = {};
+        activeInsights.forEach(r => {
+            const key = `${r.source}_${r.campaign_id}`;
+            if (!byCampaign[key]) byCampaign[key] = { name: r.campaign_name || r.campaign_id, spend: 0, leads: 0, impressions: 0, clicks: 0, source: r.source };
+            byCampaign[key].spend += r.spend;
+            byCampaign[key].leads += r.leads;
+            byCampaign[key].impressions += r.impressions;
+            byCampaign[key].clicks += r.clicks;
         });
         return Object.values(byCampaign)
             .map(c => ({
@@ -353,7 +457,7 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                 cpa: c.leads > 0 ? c.spend / c.leads : 0,
             }))
             .sort((a, b) => b.spend - a.spend);
-    }, [insights]);
+    }, [activeInsights]);
 
     const genderData = useMemo(() => {
         const byGender: Record<string, number> = {};
@@ -386,15 +490,15 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
     return (
         <div className="space-y-8 animate-fade-in">
             {/* Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-start justify-between gap-4">
                 <div>
                     <div className="flex items-center gap-2 text-primary mb-2">
                         <Megaphone size={14} />
-                        <span className="text-[10px] font-bold uppercase tracking-widest">Integração Meta Ads</span>
+                        <span className="text-[10px] font-bold uppercase tracking-widest">Tráfego Pago — Meta Ads + Google Ads</span>
                     </div>
                     <h2 className="text-3xl font-bold tracking-tight text-[var(--text-main)]">Campanhas</h2>
                     <p className="text-[var(--text-muted)] text-sm mt-1">
-                        Investimento, leads e retorno das campanhas de tráfego pago, cruzado com matrículas reais do Sponte.
+                        Investimento, leads e retorno das campanhas, cruzado com matrículas do Sponte.
                         {lastSync && (
                             <span className="ml-2 text-[10px] text-[var(--text-muted)]">
                                 Última sync: {new Date(lastSync).toLocaleString('pt-BR')}
@@ -403,11 +507,24 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                     </p>
                 </div>
                 {isAdmin && (
-                    <button onClick={handleSync} disabled={syncing} className="btn-primary flex items-center gap-2">
-                        {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                        {syncing ? 'Sincronizando…' : 'Sincronizar Meta Ads'}
-                    </button>
+                    <div className="flex gap-2 shrink-0">
+                        <button onClick={handleSyncMeta} disabled={syncing !== null} className="btn-primary flex items-center gap-2 text-sm" style={{ background: '#1877F2' }}>
+                            {syncing === 'meta' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                            {syncing === 'meta' ? 'Sincronizando…' : 'Sync Meta'}
+                        </button>
+                        <button onClick={handleSyncGoogle} disabled={syncing !== null} className="btn-primary flex items-center gap-2 text-sm" style={{ background: '#4285F4' }}>
+                            {syncing === 'google' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                            {syncing === 'google' ? 'Sincronizando…' : 'Sync Google'}
+                        </button>
+                    </div>
                 )}
+            </div>
+
+            {/* Source toggle */}
+            <div className="flex items-center gap-2">
+                <SourceTab label="Todos" active={source === 'all'} color="#5551FF" onClick={() => setSource('all')} />
+                <SourceTab label="Meta Ads" active={source === 'meta'} color="#1877F2" onClick={() => setSource('meta')} />
+                <SourceTab label="Google Ads" active={source === 'google'} color="#4285F4" onClick={() => setSource('google')} />
             </div>
 
             {/* Filters */}
@@ -473,7 +590,7 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                                 </label>
                                 <div className="h-px bg-[var(--border)] mx-2" />
                                 {campaignsList.map(c => (
-                                    <label key={c.campaign_id} className="flex items-center gap-2 px-4 py-2 hover:bg-[var(--bg-card-hover)] cursor-pointer transition-colors">
+                                    <label key={`${c.source}_${c.campaign_id}`} className="flex items-center gap-2 px-4 py-2 hover:bg-[var(--bg-card-hover)] cursor-pointer transition-colors">
                                         <input
                                             type="checkbox"
                                             className="w-3.5 h-3.5 accent-primary cursor-pointer shrink-0"
@@ -482,7 +599,10 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                                                 prev.includes(c.campaign_id) ? prev.filter(x => x !== c.campaign_id) : [...prev, c.campaign_id]
                                             )}
                                         />
-                                        <span className={`text-xs whitespace-nowrap ${selectedCampaigns.includes(c.campaign_id) ? 'text-primary font-bold' : 'text-[var(--text-main)]'}`}>{c.name}</span>
+                                        <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold text-white shrink-0 ${c.source === 'meta' ? 'bg-[#1877F2]' : 'bg-[#4285F4]'}`}>
+                                            {c.source === 'meta' ? 'Meta' : 'Google'}
+                                        </span>
+                                        <span className={`text-xs ${selectedCampaigns.includes(c.campaign_id) ? 'text-primary font-bold' : 'text-[var(--text-main)]'}`}>{c.name}</span>
                                     </label>
                                 ))}
                             </div>
@@ -504,19 +624,19 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
             </div>
 
             {/* Empty state */}
-            {!loading && insights.length === 0 && (
+            {!loading && activeInsights.length === 0 && (
                 <div className="glass-card p-12 flex flex-col items-center gap-4 text-center">
                     <AlertCircle size={32} className="text-[var(--text-muted)]" />
                     <div>
                         <p className="font-bold text-[var(--text-main)]">Nenhum dado sincronizado ainda</p>
                         <p className="text-[var(--text-muted)] text-sm mt-1">
-                            Clique em <strong>Sincronizar Meta Ads</strong> para importar campanhas e métricas da conta de anúncios.
+                            Clique em <strong>Sync Meta</strong> ou <strong>Sync Google</strong> para importar as campanhas.
                         </p>
                     </div>
                 </div>
             )}
 
-            {insights.length > 0 && (
+            {activeInsights.length > 0 && (
                 <>
                     {/* KPI cards */}
                     <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
@@ -592,23 +712,28 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                             <table className="w-full text-left text-xs">
                                 <thead>
                                     <tr className="border-b border-[var(--border)] text-[var(--text-muted)]">
-                                        {['Campanha', 'Investimento', 'Leads', 'CTR', 'CPA'].map(h => (
+                                        {['Fonte', 'Campanha', 'Investimento', 'Leads/Conv.', 'CTR', 'CPA'].map(h => (
                                             <th key={h} className="pb-3 px-2 font-bold uppercase tracking-wider text-[9px] whitespace-nowrap">{h}</th>
                                         ))}
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {campaignRows.map(c => (
-                                        <tr key={c.name} className="border-b border-[var(--border)]/30 hover:bg-[var(--bg-card-hover)] transition-colors">
-                                            <td className="py-2.5 px-2 font-medium text-[var(--text-main)] max-w-[280px] truncate">{c.name}</td>
+                                    {campaignRows.map((c, i) => (
+                                        <tr key={i} className="border-b border-[var(--border)]/30 hover:bg-[var(--bg-card-hover)] transition-colors">
+                                            <td className="py-2.5 px-2 whitespace-nowrap">
+                                                <span className={`px-2 py-0.5 rounded text-[9px] font-bold text-white ${c.source === 'Meta' ? 'bg-[#1877F2]' : 'bg-[#4285F4]'}`}>
+                                                    {c.source}
+                                                </span>
+                                            </td>
+                                            <td className="py-2.5 px-2 font-medium text-[var(--text-main)] max-w-[260px] truncate">{c.name}</td>
                                             <td className="py-2.5 px-2 text-[var(--text-muted)] whitespace-nowrap">{fmt(c.spend)}</td>
                                             <td className="py-2.5 px-2 text-[var(--text-muted)] whitespace-nowrap">{fmtInt(c.leads)}</td>
                                             <td className="py-2.5 px-2 text-[var(--text-muted)] whitespace-nowrap">{fmtPct(c.ctr)}</td>
                                             <td className="py-2.5 px-2 text-[var(--text-muted)] whitespace-nowrap">{c.leads > 0 ? fmt(c.cpa) : '—'}</td>
                                         </tr>
                                     ))}
-                                    <tr className="font-bold text-[var(--text-main)]">
-                                        <td className="py-3 px-2">Total geral</td>
+                                    <tr className="font-bold text-[var(--text-main)] border-t border-[var(--border)]">
+                                        <td className="py-3 px-2" colSpan={2}>Total geral</td>
                                         <td className="py-3 px-2 whitespace-nowrap">{fmt(totals.spend)}</td>
                                         <td className="py-3 px-2 whitespace-nowrap">{fmtInt(totals.leads)}</td>
                                         <td className="py-3 px-2 whitespace-nowrap">{fmtPct(totals.ctr)}</td>
