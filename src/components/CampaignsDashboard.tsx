@@ -512,7 +512,7 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                             {syncing === 'meta' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                             {syncing === 'meta' ? 'Sincronizando…' : 'Sync Meta'}
                         </button>
-                        <button onClick={handleSyncGoogle} disabled={syncing !== null} className="btn-primary flex items-center gap-2 text-sm" style={{ background: '#4285F4' }}>
+                        <button onClick={handleSyncGoogle} disabled={syncing !== null} className="btn-primary flex items-center gap-2 text-sm" style={{ background: '#F97316' }}>
                             {syncing === 'google' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                             {syncing === 'google' ? 'Sincronizando…' : 'Sync Google'}
                         </button>
@@ -524,7 +524,7 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
             <div className="flex items-center gap-2">
                 <SourceTab label="Todos" active={source === 'all'} color="#5551FF" onClick={() => setSource('all')} />
                 <SourceTab label="Meta Ads" active={source === 'meta'} color="#1877F2" onClick={() => setSource('meta')} />
-                <SourceTab label="Google Ads" active={source === 'google'} color="#4285F4" onClick={() => setSource('google')} />
+                <SourceTab label="Google Ads" active={source === 'google'} color="#F97316" onClick={() => setSource('google')} />
             </div>
 
             {/* Filters */}
@@ -599,7 +599,7 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                                                 prev.includes(c.campaign_id) ? prev.filter(x => x !== c.campaign_id) : [...prev, c.campaign_id]
                                             )}
                                         />
-                                        <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold text-white shrink-0 ${c.source === 'meta' ? 'bg-[#1877F2]' : 'bg-[#4285F4]'}`}>
+                                        <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold text-white shrink-0 ${c.source === 'meta' ? 'bg-[#1877F2]' : 'bg-[#F97316]'}`}>
                                             {c.source === 'meta' ? 'Meta' : 'Google'}
                                         </span>
                                         <span className={`text-xs ${selectedCampaigns.includes(c.campaign_id) ? 'text-primary font-bold' : 'text-[var(--text-main)]'}`}>{c.name}</span>
@@ -721,7 +721,7 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                                     {campaignRows.map((c, i) => (
                                         <tr key={i} className="border-b border-[var(--border)]/30 hover:bg-[var(--bg-card-hover)] transition-colors">
                                             <td className="py-2.5 px-2 whitespace-nowrap">
-                                                <span className={`px-2 py-0.5 rounded text-[9px] font-bold text-white ${c.source === 'Meta' ? 'bg-[#1877F2]' : 'bg-[#4285F4]'}`}>
+                                                <span className={`px-2 py-0.5 rounded text-[9px] font-bold text-white ${c.source === 'Meta' ? 'bg-[#1877F2]' : 'bg-[#F97316]'}`}>
                                                     {c.source}
                                                 </span>
                                             </td>
