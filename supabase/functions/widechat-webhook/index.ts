@@ -6,9 +6,6 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
-
-// ─── System messages that should be ignored in analysis ──────────────────────
 const SYSTEM_PATTERNS = [
     'sessão irá expirar', 'sessão expirou', 'sua sessão',
     'atendimento encerrado', 'atendimento finalizado', 'atendimento transferido',
@@ -21,211 +18,6 @@ const isSystemMessage = (text: string) => {
     return SYSTEM_PATTERNS.some(p => lower.includes(p));
 };
 
-// ─── Claude analysis ──────────────────────────────────────────────────────────
-const ANALYSIS_PROMPT = `Você é o Auditor Master de Qualidade da FICV, especializado em auditoria de alta precisão.
-
-PASSO 1 — INVALIDAÇÃO (shouldInvalidate):
-INVALIDE quando: conversa é transferência pura; menos de 2 trocas reais; bot/automação sem agente humano; atendimento terminou antes de qualquer interação significativa.
-NÃO INVALIDE quando: houve pelo menos 1 pergunta do cliente E 1 resposta real do agente.
-Quando shouldInvalidate for true, preencha invalidateReason em 1 frase e scores com valor 5.
-
-PASSO 2 — CLASSIFICAÇÃO (isCommercial):
-- false: cliente já é aluno com dúvidas, suporte técnico, processos acadêmicos
-- true: objetivo é venda de NOVO curso/produto para lead
-No suporte (false), commercial_score recebe 5 neutro; nota final = média de empatia, clareza, profundidade e agilidade.
-
-PASSO 3 — PONTUAÇÃO:
-Suporte: resolveu? 9-10. Robótico/não resolveu? <5.
-Vendas: tentativa real de fechamento? nota alta. Ignorou? nota baixa.
-
-RETORNE APENAS JSON VÁLIDO (sem markdown):
-{"messagesFeedback":[{"index":0,"score":"excelente"|"bom"|"melhorar","feedback":"texto","suggestion":"texto"}],"globalScores":{"empathy":0,"clarity":0,"depth":0,"commercial":0,"agility":0},"isCommercial":false,"shouldInvalidate":false,"invalidateReason":null,"overallConclusion":"texto","improvements":["Ação 1"]}`;
-
-async function analyzeWithClaude(messages: { role: string; text: string }[]): Promise<any> {
-    if (!ANTHROPIC_API_KEY) return null;
-
-    const conversation = messages
-        .map((m, i) => `[${i}] ${m.role === 'agent' ? 'AGENTE' : 'CLIENTE'}: ${m.text}`)
-        .join('\n');
-
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-            'x-api-key': ANTHROPIC_API_KEY,
-            'anthropic-version': '2023-06-01',
-            'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-            model: 'claude-haiku-4-5-20251001',
-            max_tokens: 2048,
-            system: ANALYSIS_PROMPT,
-            messages: [{ role: 'user', content: `CONVERSA:\n${conversation}` }],
-        }),
-    });
-
-    if (!res.ok) {
-        console.error('Claude API error:', await res.text());
-        return null;
-    }
-
-    const data = await res.json();
-    const text = data.content?.[0]?.text ?? '';
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    try { return jsonMatch ? JSON.parse(jsonMatch[0]) : null; } catch { return null; }
-}
-
-// ─── Heuristic fallback scores ────────────────────────────────────────────────
-const EMPATHY_KW   = ['bom dia', 'boa tarde', 'obrigado', 'obrigada', 'posso ajudar', 'fico feliz'];
-const CLOSING_KW   = ['posso enviar o link', 'deseja se inscrever', 'quer fazer sua matrícula', 'enviar o link de inscrição', 'fazer a inscrição'];
-
-function heuristicScores(msgs: { role: string; text: string }[]) {
-    const empathy    = Math.min(10, msgs.filter(m => EMPATHY_KW.some(k => m.text.toLowerCase().includes(k))).length * 2 + 5);
-    const commercial = Math.min(10, msgs.filter(m => CLOSING_KW.some(k => m.text.toLowerCase().includes(k))).length * 4 + 2);
-    const clarity    = Math.min(10, msgs.filter(m => m.role === 'agent' && m.text.length > 60).length * 2 + 5);
-    const depth      = Math.min(10, msgs.filter(m => m.role === 'agent' && m.text.includes('?')).length * 2 + 3);
-    const agility    = msgs.length > 5 ? 9 : 7;
-    return { empathy, commercial, clarity, depth, agility };
-}
-
-// ─── Analyze a finished session and save to messages_logs ────────────────────
-async function analyzeAndSaveSession(supabase: ReturnType<typeof createClient>, sessionData: any): Promise<void> {
-    const sessionId  = sessionData.session_id;
-    const protocol   = sessionData.protocol || sessionId;
-    const contactName = sessionData.name || 'Desconhecido';
-    const phone       = sessionData.platform_id || '';
-
-    // Fetch all stored raw messages for this session
-    const { data: rawMsgs } = await supabase
-        .from('widechat_raw_messages')
-        .select('*')
-        .eq('session_id', sessionId)
-        .order('created_at', { ascending: true });
-
-    if (!rawMsgs || rawMsgs.length === 0) {
-        console.log(`[Analysis] Sem mensagens armazenadas para sessão ${sessionId}. Abortando.`);
-        return;
-    }
-
-    // Detect agent name (last distinct agent sender)
-    const agentNames: string[] = [];
-    for (const m of rawMsgs) {
-        if (m.origin === 'agent' && m.sender_name && !agentNames.includes(m.sender_name)) {
-            agentNames.push(m.sender_name);
-        }
-    }
-    const agentName = agentNames[agentNames.length - 1] || 'Desconhecido';
-
-    // Find entry point of the real agent (ignore bot messages before)
-    const agentEntryIdx = rawMsgs.findIndex(m => m.origin === 'agent' && m.sender_name === agentName);
-    const relevantRaw   = agentEntryIdx >= 0 ? rawMsgs.slice(agentEntryIdx) : rawMsgs;
-
-    // Build transcript
-    const transcript = rawMsgs.map(m => ({
-        role: m.origin === 'agent' ? 'agent' as const : 'client' as const,
-        text: m.message || '',
-        time: m.created_at || m.received_at,
-    }));
-
-    // Build AI messages (only relevant, no system noise)
-    const aiMessages = relevantRaw
-        .filter(m => !isSystemMessage(m.message || ''))
-        .map(m => ({ role: m.origin === 'agent' ? 'agent' : 'client', text: m.message || '' }));
-
-    // Count real client messages after agent entry
-    const realClientMsgs = aiMessages.filter(m => m.role === 'client');
-
-    // Auto-invalidate if client never responded
-    if (realClientMsgs.length === 0) {
-        console.log(`[Analysis] Sessão ${sessionId} auto-invalidada: cliente não respondeu.`);
-        await supabase.from('messages_logs').upsert({
-            protocol,
-            agent_name: agentName,
-            contact: `${contactName} (${phone})`,
-            message_content: JSON.stringify(transcript),
-            final_score: 0, empathy_score: 0, clarity_score: 0,
-            depth_score: 0, commercial_score: 0, agility_score: 0,
-            closing_attempt: false, message_count: 0, is_commercial: true,
-            overall_conclusion: 'Invalidado automaticamente: cliente não respondeu após o agente entrar.',
-            improvements: [], status: 'invalidated',
-            timestamp: rawMsgs[0]?.created_at || new Date().toISOString(),
-        }, { onConflict: 'protocol' });
-        await supabase.from('widechat_raw_messages').delete().eq('session_id', sessionId);
-        return;
-    }
-
-    // Run AI analysis (or fall back to heuristics)
-    const aiResult = await analyzeWithClaude(aiMessages);
-
-    if (aiResult?.shouldInvalidate) {
-        console.log(`[Analysis] Sessão ${sessionId} invalidada pela IA: ${aiResult.invalidateReason}`);
-        await supabase.from('messages_logs').upsert({
-            protocol,
-            agent_name: agentName,
-            contact: `${contactName} (${phone})`,
-            message_content: JSON.stringify(transcript),
-            final_score: 0, empathy_score: 0, clarity_score: 0,
-            depth_score: 0, commercial_score: 0, agility_score: 0,
-            closing_attempt: false, message_count: relevantRaw.filter(m => m.origin === 'agent').length,
-            is_commercial: false, status: 'invalidated',
-            overall_conclusion: `Invalidado automaticamente: ${aiResult.invalidateReason}`,
-            improvements: [], timestamp: rawMsgs[0]?.created_at || new Date().toISOString(),
-        }, { onConflict: 'protocol' });
-        await supabase.from('widechat_raw_messages').delete().eq('session_id', sessionId);
-        return;
-    }
-
-    // Calculate scores
-    const h = heuristicScores(aiMessages);
-    const scores = {
-        empathy:    aiResult?.globalScores?.empathy    ?? h.empathy,
-        clarity:    aiResult?.globalScores?.clarity    ?? h.clarity,
-        depth:      aiResult?.globalScores?.depth      ?? h.depth,
-        commercial: aiResult?.globalScores?.commercial ?? h.commercial,
-        agility:    aiResult?.globalScores?.agility    ?? h.agility,
-    };
-    const isCommercial  = aiResult?.isCommercial ?? true;
-    const scoreValues   = isCommercial
-        ? [scores.empathy, scores.clarity, scores.depth, scores.commercial, scores.agility]
-        : [scores.empathy, scores.clarity, scores.depth, scores.agility];
-    const finalScore    = Number((scoreValues.reduce((a, b) => a + b, 0) / scoreValues.length).toFixed(1));
-    const closingAttempt = aiMessages.some(m => m.role === 'agent' && CLOSING_KW.some(k => m.text.toLowerCase().includes(k)));
-    const agentMsgCount  = relevantRaw.filter(m => m.origin === 'agent').length;
-
-    // Apply AI feedback to transcript
-    const finalTranscript = transcript.map((m, i) => ({
-        ...m,
-        feedback: m.role === 'agent'
-            ? aiResult?.messagesFeedback?.find((f: any) => f.index === i)?.feedback
-            : undefined,
-    }));
-
-    await supabase.from('messages_logs').upsert({
-        protocol,
-        agent_name: agentName,
-        contact: `${contactName} (${phone})`,
-        message_content: JSON.stringify(finalTranscript),
-        final_score: finalScore,
-        empathy_score: scores.empathy,
-        clarity_score: scores.clarity,
-        depth_score: scores.depth,
-        commercial_score: scores.commercial,
-        agility_score: scores.agility,
-        closing_attempt: closingAttempt,
-        message_count: agentMsgCount,
-        is_commercial: isCommercial,
-        status: 'approved',
-        overall_conclusion: aiResult?.overallConclusion ?? (finalScore >= 8 ? 'Excelente atendimento.' : 'Atendimento regular.'),
-        improvements: aiResult?.improvements ?? [],
-        timestamp: rawMsgs[0]?.created_at || new Date().toISOString(),
-    }, { onConflict: 'protocol' });
-
-    // Clean up raw messages for this session
-    await supabase.from('widechat_raw_messages').delete().eq('session_id', sessionId);
-
-    console.log(`[Analysis] Sessão ${sessionId} analisada → score ${finalScore} (agente: ${agentName})`);
-}
-
-// ─── Main handler ─────────────────────────────────────────────────────────────
 serve(async (req) => {
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders });
@@ -249,7 +41,6 @@ serve(async (req) => {
         const webhookEvent = payload.webhook?.key;
         const msgData      = data?.content || data || {};
 
-        // Extract fields
         let messageText  = msgData.message || msgData.interactive?.body?.text || msgData.text || "";
         let senderName   = payload.vars?.name || data?.user?.name || data?.contact?.name || "";
         let messagePhone = payload.vars?.number || data?.contact?.telephone || data?.content?.to || msgData.platform_id || "";
@@ -262,31 +53,28 @@ serve(async (req) => {
         const eventName = String(data?.event || event || "");
         const sessionId = data?.session_id || msgData.session_id;
 
-        // Detect event types
-        const CONV_END_WEBHOOKS = ["attendance_end", "finalize", "attendance_closed", "attendance_finish"];
-        const CONV_END_EVENTS   = ["attendanceEnd", "finalize", "closed", "attendance_end", "finalized", "attendanceClosed", "autoFinish", "humanFinish"];
-        const isConversationEnd = CONV_END_WEBHOOKS.includes(webhookEvent) || CONV_END_EVENTS.includes(eventName);
-        const isHumanFinish     = eventName === "humanFinish" || (isConversationEnd && data?.isAttendance === true);
+        const CONV_END_WEBHOOKS  = ["attendance_end", "finalize", "attendance_closed", "attendance_finish"];
+        const CONV_END_EVENTS    = ["attendanceEnd", "finalize", "closed", "attendance_end", "finalized", "attendanceClosed", "autoFinish", "humanFinish"];
+        const isConversationEnd  = CONV_END_WEBHOOKS.includes(webhookEvent) || CONV_END_EVENTS.includes(eventName);
         const isAcceptAttendance = webhookEvent === "accept_attendance" || eventName === "humanStart";
-        const isSystemNotif     = ["messageNotificationAgent", "Read", "Delivered"].includes(eventName);
-        const isMessage         = !isSystemNotif && (
+        const isSystemNotif      = ["messageNotificationAgent", "Read", "Delivered"].includes(eventName);
+        const isMessage          = !isSystemNotif && (
             eventName.toLowerCase().includes("message") ||
             webhookEvent === "client_message" ||
             webhookEvent === "agent_message" ||
             !!messageText
         );
 
-        // ── Store every real message to widechat_raw_messages (for transcript) ──
+        // ── Capture every real message for transcript (keyed by session_id) ─────
         if (isMessage && sessionId && messageText && !isSystemMessage(messageText)) {
             let origin = "auto";
             if (eventName === "messageContact" || msgData.origin === "contact" || msgData.origin === "channel") origin = "channel";
             if (msgData.origin === "user" || msgData.origin === "agent" || webhookEvent === "agent_message" || msgData.user?.name) origin = "agent";
-            const resolvedSender = msgData.user?.name || senderName || "";
 
             await supabase.from('widechat_raw_messages').insert({
                 session_id:  sessionId,
                 origin,
-                sender_name: resolvedSender,
+                sender_name: msgData.user?.name || senderName || "",
                 message:     messageText,
                 platform_id: messagePhone || msgData.platform_id || "",
                 message_id:  msgData.message_id || null,
@@ -294,7 +82,6 @@ serve(async (req) => {
             });
         }
 
-        // Skip non-actionable events
         if (!isMessage && !isConversationEnd && !isAcceptAttendance) {
             return new Response(JSON.stringify({ success: true, ignored: true, event: eventName }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
@@ -315,8 +102,7 @@ serve(async (req) => {
         const isTransfer   = webhookEvent === "attendance_transfer" || payload.data?.event === "humanTransfer";
 
         // Find existing lead
-        let leadId = null;
-        let foundBy = "";
+        let leadId = null, foundBy = "";
         if (sessionId) {
             const { data: l } = await supabase.from('leads').select('id').eq('widechat_session_id', sessionId).maybeSingle();
             if (l) { leadId = l.id; foundBy = "session"; }
@@ -333,7 +119,7 @@ serve(async (req) => {
             }
         }
 
-        console.log(`event=${eventName} wh=${webhookEvent} lead=${leadId}(${foundBy}) session=${sessionId} isEnd=${isConversationEnd} isHumanFinish=${isHumanFinish}`);
+        console.log(`event=${eventName} wh=${webhookEvent} lead=${leadId}(${foundBy}) session=${sessionId}`);
 
         // ── Accept attendance ──────────────────────────────────────────────────
         if (isAcceptAttendance) {
@@ -348,9 +134,8 @@ serve(async (req) => {
             });
         }
 
-        // ── Conversation end ───────────────────────────────────────────────────
+        // ── Conversation end: move lead to final stage ─────────────────────────
         if (isConversationEnd) {
-            // Move lead to final stage
             if (leadId) {
                 const { data: finalStage } = await supabase.from('stages').select('id, name')
                     .or('name.ilike.%finaliza%,name.ilike.%encerra%,name.ilike.%conclu%')
@@ -361,17 +146,7 @@ serve(async (req) => {
                     }).eq('id', leadId);
                 }
             }
-
-            // Analyze only real human-finished sessions
-            if (isHumanFinish && sessionId) {
-                console.log(`[Analysis] Disparando análise para sessão ${sessionId} (${eventName})`);
-                // Run async — return 200 immediately to Widechat, analysis continues in background
-                analyzeAndSaveSession(supabase, data).catch(e =>
-                    console.error('[Analysis] Erro na análise:', e.message)
-                );
-            }
-
-            return new Response(JSON.stringify({ success: true, lead_id: leadId, action: "conversation_ended", analyzing: isHumanFinish }), {
+            return new Response(JSON.stringify({ success: true, lead_id: leadId, action: "conversation_ended" }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
             });
         }
@@ -382,7 +157,6 @@ serve(async (req) => {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
             });
         }
-
         if (!leadId) {
             const belongsToTargetQueue = !queueName || queueName === TARGET_QUEUE;
             if (!belongsToTargetQueue || (!hasPhone && !hasName)) {
@@ -415,7 +189,7 @@ serve(async (req) => {
             if (upserted) leadId = upserted.id;
         }
 
-        // ── Store message in widechat_messages (for CRM kanban view) ──────────
+        // ── Store message in widechat_messages (CRM kanban view) ──────────────
         let origin = "auto";
         if (eventName === "messageContact" || msgData.origin === "contact") origin = "channel";
         if (msgData.origin === "user" || msgData.origin === "agent" || webhookEvent === "agent_message") origin = "agent";
