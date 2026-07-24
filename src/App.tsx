@@ -656,7 +656,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
             cursor.setDate(cursor.getDate() + 1);
         }
         return days;
-    }, [filteredData, dateRange, rawDailyVolume]);
+    }, [validData, dateRange, rawDailyVolume]);
 
     // Agent volume for Pie Chart
     const agentVolumeData = useMemo(() => {
@@ -696,7 +696,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
             });
 
         return { data, agents: allAgents };
-    }, [filteredData]);
+    }, [validData]);
     // Agent profiles for photo mapping in the bar chart
     const { profiles: agentProfilesList } = useAgentProfiles();
 
@@ -756,7 +756,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
             { subject: 'Comercial', A: Number((radarScores.commercial / radarScores.count).toFixed(1)) },
             { subject: 'Agilidade', A: Number((radarScores.agility / radarScores.count).toFixed(1)) }
         ];
-    }, [filteredData]);
+    }, [validData]);
 
 
     return (
