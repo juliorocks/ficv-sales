@@ -143,6 +143,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     const [availableCourses, setAvailableCourses] = useState<string[]>([]);
     const [selectedCourses, setSelectedCourses] = useState<string[]>([]);
     const [uploadLogs, setUploadLogs] = useState<any[]>([]);
+    const [rawDailyVolume, setRawDailyVolume] = useState<Record<string, number>>({});
     const [selectedAnalysis, setSelectedAnalysis] = useState<ConversationAnalysis | null>(null);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [refreshProgress, setRefreshProgress] = useState({ current: 0, total: 0 });
@@ -268,6 +269,25 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
         }
 
         fetchUploadLogs();
+        fetchRawDailyVolume();
+    };
+
+    const fetchRawDailyVolume = async () => {
+        const { data } = await supabase
+            .from('widechat_raw_messages')
+            .select('session_id, created_at')
+            .eq('origin', 'channel'); // one row per customer message — use to count unique sessions per day
+        if (!data) return;
+        const seen = new Set<string>();
+        const vol: Record<string, number> = {};
+        for (const row of data) {
+            const key = `${row.session_id}_${row.created_at?.slice(0, 10)}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const day = row.created_at?.slice(0, 10);
+            if (day) vol[day] = (vol[day] || 0) + 1;
+        }
+        setRawDailyVolume(vol);
     };
 
     const updateAnalysisStatus = async (protocol: string, status: 'approved' | 'invalidated') => {
@@ -616,12 +636,12 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     // Build complete daily calendar for selected period (shows ALL days, not just ones with data)
     const dailyData = useMemo(() => {
         const toKey = (d: Date) => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const toISODay = (d: Date) => d.toISOString().slice(0, 10);
         const counts: Record<string, number> = {};
         validData.forEach(d => {
             const k = toKey(new Date(d.date));
             counts[k] = (counts[k] || 0) + 1;
         });
-
 
         const start = dateRange.start ? new Date(dateRange.start + 'T00:00:00') : (() => { const d = new Date(); d.setDate(d.getDate() - 29); return d; })();
         const end = dateRange.end ? new Date(dateRange.end + 'T23:59:59') : new Date();
@@ -629,11 +649,14 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
         const cursor = new Date(start);
         while (cursor <= end) {
             const key = toKey(cursor);
-            days.push({ name: cursor.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), value: counts[key] || 0 });
+            const isoDay = toISODay(cursor);
+            const analyzed = counts[key] || 0;
+            const raw = rawDailyVolume[isoDay] || 0;
+            days.push({ name: cursor.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), value: Math.max(analyzed, raw) });
             cursor.setDate(cursor.getDate() + 1);
         }
         return days;
-    }, [filteredData, dateRange]);
+    }, [filteredData, dateRange, rawDailyVolume]);
 
     // Agent volume for Pie Chart
     const agentVolumeData = useMemo(() => {
