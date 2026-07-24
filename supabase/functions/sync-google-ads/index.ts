@@ -13,7 +13,7 @@ const REFRESH_TOKEN      = Deno.env.get('GOOGLE_ADS_REFRESH_TOKEN') ?? '';
 const CUSTOMER_ID        = Deno.env.get('GOOGLE_ADS_CUSTOMER_ID') ?? '';       // e.g. 6546476778
 const LOGIN_CUSTOMER_ID  = Deno.env.get('GOOGLE_ADS_LOGIN_CUSTOMER_ID') ?? ''; // manager account
 
-const API_VERSION = 'v17';
+const API_VERSION = 'v25';
 const BASE_URL    = `https://googleads.googleapis.com/${API_VERSION}`;
 
 // ─── OAuth2: get access token from refresh token ──────────────────────────────
@@ -52,15 +52,24 @@ async function gaqlQuery(accessToken: string, query: string): Promise<any[]> {
     const text = await res.text();
     if (!res.ok) throw new Error(`Google Ads API ${res.status}: ${text}`);
 
-    // searchStream returns NDJSON — one JSON object per line
+    // searchStream returns a JSON array of batch objects (each with a "results" array)
     const results: any[] = [];
-    for (const line of text.split('\n')) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed === '[' || trimmed === ']') continue;
-        try {
-            const parsed = JSON.parse(trimmed.replace(/^,/, ''));
-            if (parsed.results) results.push(...parsed.results);
-        } catch (_) { /* skip malformed lines */ }
+    try {
+        const parsed = JSON.parse(text);
+        const batches = Array.isArray(parsed) ? parsed : [parsed];
+        for (const batch of batches) {
+            if (batch.results) results.push(...batch.results);
+        }
+    } catch (_) {
+        // fallback: try NDJSON (older API versions)
+        for (const line of text.split('\n')) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed === '[' || trimmed === ']') continue;
+            try {
+                const batch = JSON.parse(trimmed.replace(/^,/, ''));
+                if (batch.results) results.push(...batch.results);
+            } catch (__) { /* skip malformed lines */ }
+        }
     }
     return results;
 }
