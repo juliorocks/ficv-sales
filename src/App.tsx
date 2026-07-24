@@ -510,8 +510,8 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
         });
     }, [analysisData, selectedAgents, selectedTeamId, dateRange, agentTeamMap]);
 
-    // Valid data for scores (exclude invalidated)
-    const validData = useMemo(() => filteredData.filter(d => d.status === 'approved'), [filteredData]);
+    // Valid data for scores (exclude invalidated and unanalyzed score=0 records)
+    const validData = useMemo(() => filteredData.filter(d => d.status === 'approved' && d.finalScore > 0), [filteredData]);
 
     // Date-only filtered data for HistoryLog (no agent/team filter — it has its own)
     const dateFilteredData = useMemo(() => {
@@ -638,7 +638,8 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
         const toKey = (d: Date) => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
         const toISODay = (d: Date) => d.toISOString().slice(0, 10);
         const counts: Record<string, number> = {};
-        validData.forEach(d => {
+        // Use filteredData (all conversations, not just scored) for volume count
+        filteredData.forEach(d => {
             const k = toKey(new Date(d.date));
             counts[k] = (counts[k] || 0) + 1;
         });
@@ -656,7 +657,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
             cursor.setDate(cursor.getDate() + 1);
         }
         return days;
-    }, [validData, dateRange, rawDailyVolume]);
+    }, [filteredData, dateRange, rawDailyVolume]);
 
     // Agent volume for Pie Chart
     const agentVolumeData = useMemo(() => {
