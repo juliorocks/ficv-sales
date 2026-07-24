@@ -143,6 +143,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                     .from('sponte_parcelas')
                     .select('*')
                     .eq('situacao_parcela', 'Quitada')
+                    .ilike('categoria', '%matr%')
                     .gte('data_pagamento', dateStart)
                     .lte('data_pagamento', dateEnd)
                     .range(from, from + 999);
@@ -158,6 +159,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                     .from('sponte_parcelas')
                     .select('*')
                     .eq('situacao_parcela', 'Pendente')
+                    .ilike('categoria', '%matr%')
                     .gte('vencimento', dateStart)
                     .lte('vencimento', dateEnd)
                     .range(from, from + 999);
