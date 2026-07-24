@@ -6,7 +6,7 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY') ?? '';
+const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
 
 // ─── System messages that should be ignored in analysis ──────────────────────
 const SYSTEM_PATTERNS = [
@@ -21,7 +21,7 @@ const isSystemMessage = (text: string) => {
     return SYSTEM_PATTERNS.some(p => lower.includes(p));
 };
 
-// ─── Gemini analysis ──────────────────────────────────────────────────────────
+// ─── Claude analysis ──────────────────────────────────────────────────────────
 const ANALYSIS_PROMPT = `Você é o Auditor Master de Qualidade da FICV, especializado em auditoria de alta precisão.
 
 PASSO 1 — INVALIDAÇÃO (shouldInvalidate):
@@ -41,34 +41,35 @@ Vendas: tentativa real de fechamento? nota alta. Ignorou? nota baixa.
 RETORNE APENAS JSON VÁLIDO (sem markdown):
 {"messagesFeedback":[{"index":0,"score":"excelente"|"bom"|"melhorar","feedback":"texto","suggestion":"texto"}],"globalScores":{"empathy":0,"clarity":0,"depth":0,"commercial":0,"agility":0},"isCommercial":false,"shouldInvalidate":false,"invalidateReason":null,"overallConclusion":"texto","improvements":["Ação 1"]}`;
 
-async function analyzeWithGemini(messages: { role: string; text: string }[]): Promise<any> {
-    if (!GEMINI_API_KEY) return null;
+async function analyzeWithClaude(messages: { role: string; text: string }[]): Promise<any> {
+    if (!ANTHROPIC_API_KEY) return null;
 
     const conversation = messages
         .map((m, i) => `[${i}] ${m.role === 'agent' ? 'AGENTE' : 'CLIENTE'}: ${m.text}`)
         .join('\n');
 
-    const body = {
-        contents: [{
-            parts: [{
-                text: `${ANALYSIS_PROMPT}\n\nCONVERSA:\n${conversation}`
-            }]
-        }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 2048 }
-    };
-
-    const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-    );
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+            'x-api-key': ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01',
+            'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 2048,
+            system: ANALYSIS_PROMPT,
+            messages: [{ role: 'user', content: `CONVERSA:\n${conversation}` }],
+        }),
+    });
 
     if (!res.ok) {
-        console.error('Gemini error:', await res.text());
+        console.error('Claude API error:', await res.text());
         return null;
     }
 
     const data = await res.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    const text = data.content?.[0]?.text ?? '';
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     try { return jsonMatch ? JSON.parse(jsonMatch[0]) : null; } catch { return null; }
 }
@@ -153,7 +154,7 @@ async function analyzeAndSaveSession(supabase: ReturnType<typeof createClient>, 
     }
 
     // Run AI analysis (or fall back to heuristics)
-    const aiResult = await analyzeWithGemini(aiMessages);
+    const aiResult = await analyzeWithClaude(aiMessages);
 
     if (aiResult?.shouldInvalidate) {
         console.log(`[Analysis] Sessão ${sessionId} invalidada pela IA: ${aiResult.invalidateReason}`);
