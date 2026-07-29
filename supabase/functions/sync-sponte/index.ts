@@ -68,12 +68,23 @@ function parseBrNumber(s: string): number {
     return parseFloat(s.replace(/\./g, '').replace(',', '.')) || 0;
 }
 
+// ─── Fetch phone for a single aluno from Sponte GetAlunos ────────────────────
+async function fetchCelular(aluno_id: number): Promise<string | null> {
+    try {
+        const xml = await soapCall("GetAlunos", `<sParametrosBusca>AlunoID=${aluno_id}</sParametrosBusca>`);
+        const celular = extractFirst(xml, 'Celular');
+        return celular || null;
+    } catch {
+        return null;
+    }
+}
+
 // ─── Sync enrollments (GetMatriculas) ─────────────────────────────────────────
 async function syncMatriculas(
     supabase: ReturnType<typeof createClient>,
     startDate: string,
     endDate: string
-): Promise<{ synced: number; error?: string }> {
+): Promise<{ synced: number; phones: number; error?: string }> {
     // Sponte date format: YYYY/MM/DD
     const start = startDate.replace(/-/g, '/');
     const end   = endDate.replace(/-/g, '/');
@@ -114,7 +125,7 @@ async function syncMatriculas(
         }))
         .filter(r => r.contrato_id > 0);
 
-    if (rows.length === 0) return { synced: 0 };
+    if (rows.length === 0) return { synced: 0, phones: 0 };
 
     // Upsert in batches of 200
     let synced = 0;
@@ -125,11 +136,35 @@ async function syncMatriculas(
             .upsert(batch, { onConflict: 'contrato_id' });
         if (error) {
             console.error('upsert matriculas error:', error);
-            return { synced, error: error.message };
+            return { synced, phones: 0, error: error.message };
         }
         synced += batch.length;
     }
-    return { synced };
+
+    // Enrich with Celular: only for aluno_ids that don't have it yet
+    const uniqueAlunoIds = [...new Set(rows.map(r => r.aluno_id).filter(id => id > 0))];
+    const { data: existing } = await supabase
+        .from('sponte_matriculas')
+        .select('aluno_id')
+        .in('aluno_id', uniqueAlunoIds)
+        .not('celular', 'is', null)
+        .neq('celular', '');
+    const alreadyHavePhone = new Set((existing ?? []).map((r: any) => r.aluno_id));
+    const needPhone = uniqueAlunoIds.filter(id => !alreadyHavePhone.has(id));
+
+    let phones = 0;
+    for (const aluno_id of needPhone) {
+        const celular = await fetchCelular(aluno_id);
+        if (celular) {
+            await supabase
+                .from('sponte_matriculas')
+                .update({ celular })
+                .eq('aluno_id', aluno_id);
+            phones++;
+        }
+    }
+
+    return { synced, phones };
 }
 
 // ─── Sync parcelas for a date range + update financial_goals per month ────────
@@ -262,10 +297,32 @@ serve(async (req) => {
 
         const result: Record<string, any> = { mode, startDate, endDate };
 
+        if (mode === 'backfill_phones') {
+            // Fill celular for all sponte_matriculas rows that still lack it
+            const { data: rows } = await supabase
+                .from('sponte_matriculas')
+                .select('aluno_id')
+                .or('celular.is.null,celular.eq.')
+                .gt('aluno_id', 0);
+            const uniqueIds = [...new Set((rows ?? []).map((r: any) => r.aluno_id as number))];
+            let filled = 0, skipped = 0;
+            for (const aluno_id of uniqueIds) {
+                const celular = await fetchCelular(aluno_id);
+                if (celular) {
+                    await supabase.from('sponte_matriculas').update({ celular }).eq('aluno_id', aluno_id);
+                    filled++;
+                } else {
+                    skipped++;
+                }
+            }
+            result.backfill = { total: uniqueIds.length, filled, skipped };
+            console.log(`Phone backfill: ${filled}/${uniqueIds.length} filled, ${skipped} skipped`);
+        }
+
         if (mode === 'matriculas' || mode === 'full') {
             const r = await syncMatriculas(supabase, startDate, endDate);
             result.matriculas = r;
-            console.log(`Matriculas synced: ${r.synced}`, r.error ?? '');
+            console.log(`Matriculas synced: ${r.synced}, phones: ${r.phones}`, r.error ?? '');
         }
 
         if (mode === 'parcelas' || mode === 'full') {
