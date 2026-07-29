@@ -353,8 +353,37 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
             .map(([name, value]) => ({ name: name.length > 30 ? name.slice(0, 28) + '…' : name, value }));
     }, [filtered]);
 
-    // ─── Chart: matrículas por mês ────────────────────────────────────────────
+    // ─── Chart: matrículas por mês / dia ─────────────────────────────────────
     const chartByMonth = useMemo(() => {
+        const byDay = period === 'month' || period === 'week';
+
+        if (byDay) {
+            // Build a map with every day in [dateStart, dateEnd] pre-filled with 0
+            const counts: Record<string, number> = {};
+            const cursor = new Date(dateStart + 'T12:00:00');
+            const end = new Date(dateEnd + 'T12:00:00');
+            while (cursor <= end) {
+                const key = cursor.toISOString().split('T')[0];
+                counts[key] = 0;
+                cursor.setDate(cursor.getDate() + 1);
+            }
+            filtered.forEach(m => {
+                if (!m.data_matricula) return;
+                const key = m.data_matricula.split('T')[0];
+                if (key in counts) counts[key] += 1;
+            });
+            return Object.entries(counts)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([key, value]) => {
+                    const d = new Date(key + 'T12:00:00');
+                    const label = period === 'week'
+                        ? d.toLocaleDateString('pt-BR', { weekday: 'short', day: 'numeric' })
+                        : String(d.getDate());
+                    return { name: label, value };
+                });
+        }
+
+        // Default: group by month
         const counts: Record<string, { label: string; value: number }> = {};
         filtered.forEach(m => {
             if (!m.data_matricula) return;
@@ -371,7 +400,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
         return Object.entries(counts)
             .sort(([a], [b]) => a.localeCompare(b))
             .map(([, { label, value }]) => ({ name: label, value }));
-    }, [filtered]);
+    }, [filtered, period, dateStart, dateEnd]);
 
     return (
         <div className="space-y-8 animate-fade-in">
@@ -635,7 +664,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                         {/* By month */}
                         <div className="glass-card p-6">
                             <h3 className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-widest mb-4">
-                                Matrículas por Mês
+                                {period === 'month' || period === 'week' ? 'Matrículas por Dia' : 'Matrículas por Mês'}
                             </h3>
                             {loading ? (
                                 <div className="h-64 flex items-center justify-center">
