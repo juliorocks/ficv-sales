@@ -50,19 +50,17 @@ AS $$
       agent_name,
       MIN(ts) AS primeiro_atendimento
     FROM (
-      -- Fonte nova: widechat_messages (origin='agent') via leads
-      -- Limita a ±30 dias do período para evitar full scan
+      -- Fonte nova: widechat_messages via leads.assigned_to_id → profiles
+      -- Usa profiles.full_name para garantir que só agentes reais apareçam
       SELECT
         right(regexp_replace(l.telefone, '[^0-9]', '', 'g'), 11) AS contact_phone,
         normalize_name(l.nome_completo)                            AS norm_contact,
-        wm.sender_name                                             AS agent_name,
+        p.full_name                                                AS agent_name,
         wm.created_at                                              AS ts
       FROM widechat_messages wm
       JOIN leads l ON l.id = wm.lead_id
+      JOIN profiles p ON p.id = l.assigned_to_id
       WHERE wm.origin = 'agent'
-        AND wm.sender_name IS NOT NULL
-        AND wm.sender_name <> ''
-        AND wm.sender_name <> 'Desconhecido'
         AND l.telefone IS NOT NULL
         AND wm.created_at IS NOT NULL
         AND wm.created_at >= (p_data_inicio - INTERVAL '30 days')::timestamptz
