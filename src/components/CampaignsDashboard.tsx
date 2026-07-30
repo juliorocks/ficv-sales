@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
     Megaphone, RefreshCw, DollarSign, MessageSquare, Target, MousePointerClick,
-    Eye, Loader2, AlertCircle, ChevronDown, XCircle, GraduationCap, TrendingUp, TrendingDown, Wallet
+    Eye, Loader2, AlertCircle, ChevronDown, XCircle, GraduationCap, TrendingUp, TrendingDown, Wallet, Pencil, Check
 } from 'lucide-react';
 import {
     BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
@@ -166,6 +166,8 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
     const [syncing, setSyncing] = useState<'meta' | 'google' | null>(null);
     const [lastSync, setLastSync] = useState<string | null>(null);
     const [budget, setBudget] = useState<BudgetInfo | null>(null);
+    const [editingGoogleBalance, setEditingGoogleBalance] = useState(false);
+    const [googleBalanceInput, setGoogleBalanceInput] = useState('');
 
     // Filters
     const [source, setSource] = useState<AdSource>('all');
@@ -217,6 +219,17 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
         };
         loadCampaigns();
     }, [dateStart, dateEnd]);
+
+    // ─── Save Google balance manually ─────────────────────────────────────────
+    const saveGoogleBalance = useCallback(async () => {
+        const val = parseFloat(googleBalanceInput.replace(',', '.'));
+        if (isNaN(val) || val < 0) { setEditingGoogleBalance(false); return; }
+        const { error } = await supabase
+            .from('meta_account_stats')
+            .upsert({ id: 1, google_balance: val, updated_at: new Date().toISOString() }, { onConflict: 'id' });
+        if (!error) setBudget(prev => prev ? { ...prev, googleBalance: val } : prev);
+        setEditingGoogleBalance(false);
+    }, [googleBalanceInput]);
 
     // ─── Load period data ──────────────────────────────────────────────────────
     const loadData = useCallback(async (opts?: { silent?: boolean }) => {
@@ -543,7 +556,7 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                     <SourceTab label="Meta Ads" active={source === 'meta'} color="#1877F2" onClick={() => setSource('meta')} />
                     <SourceTab label="Google Ads" active={source === 'google'} color="#F97316" onClick={() => setSource('google')} />
                 </div>
-                {budget && (budget.metaBalance > 0 || budget.googleBalance !== null) && (
+                {budget && (
                     <div className="flex items-center gap-2">
                         {budget.metaBalance > 0 && (
                             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] text-xs">
@@ -552,13 +565,40 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                                 <span className="font-bold text-[var(--text-main)]">{fmt(budget.metaBalance)}</span>
                             </div>
                         )}
-                        {budget.googleBalance !== null && budget.googleBalance > 0 && (
-                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] text-xs">
-                                <Wallet size={12} style={{ color: '#F97316' }} />
-                                <span className="text-[var(--text-muted)] font-semibold">Google Ads</span>
-                                <span className="font-bold text-[var(--text-main)]">{fmt(budget.googleBalance)}</span>
-                            </div>
-                        )}
+                        {/* Google Ads — valor editável manualmente (API não expõe o saldo pré-pago) */}
+                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] text-xs">
+                            <Wallet size={12} style={{ color: '#F97316' }} />
+                            <span className="text-[var(--text-muted)] font-semibold">Google Ads</span>
+                            {editingGoogleBalance ? (
+                                <>
+                                    <input
+                                        autoFocus
+                                        type="text"
+                                        value={googleBalanceInput}
+                                        onChange={e => setGoogleBalanceInput(e.target.value)}
+                                        onKeyDown={e => { if (e.key === 'Enter') saveGoogleBalance(); if (e.key === 'Escape') setEditingGoogleBalance(false); }}
+                                        onBlur={saveGoogleBalance}
+                                        className="w-24 bg-transparent border-b border-[var(--border)] outline-none font-bold text-[var(--text-main)] text-right"
+                                        placeholder="0,00"
+                                    />
+                                    <Check size={11} className="cursor-pointer text-green-400" onClick={saveGoogleBalance} />
+                                </>
+                            ) : (
+                                <>
+                                    <span className="font-bold text-[var(--text-main)]">
+                                        {budget.googleBalance !== null ? fmt(budget.googleBalance) : '—'}
+                                    </span>
+                                    <Pencil
+                                        size={10}
+                                        className="cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                                        onClick={() => {
+                                            setGoogleBalanceInput(budget.googleBalance !== null ? String(budget.googleBalance) : '');
+                                            setEditingGoogleBalance(true);
+                                        }}
+                                    />
+                                </>
+                            )}
+                        </div>
                     </div>
                 )}
             </div>

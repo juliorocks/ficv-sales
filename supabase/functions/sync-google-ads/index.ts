@@ -34,6 +34,34 @@ async function getAccessToken(): Promise<string> {
 }
 
 // ─── Google Ads API: GAQL query ───────────────────────────────────────────────
+async function gaqlQueryFor(accessToken: string, customerId: string, query: string): Promise<any[]> {
+    const url = `${BASE_URL}/customers/${customerId}/googleAds:searchStream`;
+    const headers: Record<string, string> = {
+        'Authorization':    `Bearer ${accessToken}`,
+        'developer-token':  DEVELOPER_TOKEN,
+        'Content-Type':     'application/json',
+    };
+    if (LOGIN_CUSTOMER_ID) headers['login-customer-id'] = LOGIN_CUSTOMER_ID;
+
+    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ query }) });
+    const text = await res.text();
+    if (!res.ok) return []; // silently skip inaccessible customers
+
+    const results: any[] = [];
+    try {
+        const parsed = JSON.parse(text);
+        const batches = Array.isArray(parsed) ? parsed : [parsed];
+        for (const batch of batches) { if (batch.results) results.push(...batch.results); }
+    } catch (_) {
+        for (const line of text.split('\n')) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed === '[' || trimmed === ']') continue;
+            try { const b = JSON.parse(trimmed.replace(/^,/, '')); if (b.results) results.push(...b.results); } catch (__) {}
+        }
+    }
+    return results;
+}
+
 async function gaqlQuery(accessToken: string, query: string): Promise<any[]> {
     const url = `${BASE_URL}/customers/${CUSTOMER_ID}/googleAds:searchStream`;
     const headers: Record<string, string> = {
@@ -74,28 +102,27 @@ async function gaqlQuery(accessToken: string, query: string): Promise<any[]> {
     return results;
 }
 
-// ─── Sync account balance (account_budget) ────────────────────────────────────
+// ─── Sync account balance via account_budget ──────────────────────────────────
+// Funciona para contas com Account Budgets configurados (spending limit SPECIFIED).
+// Para contas pré-pagas manuais sem account_budget, o saldo é atualizado manualmente no dashboard.
 async function syncAccountBalance(
     supabase: ReturnType<typeof createClient>,
     accessToken: string
 ): Promise<{ balance: number | null }> {
     try {
         const rows = await gaqlQuery(accessToken, `
-            SELECT
-                account_budget.status,
-                account_budget.approved_spending_limit_type,
-                account_budget.approved_spending_limit_micros,
-                account_budget.amount_served_in_micros
+            SELECT account_budget.status,
+                   account_budget.approved_spending_limit_type,
+                   account_budget.approved_spending_limit_micros,
+                   account_budget.amount_served_in_micros
             FROM account_budget
             WHERE account_budget.status = 'APPROVED'
         `);
-        console.log('Google account_budget raw:', JSON.stringify(rows));
 
         let totalRemaining = 0;
         let hasSpecified = false;
         for (const r of rows) {
-            const limitType = r.accountBudget?.approvedSpendingLimitType;
-            if (limitType !== 'SPECIFIED') continue;
+            if (r.accountBudget?.approvedSpendingLimitType !== 'SPECIFIED') continue;
             const limit  = Number(r.accountBudget?.approvedSpendingLimitMicros ?? 0);
             const served = Number(r.accountBudget?.amountServedInMicros ?? 0);
             if (limit > 0) { totalRemaining += (limit - served) / 1_000_000; hasSpecified = true; }
