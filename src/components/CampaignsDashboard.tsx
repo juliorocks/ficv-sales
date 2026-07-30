@@ -49,9 +49,8 @@ interface MetaCampaignOption {
 }
 
 interface BudgetInfo {
-    metaBalance: number;      // saldo da conta pré-paga Meta (fundos disponíveis)
-    googleDailyTotal: number; // soma dos budget_amount diários do Google (por campanha)
-    remainingDays: number;
+    metaBalance: number;
+    googleBalance: number | null;
 }
 
 const fmt = (v: number) =>
@@ -277,18 +276,14 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
             if (syncRes.data) setLastSync((syncRes.data as any).synced_at);
 
             // Budget info
-            const today = new Date();
-            const endD = new Date(dateEnd + 'T23:59:59');
-            const remainingDays = Math.max(0, Math.ceil((endD.getTime() - today.getTime()) / 86400000));
-            const [metaBalanceRes, googleCamps] = await Promise.all([
-                supabase.from('meta_account_stats').select('balance').eq('id', 1).single(),
-                supabase.from('google_ads_campaigns')
-                    .select('status,budget_amount')
-                    .in('status', ['ENABLED', 'PAUSED']),
-            ]);
-            const metaBalance = (metaBalanceRes.data as any)?.balance ?? 0;
-            const googleDailyTotal = (googleCamps.data ?? []).reduce((s: number, c: any) => s + (c.budget_amount ?? 0), 0);
-            setBudget({ metaBalance, googleDailyTotal, remainingDays });
+            const statsRes = await supabase
+                .from('meta_account_stats')
+                .select('balance,google_balance')
+                .eq('id', 1)
+                .single();
+            const metaBalance   = (statsRes.data as any)?.balance        ?? 0;
+            const googleBalance = (statsRes.data as any)?.google_balance  ?? null;
+            setBudget({ metaBalance, googleBalance });
         } catch (e) {
             console.error('loadData error:', e);
         } finally {
@@ -548,11 +543,22 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                     <SourceTab label="Meta Ads" active={source === 'meta'} color="#1877F2" onClick={() => setSource('meta')} />
                     <SourceTab label="Google Ads" active={source === 'google'} color="#F97316" onClick={() => setSource('google')} />
                 </div>
-                {budget && budget.metaBalance > 0 && (
-                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] text-xs">
-                        <Wallet size={12} style={{ color: '#1877F2' }} />
-                        <span className="text-[var(--text-muted)] font-semibold">Verba da Conta</span>
-                        <span className="font-bold text-[var(--text-main)]">{fmt(budget.metaBalance)}</span>
+                {budget && (budget.metaBalance > 0 || budget.googleBalance !== null) && (
+                    <div className="flex items-center gap-2">
+                        {budget.metaBalance > 0 && (
+                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] text-xs">
+                                <Wallet size={12} style={{ color: '#1877F2' }} />
+                                <span className="text-[var(--text-muted)] font-semibold">Meta Ads</span>
+                                <span className="font-bold text-[var(--text-main)]">{fmt(budget.metaBalance)}</span>
+                            </div>
+                        )}
+                        {budget.googleBalance !== null && budget.googleBalance > 0 && (
+                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] text-xs">
+                                <Wallet size={12} style={{ color: '#F97316' }} />
+                                <span className="text-[var(--text-muted)] font-semibold">Google Ads</span>
+                                <span className="font-bold text-[var(--text-main)]">{fmt(budget.googleBalance)}</span>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

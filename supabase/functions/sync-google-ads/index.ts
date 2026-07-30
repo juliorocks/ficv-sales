@@ -74,6 +74,46 @@ async function gaqlQuery(accessToken: string, query: string): Promise<any[]> {
     return results;
 }
 
+// ─── Sync account balance (account_budget) ────────────────────────────────────
+async function syncAccountBalance(
+    supabase: ReturnType<typeof createClient>,
+    accessToken: string
+): Promise<{ balance: number | null }> {
+    try {
+        const rows = await gaqlQuery(accessToken, `
+            SELECT
+                account_budget.status,
+                account_budget.approved_spending_limit_type,
+                account_budget.approved_spending_limit_micros,
+                account_budget.amount_served_in_micros
+            FROM account_budget
+            WHERE account_budget.status = 'APPROVED'
+        `);
+        console.log('Google account_budget raw:', JSON.stringify(rows));
+
+        let totalRemaining = 0;
+        let hasSpecified = false;
+        for (const r of rows) {
+            const limitType = r.accountBudget?.approvedSpendingLimitType;
+            if (limitType !== 'SPECIFIED') continue;
+            const limit  = Number(r.accountBudget?.approvedSpendingLimitMicros ?? 0);
+            const served = Number(r.accountBudget?.amountServedInMicros ?? 0);
+            if (limit > 0) { totalRemaining += (limit - served) / 1_000_000; hasSpecified = true; }
+        }
+        if (!hasSpecified) return { balance: null };
+
+        const balance = Math.max(0, totalRemaining);
+        await supabase.from('meta_account_stats').upsert(
+            { id: 1, google_balance: balance, updated_at: new Date().toISOString() },
+            { onConflict: 'id' }
+        );
+        return { balance };
+    } catch (e: any) {
+        console.error('syncAccountBalance error:', e.message);
+        return { balance: null };
+    }
+}
+
 // ─── Sync campaigns ───────────────────────────────────────────────────────────
 async function syncCampaigns(
     supabase: ReturnType<typeof createClient>,
@@ -180,12 +220,13 @@ serve(async (req) => {
 
         const accessToken = await getAccessToken();
 
-        const [campaigns, insights] = await Promise.all([
+        const [campaigns, insights, accountBalance] = await Promise.all([
             syncCampaigns(supabase, accessToken),
             syncInsights(supabase, accessToken, startDate, endDate),
+            syncAccountBalance(supabase, accessToken),
         ]);
 
-        return new Response(JSON.stringify({ ok: true, startDate, endDate, campaigns, insights }), {
+        return new Response(JSON.stringify({ ok: true, startDate, endDate, campaigns, insights, accountBalance }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
     } catch (err: any) {
