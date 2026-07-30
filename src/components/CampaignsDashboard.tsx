@@ -289,18 +289,12 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
             const today = new Date();
             const endD = new Date(dateEnd + 'T23:59:59');
             const remainingDays = Math.max(0, Math.ceil((endD.getTime() - today.getTime()) / 86400000));
-            let metaTotal = 0, metaRemaining = 0;
-            (metaCamps.data ?? []).forEach((c: any) => {
-                if (c.lifetime_budget) {
-                    metaTotal += c.lifetime_budget;
-                    metaRemaining += c.budget_remaining ?? 0;
-                } else if (c.daily_budget) {
-                    metaTotal += c.daily_budget * remainingDays;
-                    metaRemaining += c.daily_budget * remainingDays;
-                }
-            });
+            // Usa budget_remaining diretamente (válido tanto para lifetime quanto daily/ABO)
+            const metaRemaining = (metaCamps.data ?? []).reduce(
+                (s: number, c: any) => s + (c.budget_remaining ?? 0), 0
+            );
             const googleDailyTotal = (googleCamps.data ?? []).reduce((s: number, c: any) => s + (c.budget_amount ?? 0), 0);
-            setBudget({ metaTotal, metaRemaining, googleDailyTotal, remainingDays });
+            setBudget({ metaTotal: 0, metaRemaining, googleDailyTotal, remainingDays });
         } catch (e) {
             console.error('loadData error:', e);
         } finally {
@@ -688,12 +682,11 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                         <KpiCard icon={Eye} title="CPM" value={fmt(totals.cpm)}
                             delta={pctDelta(totals.cpm, prevTotals.cpm)} goodDirection="down"
                             series={cpmSeries} color="#A78BFA" />
-                        {/* Verba Restante */}
-                        {budget && (source === 'meta' || source === 'all') && budget.metaRemaining > 0 && (() => {
-                            const spent = source === 'google' ? 0 : totals.spend - (source === 'all' ? gInsights.reduce((s, r) => s + (r.spend || 0), 0) : 0);
-                            const total = budget.metaTotal;
-                            const remaining = budget.metaRemaining;
-                            const pct = total > 0 ? Math.min(100, ((total - remaining) / total) * 100) : 0;
+                        {/* Verba Restante — Meta */}
+                        {budget && source !== 'google' && budget.metaRemaining > 0 && (() => {
+                            const metaSpend = insights.reduce((s, r) => s + (r.spend || 0), 0);
+                            const total = metaSpend + budget.metaRemaining;
+                            const pct = total > 0 ? Math.min(100, (metaSpend / total) * 100) : 0;
                             return (
                                 <div className="glass-card p-5 relative overflow-hidden">
                                     <div className="flex justify-between items-start mb-3">
@@ -701,31 +694,25 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                                             <Wallet size={16} style={{ color: '#22c55e' }} />
                                         </div>
                                     </div>
-                                    <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Verba Restante</p>
-                                    <p className="text-xl font-bold text-[var(--text-main)] mb-1">{fmt(remaining)}</p>
-                                    <p className="text-[10px] text-[var(--text-muted)] mb-2">
-                                        {budget.remainingDays > 0 ? `${budget.remainingDays}d restantes` : 'período encerrado'}
-                                    </p>
-                                    {/* Barra de progresso */}
+                                    <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Verba Restante · Meta</p>
+                                    <p className="text-xl font-bold text-[var(--text-main)] mb-1">{fmt(budget.metaRemaining)}</p>
+                                    <p className="text-[10px] text-[var(--text-muted)] mb-2">{fmt(metaSpend)} investido</p>
                                     <div className="w-full h-1.5 rounded-full bg-[var(--border)] overflow-hidden">
-                                        <div
-                                            className="h-full rounded-full transition-all"
-                                            style={{
-                                                width: `${pct}%`,
-                                                background: pct > 85 ? '#ef4444' : pct > 60 ? '#f59e0b' : '#22c55e',
-                                            }}
-                                        />
+                                        <div className="h-full rounded-full transition-all" style={{
+                                            width: `${pct}%`,
+                                            background: pct > 85 ? '#ef4444' : pct > 60 ? '#f59e0b' : '#22c55e',
+                                        }} />
                                     </div>
-                                    <p className="text-[9px] text-[var(--text-muted)] mt-1">{pct.toFixed(0)}% utilizado · Meta</p>
+                                    <p className="text-[9px] text-[var(--text-muted)] mt-1">{pct.toFixed(0)}% do orçamento utilizado</p>
                                 </div>
                             );
                         })()}
-                        {budget && (source === 'google' || source === 'all') && budget.googleDailyTotal > 0 && (() => {
+                        {/* Verba Restante — Google */}
+                        {budget && source !== 'meta' && budget.googleDailyTotal > 0 && (() => {
                             const googleSpend = gInsights.reduce((s, r) => s + (r.spend || 0), 0);
-                            const googleTotal = budget.googleDailyTotal * budget.remainingDays;
-                            const googleRemaining = Math.max(0, googleTotal - googleSpend);
+                            const googleRemaining = Math.max(0, budget.googleDailyTotal * budget.remainingDays - googleSpend);
+                            const googleTotal = googleSpend + googleRemaining;
                             const pct = googleTotal > 0 ? Math.min(100, (googleSpend / googleTotal) * 100) : 0;
-                            if (source === 'all') return null; // já mostrado no card Meta quando 'all'
                             return (
                                 <div className="glass-card p-5 relative overflow-hidden">
                                     <div className="flex justify-between items-start mb-3">
@@ -733,21 +720,16 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                                             <Wallet size={16} style={{ color: '#22c55e' }} />
                                         </div>
                                     </div>
-                                    <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Verba Restante</p>
+                                    <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Verba Restante · Google</p>
                                     <p className="text-xl font-bold text-[var(--text-main)] mb-1">{fmt(googleRemaining)}</p>
-                                    <p className="text-[10px] text-[var(--text-muted)] mb-2">
-                                        {budget.remainingDays > 0 ? `${budget.remainingDays}d restantes` : 'período encerrado'}
-                                    </p>
+                                    <p className="text-[10px] text-[var(--text-muted)] mb-2">{fmt(googleSpend)} investido</p>
                                     <div className="w-full h-1.5 rounded-full bg-[var(--border)] overflow-hidden">
-                                        <div
-                                            className="h-full rounded-full transition-all"
-                                            style={{
-                                                width: `${pct}%`,
-                                                background: pct > 85 ? '#ef4444' : pct > 60 ? '#f59e0b' : '#22c55e',
-                                            }}
-                                        />
+                                        <div className="h-full rounded-full transition-all" style={{
+                                            width: `${pct}%`,
+                                            background: pct > 85 ? '#ef4444' : pct > 60 ? '#f59e0b' : '#22c55e',
+                                        }} />
                                     </div>
-                                    <p className="text-[9px] text-[var(--text-muted)] mt-1">{pct.toFixed(0)}% utilizado · Google</p>
+                                    <p className="text-[9px] text-[var(--text-muted)] mt-1">{pct.toFixed(0)}% do orçamento utilizado · estimado</p>
                                 </div>
                             );
                         })()}
