@@ -84,7 +84,9 @@ async function syncCampaigns(
             campaign.id,
             campaign.name,
             campaign.status,
-            campaign.advertising_channel_type
+            campaign.advertising_channel_type,
+            campaign_budget.amount_micros,
+            campaign_budget.type
         FROM campaign
         WHERE campaign.status != 'REMOVED'
         ORDER BY campaign.name
@@ -97,6 +99,10 @@ async function syncCampaigns(
         campaign_name:            r.campaign.name ?? null,
         status:                   r.campaign.status ?? null,
         advertising_channel_type: r.campaign.advertisingChannelType ?? null,
+        budget_amount:            r.campaignBudget?.amountMicros != null
+                                      ? Number(r.campaignBudget.amountMicros) / 1_000_000
+                                      : null,
+        budget_type:              r.campaignBudget?.type ?? null,
         synced_at:                new Date().toISOString(),
     }));
 

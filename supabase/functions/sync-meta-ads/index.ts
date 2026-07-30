@@ -56,15 +56,20 @@ async function metaGet(path: string, params: Record<string, string>): Promise<an
 async function syncCampaigns(supabase: ReturnType<typeof createClient>): Promise<{ synced: number; error?: string }> {
     try {
         const rows = await metaGet(`${AD_ACCOUNT_ID}/campaigns`, {
-            fields: 'id,name,objective,status,effective_status',
+            fields: 'id,name,objective,status,effective_status,daily_budget,lifetime_budget,budget_remaining',
         });
 
+        const parseCents = (v: any) => (v !== undefined && v !== null && v !== '') ? parseFloat(v) / 100 : null;
+
         const mapped = rows.map(r => ({
-            campaign_id: r.id,
-            name: r.name,
-            objective: r.objective ?? null,
-            status: r.effective_status ?? r.status ?? null,
-            updated_at: new Date().toISOString(),
+            campaign_id:      r.id,
+            name:             r.name,
+            objective:        r.objective ?? null,
+            status:           r.effective_status ?? r.status ?? null,
+            daily_budget:     parseCents(r.daily_budget),
+            lifetime_budget:  parseCents(r.lifetime_budget),
+            budget_remaining: parseCents(r.budget_remaining),
+            updated_at:       new Date().toISOString(),
         }));
 
         if (mapped.length === 0) return { synced: 0 };
