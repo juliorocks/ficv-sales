@@ -207,17 +207,41 @@ serve(async (req) => {
             // Saldo da conta (fundos disponíveis pré-pagos)
             try {
                 const accRes = await fetch(
-                    `https://graph.facebook.com/v21.0/${AD_ACCOUNT_ID}?fields=balance,currency&access_token=${ACCESS_TOKEN}`
+                    `https://graph.facebook.com/v21.0/${AD_ACCOUNT_ID}?fields=balance,currency,funding_source_details&access_token=${ACCESS_TOKEN}`
                 );
                 const acc = await accRes.json();
-                if (acc.balance !== undefined) {
+                console.log('Meta account raw:', JSON.stringify(acc));
+
+                let prepaidBalance: number | null = null;
+                const fsd = acc.funding_source_details;
+
+                // O saldo real fica em funding_source_details.display_string
+                // Ex: "Saldo disponível (R$816,87 BRL)"
+                if (fsd?.display_string) {
+                    const m = fsd.display_string.match(/\((R\$|BRL\s*)?([\d.]+),([\d]{2})\s*BRL\)/i)
+                           ?? fsd.display_string.match(/\(([\d.]+),([\d]{2})/);
+                    if (m) {
+                        const intPart  = (m[2] ?? m[1]).replace(/\./g, '');
+                        const decPart  = m[3] ?? m[2];
+                        prepaidBalance = parseFloat(`${intPart}.${decPart}`);
+                        console.log('balance source: display_string =', fsd.display_string, '→', prepaidBalance);
+                    }
+                }
+
+                // Fallback: campo balance da conta (em centavos)
+                if (prepaidBalance === null && acc.balance !== undefined) {
+                    prepaidBalance = parseFloat(acc.balance) / 100;
+                    console.log('balance source: account.balance =', acc.balance);
+                }
+
+                if (prepaidBalance !== null) {
                     await supabase.from('meta_account_stats').upsert({
                         id: 1,
-                        balance: parseFloat(acc.balance) / 100,
+                        balance: prepaidBalance,
                         currency: acc.currency ?? 'BRL',
                         updated_at: new Date().toISOString(),
                     }, { onConflict: 'id' });
-                    result.account_balance = parseFloat(acc.balance) / 100;
+                    result.account_balance = prepaidBalance;
                 }
             } catch (e: any) {
                 console.error('account balance error:', e.message);
