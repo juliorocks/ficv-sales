@@ -198,6 +198,10 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
     // ─── Matrículas por agente — calculado no banco (função matriculas_por_agente),
     // respeitando os mesmos filtros de período/curso/turma/situação da página.
     useEffect(() => {
+        let ignore = false;
+        // Limpa imediatamente para não exibir dados do período anterior enquanto carrega
+        setAgentAttribution({ porAgente: [], detalhes: [], semAtribuicao: 0, jaExistente: 0 });
+        setSelectedAgentDrillDown(null);
         const loadPorAgente = async () => {
             setPorAgenteLoading(true);
             try {
@@ -208,6 +212,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                     p_turma: selectedTurma,
                     p_situacao: selectedSituacao,
                 });
+                if (ignore) return;
                 if (error) throw error;
                 setAgentAttribution({
                     porAgente: data?.porAgente ?? [],
@@ -215,14 +220,14 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                     semAtribuicao: data?.semAtribuicao ?? 0,
                     jaExistente: data?.jaExistente ?? 0,
                 });
-                setSelectedAgentDrillDown(null);
             } catch (e) {
-                console.error('loadPorAgente error:', e);
+                if (!ignore) console.error('loadPorAgente error:', e);
             } finally {
-                setPorAgenteLoading(false);
+                if (!ignore) setPorAgenteLoading(false);
             }
         };
         loadPorAgente();
+        return () => { ignore = true; };
     }, [dateStart, dateEnd, selectedCursos, selectedTurma, selectedSituacao]);
 
     // ─── Drill-down: matrículas do agente selecionado, agrupadas por curso ────
@@ -587,7 +592,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                             icon={GraduationCap}
                             title="Total Matrículas"
                             value={filtered.length.toLocaleString()}
-                            sub={`em ${selectedYear}`}
+                            sub={period === 'today' ? 'hoje' : period === 'week' ? 'esta semana' : period === 'month' ? 'este mês' : period === 'semester' ? 'este semestre' : period === 'custom' ? `${dateStart} – ${dateEnd}` : `em ${selectedYear}`}
                             color="#5551FF"
                         />
                         <StatCard
