@@ -541,11 +541,20 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                 )}
             </div>
 
-            {/* Source toggle */}
-            <div className="flex items-center gap-2">
-                <SourceTab label="Todos" active={source === 'all'} color="#5551FF" onClick={() => setSource('all')} />
-                <SourceTab label="Meta Ads" active={source === 'meta'} color="#1877F2" onClick={() => setSource('meta')} />
-                <SourceTab label="Google Ads" active={source === 'google'} color="#F97316" onClick={() => setSource('google')} />
+            {/* Source toggle + saldo de conta */}
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                    <SourceTab label="Todos" active={source === 'all'} color="#5551FF" onClick={() => setSource('all')} />
+                    <SourceTab label="Meta Ads" active={source === 'meta'} color="#1877F2" onClick={() => setSource('meta')} />
+                    <SourceTab label="Google Ads" active={source === 'google'} color="#F97316" onClick={() => setSource('google')} />
+                </div>
+                {budget && budget.metaBalance > 0 && (
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] text-xs">
+                        <Wallet size={12} style={{ color: '#1877F2' }} />
+                        <span className="text-[var(--text-muted)] font-semibold">Verba da Conta</span>
+                        <span className="font-bold text-[var(--text-main)]">{fmt(budget.metaBalance)}</span>
+                    </div>
+                )}
             </div>
 
             {/* Filters */}
@@ -660,7 +669,7 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
             {activeInsights.length > 0 && (
                 <>
                     {/* KPI cards */}
-                    <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+                    <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
                         <KpiCard icon={DollarSign} title="Investimento" value={fmt(totals.spend)}
                             delta={pctDelta(totals.spend, prevTotals.spend)} goodDirection="neutral"
                             series={spendSeries} color="#5551FF" />
@@ -676,57 +685,6 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                         <KpiCard icon={Eye} title="CPM" value={fmt(totals.cpm)}
                             delta={pctDelta(totals.cpm, prevTotals.cpm)} goodDirection="down"
                             series={cpmSeries} color="#A78BFA" />
-                        {/* Verba Restante — Meta (saldo da conta pré-paga) */}
-                        {budget && source !== 'google' && budget.metaBalance > 0 && (() => {
-                            const metaSpend = insights.reduce((s, r) => s + (r.spend || 0), 0);
-                            const total = metaSpend + budget.metaBalance;
-                            const pct = total > 0 ? Math.min(100, (metaSpend / total) * 100) : 0;
-                            return (
-                                <div className="glass-card p-5 relative overflow-hidden">
-                                    <div className="flex justify-between items-start mb-3">
-                                        <div className="p-2 rounded-lg" style={{ background: '#22c55e15' }}>
-                                            <Wallet size={16} style={{ color: '#22c55e' }} />
-                                        </div>
-                                    </div>
-                                    <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Fundos Disponíveis · Meta</p>
-                                    <p className="text-xl font-bold text-[var(--text-main)] mb-1">{fmt(budget.metaBalance)}</p>
-                                    <p className="text-[10px] text-[var(--text-muted)] mb-2">{fmt(metaSpend)} investido no período</p>
-                                    <div className="w-full h-1.5 rounded-full bg-[var(--border)] overflow-hidden">
-                                        <div className="h-full rounded-full transition-all" style={{
-                                            width: `${pct}%`,
-                                            background: pct > 85 ? '#ef4444' : pct > 60 ? '#f59e0b' : '#22c55e',
-                                        }} />
-                                    </div>
-                                    <p className="text-[9px] text-[var(--text-muted)] mt-1">{pct.toFixed(0)}% do saldo utilizado no período</p>
-                                </div>
-                            );
-                        })()}
-                        {/* Verba Restante — Google */}
-                        {budget && source !== 'meta' && budget.googleDailyTotal > 0 && (() => {
-                            const googleSpend = gInsights.reduce((s, r) => s + (r.spend || 0), 0);
-                            const googleRemaining = Math.max(0, budget.googleDailyTotal * budget.remainingDays - googleSpend);
-                            const googleTotal = googleSpend + googleRemaining;
-                            const pct = googleTotal > 0 ? Math.min(100, (googleSpend / googleTotal) * 100) : 0;
-                            return (
-                                <div className="glass-card p-5 relative overflow-hidden">
-                                    <div className="flex justify-between items-start mb-3">
-                                        <div className="p-2 rounded-lg" style={{ background: '#22c55e15' }}>
-                                            <Wallet size={16} style={{ color: '#22c55e' }} />
-                                        </div>
-                                    </div>
-                                    <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Verba Restante · Google</p>
-                                    <p className="text-xl font-bold text-[var(--text-main)] mb-1">{fmt(googleRemaining)}</p>
-                                    <p className="text-[10px] text-[var(--text-muted)] mb-2">{fmt(googleSpend)} investido</p>
-                                    <div className="w-full h-1.5 rounded-full bg-[var(--border)] overflow-hidden">
-                                        <div className="h-full rounded-full transition-all" style={{
-                                            width: `${pct}%`,
-                                            background: pct > 85 ? '#ef4444' : pct > 60 ? '#f59e0b' : '#22c55e',
-                                        }} />
-                                    </div>
-                                    <p className="text-[9px] text-[var(--text-muted)] mt-1">{pct.toFixed(0)}% do orçamento utilizado · estimado</p>
-                                </div>
-                            );
-                        })()}
                     </div>
 
                     {/* Charts */}
