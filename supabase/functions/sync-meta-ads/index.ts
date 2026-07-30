@@ -203,6 +203,25 @@ serve(async (req) => {
             const r = await syncCampaigns(supabase);
             result.campaigns = r;
             console.log(`Campaigns synced: ${r.synced}`, r.error ?? '');
+
+            // Saldo da conta (fundos disponíveis pré-pagos)
+            try {
+                const accRes = await fetch(
+                    `https://graph.facebook.com/v21.0/${AD_ACCOUNT_ID}?fields=balance,currency&access_token=${ACCESS_TOKEN}`
+                );
+                const acc = await accRes.json();
+                if (acc.balance !== undefined) {
+                    await supabase.from('meta_account_stats').upsert({
+                        id: 1,
+                        balance: parseFloat(acc.balance) / 100,
+                        currency: acc.currency ?? 'BRL',
+                        updated_at: new Date().toISOString(),
+                    }, { onConflict: 'id' });
+                    result.account_balance = parseFloat(acc.balance) / 100;
+                }
+            } catch (e: any) {
+                console.error('account balance error:', e.message);
+            }
         }
 
         if (mode === 'insights' || mode === 'full') {

@@ -49,8 +49,7 @@ interface MetaCampaignOption {
 }
 
 interface BudgetInfo {
-    metaTotal: number;       // soma de lifetime_budget das campanhas Meta ativas
-    metaRemaining: number;   // soma de budget_remaining (lifetime) + daily_budget × dias restantes
+    metaBalance: number;      // saldo da conta pré-paga Meta (fundos disponíveis)
     googleDailyTotal: number; // soma dos budget_amount diários do Google (por campanha)
     remainingDays: number;
 }
@@ -278,23 +277,18 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
             if (syncRes.data) setLastSync((syncRes.data as any).synced_at);
 
             // Budget info
-            const [metaCamps, googleCamps] = await Promise.all([
-                supabase.from('meta_campaigns')
-                    .select('status,daily_budget,lifetime_budget,budget_remaining')
-                    .in('status', ['ACTIVE', 'PAUSED', 'CAMPAIGN_PAUSED']),
+            const today = new Date();
+            const endD = new Date(dateEnd + 'T23:59:59');
+            const remainingDays = Math.max(0, Math.ceil((endD.getTime() - today.getTime()) / 86400000));
+            const [metaBalanceRes, googleCamps] = await Promise.all([
+                supabase.from('meta_account_stats').select('balance').eq('id', 1).single(),
                 supabase.from('google_ads_campaigns')
                     .select('status,budget_amount')
                     .in('status', ['ENABLED', 'PAUSED']),
             ]);
-            const today = new Date();
-            const endD = new Date(dateEnd + 'T23:59:59');
-            const remainingDays = Math.max(0, Math.ceil((endD.getTime() - today.getTime()) / 86400000));
-            // Usa budget_remaining diretamente (válido tanto para lifetime quanto daily/ABO)
-            const metaRemaining = (metaCamps.data ?? []).reduce(
-                (s: number, c: any) => s + (c.budget_remaining ?? 0), 0
-            );
+            const metaBalance = (metaBalanceRes.data as any)?.balance ?? 0;
             const googleDailyTotal = (googleCamps.data ?? []).reduce((s: number, c: any) => s + (c.budget_amount ?? 0), 0);
-            setBudget({ metaTotal: 0, metaRemaining, googleDailyTotal, remainingDays });
+            setBudget({ metaBalance, googleDailyTotal, remainingDays });
         } catch (e) {
             console.error('loadData error:', e);
         } finally {
@@ -682,10 +676,10 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                         <KpiCard icon={Eye} title="CPM" value={fmt(totals.cpm)}
                             delta={pctDelta(totals.cpm, prevTotals.cpm)} goodDirection="down"
                             series={cpmSeries} color="#A78BFA" />
-                        {/* Verba Restante — Meta */}
-                        {budget && source !== 'google' && budget.metaRemaining > 0 && (() => {
+                        {/* Verba Restante — Meta (saldo da conta pré-paga) */}
+                        {budget && source !== 'google' && budget.metaBalance > 0 && (() => {
                             const metaSpend = insights.reduce((s, r) => s + (r.spend || 0), 0);
-                            const total = metaSpend + budget.metaRemaining;
+                            const total = metaSpend + budget.metaBalance;
                             const pct = total > 0 ? Math.min(100, (metaSpend / total) * 100) : 0;
                             return (
                                 <div className="glass-card p-5 relative overflow-hidden">
@@ -694,16 +688,16 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                                             <Wallet size={16} style={{ color: '#22c55e' }} />
                                         </div>
                                     </div>
-                                    <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Verba Restante · Meta</p>
-                                    <p className="text-xl font-bold text-[var(--text-main)] mb-1">{fmt(budget.metaRemaining)}</p>
-                                    <p className="text-[10px] text-[var(--text-muted)] mb-2">{fmt(metaSpend)} investido</p>
+                                    <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Fundos Disponíveis · Meta</p>
+                                    <p className="text-xl font-bold text-[var(--text-main)] mb-1">{fmt(budget.metaBalance)}</p>
+                                    <p className="text-[10px] text-[var(--text-muted)] mb-2">{fmt(metaSpend)} investido no período</p>
                                     <div className="w-full h-1.5 rounded-full bg-[var(--border)] overflow-hidden">
                                         <div className="h-full rounded-full transition-all" style={{
                                             width: `${pct}%`,
                                             background: pct > 85 ? '#ef4444' : pct > 60 ? '#f59e0b' : '#22c55e',
                                         }} />
                                     </div>
-                                    <p className="text-[9px] text-[var(--text-muted)] mt-1">{pct.toFixed(0)}% do orçamento utilizado</p>
+                                    <p className="text-[9px] text-[var(--text-muted)] mt-1">{pct.toFixed(0)}% do saldo utilizado no período</p>
                                 </div>
                             );
                         })()}
