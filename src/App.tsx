@@ -1809,8 +1809,15 @@ const FullApp = () => {
     }, [isDarkMode]);
 
     useEffect(() => {
+        // Timeout de segurança: se getSession() travar (Supabase down), libera a tela em 6s
+        const timeout = setTimeout(() => setLoading(false), 6000);
+
         supabase.auth.getSession().then(({ data: { session } }) => {
+            clearTimeout(timeout);
             setSession(session);
+            setLoading(false);
+        }).catch(() => {
+            clearTimeout(timeout);
             setLoading(false);
         });
 
@@ -1818,7 +1825,7 @@ const FullApp = () => {
             setSession(session);
         });
 
-        return () => subscription.unsubscribe();
+        return () => { clearTimeout(timeout); subscription.unsubscribe(); };
     }, []);
 
     if (loading) return (
