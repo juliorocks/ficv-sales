@@ -1,35 +1,60 @@
 #!/usr/bin/env node
 /**
  * sync-supabase-to-surreal.js
- * Migração inicial: lê dados do Supabase e insere no SurrealDB Cloud via REST API.
- * Usa fetch nativo (Node.js 18+) — sem dependências extras.
+ * Migração inicial: lê dados direto do PostgreSQL (sem REST API) e insere no SurrealDB.
  *
- * Uso (recomendado — usa usuário permanente ficv_admin):
- *   SUPABASE_SERVICE_KEY=<key> node surreal/sync-supabase-to-surreal.js [tabela]
+ * Uso:
+ *   SUPABASE_DB_PASSWORD=<senha> node surreal/sync-supabase-to-surreal.js [tabela]
  *
- * Uso alternativo (com token temporário do dashboard):
- *   SURREAL_TOKEN=<jwt> SUPABASE_SERVICE_KEY=<key> node surreal/sync-supabase-to-surreal.js
+ * Opcionalmente, passe DATABASE_URL completa:
+ *   DATABASE_URL=postgresql://postgres.<ref>:<senha>@aws-0-us-east-1.pooler.supabase.com:6543/postgres \
+ *   node surreal/sync-supabase-to-surreal.js
  */
 
-import { createClient } from '@supabase/supabase-js';
+import pg from 'pg';
+const { Client } = pg;
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const SURREAL_ENDPOINT = process.env.SURREAL_ENDPOINT
   || 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
-const SURREAL_NS    = process.env.SURREAL_NS || 'ficv';
-const SURREAL_DB    = process.env.SURREAL_DB || 'salespulse';
-const SURREAL_USER  = process.env.SURREAL_USER  || 'ficv_admin';
-const SURREAL_PASS  = process.env.SURREAL_PASS  || 'Ficv@Surreal2026!';
+const SURREAL_NS   = process.env.SURREAL_NS  || 'ficv';
+const SURREAL_DB   = process.env.SURREAL_DB  || 'salespulse';
+const SURREAL_USER = process.env.SURREAL_USER || 'ficv_admin';
+const SURREAL_PASS = process.env.SURREAL_PASS || 'Ficv@Surreal2026!';
 
-const SUPABASE_URL  = process.env.SUPABASE_URL || 'https://znypfroagfwohqeyxyqv.supabase.co';
-const SUPABASE_KEY  = process.env.SUPABASE_SERVICE_KEY; // service role key
+// Supabase Postgres — tenta conexão direta primeiro, pooler como fallback
+const SUPABASE_REF  = 'znypfroagfwohqeyxyqv';
+const SUPABASE_PASS = process.env.SUPABASE_DB_PASSWORD || '';
+
+const PG_CONFIGS = process.env.DATABASE_URL
+  ? [{ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } }]
+  : [
+      // 1. Conexão direta (melhor — session-level, sem limites de OFFSET)
+      {
+        host: `db.${SUPABASE_REF}.supabase.co`,
+        port: 5432,
+        database: 'postgres',
+        user: 'postgres',
+        password: SUPABASE_PASS,
+        ssl: { rejectUnauthorized: false },
+        connectionTimeoutMillis: 10000,
+      },
+      // 2. Pooler session mode (fallback)
+      {
+        host: 'aws-0-us-east-1.pooler.supabase.com',
+        port: 5432,
+        database: 'postgres',
+        user: `postgres.${SUPABASE_REF}`,
+        password: SUPABASE_PASS,
+        ssl: { rejectUnauthorized: false },
+        connectionTimeoutMillis: 10000,
+      },
+    ];
 
 const BATCH = 500;
-let _token = process.env.SURREAL_TOKEN || null; // pode ser passado externamente
+let _token = null;
 
 // ── SurrealDB REST client ─────────────────────────────────────────────────────
-// /sql aceita plain text SurrealQL (sem vars). Para INSERTs com dados,
-// serializa os dados diretamente no SQL usando JSON embutido.
 
 async function surrealSignin() {
   const res = await fetch(`${SURREAL_ENDPOINT}/signin`, {
@@ -43,19 +68,16 @@ async function surrealSignin() {
   _token = token;
 }
 
-const SURREAL_HEADERS = () => ({
-  'Content-Type':  'text/plain',
-  'Accept':        'application/json',
-  'Authorization': `Bearer ${_token}`,
-  'surreal-ns':    SURREAL_NS,
-  'surreal-db':    SURREAL_DB,
-});
-
 async function surrealSQL(sql) {
-  if (!_token) throw new Error('_token não definido — chame surrealSignin() primeiro');
   const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
     method: 'POST',
-    headers: SURREAL_HEADERS(),
+    headers: {
+      'Content-Type':  'text/plain',
+      'Accept':        'application/json',
+      'Authorization': `Bearer ${_token}`,
+      'surreal-ns':    SURREAL_NS,
+      'surreal-db':    SURREAL_DB,
+    },
     body: sql,
   });
   if (!res.ok) {
@@ -70,19 +92,15 @@ async function surrealSQL(sql) {
   return data;
 }
 
-// Serializa valor JS para literal SurrealQL inline
 function toSurrealLiteral(v) {
   if (v === null || v === undefined) return 'NONE';
   if (typeof v === 'boolean') return v ? 'true' : 'false';
   if (typeof v === 'number') return String(v);
+  if (v instanceof Date) return `d"${v.toISOString()}"`;
   if (typeof v === 'string') {
-    // record ID: deixa como está (table:id)
-    if (/^[a-z_]+:[^\s,;]+$/.test(v)) return v;
-    // datetime ISO — converte para d"..."
     if (/^\d{4}-\d{2}-\d{2}T/.test(v)) return `d"${v}"`;
     if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return `d"${v}T00:00:00Z"`;
-    // string normal
-    return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
+    return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '')}"`;
   }
   if (Array.isArray(v)) return `[${v.map(toSurrealLiteral).join(',')}]`;
   if (typeof v === 'object') {
@@ -99,52 +117,69 @@ async function surrealInsert(table, rows) {
   let inserted = 0;
   for (let i = 0; i < rows.length; i += 50) {
     const chunk = rows.slice(i, i + 50);
-    // Serializa cada row como objeto literal SurrealQL
     const literals = chunk.map(r => toSurrealLiteral(r)).join(',\n  ');
     const sql = `INSERT INTO ${table} [\n  ${literals}\n] RETURN NONE`;
     try {
       await surrealSQL(sql);
       inserted += chunk.length;
     } catch (e) {
-      warn(`Erro ao inserir em ${table} (chunk ${i}): ${e.message.slice(0, 200)}`);
+      warn(`Erro ao inserir em ${table} (chunk ${i}): ${e.message.slice(0, 300)}`);
     }
     await sleep(30);
   }
   return inserted;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── PostgreSQL client ─────────────────────────────────────────────────────────
 
-const log  = (msg) => console.log(`[${new Date().toISOString()}] ${msg}`);
-const warn = (msg) => console.warn(`\x1b[33m[WARN]\x1b[0m ${msg}`);
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
-async function paginate(supabase, table, columns = '*', orderBy = 'id') {
-  const rows = [];
-  let from = 0;
-  while (true) {
-    const { data, error } = await supabase
-      .from(table)
-      .select(columns)
-      .order(orderBy, { ascending: true })
-      .range(from, from + BATCH - 1);
-    if (error) {
-      warn(`Supabase ${table}: ${error.message}`);
-      break;
+async function connectPg() {
+  for (const config of PG_CONFIGS) {
+    const label = config.connectionString
+      ? config.connectionString.replace(/:([^@]+)@/, ':***@')
+      : `${config.host}:${config.port}`;
+    try {
+      const client = new Client(config);
+      await client.connect();
+      log(`✓ PostgreSQL conectado via ${label}`);
+      return client;
+    } catch (e) {
+      warn(`PG ${label}: ${e.message}`);
     }
-    if (!data || data.length === 0) break;
-    rows.push(...data);
-    if (data.length < BATCH) break;
-    from += BATCH;
   }
+  throw new Error('Não foi possível conectar ao PostgreSQL. Verifique SUPABASE_DB_PASSWORD.');
+}
+
+async function pgQuery(client, table, columns, orderBy, offset) {
+  const cols = columns === '*' ? '*' : columns.split(',').map(c => `"${c.trim()}"`).join(', ');
+  const q = `SELECT ${cols} FROM "${table}" ORDER BY "${orderBy}" LIMIT ${BATCH} OFFSET ${offset}`;
+  const res = await client.query(q);
+  return res.rows;
+}
+
+async function paginate(client, table, columns, orderBy) {
+  const rows = [];
+  let offset = 0;
+  while (true) {
+    const batch = await pgQuery(client, table, columns, orderBy, offset);
+    if (!batch.length) break;
+    rows.push(...batch);
+    if (batch.length < BATCH) break;
+    offset += BATCH;
+    process.stdout.write(`\r   PostgreSQL: ${rows.length} lidos...`);
+  }
+  if (rows.length > 0) process.stdout.write('\r');
   return rows;
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const log  = (msg) => console.log(`[${new Date().toLocaleTimeString('pt-BR')}] ${msg}`);
+const warn = (msg) => console.warn(`\x1b[33m[WARN]\x1b[0m ${msg}`);
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
 function sid(table, id) {
-  // Gera record ID compatível com SurrealDB: table:id
   if (id == null) return null;
-  const safe = String(id).replace(/[^a-zA-Z0-9_-]/g, '_');
-  return `${table}:⟨${safe}⟩`; // usando ⟨⟩ para IDs arbitrários
+  return `${table}:⟨${String(id)}⟩`;
 }
 
 // ── Transformers ──────────────────────────────────────────────────────────────
@@ -169,15 +204,13 @@ const T = {
   }),
   profiles: (r) => ({
     id: sid('profiles', r.id), email: r.email,
-    full_name: r.full_name || r.name || '',
+    full_name: r.full_name || '',
     role: r.role || 'agent', avatar_url: r.avatar_url || null,
     active: r.active !== false, created_at: r.created_at, updated_at: r.updated_at,
-    password: null, // senha não migra — usuário reseta pelo novo auth
   }),
   alunos: (r) => ({
     id: sid('alunos', r.id), cpf: r.cpf, nome: r.nome,
-    email: r.email, password: null,
-    created_at: r.created_at, updated_at: r.updated_at,
+    email: r.email, created_at: r.created_at, updated_at: r.updated_at,
   }),
   leads: (r) => ({
     id: sid('leads', r.id),
@@ -190,7 +223,6 @@ const T = {
     data_entrada: r.data_entrada,
     stage_entry_date: r.stage_entry_date || null,
     observacoes: r.observacoes || null,
-    attachments: r.attachments || null,
     source_id: r.source_id ? sid('lead_sources', r.source_id) : null,
     temperatura: r.temperatura || null,
     assigned_to_id: r.assigned_to_id ? sid('profiles', r.assigned_to_id) : null,
@@ -327,8 +359,6 @@ const T = {
   }),
 };
 
-// ── Plano de migração (ordem: sem FK primeiro) ────────────────────────────────
-
 const PLAN = [
   { table: 'stages',                        columns: 'id,name,order,title_color,bg_color',             orderBy: 'id' },
   { table: 'courses',                       columns: 'id,name,type,default_value',                      orderBy: 'id' },
@@ -345,46 +375,36 @@ const PLAN = [
   { table: 'tickets',                       columns: '*',                                               orderBy: 'id' },
   { table: 'ticket_messages',               columns: 'id,ticket_id,autor_id,autor_nome,autor_role,conteudo,interno,created_at', orderBy: 'id' },
   { table: 'ticket_evaluations',            columns: '*',                                               orderBy: 'id' },
-  { table: 'meta_campaigns',                columns: '*',                                               orderBy: 'campaign_id' },
-  { table: 'meta_campaign_insights_daily',  columns: '*',                                               orderBy: 'date' },
-  { table: 'meta_demographics_daily',       columns: '*',                                               orderBy: 'date' },
-  { table: 'google_ads_campaigns',          columns: '*',                                               orderBy: 'campaign_id' },
-  { table: 'google_ads_insights_daily',     columns: '*',                                               orderBy: 'date' },
-  { table: 'sponte_matriculas',             columns: '*',                                               orderBy: 'data_matricula' },
-  { table: 'sponte_parcelas',               columns: '*',                                               orderBy: 'id' },
-  { table: 'matriculas',                    columns: '*',                                               orderBy: 'created_at' },
-  { table: 'widechat_messages',             columns: 'id,lead_id,origin,sender_name,content,session_id,contact_id,created_at', orderBy: 'created_at' },
-  { table: 'widechat_atendimentos',         columns: '*',                                               orderBy: 'aceito_em' },
-  { table: 'messages_logs',                 columns: 'id,contact,agent_name,timestamp',                orderBy: 'timestamp' },
+  { table: 'meta_campaigns',               columns: '*',                                               orderBy: 'campaign_id' },
+  { table: 'meta_campaign_insights_daily', columns: '*',                                               orderBy: 'date' },
+  { table: 'meta_demographics_daily',      columns: '*',                                               orderBy: 'date' },
+  { table: 'google_ads_campaigns',         columns: '*',                                               orderBy: 'campaign_id' },
+  { table: 'google_ads_insights_daily',    columns: '*',                                               orderBy: 'date' },
+  { table: 'sponte_matriculas',            columns: '*',                                               orderBy: 'data_matricula' },
+  { table: 'sponte_parcelas',              columns: '*',                                               orderBy: 'id' },
+  { table: 'matriculas',                   columns: '*',                                               orderBy: 'created_at' },
+  { table: 'widechat_messages',            columns: 'id,lead_id,origin,sender_name,content,session_id,contact_id,created_at', orderBy: 'created_at' },
+  { table: 'widechat_atendimentos',        columns: '*',                                               orderBy: 'aceito_em' },
+  { table: 'messages_logs',               columns: 'id,contact,agent_name,timestamp',                orderBy: 'timestamp' },
 ];
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-async function testSurrealConnection() {
-  log('Autenticando no SurrealDB...');
-  if (!_token) await surrealSignin();
-  const res = await surrealSQL('RETURN 42');
-  log(`  ✓ Conectado como ${SURREAL_USER} — ok`);
-}
-
 async function main() {
-  if (!SUPABASE_KEY) {
-    console.error('\x1b[31mERRO:\x1b[0m Defina SUPABASE_SERVICE_KEY no ambiente');
-    process.exit(1);
-  }
-  if (!SURREAL_TOKEN) {
-    console.error('\x1b[31mERRO:\x1b[0m Defina SURREAL_TOKEN no ambiente (JWT do dashboard SurrealDB Cloud)');
+  if (!SUPABASE_PASS && !process.env.DATABASE_URL) {
+    console.error('\x1b[31mERRO:\x1b[0m Defina SUPABASE_DB_PASSWORD (ou DATABASE_URL) no ambiente.');
+    console.error('  Senha disponível em: Supabase Dashboard → Settings → Database → Database password');
     process.exit(1);
   }
 
-  await testSurrealConnection();
+  log('Autenticando no SurrealDB...');
+  await surrealSignin();
+  const r = await surrealSQL('RETURN 42');
+  log(`✓ SurrealDB conectado como ${SURREAL_USER}`);
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-  log('Supabase client inicializado');
+  const pgClient = await connectPg();
 
   const results = [];
-
-  // Argumento opcional: migrar só uma tabela (para testes)
   const onlyTable = process.argv[2];
   const plan = onlyTable ? PLAN.filter(p => p.table === onlyTable) : PLAN;
 
@@ -397,8 +417,8 @@ async function main() {
 
     try {
       log(`\n── ${table}`);
-      const rows = await paginate(supabase, table, columns, orderBy);
-      log(`   Supabase: ${rows.length} registros`);
+      const rows = await paginate(pgClient, table, columns, orderBy);
+      log(`   PostgreSQL: ${rows.length} registros`);
 
       const transformed = rows.map(transform);
       const inserted = await surrealInsert(table, transformed);
@@ -410,7 +430,8 @@ async function main() {
     }
   }
 
-  // Relatório final
+  await pgClient.end();
+
   console.log('\n\x1b[1m══════════════ RELATÓRIO ══════════════\x1b[0m');
   let totalOk = 0, totalErr = 0;
   for (const r of results) {
