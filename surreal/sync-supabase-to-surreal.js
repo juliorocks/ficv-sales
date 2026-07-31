@@ -4,7 +4,10 @@
  * Migração inicial: lê dados do Supabase e insere no SurrealDB Cloud via REST API.
  * Usa fetch nativo (Node.js 18+) — sem dependências extras.
  *
- * Uso:
+ * Uso (recomendado — usa usuário permanente ficv_admin):
+ *   SUPABASE_SERVICE_KEY=<key> node surreal/sync-supabase-to-surreal.js [tabela]
+ *
+ * Uso alternativo (com token temporário do dashboard):
  *   SURREAL_TOKEN=<jwt> SUPABASE_SERVICE_KEY=<key> node surreal/sync-supabase-to-surreal.js
  */
 
@@ -15,27 +18,41 @@ const SURREAL_ENDPOINT = process.env.SURREAL_ENDPOINT
   || 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
 const SURREAL_NS    = process.env.SURREAL_NS || 'ficv';
 const SURREAL_DB    = process.env.SURREAL_DB || 'salespulse';
-const SURREAL_TOKEN = process.env.SURREAL_TOKEN; // JWT do dashboard
+const SURREAL_USER  = process.env.SURREAL_USER  || 'ficv_admin';
+const SURREAL_PASS  = process.env.SURREAL_PASS  || 'Ficv@Surreal2026!';
 
 const SUPABASE_URL  = process.env.SUPABASE_URL || 'https://znypfroagfwohqeyxyqv.supabase.co';
 const SUPABASE_KEY  = process.env.SUPABASE_SERVICE_KEY; // service role key
 
 const BATCH = 500;
+let _token = process.env.SURREAL_TOKEN || null; // pode ser passado externamente
 
 // ── SurrealDB REST client ─────────────────────────────────────────────────────
 // /sql aceita plain text SurrealQL (sem vars). Para INSERTs com dados,
 // serializa os dados diretamente no SQL usando JSON embutido.
 
+async function surrealSignin() {
+  const res = await fetch(`${SURREAL_ENDPOINT}/signin`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'surreal-ns': SURREAL_NS },
+    body: JSON.stringify({ ns: SURREAL_NS, user: SURREAL_USER, pass: SURREAL_PASS }),
+  });
+  if (!res.ok) throw new Error(`Signin falhou HTTP ${res.status}: ${await res.text()}`);
+  const { token } = await res.json();
+  if (!token) throw new Error('Signin retornou sem token');
+  _token = token;
+}
+
 const SURREAL_HEADERS = () => ({
   'Content-Type':  'text/plain',
   'Accept':        'application/json',
-  'Authorization': `Bearer ${SURREAL_TOKEN}`,
+  'Authorization': `Bearer ${_token}`,
   'surreal-ns':    SURREAL_NS,
   'surreal-db':    SURREAL_DB,
 });
 
 async function surrealSQL(sql) {
-  if (!SURREAL_TOKEN) throw new Error('SURREAL_TOKEN não definido');
+  if (!_token) throw new Error('_token não definido — chame surrealSignin() primeiro');
   const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
     method: 'POST',
     headers: SURREAL_HEADERS(),
@@ -344,9 +361,10 @@ const PLAN = [
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function testSurrealConnection() {
-  log('Testando conexão SurrealDB...');
+  log('Autenticando no SurrealDB...');
+  if (!_token) await surrealSignin();
   const res = await surrealSQL('RETURN 42');
-  log(`  ✓ Conectado — resultado: ${JSON.stringify(res[0]?.result)}`);
+  log(`  ✓ Conectado como ${SURREAL_USER} — ok`);
 }
 
 async function main() {
