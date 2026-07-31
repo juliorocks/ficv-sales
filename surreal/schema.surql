@@ -81,7 +81,7 @@ DEFINE TABLE profiles SCHEMAFULL
     FOR create, update WHERE $auth.role = 'admin',
     FOR delete WHERE $auth.role = 'admin';
 
-DEFINE FIELD email       ON profiles TYPE string ASSERT string::is::email($value);
+DEFINE FIELD email       ON profiles TYPE string ASSERT string::is_email($value);
 DEFINE FIELD password    ON profiles TYPE string;
 DEFINE FIELD full_name   ON profiles TYPE string;
 DEFINE FIELD role        ON profiles TYPE string ASSERT $value IN ['admin', 'agent', 'atendente', 'visualizador'] DEFAULT 'agent';
@@ -105,7 +105,7 @@ DEFINE TABLE alunos SCHEMAFULL
 
 DEFINE FIELD cpf        ON alunos TYPE string;
 DEFINE FIELD nome       ON alunos TYPE string;
-DEFINE FIELD email      ON alunos TYPE string ASSERT string::is::email($value);
+DEFINE FIELD email      ON alunos TYPE string ASSERT string::is_email($value);
 DEFINE FIELD password   ON alunos TYPE string;
 DEFINE FIELD created_at ON alunos TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at ON alunos TYPE datetime DEFAULT time::now();

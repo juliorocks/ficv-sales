@@ -12,62 +12,84 @@ import { createClient } from '@supabase/supabase-js';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const SURREAL_ENDPOINT = process.env.SURREAL_ENDPOINT
-  || 'https://heroic-quelea-06frhjc9ott4l6ls0fs8nn630s.aws-use2.surreal.cloud';
+  || 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
 const SURREAL_NS    = process.env.SURREAL_NS || 'ficv';
 const SURREAL_DB    = process.env.SURREAL_DB || 'salespulse';
 const SURREAL_TOKEN = process.env.SURREAL_TOKEN; // JWT do dashboard
 
-const SUPABASE_URL  = process.env.SUPABASE_URL || 'https://pynwnhegacuqfzxldzhf.supabase.co';
+const SUPABASE_URL  = process.env.SUPABASE_URL || 'https://znypfroagfwohqeyxyqv.supabase.co';
 const SUPABASE_KEY  = process.env.SUPABASE_SERVICE_KEY; // service role key
 
 const BATCH = 500;
 
 // ── SurrealDB REST client ─────────────────────────────────────────────────────
+// /sql aceita plain text SurrealQL (sem vars). Para INSERTs com dados,
+// serializa os dados diretamente no SQL usando JSON embutido.
 
-async function surrealQuery(sql, vars = {}) {
+const SURREAL_HEADERS = () => ({
+  'Content-Type':  'text/plain',
+  'Accept':        'application/json',
+  'Authorization': `Bearer ${SURREAL_TOKEN}`,
+  'surreal-ns':    SURREAL_NS,
+  'surreal-db':    SURREAL_DB,
+});
+
+async function surrealSQL(sql) {
   if (!SURREAL_TOKEN) throw new Error('SURREAL_TOKEN não definido');
-
   const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
     method: 'POST',
-    headers: {
-      'Content-Type':   'application/json',
-      'Accept':         'application/json',
-      'Authorization':  `Bearer ${SURREAL_TOKEN}`,
-      'surreal-ns':     SURREAL_NS,
-      'surreal-db':     SURREAL_DB,
-    },
-    body: JSON.stringify({ query: sql, variables: vars }),
+    headers: SURREAL_HEADERS(),
+    body: sql,
   });
-
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(`SurrealDB HTTP ${res.status}: ${text}`);
   }
-
   const data = await res.json();
-  // Resultado pode ser array de statements
   if (Array.isArray(data)) {
     const errors = data.filter(r => r.status === 'ERR');
-    if (errors.length > 0) {
-      throw new Error(errors.map(e => e.result).join('; '));
-    }
+    if (errors.length > 0) throw new Error(errors.map(e => e.result).join('; '));
   }
   return data;
+}
+
+// Serializa valor JS para literal SurrealQL inline
+function toSurrealLiteral(v) {
+  if (v === null || v === undefined) return 'NONE';
+  if (typeof v === 'boolean') return v ? 'true' : 'false';
+  if (typeof v === 'number') return String(v);
+  if (typeof v === 'string') {
+    // record ID: deixa como está (table:id)
+    if (/^[a-z_]+:[^\s,;]+$/.test(v)) return v;
+    // datetime ISO — converte para d"..."
+    if (/^\d{4}-\d{2}-\d{2}T/.test(v)) return `d"${v}"`;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return `d"${v}T00:00:00Z"`;
+    // string normal
+    return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
+  }
+  if (Array.isArray(v)) return `[${v.map(toSurrealLiteral).join(',')}]`;
+  if (typeof v === 'object') {
+    const pairs = Object.entries(v)
+      .filter(([, val]) => val !== undefined)
+      .map(([k, val]) => `${k}: ${toSurrealLiteral(val)}`);
+    return `{${pairs.join(', ')}}`;
+  }
+  return JSON.stringify(v);
 }
 
 async function surrealInsert(table, rows) {
   if (rows.length === 0) return 0;
   let inserted = 0;
-  // Insere em chunks de 50 para evitar payloads gigantes
   for (let i = 0; i < rows.length; i += 50) {
     const chunk = rows.slice(i, i + 50);
-    // INSERT INTO table [$rows] — SurrealDB aceita array no INSERT
-    const sql = `INSERT INTO ${table} $rows RETURN NONE`;
+    // Serializa cada row como objeto literal SurrealQL
+    const literals = chunk.map(r => toSurrealLiteral(r)).join(',\n  ');
+    const sql = `INSERT INTO ${table} [\n  ${literals}\n] RETURN NONE`;
     try {
-      await surrealQuery(sql, { rows: chunk });
+      await surrealSQL(sql);
       inserted += chunk.length;
     } catch (e) {
-      warn(`Erro ao inserir em ${table} (chunk ${i}): ${e.message}`);
+      warn(`Erro ao inserir em ${table} (chunk ${i}): ${e.message.slice(0, 200)}`);
     }
     await sleep(30);
   }
@@ -323,8 +345,8 @@ const PLAN = [
 
 async function testSurrealConnection() {
   log('Testando conexão SurrealDB...');
-  const res = await surrealQuery('SELECT 1 AS ok');
-  log(`  ✓ Conectado — resultado: ${JSON.stringify(res)}`);
+  const res = await surrealSQL('RETURN 42');
+  log(`  ✓ Conectado — resultado: ${JSON.stringify(res[0]?.result)}`);
 }
 
 async function main() {
