@@ -150,6 +150,12 @@ function wrapMutationBuilder(
     return builder;
 }
 
+type AnyRecord = Record<string, (...args: unknown[]) => unknown>;
+
+function call<T>(obj: unknown, method: string, ...args: unknown[]): T {
+    return ((obj as AnyRecord)[method])(...args) as T;
+}
+
 function makeFromProxy(table: string): ReturnType<typeof _supabase.from> {
     const base = _supabase.from(table);
     let _filters: Record<string, unknown> = {};
@@ -157,43 +163,40 @@ function makeFromProxy(table: string): ReturnType<typeof _supabase.from> {
     const wrap = (inner: ReturnType<typeof _supabase.from>): ReturnType<typeof _supabase.from> => {
         return new Proxy(inner, {
             get(target, prop: string) {
-                const val = (target as Record<string, unknown>)[prop];
+                const val = (target as unknown as AnyRecord)[prop];
 
-                // Captura filtros eq para passar ao surrealWrite
                 if (prop === 'eq') {
                     return (field: string, value: unknown) => {
                         _filters[field] = value;
-                        return wrap((target as Record<string, Function>).eq(field, value) as ReturnType<typeof _supabase.from>);
+                        return wrap(call<ReturnType<typeof _supabase.from>>(target, 'eq', field, value));
                     };
                 }
 
-                // Intercepta mutações
                 if (prop === 'insert') {
                     return (data: unknown) => {
-                        const b = (target as Record<string, Function>).insert(data) as ReturnType<typeof _supabase.from>;
-                        return wrapMutationBuilder(b as Parameters<typeof wrapMutationBuilder>[0], table, 'insert', data, {});
+                        const b = call<Parameters<typeof wrapMutationBuilder>[0]>(target, 'insert', data);
+                        return wrapMutationBuilder(b, table, 'insert', data, {});
                     };
                 }
                 if (prop === 'upsert') {
                     return (data: unknown, opts?: unknown) => {
-                        const b = (target as Record<string, Function>).upsert(data, opts) as ReturnType<typeof _supabase.from>;
-                        return wrapMutationBuilder(b as Parameters<typeof wrapMutationBuilder>[0], table, 'upsert', data, {});
+                        const b = call<Parameters<typeof wrapMutationBuilder>[0]>(target, 'upsert', data, opts);
+                        return wrapMutationBuilder(b, table, 'upsert', data, {});
                     };
                 }
                 if (prop === 'update') {
                     return (data: unknown) => {
-                        const b = (target as Record<string, Function>).update(data) as ReturnType<typeof _supabase.from>;
-                        // Ao encadear .eq() após .update(), captura os filtros
+                        const b = call<ReturnType<typeof _supabase.from>>(target, 'update', data);
                         return new Proxy(b, {
                             get(bt, bp: string) {
                                 if (bp === 'eq') {
                                     return (field: string, value: unknown) => {
                                         _filters[field] = value;
-                                        const nb = (bt as Record<string, Function>).eq(field, value) as ReturnType<typeof _supabase.from>;
-                                        return wrapMutationBuilder(nb as Parameters<typeof wrapMutationBuilder>[0], table, 'update', data, { ..._filters });
+                                        const nb = call<Parameters<typeof wrapMutationBuilder>[0]>(bt, 'eq', field, value);
+                                        return wrapMutationBuilder(nb, table, 'update', data, { ..._filters });
                                     };
                                 }
-                                const bv = (bt as Record<string, unknown>)[bp];
+                                const bv = (bt as unknown as AnyRecord)[bp];
                                 return typeof bv === 'function' ? bv.bind(bt) : bv;
                             }
                         });
@@ -201,24 +204,24 @@ function makeFromProxy(table: string): ReturnType<typeof _supabase.from> {
                 }
                 if (prop === 'delete') {
                     return () => {
-                        const b = (target as Record<string, Function>).delete() as ReturnType<typeof _supabase.from>;
+                        const b = call<ReturnType<typeof _supabase.from>>(target, 'delete');
                         return new Proxy(b, {
                             get(bt, bp: string) {
                                 if (bp === 'eq') {
                                     return (field: string, value: unknown) => {
                                         _filters[field] = value;
-                                        const nb = (bt as Record<string, Function>).eq(field, value) as ReturnType<typeof _supabase.from>;
-                                        return wrapMutationBuilder(nb as Parameters<typeof wrapMutationBuilder>[0], table, 'delete', null, { ..._filters });
+                                        const nb = call<Parameters<typeof wrapMutationBuilder>[0]>(bt, 'eq', field, value);
+                                        return wrapMutationBuilder(nb, table, 'delete', null, { ..._filters });
                                     };
                                 }
-                                const bv = (bt as Record<string, unknown>)[bp];
+                                const bv = (bt as unknown as AnyRecord)[bp];
                                 return typeof bv === 'function' ? bv.bind(bt) : bv;
                             }
                         });
                     };
                 }
 
-                return typeof val === 'function' ? (val as Function).bind(target) : val;
+                return typeof val === 'function' ? val.bind(target) : val;
             }
         });
     };
@@ -232,7 +235,7 @@ export const supabase = new Proxy(_supabase, {
         if (prop === 'from') {
             return (table: string) => makeFromProxy(table);
         }
-        const val = (target as Record<string, unknown>)[prop];
-        return typeof val === 'function' ? (val as Function).bind(target) : val;
+        const val = (target as unknown as AnyRecord)[prop];
+        return typeof val === 'function' ? val.bind(target) : val;
     }
 }) as typeof _supabase;
