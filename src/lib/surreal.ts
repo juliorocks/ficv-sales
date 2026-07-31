@@ -380,7 +380,7 @@ const auth = {
       }
       // Busca perfil do usuário
       const [[profile]] = await (async () => {
-        _token = body.token;
+        _token = body.token ?? null;
         return sql(`SELECT * FROM profiles WHERE email = "${email}" LIMIT 1`) as Promise<unknown[][]>;
       })();
       const user: SurrealSession['user'] = {
