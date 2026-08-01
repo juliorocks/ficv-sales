@@ -79,19 +79,20 @@ async function surrealWrite(
 
     let query: string;
     try {
+        const buildWhere = (f: Record<string, unknown>) =>
+            Object.entries(f).map(([k, v]) =>
+                k === 'id' ? `id = ${table}:⟨${v}⟩` : `${k} = ${toSurrealValue(v)}`
+            ).join(' AND ');
+
         if (op === 'delete') {
             if (!filters || !Object.keys(filters).length) return;
-            const where = Object.entries(filters)
-                .map(([k, v]) => `${k} = ${toSurrealValue(v)}`).join(' AND ');
-            query = `DELETE ${table} WHERE ${where}`;
+            query = `DELETE ${table} WHERE ${buildWhere(filters)}`;
         } else if (op === 'update') {
             if (!filters || !Object.keys(filters).length || !data) return;
             const sets = Object.entries(data as Record<string, unknown>)
                 .filter(([, v]) => v !== undefined)
                 .map(([k, v]) => `${k} = ${toSurrealValue(v)}`).join(', ');
-            const where = Object.entries(filters)
-                .map(([k, v]) => `${k} = ${toSurrealValue(v)}`).join(' AND ');
-            query = `UPDATE ${table} SET ${sets} WHERE ${where}`;
+            query = `UPDATE ${table} SET ${sets} WHERE ${buildWhere(filters)}`;
         } else {
             // insert / upsert
             const rows = Array.isArray(data) ? data : [data];
@@ -120,6 +121,108 @@ async function surrealWrite(
     } catch { /* não bloqueia o app */ }
 }
 
+// ── Read proxy (leituras de tabelas seguras direto do SurrealDB) ──────────────
+// Apenas tabelas simples sem FK cruzada entre tabelas UI-interativas.
+
+const SURREAL_READ_TABLES = new Set([
+    'scripts', 'knowledge_base', 'app_settings', 'financial_goals',
+]);
+
+function stripSurrealIds(v: unknown): unknown {
+    if (v === null || v === undefined) return v;
+    if (typeof v === 'string') {
+        const m = v.match(/^[a-z_]+:⟨(.+)⟩$/);
+        return m ? m[1] : v;
+    }
+    if (Array.isArray(v)) return (v as unknown[]).map(stripSurrealIds);
+    if (typeof v === 'object') {
+        const out: Record<string, unknown> = {};
+        for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+            out[k] = stripSurrealIds(val);
+        }
+        return out;
+    }
+    return v;
+}
+
+function makeSurrealSelect(table: string, cols: string, sbBase: unknown) {
+    type WherePart = { isIn: boolean; field: string; val: unknown };
+    type OrderPart = { field: string; asc: boolean };
+    const wheres: WherePart[] = [];
+    const orders: OrderPart[] = [];
+    let lim: number | null = null;
+    let isSingle = false;
+    let isMaybe = false;
+    let sb = sbBase as Record<string, (...a: unknown[]) => unknown>;
+
+    const buildWhereSql = () => wheres.map(({ isIn, field, val }) => {
+        if (!isIn) {
+            if (field === 'id') return `id = ${table}:⟨${val}⟩`;
+            return `${field} = ${toSurrealValue(val)}`;
+        }
+        return `${field} IN [${(val as unknown[]).map(v => toSurrealValue(v)).join(', ')}]`;
+    }).join(' AND ');
+
+    async function run(): Promise<unknown> {
+        try {
+            const token = await ensureSurrealToken();
+            if (!token) throw new Error('no token');
+            const colStr = cols.trim() === '*' ? '*'
+                : cols.split(',').map(c => c.trim()).join(', ');
+            let sql = `SELECT ${colStr} FROM ${table}`;
+            if (wheres.length) sql += ` WHERE ${buildWhereSql()}`;
+            if (orders.length)
+                sql += ' ORDER BY ' + orders.map(o => `${o.field} ${o.asc ? 'ASC' : 'DESC'}`).join(', ');
+            if (isSingle || isMaybe) sql += ' LIMIT 1';
+            else if (lim !== null) sql += ` LIMIT ${lim}`;
+
+            const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'text/plain', 'Accept': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                    'surreal-ns': SURREAL_NS, 'surreal-db': SURREAL_DB,
+                },
+                body: sql,
+            });
+            if (res.status === 401) { _surrealToken = null; localStorage.removeItem('surreal_token'); }
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const json = await res.json();
+            const entry = Array.isArray(json) ? json[0] : json;
+            if (entry?.status === 'ERR') throw new Error(entry.result);
+            let rows: unknown[] = Array.isArray(entry?.result) ? entry.result : [];
+            rows = rows.map(r => stripSurrealIds(r));
+            if (isSingle) {
+                if (!rows.length) return { data: null, error: { message: 'Row not found', code: 'PGRST116' } };
+                return { data: rows[0], error: null };
+            }
+            if (isMaybe) return { data: rows[0] ?? null, error: null };
+            return { data: rows, error: null };
+        } catch (e) {
+            console.warn(`[surreal-read] ${table} fallback: ${(e as Error).message}`);
+            return sb; // sb é thenable — resolve para o resultado do Supabase
+        }
+    }
+
+    const builder = {
+        eq(field: string, val: unknown)      { wheres.push({ isIn: false, field, val }); sb = sb.eq(field, val) as typeof sb; return builder; },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        in(field: string, vals: unknown[])   { wheres.push({ isIn: true, field, val: vals }); sb = (sb as any).in(field, vals); return builder; },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        order(field: string, opts?: { ascending?: boolean }) { orders.push({ field, asc: opts?.ascending !== false }); sb = (sb as any).order(field, opts); return builder; },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        limit(n: number)   { lim = n; sb = (sb as any).limit(n); return builder; },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        single()     { isSingle = true; sb = (sb as any).single(); return builder; },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        maybeSingle(){ isMaybe  = true; sb = (sb as any).maybeSingle(); return builder; },
+        then(res?: (v: unknown) => unknown, rej?: (e: unknown) => unknown) { return run().then(res, rej); },
+        catch(rej?: (e: unknown) => unknown) { return run().then(undefined, rej); },
+        finally(fn?: () => void) { return run().finally(fn); },
+    };
+    return builder;
+}
+
 // ── Proxy que intercepta mutações na resposta ─────────────────────────────────
 
 type MutationOp = 'insert' | 'update' | 'delete' | 'upsert';
@@ -139,8 +242,11 @@ function wrapMutationBuilder(
         return originalThen(
             (result: { data: unknown; error: unknown }) => {
                 if (!result?.error) {
-                    // Fire-and-forget ao SurrealDB
-                    surrealWrite(table, op, mutationData, filters).catch(() => {});
+                    // INSERT: usar result.data que contém o UUID gerado pelo Supabase
+                    const writeData = (op === 'insert' || op === 'upsert') && result?.data
+                        ? result.data
+                        : mutationData;
+                    surrealWrite(table, op, writeData, filters).catch(() => {});
                 }
                 return resolve ? resolve(result) : result;
             },
@@ -164,6 +270,17 @@ function makeFromProxy(table: string): ReturnType<typeof _supabase.from> {
         return new Proxy(inner, {
             get(target, prop: string) {
                 const val = (target as unknown as AnyRecord)[prop];
+
+                if (prop === 'select') {
+                    return (cols = '*', opts?: { count?: string; head?: boolean }) => {
+                        const sbResult = call<unknown>(target, 'select', cols, opts);
+                        // Se tabela não está no read set, tem join syntax ou tem count: usa Supabase
+                        if (!SURREAL_READ_TABLES.has(table) || opts?.count || /\w\s*\(/.test(cols)) {
+                            return sbResult;
+                        }
+                        return makeSurrealSelect(table, cols as string, sbResult);
+                    };
+                }
 
                 if (prop === 'eq') {
                     return (field: string, value: unknown) => {
