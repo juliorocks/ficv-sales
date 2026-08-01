@@ -56,6 +56,26 @@ function toSurrealValue(v: unknown): string {
     return JSON.stringify(v);
 }
 
+// Mapeamento de campos FK → tabela referenciada no SurrealDB
+const REFERENCE_FIELDS: Record<string, Record<string, string>> = {
+    leads: {
+        stage_id: 'stages', source_id: 'lead_sources',
+        assigned_to_id: 'profiles', motivo_perda_id: 'motivos_perda',
+        curso_interesse: 'courses',
+    },
+    lead_history: {
+        lead_id: 'leads', from_stage_id: 'stages', to_stage_id: 'stages',
+        changed_by: 'profiles', motivo_perda_id: 'motivos_perda',
+    },
+    lead_notes:          { lead_id: 'leads', created_by: 'profiles' },
+    tickets:             { aluno_id: 'alunos', atendente_id: 'profiles', curso_id: 'courses' },
+    ticket_messages:     { ticket_id: 'tickets' },
+    ticket_evaluations:  { ticket_id: 'tickets', aluno_id: 'alunos' },
+    widechat_messages:   { lead_id: 'leads' },
+    widechat_atendimentos: { lead_id: 'leads' },
+    sponte_matriculas:   { aluno_id: 'alunos' },
+};
+
 // Tabelas que recebem dual-write (omite views e logs)
 const DUAL_WRITE_TABLES = new Set([
     'leads', 'lead_history', 'lead_notes',
@@ -89,9 +109,14 @@ async function surrealWrite(
             query = `DELETE ${table} WHERE ${buildWhere(filters)}`;
         } else if (op === 'update') {
             if (!filters || !Object.keys(filters).length || !data) return;
+            const refFields = REFERENCE_FIELDS[table] ?? {};
             const sets = Object.entries(data as Record<string, unknown>)
                 .filter(([, v]) => v !== undefined)
-                .map(([k, v]) => `${k} = ${toSurrealValue(v)}`).join(', ');
+                .map(([k, v]) => {
+                    const ref = refFields[k];
+                    if (ref && v != null) return `${k} = ${ref}:⟨${v}⟩`;
+                    return `${k} = ${toSurrealValue(v)}`;
+                }).join(', ');
             query = `UPDATE ${table} SET ${sets} WHERE ${buildWhere(filters)}`;
         } else {
             // insert / upsert
@@ -121,11 +146,20 @@ async function surrealWrite(
     } catch { /* não bloqueia o app */ }
 }
 
-// ── Read proxy (leituras de tabelas seguras direto do SurrealDB) ──────────────
-// Apenas tabelas simples sem FK cruzada entre tabelas UI-interativas.
+// ── Read proxy (leituras direto do SurrealDB) ─────────────────────────────────
 
 const SURREAL_READ_TABLES = new Set([
+    // Conteúdo/configuração simples
     'scripts', 'knowledge_base', 'app_settings', 'financial_goals',
+    // Tabelas de referência (lookup)
+    'stages', 'courses', 'lead_sources', 'motivos_perda', 'teams',
+    // Dados operacionais principais
+    'leads', 'profiles', 'alunos',
+    'lead_history', 'lead_notes',
+    'tickets', 'ticket_messages', 'ticket_evaluations',
+    'widechat_messages', 'widechat_atendimentos',
+    'sponte_matriculas', 'sponte_parcelas',
+    'messages_logs',
 ]);
 
 function stripSurrealIds(v: unknown): unknown {
@@ -155,10 +189,17 @@ function makeSurrealSelect(table: string, cols: string, sbBase: unknown) {
     let isMaybe = false;
     let sb = sbBase as Record<string, (...a: unknown[]) => unknown>;
 
+    const refFields = REFERENCE_FIELDS[table] ?? {};
+    const toRecordId = (refTable: string, v: unknown) => `${refTable}:⟨${v}⟩`;
+
     const buildWhereSql = () => wheres.map(({ isIn, field, val }) => {
+        const ref = field === 'id' ? table : refFields[field];
         if (!isIn) {
-            if (field === 'id') return `id = ${table}:⟨${val}⟩`;
+            if (ref && val != null) return `${field} = ${toRecordId(ref, val)}`;
             return `${field} = ${toSurrealValue(val)}`;
+        }
+        if (ref) {
+            return `${field} IN [${(val as unknown[]).map(v => toRecordId(ref, v)).join(', ')}]`;
         }
         return `${field} IN [${(val as unknown[]).map(v => toSurrealValue(v)).join(', ')}]`;
     }).join(' AND ');
