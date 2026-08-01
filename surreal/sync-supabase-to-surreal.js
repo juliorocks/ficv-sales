@@ -460,7 +460,7 @@ const PLAN = [
   { table: 'sponte_matriculas',            columns: '*',                                               orderBy: 'data_matricula' },
   { table: 'sponte_parcelas',              columns: '*',                                               orderBy: 'id' },
   { table: 'matriculas',                   columns: '*',                                               orderBy: 'created_at' },
-  { table: 'widechat_messages',            columns: 'id,lead_id,session_id,message_id,type,message,origin,sender_name,raw_data,processed_at,created_at', orderBy: 'created_at' },
+  { table: 'widechat_messages',            columns: 'id,lead_id,session_id,message_id,type,message,origin,sender_name,raw_data,processed_at,created_at', orderBy: 'id' },
   { table: 'widechat_atendimentos',        columns: '*',                                               orderBy: 'aceito_em' },
   { table: 'messages_logs',               columns: 'id,contact,agent_name,timestamp',                orderBy: 'timestamp' },
 ];
