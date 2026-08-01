@@ -165,8 +165,14 @@ const SURREAL_READ_TABLES = new Set([
 function stripSurrealIds(v: unknown): unknown {
     if (v === null || v === undefined) return v;
     if (typeof v === 'string') {
-        const m = v.match(/^[a-z_]+:⟨(.+)⟩$/);
-        return m ? m[1] : v;
+        // Handles both `table:⟨value⟩` (string IDs) and `table:\`value\`` (numeric/complex IDs)
+        const m = v.match(/^[a-z_]+:⟨(.+)⟩$/) ?? v.match(/^[a-z_]+:`(.+)`$/);
+        if (m) {
+            const inner = m[1];
+            const asNum = Number(inner);
+            return Number.isFinite(asNum) && String(asNum) === inner ? asNum : inner;
+        }
+        return v;
     }
     if (Array.isArray(v)) return (v as unknown[]).map(stripSurrealIds);
     if (typeof v === 'object') {

@@ -108,6 +108,8 @@ function toSurrealLiteral(v) {
   if (typeof v === 'number') return String(v);
   if (v instanceof Date) return `d"${v.toISOString()}"`;
   if (typeof v === 'string') {
+    // SurrealDB record ID — output bare (unquoted) so it's treated as a record reference
+    if (/^[a-z_]+:⟨.+⟩$/.test(v)) return v;
     if (/^\d{4}-\d{2}-\d{2}T/.test(v)) return `d"${v}"`;
     if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return `d"${v}T00:00:00Z"`;
     return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '')}"`;
