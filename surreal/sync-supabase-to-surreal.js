@@ -78,7 +78,7 @@ async function surrealSignin() {
   _token = token;
 }
 
-async function surrealSQL(sql) {
+async function surrealSQL(sql, retry = true) {
   const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
     method: 'POST',
     headers: {
@@ -90,6 +90,12 @@ async function surrealSQL(sql) {
     },
     body: sql,
   });
+  if (res.status === 401 && retry) {
+    // Token expirou — renovar e tentar uma vez
+    log('Token expirado, renovando...');
+    await surrealSignin();
+    return surrealSQL(sql, false);
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(`SurrealDB HTTP ${res.status}: ${text}`);
