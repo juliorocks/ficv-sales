@@ -37,17 +37,27 @@ const PG_CONFIGS = process.env.DATABASE_URL
         user: 'postgres',
         password: SUPABASE_PASS,
         ssl: { rejectUnauthorized: false },
-        connectionTimeoutMillis: 10000,
+        connectionTimeoutMillis: 20000,
       },
-      // 2. Pooler session mode (fallback)
+      // 2. Pooler session mode — sa-east-1 (São Paulo)
       {
-        host: 'aws-0-us-east-1.pooler.supabase.com',
+        host: 'aws-0-sa-east-1.pooler.supabase.com',
         port: 5432,
         database: 'postgres',
         user: `postgres.${SUPABASE_REF}`,
         password: SUPABASE_PASS,
         ssl: { rejectUnauthorized: false },
-        connectionTimeoutMillis: 10000,
+        connectionTimeoutMillis: 15000,
+      },
+      // 3. Pooler transaction mode (porta 6543)
+      {
+        host: 'aws-0-sa-east-1.pooler.supabase.com',
+        port: 6543,
+        database: 'postgres',
+        user: `postgres.${SUPABASE_REF}`,
+        password: SUPABASE_PASS,
+        ssl: { rejectUnauthorized: false },
+        connectionTimeoutMillis: 15000,
       },
     ];
 
@@ -118,7 +128,7 @@ async function surrealInsert(table, rows) {
   for (let i = 0; i < rows.length; i += 50) {
     const chunk = rows.slice(i, i + 50);
     const literals = chunk.map(r => toSurrealLiteral(r)).join(',\n  ');
-    const sql = `INSERT INTO ${table} [\n  ${literals}\n] RETURN NONE`;
+    const sql = `INSERT IGNORE INTO ${table} [\n  ${literals}\n] RETURN NONE`;
     try {
       await surrealSQL(sql);
       inserted += chunk.length;
@@ -156,19 +166,37 @@ async function pgQuery(client, table, columns, orderBy, offset) {
   return res.rows;
 }
 
-async function paginate(client, table, columns, orderBy) {
-  const rows = [];
-  let offset = 0;
+// Streaming: lê e insere uma página de cada vez (sem acumular tudo na memória)
+async function streamProcess(client, table, columns, orderBy, transform) {
+  let lastVal = null;
+  let total = 0, inserted = 0;
+  const cols = columns === '*' ? '*' : columns.split(',').map(c => `"${c.trim()}"`).join(', ');
+
   while (true) {
-    const batch = await pgQuery(client, table, columns, orderBy, offset);
+    let cursorLit;
+    if (lastVal instanceof Date) {
+      cursorLit = `'${lastVal.toISOString()}'`;
+    } else if (typeof lastVal === 'string') {
+      cursorLit = `'${lastVal.replace(/'/g, "''")}'`;
+    } else {
+      cursorLit = lastVal;
+    }
+    const where = lastVal !== null ? `WHERE "${orderBy}" > ${cursorLit}` : '';
+    const q = `SELECT ${cols} FROM "${table}" ${where} ORDER BY "${orderBy}" LIMIT ${BATCH}`;
+    const res = await client.query(q);
+    const batch = res.rows;
     if (!batch.length) break;
-    rows.push(...batch);
+
+    total += batch.length;
+    const rows = batch.map(transform);
+    inserted += await surrealInsert(table, rows);
+
+    lastVal = batch[batch.length - 1][orderBy];
+    process.stdout.write(`\r   ${total} lidos / ${inserted} inseridos...`);
     if (batch.length < BATCH) break;
-    offset += BATCH;
-    process.stdout.write(`\r   PostgreSQL: ${rows.length} lidos...`);
   }
-  if (rows.length > 0) process.stdout.write('\r');
-  return rows;
+  process.stdout.write('\r');
+  return { total, inserted };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -203,14 +231,14 @@ const T = {
     active: r.active !== false, created_at: r.created_at, updated_at: r.updated_at,
   }),
   profiles: (r) => ({
-    id: sid('profiles', r.id), email: r.email,
+    id: sid('profiles', r.id),
     full_name: r.full_name || '',
     role: r.role || 'agent', avatar_url: r.avatar_url || null,
-    active: r.active !== false, created_at: r.created_at, updated_at: r.updated_at,
+    score: r.score ? Number(r.score) : 0, updated_at: r.updated_at,
   }),
   alunos: (r) => ({
     id: sid('alunos', r.id), cpf: r.cpf, nome: r.nome,
-    email: r.email, created_at: r.created_at, updated_at: r.updated_at,
+    email: r.email || null, created_at: r.created_at, updated_at: r.updated_at,
   }),
   leads: (r) => ({
     id: sid('leads', r.id),
@@ -280,12 +308,10 @@ const T = {
   }),
   financial_goals: (r) => ({
     id: sid('financial_goals', r.id),
-    month: r.month, goal_value: Number(r.goal_value) || 0, created_at: r.created_at,
-  }),
-  partners: (r) => ({
-    id: sid('partners', r.id), name: r.name, slug: r.slug, type: r.type,
-    target_url: r.target_url, social_media_url: r.social_media_url,
-    coupon: r.coupon, active: r.active !== false,
+    year: r.year != null ? Number(r.year) : null,
+    month: r.month != null ? Number(r.month) : null,
+    monthly_target: Number(r.monthly_target) || 0,
+    monthly_achieved: Number(r.monthly_achieved) || 0,
     created_at: r.created_at, updated_at: r.updated_at,
   }),
   meta_campaigns: (r) => ({
@@ -321,10 +347,28 @@ const T = {
     synced_at: r.synced_at,
   }),
   sponte_matriculas: (r) => ({
-    id: sid('sponte_matriculas', r.id || `${r.aluno}_${r.data_matricula}`),
-    aluno: r.aluno, cpf: r.cpf || null, celular: r.celular || null,
-    nome_curso: r.nome_curso, nome_turma: r.nome_turma || null,
-    situacao: r.situacao || null, data_matricula: r.data_matricula, synced_at: r.synced_at,
+    id: sid('sponte_matriculas', r.id || `${r.aluno_id}_${r.data_matricula}`),
+    contrato_id: r.contrato_id || null,
+    aluno_id: r.aluno_id ? sid('alunos', r.aluno_id) : null,
+    aluno: r.aluno || null,
+    turma_id: r.turma_id || null,
+    nome_turma: r.nome_turma || null,
+    nome_curso: r.nome_curso || null,
+    curso_id: r.curso_id || null,
+    situacao_id: r.situacao_id || null,
+    situacao: r.situacao || null,
+    data_matricula: r.data_matricula || null,
+    data_inicio: r.data_inicio || null,
+    data_termino: r.data_termino || null,
+    data_encerramento: r.data_encerramento || null,
+    contratante: r.contratante || null,
+    numero_contrato: r.numero_contrato || null,
+    financeiro_lancado: r.financeiro_lancado || null,
+    nome_matriz_curricular: r.nome_matriz_curricular || null,
+    tipo_contrato_id: r.tipo_contrato_id || null,
+    celular: r.celular || null,
+    synced_at: r.synced_at || null,
+    created_at: r.created_at || null,
   }),
   sponte_parcelas: (r) => ({
     id: sid('sponte_parcelas', r.id),
@@ -340,9 +384,14 @@ const T = {
   widechat_messages: (r) => ({
     id: sid('widechat_messages', r.id),
     lead_id: r.lead_id ? sid('leads', r.lead_id) : null,
-    origin: r.origin, sender_name: r.sender_name || null,
-    content: r.content || null,
-    session_id: r.session_id || null, contact_id: r.contact_id || null,
+    session_id: r.session_id || null,
+    message_id: r.message_id || null,
+    type: r.type || null,
+    message: r.message || null,
+    origin: r.origin || null,
+    sender_name: r.sender_name || null,
+    raw_data: r.raw_data || null,
+    processed_at: r.processed_at || null,
     created_at: r.created_at,
   }),
   widechat_atendimentos: (r) => ({
@@ -365,13 +414,12 @@ const PLAN = [
   { table: 'lead_sources',                  columns: 'id,name,icon,color',                             orderBy: 'id' },
   { table: 'motivos_perda',                 columns: 'id,motivo',                                      orderBy: 'id' },
   { table: 'teams',                         columns: 'id,name,description,color,icon,active,created_at,updated_at', orderBy: 'id' },
-  { table: 'profiles',                      columns: 'id,email,full_name,role,avatar_url,created_at,updated_at',    orderBy: 'created_at' },
+  { table: 'profiles',                      columns: 'id,full_name,role,avatar_url,score,updated_at',              orderBy: 'id' },
   { table: 'alunos',                        columns: 'id,cpf,nome,email,created_at,updated_at',        orderBy: 'created_at' },
   { table: 'leads',                         columns: '*',                                               orderBy: 'id' },
   { table: 'lead_history',                  columns: 'id,lead_id,from_stage_id,to_stage_id,changed_at,changed_by,motivo_perda_id', orderBy: 'id' },
   { table: 'lead_notes',                    columns: 'id,lead_id,note,created_at,created_by',          orderBy: 'id' },
-  { table: 'financial_goals',               columns: 'id,month,goal_value,created_at',                 orderBy: 'id' },
-  { table: 'partners',                      columns: '*',                                               orderBy: 'created_at' },
+  { table: 'financial_goals',               columns: 'id,year,month,monthly_target,monthly_achieved,created_at,updated_at', orderBy: 'id' },
   { table: 'tickets',                       columns: '*',                                               orderBy: 'id' },
   { table: 'ticket_messages',               columns: 'id,ticket_id,autor_id,autor_nome,autor_role,conteudo,interno,created_at', orderBy: 'id' },
   { table: 'ticket_evaluations',            columns: '*',                                               orderBy: 'id' },
@@ -383,7 +431,7 @@ const PLAN = [
   { table: 'sponte_matriculas',            columns: '*',                                               orderBy: 'data_matricula' },
   { table: 'sponte_parcelas',              columns: '*',                                               orderBy: 'id' },
   { table: 'matriculas',                   columns: '*',                                               orderBy: 'created_at' },
-  { table: 'widechat_messages',            columns: 'id,lead_id,origin,sender_name,content,session_id,contact_id,created_at', orderBy: 'created_at' },
+  { table: 'widechat_messages',            columns: 'id,lead_id,session_id,message_id,type,message,origin,sender_name,raw_data,processed_at,created_at', orderBy: 'created_at' },
   { table: 'widechat_atendimentos',        columns: '*',                                               orderBy: 'aceito_em' },
   { table: 'messages_logs',               columns: 'id,contact,agent_name,timestamp',                orderBy: 'timestamp' },
 ];
@@ -417,13 +465,9 @@ async function main() {
 
     try {
       log(`\n── ${table}`);
-      const rows = await paginate(pgClient, table, columns, orderBy);
-      log(`   PostgreSQL: ${rows.length} registros`);
-
-      const transformed = rows.map(transform);
-      const inserted = await surrealInsert(table, transformed);
-      log(`   SurrealDB: \x1b[32m${inserted}\x1b[0m inseridos`);
-      results.push({ table, total: rows.length, inserted, ok: true });
+      const { total, inserted } = await streamProcess(pgClient, table, columns, orderBy, transform);
+      log(`   \x1b[32m${inserted}/${total}\x1b[0m inseridos`);
+      results.push({ table, total, inserted, ok: true });
     } catch (err) {
       warn(`Falha em ${table}: ${err.message}`);
       results.push({ table, ok: false, error: err.message });
