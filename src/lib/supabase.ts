@@ -18,8 +18,35 @@ const SURREAL_NS = import.meta.env.VITE_SURREAL_NS || 'ficv';
 const SURREAL_DB = import.meta.env.VITE_SURREAL_DB || 'salespulse';
 
 let _surrealToken: string | null = localStorage.getItem('surreal_token');
+const _authListeners = new Set<(event: string, session: unknown) => void>();
+
+// Decode a SurrealDB RECORD-access JWT into a mock Supabase-compatible session
+function decodeSurrealSession(token: string): { user: { id: string; email: string }; access_token: string } | null {
+    try {
+        const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+        const payload = JSON.parse(atob(b64)) as Record<string, unknown>;
+        if (payload['exp'] && Date.now() / 1000 > (payload['exp'] as number)) return null;
+        const idStr = String(payload['ID'] ?? '');
+        // ID may be `profiles:\`uuid\`` or `profiles:⟨uuid⟩`
+        const m = idStr.match(/^profiles:`(.+)`$/) ?? idStr.match(/^profiles:⟨(.+)⟩$/);
+        const userId = m ? m[1] : '';
+        if (!userId) return null;
+        return { user: { id: userId, email: String(payload['email'] ?? '') }, access_token: token };
+    } catch { return null; }
+}
 
 async function ensureSurrealToken(): Promise<string | null> {
+    // Per-user token takes precedence (carries $auth for future PERMISSIONS)
+    const userToken = localStorage.getItem('surreal_user_token');
+    if (userToken) {
+        try {
+            const b64 = userToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+            const payload = JSON.parse(atob(b64)) as Record<string, unknown>;
+            if (!payload['exp'] || Date.now() / 1000 < (payload['exp'] as number)) return userToken;
+            localStorage.removeItem('surreal_user_token');
+        } catch { /* invalid, fall through */ }
+    }
+    // Fall back to admin token for pre-login and background operations
     if (_surrealToken) return _surrealToken;
     try {
         const res = await fetch(`${SURREAL_ENDPOINT}/signin`, {
@@ -36,6 +63,91 @@ async function ensureSurrealToken(): Promise<string | null> {
         return _surrealToken;
     } catch { return null; }
 }
+
+// ── Auth proxy — intercepts supabase.auth.* ───────────────────────────────────
+
+const _surrealAuth = {
+    async signInWithPassword({ email, password }: { email: string; password: string }) {
+        // Aluno emails (cpf@aluno.ficv.br) stay on Supabase auth
+        if (email.endsWith('@aluno.ficv.br')) {
+            return _supabase.auth.signInWithPassword({ email, password });
+        }
+        try {
+            const res = await fetch(`${SURREAL_ENDPOINT}/signin`, {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json', 'surreal-ns': SURREAL_NS },
+                body:    JSON.stringify({ ns: SURREAL_NS, db: SURREAL_DB, ac: 'staff', email, pass: password }),
+            });
+            if (!res.ok) {
+                return { data: { user: null, session: null }, error: { message: 'E-mail ou senha inválidos.' } };
+            }
+            const { token } = await res.json() as { token?: string };
+            if (!token) {
+                return { data: { user: null, session: null }, error: { message: 'Autenticação falhou.' } };
+            }
+            localStorage.setItem('surreal_user_token', token);
+            _surrealToken = null; // invalidate admin cache so user token is used for data ops
+            const session = decodeSurrealSession(token);
+            _authListeners.forEach(cb => cb('SIGNED_IN', session));
+            return { data: { user: session?.user ?? null, session }, error: null };
+        } catch (e) {
+            return { data: { user: null, session: null }, error: { message: (e as Error).message } };
+        }
+    },
+
+    async getSession() {
+        const userToken = localStorage.getItem('surreal_user_token');
+        if (userToken) {
+            const session = decodeSurrealSession(userToken);
+            if (session) return { data: { session }, error: null };
+            localStorage.removeItem('surreal_user_token');
+        }
+        return _supabase.auth.getSession();
+    },
+
+    onAuthStateChange(callback: (event: string, session: unknown) => void) {
+        _authListeners.add(callback);
+        // Fire immediately with current state
+        const userToken = localStorage.getItem('surreal_user_token');
+        if (userToken) {
+            const session = decodeSurrealSession(userToken);
+            if (session) setTimeout(() => callback('SIGNED_IN', session), 0);
+        }
+        // Also bridge Supabase events (for aluno sessions)
+        const { data: { subscription } } = _supabase.auth.onAuthStateChange((event, sbSession) => {
+            if (!localStorage.getItem('surreal_user_token')) {
+                callback(event, sbSession);
+            }
+        });
+        return {
+            data: {
+                subscription: {
+                    unsubscribe() {
+                        _authListeners.delete(callback);
+                        subscription.unsubscribe();
+                    },
+                },
+            },
+        };
+    },
+
+    async signOut() {
+        localStorage.removeItem('surreal_user_token');
+        _surrealToken = null;
+        _authListeners.forEach(cb => cb('SIGNED_OUT', null));
+        return _supabase.auth.signOut();
+    },
+
+    // AlunoAuth.tsx signup — keep on Supabase
+    signUp: _supabase.auth.signUp.bind(_supabase.auth),
+
+    // Password reset email — keep on Supabase (needs email delivery)
+    resetPasswordForEmail: _supabase.auth.resetPasswordForEmail.bind(_supabase.auth),
+
+    // updateUser and any other methods pass through to Supabase
+    updateUser: _supabase.auth.updateUser.bind(_supabase.auth),
+    getUser: _supabase.auth.getUser.bind(_supabase.auth),
+} as unknown as typeof _supabase.auth;
 
 function toSurrealValue(v: unknown): string {
     if (v === null || v === undefined) return 'NONE';
@@ -398,6 +510,9 @@ export const supabase = new Proxy(_supabase, {
     get(target, prop: string) {
         if (prop === 'from') {
             return (table: string) => makeFromProxy(table);
+        }
+        if (prop === 'auth') {
+            return _surrealAuth;
         }
         const val = (target as unknown as AnyRecord)[prop];
         return typeof val === 'function' ? val.bind(target) : val;
