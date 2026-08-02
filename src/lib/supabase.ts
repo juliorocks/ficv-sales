@@ -87,6 +87,8 @@ const _surrealAuth = {
             }
             localStorage.setItem('surreal_user_token', token);
             _surrealToken = null; // invalidate admin cache so user token is used for data ops
+            // Clear any stale Supabase session — it would cause functions.invoke to send expired JWTs
+            _supabase.auth.signOut().catch(() => {});
             const session = decodeSurrealSession(token);
             _authListeners.forEach(cb => cb('SIGNED_IN', session));
             return { data: { user: session?.user ?? null, session }, error: null };
@@ -716,6 +718,30 @@ function makeFromProxy(table: string): ReturnType<typeof _supabase.from> {
 }
 
 // Proxy final do supabase
+// Proxy for functions.invoke — bypasses Supabase session handling so a stale/expired
+// Supabase JWT in localStorage doesn't cause a non-2xx on Edge Function calls.
+const _functionsProxy = {
+    invoke(fnName: string, opts?: { body?: unknown; headers?: Record<string, string>; method?: string }) {
+        const url = `${supabaseUrl}/functions/v1/${fnName}`;
+        return fetch(url, {
+            method: opts?.method ?? 'POST',
+            headers: {
+                'Authorization': `Bearer ${supabaseAnonKey}`,
+                'apikey': supabaseAnonKey,
+                'Content-Type': 'application/json',
+                ...(opts?.headers ?? {}),
+            },
+            body: opts?.body !== undefined ? JSON.stringify(opts.body) : undefined,
+        }).then(async res => {
+            const json = await res.json().catch(() => null);
+            if (!res.ok) {
+                return { data: null, error: new Error((json as { error?: string })?.error ?? `HTTP ${res.status}`) };
+            }
+            return { data: json, error: null };
+        });
+    },
+};
+
 export const supabase = new Proxy(_supabase, {
     get(target, prop: string) {
         if (prop === 'from') {
@@ -723,6 +749,9 @@ export const supabase = new Proxy(_supabase, {
         }
         if (prop === 'auth') {
             return _surrealAuth;
+        }
+        if (prop === 'functions') {
+            return _functionsProxy;
         }
         const val = (target as unknown as AnyRecord)[prop];
         return typeof val === 'function' ? val.bind(target) : val;
