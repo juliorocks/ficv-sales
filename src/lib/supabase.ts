@@ -273,21 +273,24 @@ const SURREAL_PRIMARY_WRITE_TABLES = new Set([
     'scripts', 'knowledge_base', 'app_settings',
 ]);
 
+async function ensureAdminToken(): Promise<string | null> {
+    if (_surrealToken) return _surrealToken;
+    try {
+        const r = await fetch(`${SURREAL_ENDPOINT}/signin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'surreal-ns': SURREAL_NS },
+            body: JSON.stringify({ ns: SURREAL_NS, user: 'ficv_admin', pass: 'Ficv@Surreal2026!' }),
+        });
+        if (!r.ok) return null;
+        const body = await r.json() as { token?: string };
+        if (body.token) { _surrealToken = body.token; localStorage.setItem('surreal_token', body.token); }
+        return _surrealToken;
+    } catch { return null; }
+}
+
 async function _nextLeadId(): Promise<number> {
     // Counter update needs admin token — seq table uses system-level access
-    let adminToken = _surrealToken;
-    if (!adminToken) {
-        try {
-            const r = await fetch(`${SURREAL_ENDPOINT}/signin`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'surreal-ns': SURREAL_NS },
-                body: JSON.stringify({ ns: SURREAL_NS, user: 'ficv_admin', pass: 'Ficv@Surreal2026!' }),
-            });
-            const body = await r.json() as { token?: string };
-            adminToken = body.token ?? null;
-            if (adminToken) { _surrealToken = adminToken; localStorage.setItem('surreal_token', adminToken); }
-        } catch { /* leave adminToken null */ }
-    }
+    const adminToken = await ensureAdminToken();
     if (!adminToken) throw new Error('no admin token for seq counter');
     const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
         method: 'POST',
@@ -769,7 +772,7 @@ export const supabase = new Proxy(_supabase, {
 export const supabaseRaw = _supabase as typeof _supabase;
 
 // Upsert em lote no SurrealDB — deleta rows do período e reinsere com dados frescos.
-// Usado após Edge Function syncs para manter SurrealDB atualizado com Supabase.
+// Usa token admin para bypass de PERMISSIONS (operação privilegiada pós-sync).
 export async function surrealBatchUpsert(
     table: string,
     rows: Record<string, unknown>[],
@@ -777,7 +780,7 @@ export async function surrealBatchUpsert(
 ): Promise<void> {
     try {
         if (!rows.length) return;
-        const token = await ensureSurrealToken();
+        const token = await ensureAdminToken();
         if (!token) return;
         let sql = '';
         if (opts?.dateField && opts.dateFrom && opts.dateTo) {
