@@ -429,18 +429,8 @@ const SURREAL_READ_TABLES = new Set([
     'widechat_messages', 'widechat_atendimentos',
     'sponte_matriculas', 'sponte_parcelas',
     'messages_logs',
-    // Dados de campanhas — têm dados históricos no SurrealDB; novos dados
-    // são escritos no SurrealDB após cada sync via surrealBatchUpsert()
-    'meta_campaign_insights_daily', 'google_ads_insights_daily',
-    'meta_demographics_daily',
-]);
-
-// Tabelas onde resultado vazio no SurrealDB faz fallback pro Supabase.
-// Útil para períodos recentes ainda não sincronizados ao SurrealDB.
-const SURREAL_FALLBACK_ON_EMPTY = new Set([
-    'meta_campaign_insights_daily',
-    'google_ads_insights_daily',
-    'meta_demographics_daily',
+    // Campanhas: lidas direto do Supabase via supabaseRaw no CampaignsDashboard
+    // (não entram aqui para evitar dependência do SurrealDB para dados recentes)
 ]);
 
 function stripSurrealIds(v: unknown): unknown {
@@ -528,11 +518,6 @@ function makeSurrealSelect(table: string, cols: string, sbBase: unknown) {
             if (entry?.status === 'ERR') throw new Error(entry.result);
             let rows: unknown[] = Array.isArray(entry?.result) ? entry.result : [];
             rows = rows.map(r => stripSurrealIds(r));
-            // Para tabelas de campanhas, resultado vazio = período sem dados no SurrealDB
-            // (ex: mês corrente ainda não sincronizado). Faz fallback pro Supabase.
-            if (rows.length === 0 && !isSingle && !isMaybe && SURREAL_FALLBACK_ON_EMPTY.has(table)) {
-                return sb;
-            }
             if (isSingle) {
                 if (!rows.length) return { data: null, error: { message: 'Row not found', code: 'PGRST116' } };
                 return { data: rows[0], error: null };
