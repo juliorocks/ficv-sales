@@ -426,6 +426,10 @@ const SURREAL_READ_TABLES = new Set([
     'widechat_messages', 'widechat_atendimentos',
     'sponte_matriculas', 'sponte_parcelas',
     'messages_logs',
+    // Dados de campanhas — têm dados históricos no SurrealDB; novos dados
+    // são escritos no SurrealDB após cada sync via surrealBatchUpsert()
+    'meta_campaign_insights_daily', 'google_ads_insights_daily',
+    'meta_demographics_daily',
 ]);
 
 function stripSurrealIds(v: unknown): unknown {
@@ -760,3 +764,35 @@ export const supabase = new Proxy(_supabase, {
         return typeof val === 'function' ? val.bind(target) : val;
     }
 }) as typeof _supabase;
+
+// Raw Supabase client — bypassa o proxy (usar apenas para leitura pós-sync)
+export const supabaseRaw = _supabase as typeof _supabase;
+
+// Upsert em lote no SurrealDB — deleta rows do período e reinsere com dados frescos.
+// Usado após Edge Function syncs para manter SurrealDB atualizado com Supabase.
+export async function surrealBatchUpsert(
+    table: string,
+    rows: Record<string, unknown>[],
+    opts?: { dateField?: string; dateFrom?: string; dateTo?: string }
+): Promise<void> {
+    try {
+        if (!rows.length) return;
+        const token = await ensureSurrealToken();
+        if (!token) return;
+        let sql = '';
+        if (opts?.dateField && opts.dateFrom && opts.dateTo) {
+            sql += `DELETE ${table} WHERE ${opts.dateField} >= d"${opts.dateFrom}T00:00:00Z" AND ${opts.dateField} <= d"${opts.dateTo}T23:59:59Z";\n`;
+        }
+        const lits = rows.map(r => toSurrealValue(r)).join(',\n');
+        sql += `INSERT INTO ${table} [\n${lits}\n] RETURN NONE;`;
+        await fetch(`${SURREAL_ENDPOINT}/sql`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'text/plain', 'Accept': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                'surreal-ns': SURREAL_NS, 'surreal-db': SURREAL_DB,
+            },
+            body: sql,
+        });
+    } catch { /* silent — não bloqueia a UI */ }
+}

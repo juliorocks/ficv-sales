@@ -7,7 +7,7 @@ import {
     BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
     CartesianGrid, ReferenceLine, PieChart, Pie, Legend, LabelList
 } from 'recharts';
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseRaw, surrealBatchUpsert } from '../lib/supabase';
 import { showSuccess, showError } from '@/utils/toast';
 import { periodToDates, PERIOD_OPTIONS } from '@/utils/dashboardFilters';
 
@@ -371,6 +371,15 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
             });
             if (error) throw error;
             showSuccess(`Meta: ${data?.campaigns?.synced ?? 0} campanhas, ${data?.insights?.synced ?? 0} registros`);
+            // Escreve dados frescos do Supabase → SurrealDB para leituras rápidas
+            const [insRes, demoRes] = await Promise.all([
+                supabaseRaw.from('meta_campaign_insights_daily').select('*').gte('date', dateStart).lte('date', dateEnd),
+                supabaseRaw.from('meta_demographics_daily').select('*').gte('date', dateStart).lte('date', dateEnd),
+            ]);
+            await Promise.all([
+                surrealBatchUpsert('meta_campaign_insights_daily', (insRes.data ?? []) as Record<string, unknown>[], { dateField: 'date', dateFrom: dateStart, dateTo: dateEnd }),
+                surrealBatchUpsert('meta_demographics_daily', (demoRes.data ?? []) as Record<string, unknown>[], { dateField: 'date', dateFrom: dateStart, dateTo: dateEnd }),
+            ]);
             await Promise.all([loadData(), loadMonthly()]);
         } catch (e: any) {
             showError('Erro Meta Ads: ' + e.message);
@@ -387,6 +396,9 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
             });
             if (error) throw error;
             showSuccess(`Google Ads: ${data?.campaigns?.synced ?? 0} campanhas, ${data?.insights?.synced ?? 0} registros`);
+            // Escreve dados frescos do Supabase → SurrealDB para leituras rápidas
+            const gInsRes = await supabaseRaw.from('google_ads_insights_daily').select('*').gte('date', dateStart).lte('date', dateEnd);
+            await surrealBatchUpsert('google_ads_insights_daily', (gInsRes.data ?? []) as Record<string, unknown>[], { dateField: 'date', dateFrom: dateStart, dateTo: dateEnd });
             await Promise.all([loadData(), loadMonthly()]);
         } catch (e: any) {
             showError('Erro Google Ads: ' + e.message);
