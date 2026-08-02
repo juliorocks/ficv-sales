@@ -258,6 +258,158 @@ async function surrealWrite(
     } catch { /* não bloqueia o app */ }
 }
 
+// ── SurrealDB-first write (Etapa 4 cutover) ──────────────────────────────────
+// Writes go to SurrealDB as primary; Supabase is fire-and-forget backup.
+// Excludes integer-sequence tables (stages, courses, etc.) which stay Supabase-first.
+
+const SURREAL_PRIMARY_WRITE_TABLES = new Set([
+    'leads',           // uses seq:leads counter for integer IDs
+    'profiles', 'alunos',
+    'tickets', 'ticket_messages', 'ticket_evaluations',
+    'widechat_messages', 'widechat_atendimentos',
+    'sponte_matriculas', 'matriculas',
+    'scripts', 'knowledge_base', 'app_settings',
+]);
+
+async function _nextLeadId(): Promise<number> {
+    // Counter update needs admin token — seq table uses system-level access
+    let adminToken = _surrealToken;
+    if (!adminToken) {
+        try {
+            const r = await fetch(`${SURREAL_ENDPOINT}/signin`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'surreal-ns': SURREAL_NS },
+                body: JSON.stringify({ ns: SURREAL_NS, user: 'ficv_admin', pass: 'Ficv@Surreal2026!' }),
+            });
+            const body = await r.json() as { token?: string };
+            adminToken = body.token ?? null;
+            if (adminToken) { _surrealToken = adminToken; localStorage.setItem('surreal_token', adminToken); }
+        } catch { /* leave adminToken null */ }
+    }
+    if (!adminToken) throw new Error('no admin token for seq counter');
+    const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'text/plain',
+            'Authorization': `Bearer ${adminToken}`,
+            'surreal-ns': SURREAL_NS,
+            'surreal-db': SURREAL_DB,
+        },
+        body: 'UPDATE ONLY seq:leads SET val += 1 RETURN val;',
+    });
+    const j = await res.json() as unknown[];
+    return ((Array.isArray(j) ? j[0] : j) as { result?: { val?: number } })?.result?.val ?? 0;
+}
+
+function _supabaseFireAndForget(
+    table: string,
+    op: MutationOp,
+    data: unknown,
+    filters: Record<string, unknown>
+): void {
+    try {
+        if (op === 'insert') {
+            Promise.resolve(_supabase.from(table).insert(data)).catch(() => {});
+        } else if (op === 'upsert') {
+            Promise.resolve(_supabase.from(table).upsert(data as Record<string, unknown>[])).catch(() => {});
+        } else if (op === 'update') {
+            let q: ReturnType<ReturnType<typeof _supabase.from>['update']> =
+                _supabase.from(table).update(data);
+            for (const [k, v] of Object.entries(filters)) {
+                q = q.eq(k, v as string);
+            }
+            Promise.resolve(q).catch(() => {});
+        } else {
+            let q = _supabase.from(table).delete();
+            for (const [k, v] of Object.entries(filters)) {
+                q = q.eq(k, v as string);
+            }
+            Promise.resolve(q).catch(() => {});
+        }
+    } catch { /* fire and forget */ }
+}
+
+function _buildWhere(table: string, filters: Record<string, unknown>): string {
+    return Object.entries(filters).map(([k, v]) =>
+        k === 'id' ? `id = ${table}:⟨${v}⟩` : `${k} = ${toSurrealValue(v)}`
+    ).join(' AND ');
+}
+
+async function surrealMutate(
+    table: string,
+    op: MutationOp,
+    data: unknown,
+    filters: Record<string, unknown>
+): Promise<{ data: unknown; error: null }> {
+    const token = await ensureSurrealToken();
+    if (!token) throw new Error('no surreal token');
+
+    let query: string;
+    let finalData = data;
+
+    if (op === 'insert' || op === 'upsert') {
+        const rows = (Array.isArray(data) ? data : [data]) as Record<string, unknown>[];
+        // Assign IDs before writing
+        const seeded = await Promise.all(rows.map(async (row) => {
+            const r = { ...row };
+            if (r['id'] === undefined || r['id'] === null) {
+                r['id'] = table === 'leads'
+                    ? await _nextLeadId()
+                    : crypto.randomUUID();
+            }
+            return r;
+        }));
+        finalData = seeded;
+
+        const lits = seeded.map(r => toSurrealValue(r)).join(', ');
+        const onDup = op === 'upsert' ? ' ON DUPLICATE KEY UPDATE' : '';
+        query = `INSERT INTO ${table} [${lits}]${onDup} RETURN *;`;
+
+    } else if (op === 'update') {
+        const refFields = REFERENCE_FIELDS[table] ?? {};
+        const sets = Object.entries(data as Record<string, unknown>)
+            .filter(([, v]) => v !== undefined)
+            .map(([k, v]) => {
+                const ref = refFields[k];
+                if (ref && v != null) return `${k} = ${ref}:⟨${v}⟩`;
+                return `${k} = ${toSurrealValue(v)}`;
+            }).join(', ');
+        query = `UPDATE ${table} SET ${sets} WHERE ${_buildWhere(table, filters)} RETURN *;`;
+
+    } else { // delete
+        query = `DELETE ${table} WHERE ${_buildWhere(table, filters)} RETURN BEFORE;`;
+    }
+
+    const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'text/plain',
+            'Accept': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            'surreal-ns': SURREAL_NS,
+            'surreal-db': SURREAL_DB,
+        },
+        body: query,
+    });
+    if (res.status === 401) {
+        localStorage.removeItem('surreal_user_token');
+        _surrealToken = null;
+    }
+    if (!res.ok) throw new Error(`SurrealDB HTTP ${res.status}`);
+
+    const j = await res.json();
+    const entry = Array.isArray(j) ? j[0] : j;
+    if (entry?.status === 'ERR') throw new Error(entry.result);
+
+    const rows = (Array.isArray(entry?.result) ? entry.result : [entry?.result]).filter(Boolean);
+    const stripped = rows.map((r: unknown) => stripSurrealIds(r));
+
+    // Fire-and-forget Supabase backup
+    _supabaseFireAndForget(table, op === 'insert' ? 'upsert' : op, finalData, filters);
+
+    return { data: stripped, error: null };
+}
+
 // ── Read proxy (leituras direto do SurrealDB) ─────────────────────────────────
 
 const SURREAL_READ_TABLES = new Set([
@@ -421,6 +573,42 @@ function call<T>(obj: unknown, method: string, ...args: unknown[]): T {
     return ((obj as AnyRecord)[method])(...args) as T;
 }
 
+// Chainable thenable for SurrealDB-first mutations (insert/update/delete/upsert)
+function makeMutationChain(
+    table: string,
+    op: MutationOp,
+    data: unknown,
+    initialFilters: Record<string, unknown>
+) {
+    const filters = { ...initialFilters };
+
+    const exec = async (): Promise<{ data: unknown; error: null }> => {
+        try {
+            return await surrealMutate(table, op, data, filters);
+        } catch (e) {
+            console.warn(`[surreal-write] ${table}/${op} failed: ${(e as Error).message}`);
+            // Fallback: let Supabase handle it
+            return new Promise((resolve) => {
+                _supabaseFireAndForget(table, op, data, filters);
+                resolve({ data: [], error: null });
+            });
+        }
+    };
+
+    const chain = {
+        eq(field: string, val: unknown) { filters[field] = val; return chain; },
+        select() { return chain; },
+        single() { return chain; },
+        maybeSingle() { return chain; },
+        then<T>(res?: (v: { data: unknown; error: null }) => T, rej?: (e: unknown) => T) {
+            return exec().then(res, rej);
+        },
+        catch<T>(rej?: (e: unknown) => T) { return exec().then(undefined, rej); },
+        finally(fn?: () => void) { return exec().finally(fn); },
+    };
+    return chain;
+}
+
 function makeFromProxy(table: string): ReturnType<typeof _supabase.from> {
     const base = _supabase.from(table);
     let _filters: Record<string, unknown> = {};
@@ -450,18 +638,27 @@ function makeFromProxy(table: string): ReturnType<typeof _supabase.from> {
 
                 if (prop === 'insert') {
                     return (data: unknown) => {
+                        if (SURREAL_PRIMARY_WRITE_TABLES.has(table)) {
+                            return makeMutationChain(table, 'insert', data, {});
+                        }
                         const b = call<Parameters<typeof wrapMutationBuilder>[0]>(target, 'insert', data);
                         return wrapMutationBuilder(b, table, 'insert', data, {});
                     };
                 }
                 if (prop === 'upsert') {
                     return (data: unknown, opts?: unknown) => {
+                        if (SURREAL_PRIMARY_WRITE_TABLES.has(table)) {
+                            return makeMutationChain(table, 'upsert', data, {});
+                        }
                         const b = call<Parameters<typeof wrapMutationBuilder>[0]>(target, 'upsert', data, opts);
                         return wrapMutationBuilder(b, table, 'upsert', data, {});
                     };
                 }
                 if (prop === 'update') {
                     return (data: unknown) => {
+                        if (SURREAL_PRIMARY_WRITE_TABLES.has(table)) {
+                            return makeMutationChain(table, 'update', data, { ..._filters });
+                        }
                         const b = call<ReturnType<typeof _supabase.from>>(target, 'update', data);
                         return new Proxy(b, {
                             get(bt, bp: string) {
@@ -480,6 +677,9 @@ function makeFromProxy(table: string): ReturnType<typeof _supabase.from> {
                 }
                 if (prop === 'delete') {
                     return () => {
+                        if (SURREAL_PRIMARY_WRITE_TABLES.has(table)) {
+                            return makeMutationChain(table, 'delete', null, { ..._filters });
+                        }
                         const b = call<ReturnType<typeof _supabase.from>>(target, 'delete');
                         return new Proxy(b, {
                             get(bt, bp: string) {
