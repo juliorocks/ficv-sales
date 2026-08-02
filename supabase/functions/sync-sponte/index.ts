@@ -321,6 +321,35 @@ serve(async (req) => {
             console.log(`Phone backfill: ${filled}/${uniqueIds.length} filled, ${skipped} skipped`);
         }
 
+        if (mode === 'recalc_goals') {
+            // Recalculate monthly_achieved from existing sponte_parcelas without calling Sponte API
+            const byMonth: Record<string, number> = {};
+            const cur2 = new Date(startDate + 'T12:00:00');
+            const end2 = new Date(endDate + 'T12:00:00');
+            while (cur2 <= end2) {
+                const ym = cur2.toISOString().slice(0, 7);
+                const [y2, m2] = ym.split('-').map(Number);
+                const lastDay = new Date(y2, m2, 0).getDate();
+                const pad = String(m2).padStart(2, '0');
+                const { data: agg } = await supabase
+                    .from('sponte_parcelas')
+                    .select('valor_pago')
+                    .eq('situacao_parcela', 'Quitada')
+                    .ilike('categoria', '%matr%')
+                    .gte('data_pagamento', `${y2}-${pad}-01`)
+                    .lte('data_pagamento', `${y2}-${pad}-${lastDay}`);
+                const achieved = (agg ?? []).reduce((s: number, r: any) => s + (r.valor_pago || 0), 0);
+                byMonth[ym] = achieved;
+                await supabase.from('financial_goals').upsert(
+                    { year: y2, month: m2, monthly_achieved: achieved },
+                    { onConflict: 'year,month', ignoreDuplicates: false }
+                );
+                cur2.setMonth(cur2.getMonth() + 1);
+            }
+            result.goals = { byMonth };
+            console.log('Goals recalculated from sponte_parcelas:', byMonth);
+        }
+
         if (mode === 'matriculas' || mode === 'full') {
             const r = await syncMatriculas(supabase, startDate, endDate);
             result.matriculas = r;

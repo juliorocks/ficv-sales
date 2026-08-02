@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Check, Loader2 } from 'lucide-react';
+import { Check, Loader2, RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { showSuccess, showError } from '@/utils/toast';
 
 const MONTH_NAMES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
@@ -144,6 +145,23 @@ export const GoalsPage: React.FC<GoalsPageProps> = ({ isAdmin }) => {
     const [edited, setEdited] = useState<Record<string, string>>({});
     const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState(false);
+    const [recalculating, setRecalculating] = useState(false);
+
+    const recalcGoals = async () => {
+        setRecalculating(true);
+        try {
+            const { error } = await supabase.functions.invoke('sync-sponte', {
+                body: { mode: 'recalc_goals', start_date: `${year}-01-01`, end_date: `${year}-12-31` },
+            });
+            if (error) throw error;
+            await refresh();
+            showSuccess('Metas recalculadas a partir dos dados do Sponte.');
+        } catch (e: any) {
+            showError('Erro ao recalcular: ' + e.message);
+        } finally {
+            setRecalculating(false);
+        }
+    };
 
     // Local editable state
     const getVal = (month: number, field: 'monthly_target' | 'monthly_achieved') => {
@@ -195,6 +213,15 @@ export const GoalsPage: React.FC<GoalsPageProps> = ({ isAdmin }) => {
                     >
                         {[currentYear - 1, currentYear, currentYear + 1].map(y => <option key={y} value={y}>{y}</option>)}
                     </select>
+                    <button
+                        onClick={recalcGoals}
+                        disabled={recalculating}
+                        title="Recalcula os valores atingidos a partir dos dados já sincronizados do Sponte"
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-primary/50 transition-colors"
+                    >
+                        {recalculating ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                        {recalculating ? 'Calculando…' : 'Recalcular'}
+                    </button>
                     {isAdmin && (
                         <button
                             onClick={saveAll}
