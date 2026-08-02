@@ -175,8 +175,8 @@ async function pgQuery(client, table, columns, orderBy, offset) {
 }
 
 // Streaming: lê e insere uma página de cada vez (sem acumular tudo na memória)
-async function streamProcess(client, table, columns, orderBy, transform) {
-  let lastVal = null;
+async function streamProcess(client, table, columns, orderBy, transform, initialCursor = null, maxVal = null) {
+  let lastVal = initialCursor;
   let total = 0, inserted = 0;
   const cols = columns === '*' ? '*' : columns.split(',').map(c => `"${c.trim()}"`).join(', ');
 
@@ -189,7 +189,10 @@ async function streamProcess(client, table, columns, orderBy, transform) {
     } else {
       cursorLit = lastVal;
     }
-    const where = lastVal !== null ? `WHERE "${orderBy}" > ${cursorLit}` : '';
+    const whereParts = [];
+    if (lastVal !== null) whereParts.push(`"${orderBy}" > ${cursorLit}`);
+    if (maxVal !== null) whereParts.push(`"${orderBy}" <= ${maxVal}`);
+    const where = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
     const q = `SELECT ${cols} FROM "${table}" ${where} ORDER BY "${orderBy}" LIMIT ${BATCH}`;
     const res = await client.query(q);
     const batch = res.rows;
@@ -457,7 +460,7 @@ const PLAN = [
   { table: 'meta_demographics_daily',      columns: '*',                                               orderBy: 'date' },
   { table: 'google_ads_campaigns',         columns: '*',                                               orderBy: 'campaign_id' },
   { table: 'google_ads_insights_daily',    columns: '*',                                               orderBy: 'date' },
-  { table: 'sponte_matriculas',            columns: '*',                                               orderBy: 'data_matricula' },
+  { table: 'sponte_matriculas',            columns: '*',                                               orderBy: 'id' },
   { table: 'sponte_parcelas',              columns: '*',                                               orderBy: 'id' },
   { table: 'matriculas',                   columns: '*',                                               orderBy: 'created_at' },
   { table: 'widechat_messages',            columns: 'id,lead_id,session_id,message_id,type,message,origin,sender_name,raw_data,processed_at,created_at', orderBy: 'id' },
@@ -483,6 +486,12 @@ async function main() {
 
   const results = [];
   const onlyTable = process.argv[2];
+  // --start-after <value>: skip records with orderBy <= value (for resuming interrupted syncs)
+  const startAfterIdx = process.argv.indexOf('--start-after');
+  const startAfterVal = startAfterIdx !== -1 ? process.argv[startAfterIdx + 1] : null;
+  // --max-id <value>: stop processing when orderBy > value (for gap-fill scans)
+  const maxIdIdx = process.argv.indexOf('--max-id');
+  const maxIdVal = maxIdIdx !== -1 ? process.argv[maxIdIdx + 1] : null;
   const plan = onlyTable ? PLAN.filter(p => p.table === onlyTable) : PLAN;
 
   for (const { table, columns, orderBy } of plan) {
@@ -494,7 +503,9 @@ async function main() {
 
     try {
       log(`\n── ${table}`);
-      const { total, inserted } = await streamProcess(pgClient, table, columns, orderBy, transform);
+      const initialCursor = startAfterVal != null ? (isNaN(startAfterVal) ? startAfterVal : Number(startAfterVal)) : null;
+      const maxVal = maxIdVal != null ? (isNaN(maxIdVal) ? maxIdVal : Number(maxIdVal)) : null;
+      const { total, inserted } = await streamProcess(pgClient, table, columns, orderBy, transform, initialCursor, maxVal);
       log(`   \x1b[32m${inserted}/${total}\x1b[0m inseridos`);
       results.push({ table, total, inserted, ok: true });
     } catch (err) {
