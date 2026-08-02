@@ -333,8 +333,8 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                 const d = new Date(r.date + 'T12:00:00');
                 const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
                 if (!byMonth[key]) byMonth[key] = { label: d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }), spend: 0, leads: 0, matriculas: 0 };
-                byMonth[key].spend += r.spend || 0;
-                byMonth[key].leads += r.leads_count || 0;
+                byMonth[key].spend += Number(r.spend) || 0;
+                byMonth[key].leads += Number(r.leads_count) || 0;
             });
             matriculaRows.forEach(r => {
                 if (!r.data_matricula) return;
@@ -412,25 +412,25 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
     const activeInsights = useMemo(() => {
         const metaRows = (source === 'google' ? [] : insights).map(r => ({
             campaign_id: r.campaign_id, campaign_name: r.campaign_name,
-            date: r.date, spend: r.spend || 0, impressions: r.impressions || 0,
-            clicks: r.clicks || 0, leads: r.leads_count || 0, source: 'Meta' as const,
+            date: r.date, spend: Number(r.spend) || 0, impressions: Number(r.impressions) || 0,
+            clicks: Number(r.clicks) || 0, leads: Number(r.leads_count) || 0, source: 'Meta' as const,
         }));
         const googleRows = (source === 'meta' ? [] : gInsights).map(r => ({
             campaign_id: r.campaign_id, campaign_name: r.campaign_name,
-            date: r.date, spend: r.spend || 0, impressions: r.impressions || 0,
-            clicks: r.clicks || 0, leads: r.conversions || 0, source: 'Google' as const,
+            date: r.date, spend: Number(r.spend) || 0, impressions: Number(r.impressions) || 0,
+            clicks: Number(r.clicks) || 0, leads: Number(r.conversions) || 0, source: 'Google' as const,
         }));
         return [...metaRows, ...googleRows];
     }, [insights, gInsights, source]);
 
     const prevActiveInsights = useMemo(() => {
         const metaRows = (source === 'google' ? [] : prevInsights).map(r => ({
-            spend: r.spend || 0, impressions: r.impressions || 0,
-            clicks: r.clicks || 0, leads: r.leads_count || 0,
+            spend: Number(r.spend) || 0, impressions: Number(r.impressions) || 0,
+            clicks: Number(r.clicks) || 0, leads: Number(r.leads_count) || 0,
         }));
         const googleRows = (source === 'meta' ? [] : prevGInsights).map(r => ({
-            spend: r.spend || 0, impressions: r.impressions || 0,
-            clicks: r.clicks || 0, leads: r.conversions || 0,
+            spend: Number(r.spend) || 0, impressions: Number(r.impressions) || 0,
+            clicks: Number(r.clicks) || 0, leads: Number(r.conversions) || 0,
         }));
         return [...metaRows, ...googleRows];
     }, [prevInsights, prevGInsights, source]);
@@ -463,7 +463,7 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
             return {
                 date: d,
                 label: new Date(d + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
-                spend: Number(v.spend.toFixed(2)),
+                spend: Number(Number(v.spend).toFixed(2)),
                 leads: v.leads,
                 ctr: v.impressions > 0 ? Number(((v.clicks / v.impressions) * 100).toFixed(2)) : 0,
                 cpm: v.impressions > 0 ? Number(((v.spend / v.impressions) * 1000).toFixed(2)) : 0,
