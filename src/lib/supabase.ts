@@ -438,6 +438,9 @@ function stripSurrealIds(v: unknown): unknown {
             const asNum = Number(inner);
             return Number.isFinite(asNum) && String(asNum) === inner ? asNum : inner;
         }
+        // SurrealDB returns datetime objects as full ISO strings (e.g. "2026-01-15T03:00:00Z").
+        // Supabase date columns return plain "YYYY-MM-DD". Normalize so consumers don't break.
+        if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(v)) return v.slice(0, 10);
         return v;
     }
     if (Array.isArray(v)) return (v as unknown[]).map(stripSurrealIds);
