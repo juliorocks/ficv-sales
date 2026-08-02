@@ -450,28 +450,32 @@ function stripSurrealIds(v: unknown): unknown {
 }
 
 function makeSurrealSelect(table: string, cols: string, sbBase: unknown) {
-    type WherePart = { isIn: boolean; field: string; val: unknown };
+    type WherePart = { op: string; field: string; val: unknown };
     type OrderPart = { field: string; asc: boolean };
     const wheres: WherePart[] = [];
     const orders: OrderPart[] = [];
     let lim: number | null = null;
+    let offset: number | null = null;
     let isSingle = false;
     let isMaybe = false;
-    let sb = sbBase as Record<string, (...a: unknown[]) => unknown>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let sb = sbBase as any;
 
     const refFields = REFERENCE_FIELDS[table] ?? {};
     const toRecordId = (refTable: string, v: unknown) => `${refTable}:⟨${v}⟩`;
 
-    const buildWhereSql = () => wheres.map(({ isIn, field, val }) => {
+    const buildWhereSql = () => wheres.map(({ op, field, val }) => {
         const ref = field === 'id' ? table : refFields[field];
-        if (!isIn) {
-            if (ref && val != null) return `${field} = ${toRecordId(ref, val)}`;
-            return `${field} = ${toSurrealValue(val)}`;
+        if (op === 'in') {
+            if (ref) return `${field} IN [${(val as unknown[]).map(v => toRecordId(ref, v)).join(', ')}]`;
+            return `${field} IN [${(val as unknown[]).map(v => toSurrealValue(v)).join(', ')}]`;
         }
-        if (ref) {
-            return `${field} IN [${(val as unknown[]).map(v => toRecordId(ref, v)).join(', ')}]`;
+        if (op === 'ilike') {
+            const pattern = String(val).replace(/%/g, '').toLowerCase();
+            return `string::lowercase(${field}) CONTAINS "${pattern.replace(/"/g, '\\"')}"`;
         }
-        return `${field} IN [${(val as unknown[]).map(v => toSurrealValue(v)).join(', ')}]`;
+        if (ref && val != null && op === '=') return `${field} = ${toRecordId(ref, val)}`;
+        return `${field} ${op} ${toSurrealValue(val)}`;
     }).join(' AND ');
 
     async function run(): Promise<unknown> {
@@ -486,6 +490,7 @@ function makeSurrealSelect(table: string, cols: string, sbBase: unknown) {
                 sql += ' ORDER BY ' + orders.map(o => `${o.field} ${o.asc ? 'ASC' : 'DESC'}`).join(', ');
             if (isSingle || isMaybe) sql += ' LIMIT 1';
             else if (lim !== null) sql += ` LIMIT ${lim}`;
+            if (offset !== null) sql += ` START ${offset}`;
 
             const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
                 method: 'POST',
@@ -516,15 +521,20 @@ function makeSurrealSelect(table: string, cols: string, sbBase: unknown) {
     }
 
     const builder = {
-        eq(field: string, val: unknown)      { wheres.push({ isIn: false, field, val }); sb = sb.eq(field, val) as typeof sb; return builder; },
+        eq(field: string, val: unknown)      { wheres.push({ op: '=', field, val }); sb = sb.eq(field, val); return builder; },
+        neq(field: string, val: unknown)     { wheres.push({ op: '!=', field, val }); sb = sb.neq(field, val); return builder; },
+        in(field: string, vals: unknown[])   { wheres.push({ op: 'in', field, val: vals }); sb = sb.in(field, vals); return builder; },
+        gte(field: string, val: unknown)     { wheres.push({ op: '>=', field, val }); sb = sb.gte(field, val); return builder; },
+        lte(field: string, val: unknown)     { wheres.push({ op: '<=', field, val }); sb = sb.lte(field, val); return builder; },
+        gt(field: string, val: unknown)      { wheres.push({ op: '>', field, val }); sb = sb.gt(field, val); return builder; },
+        lt(field: string, val: unknown)      { wheres.push({ op: '<', field, val }); sb = sb.lt(field, val); return builder; },
+        ilike(field: string, val: unknown)   { wheres.push({ op: 'ilike', field, val }); sb = sb.ilike(field, val); return builder; },
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        in(field: string, vals: unknown[])   { wheres.push({ isIn: true, field, val: vals }); sb = (sb as any).in(field, vals); return builder; },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        order(field: string, opts?: { ascending?: boolean }) { orders.push({ field, asc: opts?.ascending !== false }); sb = (sb as any).order(field, opts); return builder; },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        limit(n: number)   { lim = n; sb = (sb as any).limit(n); return builder; },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        single()     { isSingle = true; sb = (sb as any).single(); return builder; },
+        is(field: string, val: unknown)      { wheres.push({ op: val === null ? 'IS' : '=', field, val }); sb = (sb as any).is(field, val); return builder; },
+        range(from: number, to: number)      { offset = from; lim = to - from + 1; sb = sb.range(from, to); return builder; },
+        order(field: string, opts?: { ascending?: boolean }) { orders.push({ field, asc: opts?.ascending !== false }); sb = sb.order(field, opts); return builder; },
+        limit(n: number)   { lim = n; sb = sb.limit(n); return builder; },
+        single()     { isSingle = true; sb = sb.single(); return builder; },
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         maybeSingle(){ isMaybe  = true; sb = (sb as any).maybeSingle(); return builder; },
         then(res?: (v: unknown) => unknown, rej?: (e: unknown) => unknown) { return run().then(res, rej); },
