@@ -235,16 +235,18 @@ async function syncParcelas(
         allRows.push(...rows);
     }
 
-    // Group quitadas by year-month and update financial_goals for each month
-    const monthKeys = new Set<string>();
-    allRows.forEach(r => {
-        if (r.situacao_parcela === 'Quitada' && r.data_pagamento) {
-            monthKeys.add(r.data_pagamento.slice(0, 7)); // YYYY-MM
-        }
-    });
+    // Enumerate every month in [startDate, endDate] so months with data already in
+    // sponte_parcelas (from a prior sync) also get their financial_goals recalculated.
+    const allMonthKeys = new Set<string>();
+    const cur = new Date(startDate + 'T12:00:00');
+    const endMonth = new Date(endDate + 'T12:00:00');
+    while (cur <= endMonth) {
+        allMonthKeys.add(cur.toISOString().slice(0, 7));
+        cur.setMonth(cur.getMonth() + 1);
+    }
 
     const byMonth: Record<string, number> = {};
-    for (const ym of monthKeys) {
+    for (const ym of allMonthKeys) {
         const [y, m] = ym.split('-').map(Number);
         const lastDay = new Date(y, m, 0).getDate();
         const pad = String(m).padStart(2, '0');
