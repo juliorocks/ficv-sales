@@ -450,6 +450,7 @@ const T = {
     commercial_score: r.commercial_score,
     agility_score: r.agility_score,
     final_score: r.final_score,
+    message_content: r.message_content,
   }),
 };
 
