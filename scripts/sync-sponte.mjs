@@ -136,8 +136,16 @@ async function syncMatriculas(token) {
         }))
         .filter(r => r.contrato_id > 0);
 
-    console.log(`  ${rows.length} matrículas encontradas. Limpando tabela...`);
-    await surrealSQL(token, 'DELETE sponte_matriculas;');
+    console.log(`  ${rows.length} matrículas encontradas. Limpando registros antigos...`);
+    let cleaned = 0;
+    while (true) {
+        const r = await surrealSQL(token, 'SELECT id FROM sponte_matriculas LIMIT 500;');
+        const ids = r[0]?.result ?? [];
+        if (!ids.length) break;
+        await surrealSQL(token, ids.map(x => `DELETE ${x.id};`).join('\n'));
+        cleaned += ids.length;
+    }
+    console.log(`  ${cleaned} registros antigos removidos`);
 
     let synced = 0;
     for (let i = 0; i < rows.length; i += 100) {
@@ -166,7 +174,15 @@ async function syncMatriculas(token) {
 
 async function syncParcelas(token) {
     console.log(`  Buscando parcelas ${startDate} → ${endDate}...`);
-    await surrealSQL(token, 'DELETE sponte_parcelas;');
+    let cleanedP = 0;
+    while (true) {
+        const r = await surrealSQL(token, 'SELECT id FROM sponte_parcelas LIMIT 500;');
+        const ids = r[0]?.result ?? [];
+        if (!ids.length) break;
+        await surrealSQL(token, ids.map(x => `DELETE ${x.id};`).join('\n'));
+        cleanedP += ids.length;
+    }
+    if (cleanedP) console.log(`  ${cleanedP} parcelas antigas removidas`);
 
     const chunks = [];
     const cursor = new Date(startDate + 'T12:00:00');
