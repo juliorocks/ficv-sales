@@ -136,8 +136,8 @@ async function syncMatriculas(token) {
         }))
         .filter(r => r.contrato_id > 0);
 
-    console.log(`  ${rows.length} matrículas encontradas. Removendo período antigo...`);
-    await surrealSQL(token, `DELETE sponte_matriculas WHERE data_matricula >= "${startDate}" AND data_matricula <= "${endDate}";`);
+    console.log(`  ${rows.length} matrículas encontradas. Limpando tabela...`);
+    await surrealSQL(token, 'DELETE sponte_matriculas;');
 
     let synced = 0;
     for (let i = 0; i < rows.length; i += 100) {
@@ -166,6 +166,7 @@ async function syncMatriculas(token) {
 
 async function syncParcelas(token) {
     console.log(`  Buscando parcelas ${startDate} → ${endDate}...`);
+    await surrealSQL(token, 'DELETE sponte_parcelas;');
 
     const chunks = [];
     const cursor = new Date(startDate + 'T12:00:00');
