@@ -157,7 +157,8 @@ function toSurrealValue(v: unknown): string {
     if (typeof v === 'number')         return String(v);
     if (typeof v === 'string') {
         if (/^\d{4}-\d{2}-\d{2}T/.test(v)) return `d"${v}"`;
-        if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return `d"${v}T00:00:00Z"`;
+        // YYYY-MM-DD kept as string — sponte date fields are stored as strings, not datetimes.
+        // ISO date strings are lexicographically sortable, so >= / <= work correctly.
         return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
     }
     if (Array.isArray(v)) return `[${v.map(toSurrealValue).join(', ')}]`;
