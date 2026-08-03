@@ -2,6 +2,7 @@
 // Sync Sponte CRM → SurrealDB
 // Uso: node scripts/sync-sponte.mjs [full|matriculas|parcelas] [start_date] [end_date]
 
+
 const SPONTE_URL = 'https://api.sponteeducacional.net.br/WSAPIEdu.asmx';
 const SPONTE_NS  = 'http://api.sponteeducacional.net.br/';
 const CODIGO_CLIENTE = 489166;
