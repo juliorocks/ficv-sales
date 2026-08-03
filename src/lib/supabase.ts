@@ -200,6 +200,7 @@ const DUAL_WRITE_TABLES = new Set([
     'app_settings', 'scripts', 'knowledge_base', 'financial_goals',
     'sponte_matriculas', 'matriculas',
     'widechat_messages', 'widechat_atendimentos',
+    'messages_logs',
 ]);
 
 async function surrealWrite(
