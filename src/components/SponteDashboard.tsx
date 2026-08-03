@@ -26,6 +26,13 @@ interface SponteMatricula {
     contratante: string;
     numero_contrato: string;
     financeiro_lancado: string;
+    celular?: string | null;
+}
+
+interface MessagesLog {
+    agent_name: string | null;
+    contact: string | null;
+    timestamp: string;
 }
 
 interface SponteParcela {
@@ -55,6 +62,160 @@ interface MatriculasPorAgenteResult {
     jaExistente: number;
 }
 
+// ─── Agent attribution helpers ────────────────────────────────────────────────
+
+function normalizeName(name: string): string {
+    if (!name) return '';
+    return name
+        .normalize('NFD').replace(/[̀-ͯ]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9 ]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function extractContactPhone(contact: string): string | null {
+    const m = contact.match(/\((\d{8,15})\)/);
+    if (!m) return null;
+    const digits = m[1].replace(/[^0-9]/g, '');
+    return digits.length >= 8 ? digits.slice(-11) : null;
+}
+
+function normalizeStudentPhone(celular: string | null | undefined): string | null {
+    if (!celular) return null;
+    const digits = celular.replace(/[^0-9]/g, '');
+    return digits.length >= 8 ? digits.slice(-11) : null;
+}
+
+function daysDiff(from: string, to: string): number {
+    return Math.floor((new Date(to + 'T00:00:00').getTime() - new Date(from + 'T00:00:00').getTime()) / 86400000);
+}
+
+function computeMatriculasPorAgente(
+    allMatriculas: SponteMatricula[],
+    messagesLogs: MessagesLog[],
+    dateStart: string,
+    dateEnd: string,
+    selectedCursos: string[],
+    selectedTurma: string,
+    selectedSituacao: string
+): MatriculasPorAgenteResult {
+    const candidatos = allMatriculas
+        .filter(sm => {
+            if (!sm.aluno || !sm.data_matricula) return false;
+            if (sm.data_matricula < dateStart || sm.data_matricula > dateEnd) return false;
+            if (selectedCursos.length > 0 && !selectedCursos.includes(sm.nome_curso)) return false;
+            if (selectedTurma && selectedTurma !== 'all' && sm.nome_turma !== selectedTurma) return false;
+            if (selectedSituacao && selectedSituacao !== 'all' && sm.situacao !== selectedSituacao) return false;
+            return true;
+        })
+        .map(sm => ({
+            ...sm,
+            normAluno: normalizeName(sm.aluno),
+            alunoPhone: normalizeStudentPhone(sm.celular),
+        }));
+
+    const earliestMap = new Map<string, string>();
+    for (const sm of allMatriculas) {
+        if (!sm.aluno || !sm.data_matricula) continue;
+        const norm = normalizeName(sm.aluno);
+        const existing = earliestMap.get(norm);
+        if (!existing || sm.data_matricula < existing) earliestMap.set(norm, sm.data_matricula);
+    }
+
+    type Contato = { normContact: string; contactPhone: string | null; agentName: string; primeiroAtendimento: string };
+    const contatoMap = new Map<string, Contato>();
+    for (const log of messagesLogs) {
+        if (!log.agent_name || log.agent_name === 'Desconhecido' || !log.contact) continue;
+        const normContact = normalizeName(log.contact.replace(/\s*\([^)]*\)\s*$/, ''));
+        const contactPhone = extractContactPhone(log.contact);
+        const key = `${normContact}|||${contactPhone ?? ''}|||${log.agent_name}`;
+        const existing = contatoMap.get(key);
+        if (!existing || log.timestamp < existing.primeiroAtendimento) {
+            contatoMap.set(key, { normContact, contactPhone, agentName: log.agent_name, primeiroAtendimento: log.timestamp });
+        }
+    }
+    const contatos = Array.from(contatoMap.values());
+
+    type Classified = {
+        aluno: string; nomeCurso: string; dataMatricula: string; normAluno: string;
+        agentName: string | null; primeiroAtendimento: string | null; matchType: string | null;
+        status: 'valido' | 'sem_atribuicao' | 'ja_existente';
+    };
+    const classified: Classified[] = [];
+
+    for (const c of candidatos) {
+        const earliestData = earliestMap.get(c.normAluno) ?? null;
+        let bestMatch: { agentName: string; primeiroAtendimento: string; matchType: string } | null = null;
+
+        const candidates = [
+            ...(c.alunoPhone
+                ? contatos.filter(ct =>
+                    ct.contactPhone !== null && ct.contactPhone === c.alunoPhone &&
+                    ct.primeiroAtendimento.slice(0, 10) <= c.data_matricula &&
+                    daysDiff(ct.primeiroAtendimento.slice(0, 10), c.data_matricula) <= 30
+                ).map(ct => ({ ...ct, priority: 1, matchType: 'phone' }))
+                : []),
+            ...contatos.filter(ct =>
+                ct.normContact === c.normAluno &&
+                ct.primeiroAtendimento.slice(0, 10) <= c.data_matricula &&
+                daysDiff(ct.primeiroAtendimento.slice(0, 10), c.data_matricula) <= 30
+            ).map(ct => ({ ...ct, priority: 2, matchType: 'name' })),
+        ].sort((a, b) => a.priority !== b.priority ? a.priority - b.priority : b.primeiroAtendimento.localeCompare(a.primeiroAtendimento));
+
+        if (candidates.length > 0) {
+            const top = candidates[0];
+            bestMatch = { agentName: top.agentName, primeiroAtendimento: top.primeiroAtendimento, matchType: top.matchType };
+        }
+
+        let status: Classified['status'];
+        if (!bestMatch) {
+            status = 'sem_atribuicao';
+        } else if (earliestData && earliestData < bestMatch.primeiroAtendimento.slice(0, 10)) {
+            status = 'ja_existente';
+        } else {
+            status = 'valido';
+        }
+        classified.push({
+            aluno: c.aluno, nomeCurso: c.nome_curso, dataMatricula: c.data_matricula, normAluno: c.normAluno,
+            agentName: bestMatch?.agentName ?? null, primeiroAtendimento: bestMatch?.primeiroAtendimento ?? null,
+            matchType: bestMatch?.matchType ?? null, status,
+        });
+    }
+
+    const validosSorted = classified.filter(c => c.status === 'valido').sort((a, b) => {
+        const ag = (a.agentName ?? '').localeCompare(b.agentName ?? '');
+        if (ag !== 0) return ag;
+        const na = a.normAluno.localeCompare(b.normAluno);
+        if (na !== 0) return na;
+        const normCursoA = normalizeName(a.nomeCurso?.split('(')[0]?.trim() ?? '');
+        const normCursoB = normalizeName(b.nomeCurso?.split('(')[0]?.trim() ?? '');
+        const nc = normCursoA.localeCompare(normCursoB);
+        if (nc !== 0) return nc;
+        return a.dataMatricula.localeCompare(b.dataMatricula);
+    });
+
+    const validosMap = new Map<string, Classified>();
+    for (const c of validosSorted) {
+        const normCurso = normalizeName(c.nomeCurso?.split('(')[0]?.trim() ?? '');
+        const key = `${c.agentName}|||${c.normAluno}|||${normCurso}`;
+        if (!validosMap.has(key)) validosMap.set(key, c);
+    }
+    const validos = Array.from(validosMap.values());
+
+    const agentCounts = new Map<string, number>();
+    for (const v of validos) { if (v.agentName) agentCounts.set(v.agentName, (agentCounts.get(v.agentName) ?? 0) + 1); }
+
+    return {
+        porAgente: Array.from(agentCounts.entries()).sort((a, b) => b[1] - a[1]).map(([agentName, matriculas]) => ({ agentName, matriculas })),
+        detalhes: validos.map(v => ({ agentName: v.agentName!, aluno: v.aluno, curso: v.nomeCurso, dataMatricula: v.dataMatricula })),
+        semAtribuicao: classified.filter(c => c.status === 'sem_atribuicao').length,
+        jaExistente: classified.filter(c => c.status === 'ja_existente').length,
+    };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 const fmt = (v: number) =>
     v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
 
@@ -70,8 +231,10 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
     const [matriculas, setMatriculas] = useState<SponteMatricula[]>([]);
     const [parcelas, setParcelas] = useState<SponteParcela[]>([]);
     const [parcelasPendentes, setParcelasPendentes] = useState<SponteParcela[]>([]);
-    // Matrículas por agente — vem de uma função no banco (matriculas_por_agente),
-    // recalculada sempre que os filtros da página mudam.
+    const [messagesLogs, setMessagesLogs] = useState<MessagesLog[]>([]);
+    const [messagesLogsReady, setMessagesLogsReady] = useState(false);
+
+    // Matrículas por agente — calculado client-side cruzando sponte_matriculas com messages_logs
     const [agentAttribution, setAgentAttribution] = useState<MatriculasPorAgenteResult>({ porAgente: [], detalhes: [], semAtribuicao: 0, jaExistente: 0 });
     const [porAgenteLoading, setPorAgenteLoading] = useState(true);
     const [selectedAgentDrillDown, setSelectedAgentDrillDown] = useState<string | null>(null);
@@ -178,40 +341,44 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
         return () => clearInterval(id);
     }, [loadData]);
 
-    // ─── Matrículas por agente — calculado no banco (função matriculas_por_agente),
-    // respeitando os mesmos filtros de período/curso/turma/situação da página.
+    // Carrega messages_logs uma vez — usados para cruzar atribuição de matrículas por agente
     useEffect(() => {
-        let ignore = false;
-        // Limpa imediatamente para não exibir dados do período anterior enquanto carrega
+        const load = async () => {
+            const PAGE = 5000;
+            const all: MessagesLog[] = [];
+            for (let from = 0; ; from += PAGE) {
+                const { data, error } = await supabase
+                    .from('messages_logs')
+                    .select('agent_name, contact, timestamp')
+                    .range(from, from + PAGE - 1);
+                if (error) { console.warn('messages_logs load error:', error); break; }
+                if (data?.length) all.push(...(data as MessagesLog[]));
+                if (!data || data.length < PAGE) break;
+            }
+            setMessagesLogs(all);
+            setMessagesLogsReady(true);
+        };
+        load();
+    }, []);
+
+    // ─── Matrículas por agente — calculado client-side (SurrealDB não tem RPC PostgreSQL)
+    useEffect(() => {
+        if (!messagesLogsReady || !matriculas.length) return;
         setAgentAttribution({ porAgente: [], detalhes: [], semAtribuicao: 0, jaExistente: 0 });
         setSelectedAgentDrillDown(null);
-        const loadPorAgente = async () => {
-            setPorAgenteLoading(true);
-            try {
-                const { data, error } = await supabase.rpc('matriculas_por_agente', {
-                    p_data_inicio: dateStart,
-                    p_data_fim: dateEnd,
-                    p_cursos: selectedCursos.length > 0 ? selectedCursos : null,
-                    p_turma: selectedTurma,
-                    p_situacao: selectedSituacao,
-                });
-                if (ignore) return;
-                if (error) throw error;
-                setAgentAttribution({
-                    porAgente: data?.porAgente ?? [],
-                    detalhes: data?.detalhes ?? [],
-                    semAtribuicao: data?.semAtribuicao ?? 0,
-                    jaExistente: data?.jaExistente ?? 0,
-                });
-            } catch (e) {
-                if (!ignore) console.error('loadPorAgente error:', e);
-            } finally {
-                if (!ignore) setPorAgenteLoading(false);
-            }
-        };
-        loadPorAgente();
-        return () => { ignore = true; };
-    }, [dateStart, dateEnd, selectedCursos, selectedTurma, selectedSituacao]);
+        setPorAgenteLoading(true);
+        try {
+            const result = computeMatriculasPorAgente(
+                matriculas, messagesLogs, dateStart, dateEnd,
+                selectedCursos, selectedTurma, selectedSituacao
+            );
+            setAgentAttribution(result);
+        } catch (e) {
+            console.error('computeMatriculasPorAgente error:', e);
+        } finally {
+            setPorAgenteLoading(false);
+        }
+    }, [matriculas, messagesLogs, messagesLogsReady, dateStart, dateEnd, selectedCursos, selectedTurma, selectedSituacao]);
 
     // ─── Drill-down: matrículas do agente selecionado, agrupadas por curso ────
     const drillDownByCurso = useMemo(() => {
