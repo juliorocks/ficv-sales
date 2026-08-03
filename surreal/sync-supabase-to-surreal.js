@@ -218,7 +218,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 function sid(table, id) {
   if (id == null) return null;
-  return `${table}:⟨${String(id)}⟩`;
+  return `${table}:\`${String(id)}\``;
 }
 
 // ── Transformers ──────────────────────────────────────────────────────────────

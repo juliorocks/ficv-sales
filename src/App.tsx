@@ -157,18 +157,20 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     // Load default team (Comercial) and persist team selection
     useEffect(() => {
         const setDefaultTeam = async () => {
-            const saved = localStorage.getItem('ficv_selected_team');
-            if (!saved) {
-                // First time: fetch Comercial team ID and set as default
-                const { data: teams } = await supabase
-                    .from('teams')
-                    .select('id, name')
-                    .eq('name', 'Comercial')
-                    .single();
+            const { data: teamList } = await supabase
+                .from('teams')
+                .select('id, name')
+                .eq('active', true);
 
-                if (teams?.id) {
-                    setSelectedTeamId(teams.id);
-                    localStorage.setItem('ficv_selected_team', teams.id);
+            const validIds = (teamList ?? []).map((t: { id: string }) => t.id);
+            const saved = localStorage.getItem('ficv_selected_team');
+
+            if (!saved || !validIds.includes(saved)) {
+                // No saved team or saved ID is stale/corrupted — default to Comercial
+                const comercial = (teamList ?? []).find((t: { name: string }) => t.name === 'Comercial');
+                if (comercial?.id) {
+                    setSelectedTeamId(comercial.id);
+                    localStorage.setItem('ficv_selected_team', comercial.id);
                 }
             }
         };
