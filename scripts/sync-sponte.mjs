@@ -162,7 +162,7 @@ async function syncMatriculas(token) {
             `financeiro_lancado:${sv(r.financeiro_lancado)},` +
             `nome_matriz_curricular:${sv(r.nome_matriz_curricular)},` +
             `tipo_contrato_id:${sv(r.tipo_contrato_id)},celular:NONE,` +
-            `sync_gen:2,synced_at:${sv(r.synced_at)}};`
+            `synced_at:${sv(r.synced_at)}};`
         ).join('\n');
         await surrealSQL(token, stmts);
         synced += batch.length;
@@ -230,7 +230,7 @@ async function syncParcelas(token) {
                     `forma_cobranca:${sv(r.forma_cobranca)},categoria:${sv(r.categoria)},` +
                     `categoria_id:${sv(r.categoria_id)},sacado:${sv(r.sacado)},` +
                     `conta_creditar:${sv(r.conta_creditar)},` +
-                    `sync_gen:2,synced_at:${sv(r.synced_at)}};`;
+                    `synced_at:${sv(r.synced_at)}};`;
             }).join('\n');
             await surrealSQL(token, stmts);
             totalSynced += batch.length;

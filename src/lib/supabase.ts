@@ -459,9 +459,10 @@ function stripSurrealIds(v: unknown): unknown {
     return v;
 }
 
+// Filtra registros com chave inteira (novos, do sync Sponte) vs UUID (importação antiga)
 const TABLE_DEFAULT_WHERE: Record<string, string> = {
-    sponte_matriculas: 'sync_gen IS NOT NONE',
-    sponte_parcelas:   'sync_gen IS NOT NONE',
+    sponte_matriculas: 'string::contains(type::string(id), "-") = false',
+    sponte_parcelas:   'string::contains(type::string(id), "-") = false',
 };
 
 function makeSurrealSelect(table: string, cols: string, sbBase: unknown) {
