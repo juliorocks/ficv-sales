@@ -432,8 +432,24 @@ const T = {
   }),
   messages_logs: (r) => ({
     id: sid('messages_logs', r.id),
-    contact: r.contact, agent_name: r.agent_name,
-    timestamp: r.timestamp, created_at: r.timestamp,
+    protocol: r.protocol,
+    contact: r.contact,
+    agent_name: r.agent_name,
+    agent_id: r.agent_id,
+    timestamp: r.timestamp,
+    created_at: r.timestamp,
+    message_count: r.message_count,
+    closing_attempt: r.closing_attempt,
+    status: r.status,
+    is_commercial: r.is_commercial,
+    overall_conclusion: r.overall_conclusion,
+    improvements: r.improvements,
+    empathy_score: r.empathy_score,
+    clarity_score: r.clarity_score,
+    depth_score: r.depth_score,
+    commercial_score: r.commercial_score,
+    agility_score: r.agility_score,
+    final_score: r.final_score,
   }),
 };
 
@@ -465,7 +481,7 @@ const PLAN = [
   { table: 'matriculas',                   columns: '*',                                               orderBy: 'created_at' },
   { table: 'widechat_messages',            columns: 'id,lead_id,session_id,message_id,type,message,origin,sender_name,raw_data,processed_at,created_at', orderBy: 'id' },
   { table: 'widechat_atendimentos',        columns: '*',                                               orderBy: 'aceito_em' },
-  { table: 'messages_logs',               columns: 'id,contact,agent_name,timestamp',                orderBy: 'timestamp' },
+  { table: 'messages_logs',               columns: '*',                                               orderBy: 'timestamp' },
 ];
 
 // ── Main ──────────────────────────────────────────────────────────────────────
