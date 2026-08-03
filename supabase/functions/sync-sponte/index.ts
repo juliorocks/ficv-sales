@@ -11,6 +11,45 @@ const SPONTE_NS  = "http://api.sponteeducacional.net.br/";
 const CODIGO_CLIENTE = 489166;
 const TOKEN = "qBLjek3dpFxF";
 
+// ─── SurrealDB helpers (espelha financial_goals no SurrealDB) ─────────────────
+const SURREAL_ENDPOINT = Deno.env.get('SURREAL_ENDPOINT')
+    ?? 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
+const SURREAL_NS = 'ficv';
+const SURREAL_DB = 'salespulse';
+
+async function getSurrealAdminToken(): Promise<string | null> {
+    try {
+        const res = await fetch(`${SURREAL_ENDPOINT}/signin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'surreal-ns': SURREAL_NS },
+            body: JSON.stringify({ ns: SURREAL_NS, user: 'ficv_admin', pass: 'Ficv@Surreal2026!' }),
+        });
+        if (!res.ok) return null;
+        return (await res.json()).token ?? null;
+    } catch { return null; }
+}
+
+async function surrealUpdateGoals(
+    token: string,
+    updates: { year: number; month: number; achieved: number }[]
+): Promise<void> {
+    if (!updates.length) return;
+    const sql = updates.map(({ year, month, achieved }) =>
+        `UPDATE financial_goals SET monthly_achieved = ${achieved} WHERE year = ${year} AND month = ${month};`
+    ).join('\n');
+    try {
+        await fetch(`${SURREAL_ENDPOINT}/sql`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'text/plain', 'Accept': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                'surreal-ns': SURREAL_NS, 'surreal-db': SURREAL_DB,
+            },
+            body: sql,
+        });
+    } catch { /* fire-and-forget */ }
+}
+
 // ─── SOAP helper ──────────────────────────────────────────────────────────────
 function soapEnvelope(method: string, params: string): string {
     return `<?xml version="1.0" encoding="utf-8"?>
@@ -246,6 +285,8 @@ async function syncParcelas(
     }
 
     const byMonth: Record<string, number> = {};
+    const surrealUpdates: { year: number; month: number; achieved: number }[] = [];
+
     for (const ym of allMonthKeys) {
         const [y, m] = ym.split('-').map(Number);
         const lastDay = new Date(y, m, 0).getDate();
@@ -261,6 +302,7 @@ async function syncParcelas(
 
         const achieved = (agg ?? []).reduce((s: number, r: any) => s + (r.valor_pago || 0), 0);
         byMonth[ym] = achieved;
+        surrealUpdates.push({ year: y, month: m, achieved });
 
         await supabase
             .from('financial_goals')
@@ -269,6 +311,9 @@ async function syncParcelas(
                 { onConflict: 'year,month', ignoreDuplicates: false }
             );
     }
+
+    // Espelha no SurrealDB (fire-and-forget — não bloqueia a resposta)
+    getSurrealAdminToken().then(tok => tok && surrealUpdateGoals(tok, surrealUpdates));
 
     return { synced: totalSynced, byMonth };
 }
@@ -324,6 +369,7 @@ serve(async (req) => {
         if (mode === 'recalc_goals') {
             // Recalculate monthly_achieved from existing sponte_parcelas without calling Sponte API
             const byMonth: Record<string, number> = {};
+            const recalcUpdates: { year: number; month: number; achieved: number }[] = [];
             const cur2 = new Date(startDate + 'T12:00:00');
             const end2 = new Date(endDate + 'T12:00:00');
             while (cur2 <= end2) {
@@ -340,12 +386,16 @@ serve(async (req) => {
                     .lte('data_pagamento', `${y2}-${pad}-${lastDay}`);
                 const achieved = (agg ?? []).reduce((s: number, r: any) => s + (r.valor_pago || 0), 0);
                 byMonth[ym] = achieved;
+                recalcUpdates.push({ year: y2, month: m2, achieved });
                 await supabase.from('financial_goals').upsert(
                     { year: y2, month: m2, monthly_achieved: achieved },
                     { onConflict: 'year,month', ignoreDuplicates: false }
                 );
                 cur2.setMonth(cur2.getMonth() + 1);
             }
+            // Espelha no SurrealDB
+            const surrealTok = await getSurrealAdminToken();
+            if (surrealTok) await surrealUpdateGoals(surrealTok, recalcUpdates);
             result.goals = { byMonth };
             console.log('Goals recalculated from sponte_parcelas:', byMonth);
         }

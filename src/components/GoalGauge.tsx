@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Check, Loader2, RefreshCw } from 'lucide-react';
-import { supabase, supabaseRaw } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import { showSuccess, showError } from '@/utils/toast';
 
 const MONTH_NAMES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
@@ -99,7 +99,7 @@ export const useFinancialGoals = (year: number) => {
 
     const fetch = useCallback(async () => {
         setLoading(true);
-        const { data } = await supabaseRaw
+        const { data } = await supabase
             .from('financial_goals')
             .select('month, monthly_target, monthly_achieved')
             .eq('year', year)
@@ -185,7 +185,7 @@ export const GoalsPage: React.FC<GoalsPageProps> = ({ isAdmin }) => {
             return { year, month: m, monthly_target: tgt, monthly_achieved: ach };
         });
 
-        await supabaseRaw.from('financial_goals').upsert(rows, { onConflict: 'year,month' });
+        await supabase.from('financial_goals').upsert(rows, { onConflict: 'year,month' });
         await refresh();
         setEdited({});
         setSaving(false);
