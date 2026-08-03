@@ -149,8 +149,8 @@ async function syncMatriculas(token) {
     console.log(`  ${rows.length} matrículas encontradas. Upserting...`);
 
     let synced = 0;
-    for (let i = 0; i < rows.length; i += 50) {
-        const batch = rows.slice(i, i + 50);
+    for (let i = 0; i < rows.length; i += 10) {
+        const batch = rows.slice(i, i + 10);
         const stmts = batch.map(r =>
             `UPSERT ${sid('sponte_matriculas', r.contrato_id)} CONTENT {` +
             `contrato_id:${sv(r.contrato_id)},aluno_id:${sv(r.aluno_id)},aluno:${sv(r.aluno)},` +
