@@ -1,6 +1,74 @@
 import { serve } from "https://deno.land/std@0.177.1/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 
+// ─── SurrealDB helpers ────────────────────────────────────────────────────────
+const SURREAL_ENDPOINT = Deno.env.get('SURREAL_ENDPOINT') ?? 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
+const SURREAL_NS = 'ficv';
+const SURREAL_DB = 'salespulse';
+const SURREAL_USER = Deno.env.get('SURREAL_USER') ?? 'ficv_admin';
+const SURREAL_PASS = Deno.env.get('SURREAL_PASS') ?? 'Ficv@Surreal2026!';
+
+async function surrealAuth(): Promise<string> {
+    const res = await fetch(`${SURREAL_ENDPOINT}/signin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'surreal-ns': SURREAL_NS },
+        body: JSON.stringify({ ns: SURREAL_NS, user: SURREAL_USER, pass: SURREAL_PASS }),
+    });
+    if (!res.ok) throw new Error(`SurrealDB auth failed: ${res.status}`);
+    return (await (res.json() as Promise<{ token: string }>)).token;
+}
+
+function sv(v: unknown): string {
+    if (v === null || v === undefined) return 'NONE';
+    if (typeof v === 'boolean') return String(v);
+    if (typeof v === 'number') return String(v);
+    if (typeof v === 'string') {
+        if (/^\d{4}-\d{2}-\d{2}T/.test(v)) return `d"${v}"`;
+        return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
+    }
+    if (Array.isArray(v)) return `[${v.map(sv).join(', ')}]`;
+    if (typeof v === 'object') {
+        const pairs = Object.entries(v as Record<string, unknown>).map(([k, val]) => `${k}: ${sv(val)}`);
+        return `{${pairs.join(', ')}}`;
+    }
+    return JSON.stringify(v);
+}
+
+async function surrealPost(token: string, sql: string): Promise<void> {
+    const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'text/plain', 'Accept': 'application/json',
+            'Authorization': `Bearer ${token}`, 'surreal-ns': SURREAL_NS, 'surreal-db': SURREAL_DB,
+        },
+        body: sql,
+    });
+    if (!res.ok) console.error(`SurrealDB SQL error: HTTP ${res.status}`);
+}
+
+async function surrealUpsertById(token: string, table: string, rows: Record<string, unknown>[], idField: string): Promise<void> {
+    if (!rows.length) return;
+    let sql = '';
+    for (let i = 0; i < rows.length; i += 50) {
+        for (const r of rows.slice(i, i + 50)) {
+            const id = String(r[idField] ?? '');
+            sql += `UPSERT ${table}:\`${id}\` CONTENT {${Object.entries(r).map(([k, v]) => `${k}: ${sv(v)}`).join(', ')}} RETURN NONE;\n`;
+        }
+    }
+    await surrealPost(token, sql);
+}
+
+async function surrealUpsert(token: string, table: string, rows: Record<string, unknown>[], dateField: string, dateFrom: string, dateTo: string): Promise<void> {
+    if (!rows.length) return;
+    let sql = `DELETE ${table} WHERE ${dateField} >= "${dateFrom}" AND ${dateField} <= "${dateTo}";\n`;
+    for (let i = 0; i < rows.length; i += 50) {
+        const batch = rows.slice(i, i + 50);
+        const lits = batch.map(r => `{${Object.entries(r).map(([k, val]) => `${k}: ${sv(val)}`).join(', ')}}`).join(',\n');
+        sql += `INSERT INTO ${table} [${lits}] RETURN NONE;\n`;
+    }
+    await surrealPost(token, sql);
+}
+
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -10,8 +78,8 @@ const DEVELOPER_TOKEN    = Deno.env.get('GOOGLE_ADS_DEVELOPER_TOKEN') ?? '';
 const CLIENT_ID          = Deno.env.get('GOOGLE_ADS_CLIENT_ID') ?? '';
 const CLIENT_SECRET      = Deno.env.get('GOOGLE_ADS_CLIENT_SECRET') ?? '';
 const REFRESH_TOKEN      = Deno.env.get('GOOGLE_ADS_REFRESH_TOKEN') ?? '';
-const CUSTOMER_ID        = Deno.env.get('GOOGLE_ADS_CUSTOMER_ID') ?? '';       // e.g. 6546476778
-const LOGIN_CUSTOMER_ID  = Deno.env.get('GOOGLE_ADS_LOGIN_CUSTOMER_ID') ?? ''; // manager account
+const CUSTOMER_ID        = Deno.env.get('GOOGLE_ADS_CUSTOMER_ID') ?? '';
+const LOGIN_CUSTOMER_ID  = Deno.env.get('GOOGLE_ADS_LOGIN_CUSTOMER_ID') ?? '';
 
 const API_VERSION = 'v25';
 const BASE_URL    = `https://googleads.googleapis.com/${API_VERSION}`;
@@ -34,8 +102,8 @@ async function getAccessToken(): Promise<string> {
 }
 
 // ─── Google Ads API: GAQL query ───────────────────────────────────────────────
-async function gaqlQueryFor(accessToken: string, customerId: string, query: string): Promise<any[]> {
-    const url = `${BASE_URL}/customers/${customerId}/googleAds:searchStream`;
+async function gaqlQuery(accessToken: string, query: string): Promise<any[]> {
+    const url = `${BASE_URL}/customers/${CUSTOMER_ID}/googleAds:searchStream`;
     const headers: Record<string, string> = {
         'Authorization':    `Bearer ${accessToken}`,
         'developer-token':  DEVELOPER_TOKEN,
@@ -45,7 +113,7 @@ async function gaqlQueryFor(accessToken: string, customerId: string, query: stri
 
     const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ query }) });
     const text = await res.text();
-    if (!res.ok) return []; // silently skip inaccessible customers
+    if (!res.ok) throw new Error(`Google Ads API ${res.status}: ${text}`);
 
     const results: any[] = [];
     try {
@@ -62,49 +130,7 @@ async function gaqlQueryFor(accessToken: string, customerId: string, query: stri
     return results;
 }
 
-async function gaqlQuery(accessToken: string, query: string): Promise<any[]> {
-    const url = `${BASE_URL}/customers/${CUSTOMER_ID}/googleAds:searchStream`;
-    const headers: Record<string, string> = {
-        'Authorization':    `Bearer ${accessToken}`,
-        'developer-token':  DEVELOPER_TOKEN,
-        'Content-Type':     'application/json',
-    };
-    if (LOGIN_CUSTOMER_ID) headers['login-customer-id'] = LOGIN_CUSTOMER_ID;
-
-    const res = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ query }),
-    });
-
-    const text = await res.text();
-    if (!res.ok) throw new Error(`Google Ads API ${res.status}: ${text}`);
-
-    // searchStream returns a JSON array of batch objects (each with a "results" array)
-    const results: any[] = [];
-    try {
-        const parsed = JSON.parse(text);
-        const batches = Array.isArray(parsed) ? parsed : [parsed];
-        for (const batch of batches) {
-            if (batch.results) results.push(...batch.results);
-        }
-    } catch (_) {
-        // fallback: try NDJSON (older API versions)
-        for (const line of text.split('\n')) {
-            const trimmed = line.trim();
-            if (!trimmed || trimmed === '[' || trimmed === ']') continue;
-            try {
-                const batch = JSON.parse(trimmed.replace(/^,/, ''));
-                if (batch.results) results.push(...batch.results);
-            } catch (__) { /* skip malformed lines */ }
-        }
-    }
-    return results;
-}
-
 // ─── Sync account balance via account_budget ──────────────────────────────────
-// Funciona para contas com Account Budgets configurados (spending limit SPECIFIED).
-// Para contas pré-pagas manuais sem account_budget, o saldo é atualizado manualmente no dashboard.
 async function syncAccountBalance(
     supabase: ReturnType<typeof createClient>,
     accessToken: string
@@ -145,7 +171,7 @@ async function syncAccountBalance(
 async function syncCampaigns(
     supabase: ReturnType<typeof createClient>,
     accessToken: string
-): Promise<{ synced: number }> {
+): Promise<{ synced: number; rows?: Record<string, unknown>[] }> {
     const rows = await gaqlQuery(accessToken, `
         SELECT
             campaign.id,
@@ -181,7 +207,7 @@ async function syncCampaigns(
         if (error) throw new Error('upsert campaigns: ' + error.message);
         synced += records.slice(i, i + 200).length;
     }
-    return { synced };
+    return { synced, rows: records as Record<string, unknown>[] };
 }
 
 // ─── Sync daily insights ──────────────────────────────────────────────────────
@@ -190,7 +216,7 @@ async function syncInsights(
     accessToken: string,
     startDate: string,
     endDate: string
-): Promise<{ synced: number }> {
+): Promise<{ synced: number; rows?: Record<string, unknown>[] }> {
     const rows = await gaqlQuery(accessToken, `
         SELECT
             campaign.id,
@@ -226,7 +252,7 @@ async function syncInsights(
         if (error) throw new Error('upsert insights: ' + error.message);
         synced += records.slice(i, i + 200).length;
     }
-    return { synced };
+    return { synced, rows: records as Record<string, unknown>[] };
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
@@ -245,13 +271,28 @@ serve(async (req) => {
         const startDate = body.start_date ?? `${year}-01-01`;
         const endDate   = body.end_date   ?? now.toISOString().split('T')[0];
 
-        const accessToken = await getAccessToken();
+        const [accessToken, surrealToken] = await Promise.all([
+            getAccessToken(),
+            surrealAuth().catch((e: any) => { console.error('SurrealDB auth:', e.message); return null; }),
+        ]);
 
         const [campaigns, insights, accountBalance] = await Promise.all([
             syncCampaigns(supabase, accessToken),
             syncInsights(supabase, accessToken, startDate, endDate),
             syncAccountBalance(supabase, accessToken),
         ]);
+
+        // Espelha no SurrealDB (fire-and-forget)
+        if (surrealToken) {
+            const writes: Promise<void>[] = [];
+            if (campaigns.rows?.length)
+                writes.push(surrealUpsertById(surrealToken, 'google_ads_campaigns', campaigns.rows, 'campaign_id')
+                    .catch((e: any) => console.error('SurrealDB google campaigns:', e.message)));
+            if (insights.rows?.length)
+                writes.push(surrealUpsert(surrealToken, 'google_ads_insights_daily', insights.rows, 'date', startDate, endDate)
+                    .catch((e: any) => console.error('SurrealDB google insights:', e.message)));
+            await Promise.all(writes);
+        }
 
         return new Response(JSON.stringify({ ok: true, startDate, endDate, campaigns, insights, accountBalance }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },

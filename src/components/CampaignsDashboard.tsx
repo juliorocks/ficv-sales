@@ -7,7 +7,7 @@ import {
     BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
     CartesianGrid, ReferenceLine, PieChart, Pie, Legend, LabelList
 } from 'recharts';
-import { supabase, supabaseRaw, surrealBatchUpsert } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import { showSuccess, showError } from '@/utils/toast';
 import { periodToDates, PERIOD_OPTIONS } from '@/utils/dashboardFilters';
 
@@ -195,11 +195,11 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
         const loadCampaigns = async () => {
             const [metaRows, googleRows] = await Promise.all([
                 paginateAll<{ campaign_id: string; campaign_name: string | null }>((from, to) =>
-                    supabaseRaw.from('meta_campaign_insights_daily').select('campaign_id,campaign_name')
+                    supabase.from('meta_campaign_insights_daily').select('campaign_id,campaign_name')
                         .gte('date', dateStart).lte('date', dateEnd).range(from, to)
                 ),
                 paginateAll<{ campaign_id: string; campaign_name: string | null }>((from, to) =>
-                    supabaseRaw.from('google_ads_insights_daily').select('campaign_id,campaign_name')
+                    supabase.from('google_ads_insights_daily').select('campaign_id,campaign_name')
                         .gte('date', dateStart).lte('date', dateEnd).range(from, to)
                 ),
             ]);
@@ -247,36 +247,36 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
 
             const [metaRows, prevMetaRows, gRows, prevGRows, demoRows, matriculasRes, syncRes] = await Promise.all([
                 filterMeta ? paginateAll<MetaInsight>((from, to) => {
-                    let q = supabaseRaw.from('meta_campaign_insights_daily').select(metaCols)
+                    let q = supabase.from('meta_campaign_insights_daily').select(metaCols)
                         .gte('date', dateStart).lte('date', dateEnd);
                     if (metaCampaignIds.length > 0) q = q.in('campaign_id', metaCampaignIds);
                     return q.range(from, to);
                 }) : Promise.resolve([] as MetaInsight[]),
                 filterMeta ? paginateAll<MetaInsight>((from, to) => {
-                    let q = supabaseRaw.from('meta_campaign_insights_daily').select(metaCols)
+                    let q = supabase.from('meta_campaign_insights_daily').select(metaCols)
                         .gte('date', prevStart).lte('date', prevEnd);
                     if (metaCampaignIds.length > 0) q = q.in('campaign_id', metaCampaignIds);
                     return q.range(from, to);
                 }) : Promise.resolve([] as MetaInsight[]),
                 filterGoogle ? paginateAll<GoogleInsight>((from, to) => {
-                    let q = supabaseRaw.from('google_ads_insights_daily').select(googleCols)
+                    let q = supabase.from('google_ads_insights_daily').select(googleCols)
                         .gte('date', dateStart).lte('date', dateEnd);
                     if (googleCampaignIds.length > 0) q = q.in('campaign_id', googleCampaignIds);
                     return q.range(from, to);
                 }) : Promise.resolve([] as GoogleInsight[]),
                 filterGoogle ? paginateAll<GoogleInsight>((from, to) => {
-                    let q = supabaseRaw.from('google_ads_insights_daily').select(googleCols)
+                    let q = supabase.from('google_ads_insights_daily').select(googleCols)
                         .gte('date', prevStart).lte('date', prevEnd);
                     if (googleCampaignIds.length > 0) q = q.in('campaign_id', googleCampaignIds);
                     return q.range(from, to);
                 }) : Promise.resolve([] as GoogleInsight[]),
                 paginateAll<MetaDemographic>((from, to) =>
-                    supabaseRaw.from('meta_demographics_daily').select('date,age_range,gender,spend')
+                    supabase.from('meta_demographics_daily').select('date,age_range,gender,spend')
                         .gte('date', dateStart).lte('date', dateEnd).range(from, to)
                 ),
                 supabase.from('sponte_matriculas').select('contrato_id', { count: 'exact', head: true })
                     .gte('data_matricula', dateStart).lte('data_matricula', dateEnd),
-                supabaseRaw.from('meta_campaign_insights_daily').select('synced_at')
+                supabase.from('meta_campaign_insights_daily').select('synced_at')
                     .order('synced_at', { ascending: false }).limit(1).maybeSingle(),
             ]);
 
@@ -319,7 +319,7 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
         try {
             const [insightRows, matriculaRows] = await Promise.all([
                 paginateAll<{ date: string; spend: number; leads_count: number }>((from, to) =>
-                    supabaseRaw.from('meta_campaign_insights_daily').select('date,spend,leads_count')
+                    supabase.from('meta_campaign_insights_daily').select('date,spend,leads_count')
                         .gte('date', startStr).lte('date', endStr).range(from, to)
                 ),
                 paginateAll<{ data_matricula: string }>((from, to) =>
@@ -364,6 +364,7 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
     }, [loadData, loadMonthly]);
 
     // ─── Sync via Edge Functions ───────────────────────────────────────────────
+    // As Edge Functions sincronizam Meta/Google → Supabase → SurrealDB internamente.
     const handleSyncMeta = async () => {
         setSyncing('meta');
         try {
@@ -372,15 +373,6 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
             });
             if (error) throw error;
             showSuccess(`Meta: ${data?.campaigns?.synced ?? 0} campanhas, ${data?.insights?.synced ?? 0} registros`);
-            // Escreve dados frescos do Supabase → SurrealDB para leituras rápidas
-            const [insRes, demoRes] = await Promise.all([
-                supabaseRaw.from('meta_campaign_insights_daily').select('*').gte('date', dateStart).lte('date', dateEnd),
-                supabaseRaw.from('meta_demographics_daily').select('*').gte('date', dateStart).lte('date', dateEnd),
-            ]);
-            await Promise.all([
-                surrealBatchUpsert('meta_campaign_insights_daily', (insRes.data ?? []) as Record<string, unknown>[], { dateField: 'date', dateFrom: dateStart, dateTo: dateEnd }),
-                surrealBatchUpsert('meta_demographics_daily', (demoRes.data ?? []) as Record<string, unknown>[], { dateField: 'date', dateFrom: dateStart, dateTo: dateEnd }),
-            ]);
             await Promise.all([loadData(), loadMonthly()]);
         } catch (e: any) {
             showError('Erro Meta Ads: ' + e.message);
@@ -397,9 +389,6 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
             });
             if (error) throw error;
             showSuccess(`Google Ads: ${data?.campaigns?.synced ?? 0} campanhas, ${data?.insights?.synced ?? 0} registros`);
-            // Escreve dados frescos do Supabase → SurrealDB para leituras rápidas
-            const gInsRes = await supabaseRaw.from('google_ads_insights_daily').select('*').gte('date', dateStart).lte('date', dateEnd);
-            await surrealBatchUpsert('google_ads_insights_daily', (gInsRes.data ?? []) as Record<string, unknown>[], { dateField: 'date', dateFrom: dateStart, dateTo: dateEnd });
             await Promise.all([loadData(), loadMonthly()]);
         } catch (e: any) {
             showError('Erro Google Ads: ' + e.message);

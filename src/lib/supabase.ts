@@ -431,8 +431,8 @@ const SURREAL_READ_TABLES = new Set([
     'widechat_messages', 'widechat_atendimentos',
     'sponte_matriculas', 'sponte_parcelas',
     'messages_logs',
-    // Campanhas: lidas direto do Supabase via supabaseRaw no CampaignsDashboard
-    // (não entram aqui para evitar dependência do SurrealDB para dados recentes)
+    'meta_campaigns', 'meta_campaign_insights_daily', 'meta_demographics_daily',
+    'google_ads_campaigns', 'google_ads_insights_daily',
 ]);
 
 function stripSurrealIds(v: unknown): unknown {

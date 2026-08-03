@@ -117,7 +117,7 @@ function toSurrealLiteral(v) {
     // SurrealDB record ID — output bare (unquoted) so it's treated as a record reference
     if (/^[a-z_]+:⟨.+⟩$/.test(v)) return v;
     if (/^\d{4}-\d{2}-\d{2}T/.test(v)) return `d"${v}"`;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return `d"${v}T00:00:00Z"`;
+    // YYYY-MM-DD stored as plain string (not datetime) for consistent string comparisons in queries
     return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '')}"`;
   }
   if (Array.isArray(v)) return `[${v.map(toSurrealLiteral).join(',')}]`;
@@ -347,34 +347,43 @@ const T = {
     id: sid('meta_campaigns', r.campaign_id), campaign_id: r.campaign_id,
     name: r.name, objective: r.objective, status: r.status, updated_at: r.updated_at,
   }),
-  meta_campaign_insights_daily: (r) => ({
-    id: sid('meta_campaign_insights_daily', r.id), campaign_id: r.campaign_id,
-    campaign_name: r.campaign_name, date: r.date,
-    spend: Number(r.spend) || 0, impressions: Number(r.impressions) || 0,
-    clicks: Number(r.clicks) || 0, reach: Number(r.reach) || 0,
-    frequency: Number(r.frequency) || 0, ctr: Number(r.ctr) || 0,
-    cpm: Number(r.cpm) || 0, leads_count: Number(r.leads_count) || 0,
-    actions_raw: r.actions_raw, synced_at: r.synced_at,
-  }),
-  meta_demographics_daily: (r) => ({
-    id: sid('meta_demographics_daily', r.id), date: r.date,
-    age_range: r.age_range, gender: r.gender,
-    spend: Number(r.spend) || 0, impressions: Number(r.impressions) || 0,
-    clicks: Number(r.clicks) || 0, leads_count: Number(r.leads_count) || 0,
-    synced_at: r.synced_at,
-  }),
+  meta_campaign_insights_daily: (r) => {
+    const d = r.date instanceof Date ? r.date.toISOString().split('T')[0] : String(r.date || '').split('T')[0];
+    return {
+      id: sid('meta_campaign_insights_daily', r.id), campaign_id: r.campaign_id,
+      campaign_name: r.campaign_name, date: d,
+      spend: Number(r.spend) || 0, impressions: Number(r.impressions) || 0,
+      clicks: Number(r.clicks) || 0, reach: Number(r.reach) || 0,
+      frequency: Number(r.frequency) || 0, ctr: Number(r.ctr) || 0,
+      cpm: Number(r.cpm) || 0, leads_count: Number(r.leads_count) || 0,
+      actions_raw: r.actions_raw, synced_at: r.synced_at,
+    };
+  },
+  meta_demographics_daily: (r) => {
+    const d = r.date instanceof Date ? r.date.toISOString().split('T')[0] : String(r.date || '').split('T')[0];
+    return {
+      id: sid('meta_demographics_daily', r.id), date: d,
+      age_range: r.age_range, gender: r.gender,
+      spend: Number(r.spend) || 0, impressions: Number(r.impressions) || 0,
+      clicks: Number(r.clicks) || 0, leads_count: Number(r.leads_count) || 0,
+      synced_at: r.synced_at,
+    };
+  },
   google_ads_campaigns: (r) => ({
     id: sid('google_ads_campaigns', r.campaign_id), campaign_id: r.campaign_id,
     campaign_name: r.campaign_name, status: r.status,
     advertising_channel_type: r.advertising_channel_type, synced_at: r.synced_at,
   }),
-  google_ads_insights_daily: (r) => ({
-    id: sid('google_ads_insights_daily', r.id), campaign_id: r.campaign_id,
-    campaign_name: r.campaign_name, date: r.date,
-    spend: Number(r.spend) || 0, impressions: Number(r.impressions) || 0,
-    clicks: Number(r.clicks) || 0, conversions: Number(r.conversions) || 0,
-    synced_at: r.synced_at,
-  }),
+  google_ads_insights_daily: (r) => {
+    const d = r.date instanceof Date ? r.date.toISOString().split('T')[0] : String(r.date || '').split('T')[0];
+    return {
+      id: sid('google_ads_insights_daily', r.id), campaign_id: r.campaign_id,
+      campaign_name: r.campaign_name, date: d,
+      spend: Number(r.spend) || 0, impressions: Number(r.impressions) || 0,
+      clicks: Number(r.clicks) || 0, conversions: Number(r.conversions) || 0,
+      synced_at: r.synced_at,
+    };
+  },
   sponte_matriculas: (r) => ({
     id: sid('sponte_matriculas', r.id || `${r.aluno_id}_${r.data_matricula}`),
     contrato_id: r.contrato_id || null,

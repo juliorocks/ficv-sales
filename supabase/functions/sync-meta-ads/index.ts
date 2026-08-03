@@ -1,6 +1,80 @@
 import { serve } from "https://deno.land/std@0.177.1/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 
+// ─── SurrealDB helpers ────────────────────────────────────────────────────────
+const SURREAL_ENDPOINT = Deno.env.get('SURREAL_ENDPOINT') ?? 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
+const SURREAL_NS = 'ficv';
+const SURREAL_DB = 'salespulse';
+const SURREAL_USER = Deno.env.get('SURREAL_USER') ?? 'ficv_admin';
+const SURREAL_PASS = Deno.env.get('SURREAL_PASS') ?? 'Ficv@Surreal2026!';
+
+async function surrealAuth(): Promise<string> {
+    const res = await fetch(`${SURREAL_ENDPOINT}/signin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'surreal-ns': SURREAL_NS },
+        body: JSON.stringify({ ns: SURREAL_NS, user: SURREAL_USER, pass: SURREAL_PASS }),
+    });
+    if (!res.ok) throw new Error(`SurrealDB auth failed: ${res.status}`);
+    return (await (res.json() as Promise<{ token: string }>)).token;
+}
+
+function sv(v: unknown): string {
+    if (v === null || v === undefined) return 'NONE';
+    if (typeof v === 'boolean') return String(v);
+    if (typeof v === 'number') return String(v);
+    if (typeof v === 'string') {
+        if (/^\d{4}-\d{2}-\d{2}T/.test(v)) return `d"${v}"`;
+        return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
+    }
+    if (Array.isArray(v)) return `[${v.map(sv).join(', ')}]`;
+    if (typeof v === 'object') {
+        const pairs = Object.entries(v as Record<string, unknown>).map(([k, val]) => `${k}: ${sv(val)}`);
+        return `{${pairs.join(', ')}}`;
+    }
+    return JSON.stringify(v);
+}
+
+async function surrealUpsertById(token: string, table: string, rows: Record<string, unknown>[], idField: string): Promise<void> {
+    if (!rows.length) return;
+    let sql = '';
+    for (let i = 0; i < rows.length; i += 50) {
+        const batch = rows.slice(i, i + 50);
+        for (const r of batch) {
+            const id = String(r[idField] ?? '');
+            sql += `UPSERT ${table}:\`${id}\` CONTENT {${Object.entries(r).map(([k, v]) => `${k}: ${sv(v)}`).join(', ')}} RETURN NONE;\n`;
+        }
+    }
+    const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'text/plain', 'Accept': 'application/json',
+            'Authorization': `Bearer ${token}`, 'surreal-ns': SURREAL_NS, 'surreal-db': SURREAL_DB,
+        },
+        body: sql,
+    });
+    if (!res.ok) console.error(`SurrealDB upsert error ${table}: HTTP ${res.status}`);
+}
+
+async function surrealUpsert(token: string, table: string, rows: Record<string, unknown>[], dateField: string, dateFrom: string, dateTo: string): Promise<void> {
+    if (!rows.length) return;
+    // Delete period range then re-insert (string date comparison)
+    let sql = `DELETE ${table} WHERE ${dateField} >= "${dateFrom}" AND ${dateField} <= "${dateTo}";\n`;
+    for (let i = 0; i < rows.length; i += 50) {
+        const batch = rows.slice(i, i + 50);
+        const lits = batch.map(r => `{${Object.entries(r).map(([k, val]) => `${k}: ${sv(val)}`).join(', ')}}`).join(',\n');
+        sql += `INSERT INTO ${table} [${lits}] RETURN NONE;\n`;
+    }
+    const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'text/plain', 'Accept': 'application/json',
+            'Authorization': `Bearer ${token}`, 'surreal-ns': SURREAL_NS, 'surreal-db': SURREAL_DB,
+        },
+        body: sql,
+    });
+    if (!res.ok) console.error(`SurrealDB upsert error ${table}: HTTP ${res.status}`);
+}
+
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -53,7 +127,7 @@ async function metaGet(path: string, params: Record<string, string>): Promise<an
 }
 
 // ─── Sync campaign metadata ───────────────────────────────────────────────────
-async function syncCampaigns(supabase: ReturnType<typeof createClient>): Promise<{ synced: number; error?: string }> {
+async function syncCampaigns(supabase: ReturnType<typeof createClient>): Promise<{ synced: number; rows?: Record<string, unknown>[]; error?: string }> {
     try {
         const rows = await metaGet(`${AD_ACCOUNT_ID}/campaigns`, {
             fields: 'id,name,objective,status,effective_status,daily_budget,lifetime_budget,budget_remaining',
@@ -76,7 +150,7 @@ async function syncCampaigns(supabase: ReturnType<typeof createClient>): Promise
 
         const { error } = await supabase.from('meta_campaigns').upsert(mapped, { onConflict: 'campaign_id' });
         if (error) return { synced: 0, error: error.message };
-        return { synced: mapped.length };
+        return { synced: mapped.length, rows: mapped as Record<string, unknown>[] };
     } catch (e: any) {
         return { synced: 0, error: e.message };
     }
@@ -87,7 +161,7 @@ async function syncInsights(
     supabase: ReturnType<typeof createClient>,
     startDate: string,
     endDate: string
-): Promise<{ synced: number; error?: string }> {
+): Promise<{ synced: number; rows?: Record<string, unknown>[]; error?: string }> {
     try {
         const rows = await metaGet(`${AD_ACCOUNT_ID}/insights`, {
             level: 'campaign',
@@ -123,7 +197,7 @@ async function syncInsights(
             if (error) return { synced, error: error.message };
             synced += batch.length;
         }
-        return { synced };
+        return { synced, rows: mapped as Record<string, unknown>[] };
     } catch (e: any) {
         return { synced: 0, error: e.message };
     }
@@ -134,7 +208,7 @@ async function syncDemographics(
     supabase: ReturnType<typeof createClient>,
     startDate: string,
     endDate: string
-): Promise<{ synced: number; error?: string }> {
+): Promise<{ synced: number; rows?: Record<string, unknown>[]; error?: string }> {
     try {
         const rows = await metaGet(`${AD_ACCOUNT_ID}/insights`, {
             level: 'account',
@@ -164,7 +238,7 @@ async function syncDemographics(
             if (error) return { synced, error: error.message };
             synced += batch.length;
         }
-        return { synced };
+        return { synced, rows: mapped as Record<string, unknown>[] };
     } catch (e: any) {
         return { synced: 0, error: e.message };
     }
@@ -199,10 +273,19 @@ serve(async (req) => {
 
         const result: Record<string, any> = { mode, startDate, endDate };
 
+        // SurrealDB token — obtido uma vez, reutilizado pelas funções de sync
+        let surrealToken: string | null = null;
+        try { surrealToken = await surrealAuth(); } catch (e: any) { console.error('SurrealDB auth:', e.message); }
+
         if (mode === 'campaigns' || mode === 'full') {
             const r = await syncCampaigns(supabase);
             result.campaigns = r;
             console.log(`Campaigns synced: ${r.synced}`, r.error ?? '');
+            // Espelha no SurrealDB
+            if (surrealToken && r.rows?.length) {
+                await surrealUpsertById(surrealToken, 'meta_campaigns', r.rows, 'campaign_id')
+                    .catch((e: any) => console.error('SurrealDB campaigns upsert:', e.message));
+            }
 
             // Saldo da conta (fundos disponíveis pré-pagos)
             try {
@@ -252,12 +335,22 @@ serve(async (req) => {
             const r = await syncInsights(supabase, startDate, endDate);
             result.insights = r;
             console.log(`Insights synced: ${r.synced}`, r.error ?? '');
+            // Espelha no SurrealDB
+            if (surrealToken && r.rows?.length) {
+                await surrealUpsert(surrealToken, 'meta_campaign_insights_daily', r.rows, 'date', startDate, endDate)
+                    .catch((e: any) => console.error('SurrealDB insights upsert:', e.message));
+            }
         }
 
         if (mode === 'demographics' || mode === 'full') {
             const r = await syncDemographics(supabase, startDate, endDate);
             result.demographics = r;
             console.log(`Demographics synced: ${r.synced}`, r.error ?? '');
+            // Espelha no SurrealDB
+            if (surrealToken && r.rows?.length) {
+                await surrealUpsert(surrealToken, 'meta_demographics_daily', r.rows, 'date', startDate, endDate)
+                    .catch((e: any) => console.error('SurrealDB demographics upsert:', e.message));
+            }
         }
 
         return new Response(JSON.stringify({ ok: true, ...result }), {
