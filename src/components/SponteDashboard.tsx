@@ -121,52 +121,35 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
     const loadData = useCallback(async (opts?: { silent?: boolean }) => {
         if (!opts?.silent) setLoading(true);
         try {
-            // Paginate ALL matriculas for the year (no period restriction)
+            // Busca matrículas do ano em requests paralelas de 5000 (reduz roundtrips)
+            const PAGE = 5000;
             const allMatriculas: SponteMatricula[] = [];
-            for (let from = 0; ; from += 1000) {
+            for (let from = 0; ; from += PAGE) {
                 const { data, error } = await supabase
                     .from('sponte_matriculas')
                     .select('*')
                     .gte('data_matricula', yearStart)
                     .lte('data_matricula', yearEnd)
                     .order('data_matricula', { ascending: false })
-                    .range(from, from + 999);
+                    .range(from, from + PAGE - 1);
                 if (error) throw error;
                 if (data?.length) allMatriculas.push(...data);
-                if (!data || data.length < 1000) break;
+                if (!data || data.length < PAGE) break;
             }
 
-            // Paginate paid parcelas
-            const allParcelas: SponteParcela[] = [];
-            for (let from = 0; ; from += 1000) {
-                const { data, error } = await supabase
-                    .from('sponte_parcelas')
-                    .select('*')
-                    .eq('situacao_parcela', 'Quitada')
-                    .ilike('categoria', '%matr%')
-                    .gte('data_pagamento', dateStart)
-                    .lte('data_pagamento', dateEnd)
-                    .range(from, from + 999);
-                if (error) throw error;
-                if (data?.length) allParcelas.push(...data);
-                if (!data || data.length < 1000) break;
-            }
-
-            // Paginate pending parcelas
-            const allPendentes: SponteParcela[] = [];
-            for (let from = 0; ; from += 1000) {
-                const { data, error } = await supabase
-                    .from('sponte_parcelas')
-                    .select('*')
-                    .eq('situacao_parcela', 'Pendente')
-                    .ilike('categoria', '%matr%')
-                    .gte('vencimento', dateStart)
-                    .lte('vencimento', dateEnd)
-                    .range(from, from + 999);
-                if (error) throw error;
-                if (data?.length) allPendentes.push(...data);
-                if (!data || data.length < 1000) break;
-            }
+            // Parcelas pagas e pendentes em paralelo (mesma página grande)
+            const [parcelasRes, pendentesRes] = await Promise.all([
+                supabase.from('sponte_parcelas').select('*')
+                    .eq('situacao_parcela', 'Quitada').ilike('categoria', '%matr%')
+                    .gte('data_pagamento', dateStart).lte('data_pagamento', dateEnd)
+                    .range(0, PAGE - 1),
+                supabase.from('sponte_parcelas').select('*')
+                    .eq('situacao_parcela', 'Pendente').ilike('categoria', '%matr%')
+                    .gte('vencimento', dateStart).lte('vencimento', dateEnd)
+                    .range(0, PAGE - 1),
+            ]);
+            const allParcelas   = parcelasRes.data ?? [];
+            const allPendentes  = pendentesRes.data ?? [];
 
             const syncRes = await supabase
                 .from('sponte_matriculas')
