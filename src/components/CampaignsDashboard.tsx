@@ -560,13 +560,11 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                 </div>
                 {budget && (
                     <div className="flex items-center gap-2">
-                        {budget.metaBalance > 0 && (
-                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] text-xs">
-                                <Wallet size={12} style={{ color: '#1877F2' }} />
-                                <span className="text-[var(--text-muted)] font-semibold">Meta Ads</span>
-                                <span className="font-bold text-[var(--text-main)]">{fmt(budget.metaBalance)}</span>
-                            </div>
-                        )}
+                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] text-xs">
+                            <Wallet size={12} style={{ color: '#1877F2' }} />
+                            <span className="text-[var(--text-muted)] font-semibold">Meta Ads</span>
+                            <span className={`font-bold ${budget.metaBalance === 0 ? 'text-red-400' : 'text-[var(--text-main)]'}`}>{fmt(budget.metaBalance)}</span>
+                        </div>
                         {/* Google Ads — valor editável manualmente (API não expõe o saldo pré-pago) */}
                         <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] text-xs">
                             <Wallet size={12} style={{ color: '#F97316' }} />
