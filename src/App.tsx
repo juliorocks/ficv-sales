@@ -471,15 +471,19 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
         });
     };
 
-    // Get agent-to-team mapping
+    // Get agent-to-team mapping (query simples sem JOIN para não depender de FK no schema)
     const { profiles } = useAgentProfiles();
-    const agentTeamMap = useMemo(() => {
-        const map: Record<string, string | null> = {};
-        profiles.forEach(p => {
-            map[p.name] = p.team_id ?? null;
-        });
-        return map;
-    }, [profiles]);
+    const [agentTeamMap, setAgentTeamMap] = useState<Record<string, string | null>>({});
+    useEffect(() => {
+        supabase
+            .from('agent_profiles')
+            .select('name, team_id')
+            .then(({ data }) => {
+                const map: Record<string, string | null> = {};
+                (data ?? []).forEach(p => { map[p.name] = p.team_id ?? null; });
+                setAgentTeamMap(map);
+            });
+    }, []);
 
     // Filter results
     const filteredData = useMemo(() => {
@@ -509,15 +513,6 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
             }
 
             return matchesAgent && matchesDate && matchesTeam;
-        });
-        console.log('[DEBUG filteredData]', {
-            analysisTotal: analysisData.length,
-            filteredTotal: result.length,
-            selectedTeamId,
-            dateRange,
-            agentTeamMapSize: Object.keys(agentTeamMap).length,
-            sampleDates: analysisData.slice(0, 3).map(d => d.date),
-            sampleAgents: analysisData.slice(0, 3).map(d => d.agent),
         });
         return result;
     }, [analysisData, selectedAgents, selectedTeamId, dateRange, agentTeamMap]);
