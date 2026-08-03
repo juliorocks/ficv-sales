@@ -196,8 +196,7 @@ const DUAL_WRITE_TABLES = new Set([
     'tickets', 'ticket_messages', 'ticket_evaluations',
     'profiles', 'alunos', 'stages', 'courses',
     'lead_sources', 'motivos_perda', 'teams',
-    'app_settings', 'scripts', 'knowledge_base',
-    // financial_goals: lido do Supabase (Edge Function escreve direto no Supabase, SurrealDB fica desatualizado)
+    'app_settings', 'scripts', 'knowledge_base', 'financial_goals',
     'sponte_matriculas', 'matriculas',
     'widechat_messages', 'widechat_atendimentos',
 ]);
@@ -420,8 +419,7 @@ async function surrealMutate(
 
 const SURREAL_READ_TABLES = new Set([
     // Conteúdo/configuração simples
-    'scripts', 'knowledge_base', 'app_settings',
-    // financial_goals: lido do Supabase direto (Edge Function escreve só no Supabase)
+    'scripts', 'knowledge_base', 'app_settings', 'financial_goals',
     // Tabelas de referência (lookup)
     'stages', 'courses', 'lead_sources', 'motivos_perda', 'teams',
     // Dados operacionais principais
