@@ -31,18 +31,27 @@ async function surrealAuth() {
     return (await res.json()).token;
 }
 
-async function surrealSQL(token, sql) {
-    const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'text/plain', 'Accept': 'application/json',
-            'Authorization': `Bearer ${token}`,
-            'surreal-ns': SURREAL_NS, 'surreal-db': SURREAL_DB,
-        },
-        body: sql,
-    });
-    if (!res.ok) throw new Error(`SurrealDB SQL error ${res.status}: ${await res.text().catch(() => '')}`);
-    return res.json();
+async function surrealSQL(token, sql, attempt = 0) {
+    try {
+        const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'text/plain', 'Accept': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                'surreal-ns': SURREAL_NS, 'surreal-db': SURREAL_DB,
+            },
+            body: sql,
+            signal: AbortSignal.timeout(120000),
+        });
+        if (!res.ok) throw new Error(`SurrealDB SQL error ${res.status}: ${await res.text().catch(() => '')}`);
+        return res.json();
+    } catch (e) {
+        if (attempt < 2) {
+            await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+            return surrealSQL(token, sql, attempt + 1);
+        }
+        throw e;
+    }
 }
 
 function sv(v) {
@@ -136,20 +145,11 @@ async function syncMatriculas(token) {
         }))
         .filter(r => r.contrato_id > 0);
 
-    console.log(`  ${rows.length} matrículas encontradas. Limpando registros antigos...`);
-    let cleaned = 0;
-    while (true) {
-        const r = await surrealSQL(token, 'SELECT id FROM sponte_matriculas LIMIT 500;');
-        const ids = r[0]?.result ?? [];
-        if (!ids.length) break;
-        await surrealSQL(token, ids.map(x => `DELETE ${x.id};`).join('\n'));
-        cleaned += ids.length;
-    }
-    console.log(`  ${cleaned} registros antigos removidos`);
+    console.log(`  ${rows.length} matrículas encontradas. Upserting...`);
 
     let synced = 0;
-    for (let i = 0; i < rows.length; i += 100) {
-        const batch = rows.slice(i, i + 100);
+    for (let i = 0; i < rows.length; i += 50) {
+        const batch = rows.slice(i, i + 50);
         const stmts = batch.map(r =>
             `UPSERT ${sid('sponte_matriculas', r.contrato_id)} CONTENT {` +
             `contrato_id:${sv(r.contrato_id)},aluno_id:${sv(r.aluno_id)},aluno:${sv(r.aluno)},` +
@@ -160,7 +160,8 @@ async function syncMatriculas(token) {
             `contratante:${sv(r.contratante)},numero_contrato:${sv(r.numero_contrato)},` +
             `financeiro_lancado:${sv(r.financeiro_lancado)},` +
             `nome_matriz_curricular:${sv(r.nome_matriz_curricular)},` +
-            `tipo_contrato_id:${sv(r.tipo_contrato_id)},celular:NONE,synced_at:${sv(r.synced_at)}};`
+            `tipo_contrato_id:${sv(r.tipo_contrato_id)},celular:NONE,` +
+            `sync_gen:2,synced_at:${sv(r.synced_at)}};`
         ).join('\n');
         await surrealSQL(token, stmts);
         synced += batch.length;
@@ -174,15 +175,6 @@ async function syncMatriculas(token) {
 
 async function syncParcelas(token) {
     console.log(`  Buscando parcelas ${startDate} → ${endDate}...`);
-    let cleanedP = 0;
-    while (true) {
-        const r = await surrealSQL(token, 'SELECT id FROM sponte_parcelas LIMIT 500;');
-        const ids = r[0]?.result ?? [];
-        if (!ids.length) break;
-        await surrealSQL(token, ids.map(x => `DELETE ${x.id};`).join('\n'));
-        cleanedP += ids.length;
-    }
-    if (cleanedP) console.log(`  ${cleanedP} parcelas antigas removidas`);
 
     const chunks = [];
     const cursor = new Date(startDate + 'T12:00:00');
@@ -236,7 +228,8 @@ async function syncParcelas(token) {
                     `valor_parcela:${sv(r.valor_parcela)},valor_pago:${sv(r.valor_pago)},` +
                     `forma_cobranca:${sv(r.forma_cobranca)},categoria:${sv(r.categoria)},` +
                     `categoria_id:${sv(r.categoria_id)},sacado:${sv(r.sacado)},` +
-                    `conta_creditar:${sv(r.conta_creditar)},synced_at:${sv(r.synced_at)}};`;
+                    `conta_creditar:${sv(r.conta_creditar)},` +
+                    `sync_gen:2,synced_at:${sv(r.synced_at)}};`;
             }).join('\n');
             await surrealSQL(token, stmts);
             totalSynced += batch.length;

@@ -459,6 +459,11 @@ function stripSurrealIds(v: unknown): unknown {
     return v;
 }
 
+const TABLE_DEFAULT_WHERE: Record<string, string> = {
+    sponte_matriculas: 'sync_gen IS NOT NONE',
+    sponte_parcelas:   'sync_gen IS NOT NONE',
+};
+
 function makeSurrealSelect(table: string, cols: string, sbBase: unknown) {
     type WherePart = { op: string; field: string; val: unknown };
     type OrderPart = { field: string; asc: boolean };
@@ -495,7 +500,10 @@ function makeSurrealSelect(table: string, cols: string, sbBase: unknown) {
             const colStr = cols.trim() === '*' ? '*'
                 : cols.split(',').map(c => c.trim()).join(', ');
             let sql = `SELECT ${colStr} FROM ${table}`;
-            if (wheres.length) sql += ` WHERE ${buildWhereSql()}`;
+            const _defaultWhere = TABLE_DEFAULT_WHERE[table] ?? '';
+            const _dynWhere = wheres.length ? buildWhereSql() : '';
+            const _allWhere = [_defaultWhere, _dynWhere].filter(Boolean).join(' AND ');
+            if (_allWhere) sql += ` WHERE ${_allWhere}`;
             if (orders.length)
                 sql += ' ORDER BY ' + orders.map(o => `${o.field} ${o.asc ? 'ASC' : 'DESC'}`).join(', ');
             if (isSingle || isMaybe) sql += ' LIMIT 1';
