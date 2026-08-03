@@ -246,21 +246,31 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
             .sort((a, b) => b.alunos.length - a.alunos.length);
     }, [agentAttribution.detalhes, selectedAgentDrillDown]);
 
-    // ─── Trigger sync via Vercel API (grava direto no SurrealDB) ─────────────
+    // ─── Trigger sync via GitHub Actions workflow_dispatch ────────────────────
     const handleSync = async () => {
         setSyncing(true);
         try {
-            const res = await fetch('/api/sync-sponte', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ mode: 'full', start_date: dateStart, end_date: dateEnd }),
-            });
-            const data = await res.json();
-            if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
-            showSuccess(`Sincronizado: ${data?.matriculas?.synced ?? 0} matrículas, ${data?.parcelas?.synced ?? 0} parcelas`);
-            await loadData();
+            const ghToken = import.meta.env.VITE_GITHUB_SYNC_TOKEN;
+            if (!ghToken) throw new Error('VITE_GITHUB_SYNC_TOKEN não configurado');
+            const res = await fetch(
+                'https://api.github.com/repos/juliorocks/ficv-sales/actions/workflows/sync-sponte.yml/dispatches',
+                {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${ghToken}`,
+                        'Accept': 'application/vnd.github+json',
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        ref: 'main',
+                        inputs: { mode: 'full', start_date: dateStart, end_date: dateEnd },
+                    }),
+                }
+            );
+            if (!res.ok) throw new Error(`GitHub API ${res.status}`);
+            showSuccess('Sync iniciado! Os dados serão atualizados em ~2 minutos.');
         } catch (e: any) {
-            showError('Erro na sincronização: ' + e.message);
+            showError('Erro ao iniciar sync: ' + e.message);
         } finally {
             setSyncing(false);
         }

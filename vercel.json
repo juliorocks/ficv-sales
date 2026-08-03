@@ -1,8 +1,5 @@
 {
-  "crons": [
-    {
-      "path": "/api/sync-sponte?mode=full",
-      "schedule": "0 11,16,20,0 * * *"
-    }
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
