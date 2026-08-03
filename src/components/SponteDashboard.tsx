@@ -246,18 +246,17 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
             .sort((a, b) => b.alunos.length - a.alunos.length);
     }, [agentAttribution.detalhes, selectedAgentDrillDown]);
 
-    // ─── Trigger sync via Edge Function ───────────────────────────────────────
+    // ─── Trigger sync via Vercel API (grava direto no SurrealDB) ─────────────
     const handleSync = async () => {
         setSyncing(true);
         try {
-            const { data, error } = await supabase.functions.invoke('sync-sponte', {
-                body: {
-                    mode: 'full',
-                    start_date: dateStart,
-                    end_date: dateEnd,
-                },
+            const res = await fetch('/api/sync-sponte', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mode: 'full', start_date: dateStart, end_date: dateEnd }),
             });
-            if (error) throw error;
+            const data = await res.json();
+            if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
             showSuccess(`Sincronizado: ${data?.matriculas?.synced ?? 0} matrículas, ${data?.parcelas?.synced ?? 0} parcelas`);
             await loadData();
         } catch (e: any) {
