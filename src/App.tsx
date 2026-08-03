@@ -483,7 +483,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
 
     // Filter results
     const filteredData = useMemo(() => {
-        return analysisData.filter(d => {
+        const result = analysisData.filter(d => {
             const matchesAgent = selectedAgents.length === 0 || selectedAgents.includes('all') || selectedAgents.includes(d.agent);
 
             let matchesDate = true;
@@ -510,6 +510,16 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
 
             return matchesAgent && matchesDate && matchesTeam;
         });
+        console.log('[DEBUG filteredData]', {
+            analysisTotal: analysisData.length,
+            filteredTotal: result.length,
+            selectedTeamId,
+            dateRange,
+            agentTeamMapSize: Object.keys(agentTeamMap).length,
+            sampleDates: analysisData.slice(0, 3).map(d => d.date),
+            sampleAgents: analysisData.slice(0, 3).map(d => d.agent),
+        });
+        return result;
     }, [analysisData, selectedAgents, selectedTeamId, dateRange, agentTeamMap]);
 
     // Valid data for scores (exclude invalidated and unanalyzed score=0 records)
