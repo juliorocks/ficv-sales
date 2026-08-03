@@ -131,11 +131,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
 
     // Filter states
     const [selectedAgents, setSelectedAgents] = useState<string[]>([]);
-    const [selectedTeamId, setSelectedTeamId] = useState<string | null>(() => {
-        // Default to "Comercial" team on first load, but allow localStorage override
-        const saved = localStorage.getItem('ficv_selected_team');
-        return saved || null; // Will need to set default after teams load
-    });
+    const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
     const [dateRange, setDateRange] = useState<{ start: string; end: string }>({ start: '', end: '' });
     const [isAgentFilterOpen, setIsAgentFilterOpen] = useState(false);
     const [isDateFilterOpen, setIsDateFilterOpen] = useState(false);
@@ -154,27 +150,31 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
         localStorage.setItem('ficv_active_tab', activeTab);
     }, [activeTab]);
 
-    // Load default team (Comercial) and persist team selection
+    // Load team selection — always validate against DB to flush corrupted localStorage values
     useEffect(() => {
-        const setDefaultTeam = async () => {
+        const loadTeam = async () => {
             const { data: teamList } = await supabase
                 .from('teams')
                 .select('id, name')
                 .eq('active', true);
 
-            const validIds = (teamList ?? []).map((t: { id: string }) => t.id);
+            const teams = (teamList ?? []) as { id: string; name: string }[];
+            const validIds = teams.map(t => t.id);
             const saved = localStorage.getItem('ficv_selected_team');
 
-            if (!saved || !validIds.includes(saved)) {
-                // No saved team or saved ID is stale/corrupted — default to Comercial
-                const comercial = (teamList ?? []).find((t: { name: string }) => t.name === 'Comercial');
+            if (saved && validIds.includes(saved)) {
+                setSelectedTeamId(saved);
+            } else {
+                // Saved value missing or corrupted — reset to Comercial
+                localStorage.removeItem('ficv_selected_team');
+                const comercial = teams.find(t => t.name === 'Comercial');
                 if (comercial?.id) {
                     setSelectedTeamId(comercial.id);
                     localStorage.setItem('ficv_selected_team', comercial.id);
                 }
             }
         };
-        setDefaultTeam();
+        loadTeam();
     }, []);
 
     // Persist team selection in localStorage
