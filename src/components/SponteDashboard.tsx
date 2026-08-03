@@ -6,7 +6,7 @@ import {
 import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid
 } from 'recharts';
-import { supabase, supabaseRaw } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import { showSuccess, showError } from '@/utils/toast';
 import { periodToDates, AutoWidthSelect, PERIOD_OPTIONS } from '@/utils/dashboardFilters';
 
@@ -341,14 +341,13 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
         return () => clearInterval(id);
     }, [loadData]);
 
-    // Carrega messages_logs do Supabase até o sync histórico para o SurrealDB ser executado
-    // TODO: trocar supabaseRaw → supabase após rodar: node surreal/sync-supabase-to-surreal.js messages_logs
+    // Carrega messages_logs do SurrealDB (sync histórico executado, dual-write ativo)
     useEffect(() => {
         const load = async () => {
             const PAGE = 5000;
             const all: MessagesLog[] = [];
             for (let from = 0; ; from += PAGE) {
-                const { data, error } = await supabaseRaw
+                const { data, error } = await supabase
                     .from('messages_logs')
                     .select('agent_name, contact, timestamp')
                     .range(from, from + PAGE - 1);
