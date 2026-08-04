@@ -1,7 +1,6 @@
 import { serve } from "https://deno.land/std@0.177.1/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 
-// ─── SurrealDB helpers ────────────────────────────────────────────────────────
+// ─── SurrealDB ────────────────────────────────────────────────────────────────
 const SURREAL_ENDPOINT = Deno.env.get('SURREAL_ENDPOINT') ?? 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
 const SURREAL_NS = 'ficv';
 const SURREAL_DB = 'salespulse';
@@ -14,8 +13,29 @@ async function surrealAuth(): Promise<string> {
         headers: { 'Content-Type': 'application/json', 'surreal-ns': SURREAL_NS },
         body: JSON.stringify({ ns: SURREAL_NS, user: SURREAL_USER, pass: SURREAL_PASS }),
     });
-    if (!res.ok) throw new Error(`SurrealDB auth failed: ${res.status}`);
+    if (!res.ok) throw new Error(`SurrealDB auth: ${res.status}`);
     return (await (res.json() as Promise<{ token: string }>)).token;
+}
+
+async function surrealExec(token: string, sql: string): Promise<void> {
+    const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'text/plain',
+            'Accept': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            'surreal-ns': SURREAL_NS,
+            'surreal-db': SURREAL_DB,
+        },
+        body: sql,
+    });
+    if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(`SurrealDB HTTP ${res.status}: ${txt.slice(0, 300)}`);
+    }
+    const data = await res.json() as any[];
+    const errs = data.filter((r: any) => r.status === 'ERR');
+    if (errs.length) console.error('SurrealDB ERR:', errs.map((e: any) => e.result).join('; '));
 }
 
 function sv(v: unknown): string {
@@ -34,57 +54,17 @@ function sv(v: unknown): string {
     return JSON.stringify(v);
 }
 
-async function surrealPost(token: string, sql: string): Promise<void> {
-    const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'text/plain', 'Accept': 'application/json',
-            'Authorization': `Bearer ${token}`, 'surreal-ns': SURREAL_NS, 'surreal-db': SURREAL_DB,
-        },
-        body: sql,
-    });
-    if (!res.ok) console.error(`SurrealDB SQL error: HTTP ${res.status}`);
-}
+// ─── Google Ads OAuth2 ────────────────────────────────────────────────────────
+const DEVELOPER_TOKEN   = Deno.env.get('GOOGLE_ADS_DEVELOPER_TOKEN') ?? '';
+const CLIENT_ID         = Deno.env.get('GOOGLE_ADS_CLIENT_ID') ?? '';
+const CLIENT_SECRET     = Deno.env.get('GOOGLE_ADS_CLIENT_SECRET') ?? '';
+const REFRESH_TOKEN     = Deno.env.get('GOOGLE_ADS_REFRESH_TOKEN') ?? '';
+const CUSTOMER_ID       = Deno.env.get('GOOGLE_ADS_CUSTOMER_ID') ?? '';
+const LOGIN_CUSTOMER_ID = Deno.env.get('GOOGLE_ADS_LOGIN_CUSTOMER_ID') ?? '';
 
-async function surrealUpsertById(token: string, table: string, rows: Record<string, unknown>[], idField: string): Promise<void> {
-    if (!rows.length) return;
-    let sql = '';
-    for (let i = 0; i < rows.length; i += 50) {
-        for (const r of rows.slice(i, i + 50)) {
-            const id = String(r[idField] ?? '');
-            sql += `UPSERT ${table}:\`${id}\` CONTENT {${Object.entries(r).map(([k, v]) => `${k}: ${sv(v)}`).join(', ')}} RETURN NONE;\n`;
-        }
-    }
-    await surrealPost(token, sql);
-}
-
-async function surrealUpsert(token: string, table: string, rows: Record<string, unknown>[], dateField: string, dateFrom: string, dateTo: string): Promise<void> {
-    if (!rows.length) return;
-    let sql = `DELETE ${table} WHERE ${dateField} >= "${dateFrom}" AND ${dateField} <= "${dateTo}";\n`;
-    for (let i = 0; i < rows.length; i += 50) {
-        const batch = rows.slice(i, i + 50);
-        const lits = batch.map(r => `{${Object.entries(r).map(([k, val]) => `${k}: ${sv(val)}`).join(', ')}}`).join(',\n');
-        sql += `INSERT INTO ${table} [${lits}] RETURN NONE;\n`;
-    }
-    await surrealPost(token, sql);
-}
-
-const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
-
-const DEVELOPER_TOKEN    = Deno.env.get('GOOGLE_ADS_DEVELOPER_TOKEN') ?? '';
-const CLIENT_ID          = Deno.env.get('GOOGLE_ADS_CLIENT_ID') ?? '';
-const CLIENT_SECRET      = Deno.env.get('GOOGLE_ADS_CLIENT_SECRET') ?? '';
-const REFRESH_TOKEN      = Deno.env.get('GOOGLE_ADS_REFRESH_TOKEN') ?? '';
-const CUSTOMER_ID        = Deno.env.get('GOOGLE_ADS_CUSTOMER_ID') ?? '';
-const LOGIN_CUSTOMER_ID  = Deno.env.get('GOOGLE_ADS_LOGIN_CUSTOMER_ID') ?? '';
-
-const API_VERSION = 'v25';
+const API_VERSION = 'v21';
 const BASE_URL    = `https://googleads.googleapis.com/${API_VERSION}`;
 
-// ─── OAuth2: get access token from refresh token ──────────────────────────────
 async function getAccessToken(): Promise<string> {
     const res = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
@@ -96,45 +76,137 @@ async function getAccessToken(): Promise<string> {
             grant_type:    'refresh_token',
         }),
     });
-    const json = await res.json();
+    const json = await res.json() as any;
     if (!json.access_token) throw new Error(`OAuth error: ${JSON.stringify(json)}`);
     return json.access_token;
 }
 
-// ─── Google Ads API: GAQL query ───────────────────────────────────────────────
 async function gaqlQuery(accessToken: string, query: string): Promise<any[]> {
-    const url = `${BASE_URL}/customers/${CUSTOMER_ID}/googleAds:searchStream`;
+    const url = `${BASE_URL}/customers/${CUSTOMER_ID}/googleAds:search`;
     const headers: Record<string, string> = {
-        'Authorization':    `Bearer ${accessToken}`,
-        'developer-token':  DEVELOPER_TOKEN,
-        'Content-Type':     'application/json',
+        'Authorization':   `Bearer ${accessToken}`,
+        'developer-token': DEVELOPER_TOKEN,
+        'Content-Type':    'application/json',
     };
     if (LOGIN_CUSTOMER_ID) headers['login-customer-id'] = LOGIN_CUSTOMER_ID;
 
     const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ query }) });
     const text = await res.text();
-    if (!res.ok) throw new Error(`Google Ads API ${res.status}: ${text}`);
+    if (!res.ok) throw new Error(`Google Ads API ${res.status}: ${text.slice(0, 500)}`);
 
     const results: any[] = [];
     try {
-        const parsed = JSON.parse(text);
+        const parsed = JSON.parse(text) as any;
         const batches = Array.isArray(parsed) ? parsed : [parsed];
         for (const batch of batches) { if (batch.results) results.push(...batch.results); }
     } catch (_) {
         for (const line of text.split('\n')) {
             const trimmed = line.trim();
             if (!trimmed || trimmed === '[' || trimmed === ']') continue;
-            try { const b = JSON.parse(trimmed.replace(/^,/, '')); if (b.results) results.push(...b.results); } catch (__) {}
+            try {
+                const b = JSON.parse(trimmed.replace(/^,/, '')) as any;
+                if (b.results) results.push(...b.results);
+            } catch (__) {}
         }
     }
     return results;
 }
 
-// ─── Sync account balance via account_budget ──────────────────────────────────
-async function syncAccountBalance(
-    supabase: ReturnType<typeof createClient>,
-    accessToken: string
-): Promise<{ balance: number | null }> {
+const corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+// ─── Sync campaigns → SurrealDB ───────────────────────────────────────────────
+async function syncCampaigns(token: string, accessToken: string): Promise<{ synced: number; error?: string }> {
+    try {
+        const rows = await gaqlQuery(accessToken, `
+            SELECT
+                campaign.id,
+                campaign.name,
+                campaign.status,
+                campaign.advertising_channel_type,
+                campaign_budget.amount_micros,
+                campaign_budget.type
+            FROM campaign
+            WHERE campaign.status != 'REMOVED'
+            ORDER BY campaign.name
+        `);
+
+        if (!rows.length) return { synced: 0 };
+
+        const now = new Date().toISOString();
+        const records = rows.map((r: any) => ({
+            campaign_id:              String(r.campaign.id),
+            campaign_name:            r.campaign.name ?? null,
+            status:                   r.campaign.status ?? null,
+            advertising_channel_type: r.campaign.advertisingChannelType ?? null,
+            budget_amount:            r.campaignBudget?.amountMicros != null
+                                          ? Number(r.campaignBudget.amountMicros) / 1_000_000
+                                          : null,
+            budget_type:              r.campaignBudget?.type ?? null,
+            synced_at:                now,
+        }));
+
+        let sql = '';
+        for (const r of records) {
+            sql += `UPSERT google_ads_campaigns:\`${r.campaign_id}\` CONTENT {${Object.entries(r).map(([k, v]) => `${k}: ${sv(v)}`).join(', ')}} RETURN NONE;\n`;
+        }
+        await surrealExec(token, sql);
+
+        return { synced: records.length };
+    } catch (e: any) {
+        return { synced: 0, error: e.message };
+    }
+}
+
+// ─── Sync insights → SurrealDB ────────────────────────────────────────────────
+async function syncInsights(token: string, accessToken: string, startDate: string, endDate: string): Promise<{ synced: number; error?: string }> {
+    try {
+        const rows = await gaqlQuery(accessToken, `
+            SELECT
+                campaign.id,
+                campaign.name,
+                segments.date,
+                metrics.cost_micros,
+                metrics.impressions,
+                metrics.clicks,
+                metrics.conversions
+            FROM campaign
+            WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'
+              AND campaign.status != 'REMOVED'
+        `);
+
+        if (!rows.length) return { synced: 0 };
+
+        const now = new Date().toISOString();
+        const records = rows.map((r: any) => ({
+            campaign_id:   String(r.campaign.id),
+            campaign_name: r.campaign.name ?? null,
+            date:          r.segments.date,
+            spend:         Number(((r.metrics.costMicros ?? 0) / 1_000_000).toFixed(2)),
+            impressions:   Number(r.metrics.impressions ?? 0),
+            clicks:        Number(r.metrics.clicks ?? 0),
+            conversions:   Number((r.metrics.conversions ?? 0).toFixed(2)),
+            synced_at:     now,
+        }));
+
+        let sql = `DELETE google_ads_insights_daily WHERE date >= "${startDate}" AND date <= "${endDate}";\n`;
+        for (let i = 0; i < records.length; i += 100) {
+            const batch = records.slice(i, i + 100);
+            const lits = batch.map((r: any) => `{${Object.entries(r).map(([k, v]) => `${k}: ${sv(v)}`).join(', ')}}`).join(',\n');
+            sql += `INSERT INTO google_ads_insights_daily [${lits}] RETURN NONE;\n`;
+        }
+        await surrealExec(token, sql);
+
+        return { synced: records.length };
+    } catch (e: any) {
+        return { synced: 0, error: e.message };
+    }
+}
+
+// ─── Sync account balance → SurrealDB ────────────────────────────────────────
+async function syncAccountBalance(token: string, accessToken: string): Promise<{ balance: number | null; error?: string }> {
     try {
         const rows = await gaqlQuery(accessToken, `
             SELECT account_budget.status,
@@ -156,113 +228,20 @@ async function syncAccountBalance(
         if (!hasSpecified) return { balance: null };
 
         const balance = Math.max(0, totalRemaining);
-        await supabase.from('meta_account_stats').upsert(
-            { id: 1, google_balance: balance, updated_at: new Date().toISOString() },
-            { onConflict: 'id' }
+        const now = new Date().toISOString();
+        await surrealExec(token,
+            `UPDATE meta_account_stats:\`1\` MERGE {google_balance: ${balance}, updated_at: d"${now}"} RETURN NONE;`
         );
         return { balance };
     } catch (e: any) {
         console.error('syncAccountBalance error:', e.message);
-        return { balance: null };
+        return { balance: null, error: e.message };
     }
-}
-
-// ─── Sync campaigns ───────────────────────────────────────────────────────────
-async function syncCampaigns(
-    supabase: ReturnType<typeof createClient>,
-    accessToken: string
-): Promise<{ synced: number; rows?: Record<string, unknown>[] }> {
-    const rows = await gaqlQuery(accessToken, `
-        SELECT
-            campaign.id,
-            campaign.name,
-            campaign.status,
-            campaign.advertising_channel_type,
-            campaign_budget.amount_micros,
-            campaign_budget.type
-        FROM campaign
-        WHERE campaign.status != 'REMOVED'
-        ORDER BY campaign.name
-    `);
-
-    if (rows.length === 0) return { synced: 0 };
-
-    const records = rows.map(r => ({
-        campaign_id:              String(r.campaign.id),
-        campaign_name:            r.campaign.name ?? null,
-        status:                   r.campaign.status ?? null,
-        advertising_channel_type: r.campaign.advertisingChannelType ?? null,
-        budget_amount:            r.campaignBudget?.amountMicros != null
-                                      ? Number(r.campaignBudget.amountMicros) / 1_000_000
-                                      : null,
-        budget_type:              r.campaignBudget?.type ?? null,
-        synced_at:                new Date().toISOString(),
-    }));
-
-    let synced = 0;
-    for (let i = 0; i < records.length; i += 200) {
-        const { error } = await supabase
-            .from('google_ads_campaigns')
-            .upsert(records.slice(i, i + 200), { onConflict: 'campaign_id' });
-        if (error) throw new Error('upsert campaigns: ' + error.message);
-        synced += records.slice(i, i + 200).length;
-    }
-    return { synced, rows: records as Record<string, unknown>[] };
-}
-
-// ─── Sync daily insights ──────────────────────────────────────────────────────
-async function syncInsights(
-    supabase: ReturnType<typeof createClient>,
-    accessToken: string,
-    startDate: string,
-    endDate: string
-): Promise<{ synced: number; rows?: Record<string, unknown>[] }> {
-    const rows = await gaqlQuery(accessToken, `
-        SELECT
-            campaign.id,
-            campaign.name,
-            segments.date,
-            metrics.cost_micros,
-            metrics.impressions,
-            metrics.clicks,
-            metrics.conversions
-        FROM campaign
-        WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'
-          AND campaign.status != 'REMOVED'
-    `);
-
-    if (rows.length === 0) return { synced: 0 };
-
-    const records = rows.map(r => ({
-        campaign_id:   String(r.campaign.id),
-        campaign_name: r.campaign.name ?? null,
-        date:          r.segments.date,
-        spend:         Number(((r.metrics.costMicros ?? 0) / 1_000_000).toFixed(2)),
-        impressions:   Number(r.metrics.impressions ?? 0),
-        clicks:        Number(r.metrics.clicks ?? 0),
-        conversions:   Number((r.metrics.conversions ?? 0).toFixed(2)),
-        synced_at:     new Date().toISOString(),
-    }));
-
-    let synced = 0;
-    for (let i = 0; i < records.length; i += 200) {
-        const { error } = await supabase
-            .from('google_ads_insights_daily')
-            .upsert(records.slice(i, i + 200), { onConflict: 'campaign_id,date' });
-        if (error) throw new Error('upsert insights: ' + error.message);
-        synced += records.slice(i, i + 200).length;
-    }
-    return { synced, rows: records as Record<string, unknown>[] };
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
 serve(async (req) => {
     if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
-
-    const supabase = createClient(
-        Deno.env.get('SUPABASE_URL') ?? '',
-        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
 
     try {
         const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
@@ -273,28 +252,22 @@ serve(async (req) => {
 
         const [accessToken, surrealToken] = await Promise.all([
             getAccessToken(),
-            surrealAuth().catch((e: any) => { console.error('SurrealDB auth:', e.message); return null; }),
+            surrealAuth(),
         ]);
 
+        // campaigns, insights e balance em paralelo — direto ao SurrealDB
         const [campaigns, insights, accountBalance] = await Promise.all([
-            syncCampaigns(supabase, accessToken),
-            syncInsights(supabase, accessToken, startDate, endDate),
-            syncAccountBalance(supabase, accessToken),
+            syncCampaigns(surrealToken, accessToken),
+            syncInsights(surrealToken, accessToken, startDate, endDate),
+            syncAccountBalance(surrealToken, accessToken),
         ]);
 
-        // Espelha no SurrealDB (fire-and-forget)
-        if (surrealToken) {
-            const writes: Promise<void>[] = [];
-            if (campaigns.rows?.length)
-                writes.push(surrealUpsertById(surrealToken, 'google_ads_campaigns', campaigns.rows, 'campaign_id')
-                    .catch((e: any) => console.error('SurrealDB google campaigns:', e.message)));
-            if (insights.rows?.length)
-                writes.push(surrealUpsert(surrealToken, 'google_ads_insights_daily', insights.rows, 'date', startDate, endDate)
-                    .catch((e: any) => console.error('SurrealDB google insights:', e.message)));
-            await Promise.all(writes);
-        }
+        console.log(`OK campaigns=${campaigns.synced} insights=${insights.synced} balance=${accountBalance.balance}`);
 
-        return new Response(JSON.stringify({ ok: true, startDate, endDate, campaigns, insights, accountBalance }), {
+        return new Response(JSON.stringify({
+            ok: true, startDate, endDate,
+            campaigns, insights, accountBalance,
+        }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
     } catch (err: any) {
