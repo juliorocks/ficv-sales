@@ -472,6 +472,68 @@ const TABLE_DEFAULT_WHERE: Record<string, string> = {
     sponte_parcelas:   'string::contains(type::string(id), "-") = false',
 };
 
+function makeSurrealCount(table: string, sbBase: unknown) {
+    type WherePart = { op: string; field: string; val: unknown };
+    const wheres: WherePart[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let sb = sbBase as any;
+
+    const refFields = REFERENCE_FIELDS[table] ?? {};
+    const toRecordId = (refTable: string, v: unknown) => `${refTable}:⟨${v}⟩`;
+    const buildWhereSql = () => wheres.map(({ op, field, val }) => {
+        const ref = field === 'id' ? table : refFields[field];
+        if (op === 'in') {
+            if (ref) return `${field} IN [${(val as unknown[]).map(v => toRecordId(ref, v)).join(', ')}]`;
+            return `${field} IN [${(val as unknown[]).map(v => toSurrealValue(v)).join(', ')}]`;
+        }
+        if (ref && val != null && op === '=') return `${field} = ${toRecordId(ref, val)}`;
+        return `${field} ${op} ${toSurrealValue(val)}`;
+    }).join(' AND ');
+
+    async function run(): Promise<unknown> {
+        try {
+            const token = await ensureSurrealToken();
+            if (!token) throw new Error('no token');
+            const _defaultWhere = TABLE_DEFAULT_WHERE[table] ?? '';
+            const _dynWhere = wheres.length ? buildWhereSql() : '';
+            const _allWhere = [_defaultWhere, _dynWhere].filter(Boolean).join(' AND ');
+            let sql = `SELECT count() FROM ${table}`;
+            if (_allWhere) sql += ` WHERE ${_allWhere}`;
+            sql += ' GROUP ALL';
+            const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'text/plain', 'Accept': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                    'surreal-ns': SURREAL_NS, 'surreal-db': SURREAL_DB,
+                },
+                body: sql,
+            });
+            if (res.status === 401) { _surrealToken = null; localStorage.removeItem('surreal_token'); }
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const json = await res.json();
+            const entry = Array.isArray(json) ? json[0] : json;
+            if (entry?.status === 'ERR') throw new Error(entry.result);
+            const count = (entry?.result?.[0]?.count as number) ?? 0;
+            return { count, data: null, error: null };
+        } catch (e) {
+            console.warn(`[surreal-count] ${table} fallback: ${(e as Error).message}`);
+            return sb;
+        }
+    }
+
+    const builder = {
+        eq(field: string, val: unknown)    { wheres.push({ op: '=', field, val }); sb = sb.eq(field, val); return builder; },
+        gte(field: string, val: unknown)   { wheres.push({ op: '>=', field, val }); sb = sb.gte(field, val); return builder; },
+        lte(field: string, val: unknown)   { wheres.push({ op: '<=', field, val }); sb = sb.lte(field, val); return builder; },
+        in(field: string, vals: unknown[]) { wheres.push({ op: 'in', field, val: vals }); sb = sb.in(field, vals); return builder; },
+        then(res?: (v: unknown) => unknown, rej?: (e: unknown) => unknown) { return run().then(res, rej); },
+        catch(rej?: (e: unknown) => unknown) { return run().then(undefined, rej); },
+        finally(fn?: () => void) { return run().finally(fn); },
+    };
+    return builder;
+}
+
 function makeSurrealSelect(table: string, cols: string, sbBase: unknown) {
     type WherePart = { op: string; field: string; val: unknown };
     type OrderPart = { field: string; asc: boolean };
@@ -657,10 +719,11 @@ function makeFromProxy(table: string): ReturnType<typeof _supabase.from> {
                 if (prop === 'select') {
                     return (cols = '*', opts?: { count?: string; head?: boolean }) => {
                         const sbResult = call<unknown>(target, 'select', cols, opts);
-                        // Se tabela não está no read set, tem join syntax ou tem count: usa Supabase
-                        if (!SURREAL_READ_TABLES.has(table) || opts?.count || /\w\s*\(/.test(cols)) {
-                            return sbResult;
-                        }
+                        if (!SURREAL_READ_TABLES.has(table)) return sbResult;
+                        // COUNT query — rota para SurrealDB com count()
+                        if (opts?.count) return makeSurrealCount(table, sbResult);
+                        // JOIN syntax → cai no Supabase
+                        if (/\w\s*\(/.test(cols)) return sbResult;
                         return makeSurrealSelect(table, cols as string, sbResult);
                     };
                 }

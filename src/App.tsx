@@ -363,13 +363,14 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
 
 
     const fetchUploadLogs = async () => {
-        const { data, error } = await supabase
-            .from('upload_logs')
-            .select('*, profiles(full_name)')
-            .order('created_at', { ascending: false })
-            .limit(10);
-
-        if (!error && data) setUploadLogs(data);
+        const [{ data: logs }, { data: profData }] = await Promise.all([
+            supabase.from('upload_logs').select('*').order('created_at', { ascending: false }).limit(10),
+            supabase.from('profiles').select('id, full_name'),
+        ]);
+        if (logs) {
+            const byId = Object.fromEntries((profData ?? []).map((p: any) => [p.id, p.full_name]));
+            setUploadLogs(logs.map((l: any) => ({ ...l, profiles: { full_name: byId[l.uploaded_by] ?? null } })));
+        }
     };
 
     const fetchProfile = async (userId: string) => {

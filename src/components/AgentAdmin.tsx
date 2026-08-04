@@ -25,11 +25,16 @@ export const useAgentProfiles = () => {
 
     const fetch = useCallback(async () => {
         setLoading(true);
-        const { data } = await supabase
-            .from('agent_profiles')
-            .select('*, team:teams(id, name, icon, color)')
-            .order('name');
-        setProfiles(data ?? []);
+        const [{ data: profData }, { data: teamsData }] = await Promise.all([
+            supabase.from('agent_profiles').select('*').order('name'),
+            supabase.from('teams').select('id, name, icon, color'),
+        ]);
+        const teamsById = Object.fromEntries((teamsData ?? []).map((t: any) => [t.id, t]));
+        const merged = (profData ?? []).map((p: any) => ({
+            ...p,
+            team: p.team_id ? (teamsById[p.team_id] ?? null) : null,
+        }));
+        setProfiles(merged);
         setLoading(false);
     }, []);
 
