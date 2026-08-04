@@ -2,8 +2,7 @@ name: Sync Google Ads → SurrealDB
 
 on:
   schedule:
-    # 08h e 18h horário de Brasília (UTC-3)
-    - cron: '30 11,21 * * *'
+    - cron: '30 * * * *'
   workflow_dispatch:
     inputs:
       days_back:

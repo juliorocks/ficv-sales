@@ -2,8 +2,7 @@ name: Sync Meta Ads → SurrealDB
 
 on:
   schedule:
-    # 08h e 18h horário de Brasília (UTC-3)
-    - cron: '0 11,21 * * *'
+    - cron: '0 * * * *'
   workflow_dispatch:
     inputs:
       date_preset:
