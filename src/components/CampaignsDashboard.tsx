@@ -246,7 +246,7 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
             const filterMeta   = selectedCampaigns.length === 0 || metaCampaignIds.length > 0;
             const filterGoogle = selectedCampaigns.length === 0 || googleCampaignIds.length > 0;
 
-            const [metaRows, prevMetaRows, gRows, prevGRows, demoRows, matriculasRes, syncRes] = await Promise.all([
+            const [metaRows, prevMetaRows, gRows, prevGRows, demoRows, matriculasRes, syncRes, maxDateRes] = await Promise.all([
                 filterMeta ? paginateAll<MetaInsight>((from, to) => {
                     let q = supabase.from('meta_campaign_insights_daily').select(metaCols)
                         .gte('date', dateStart).lte('date', dateEnd);
@@ -277,8 +277,10 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                 ),
                 supabase.from('sponte_matriculas').select('contrato_id', { count: 'exact', head: true })
                     .gte('data_matricula', dateStart).lte('data_matricula', dateEnd),
-                supabase.from('meta_campaign_insights_daily').select('synced_at,date')
+                supabase.from('meta_campaign_insights_daily').select('synced_at')
                     .order('synced_at', { ascending: false }).limit(1).maybeSingle(),
+                supabase.from('meta_campaign_insights_daily').select('date')
+                    .order('date', { ascending: false }).limit(1).maybeSingle(),
             ]);
 
             setInsights(metaRows);
@@ -287,10 +289,8 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
             setPrevGInsights(prevGRows);
             setDemographics(demoRows);
             setMatriculasCount(matriculasRes.count ?? 0);
-            if (syncRes.data) {
-                setLastSync((syncRes.data as any).synced_at);
-                setLastDataDate((syncRes.data as any).date ?? null);
-            }
+            if (syncRes.data) setLastSync((syncRes.data as any).synced_at);
+            if ((maxDateRes as any).data) setLastDataDate((maxDateRes as any).data.date ?? null);
 
             // Budget info
             const statsRes = await supabase
