@@ -165,7 +165,6 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState<'meta' | 'google' | null>(null);
     const [lastSync, setLastSync] = useState<string | null>(null);
-    const [lastDataDate, setLastDataDate] = useState<string | null>(null);
     const [budget, setBudget] = useState<BudgetInfo | null>(null);
     const [editingGoogleBalance, setEditingGoogleBalance] = useState(false);
     const [googleBalanceInput, setGoogleBalanceInput] = useState('');
@@ -246,7 +245,7 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
             const filterMeta   = selectedCampaigns.length === 0 || metaCampaignIds.length > 0;
             const filterGoogle = selectedCampaigns.length === 0 || googleCampaignIds.length > 0;
 
-            const [metaRows, prevMetaRows, gRows, prevGRows, demoRows, matriculasRes, syncRes, maxDateRes] = await Promise.all([
+            const [metaRows, prevMetaRows, gRows, prevGRows, demoRows, matriculasRes, syncRes] = await Promise.all([
                 filterMeta ? paginateAll<MetaInsight>((from, to) => {
                     let q = supabase.from('meta_campaign_insights_daily').select(metaCols)
                         .gte('date', dateStart).lte('date', dateEnd);
@@ -279,8 +278,6 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                     .gte('data_matricula', dateStart).lte('data_matricula', dateEnd),
                 supabase.from('meta_campaign_insights_daily').select('synced_at')
                     .order('synced_at', { ascending: false }).limit(1).maybeSingle(),
-                supabase.from('meta_campaign_insights_daily').select('date')
-                    .order('date', { ascending: false }).limit(1).maybeSingle(),
             ]);
 
             setInsights(metaRows);
@@ -290,7 +287,6 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
             setDemographics(demoRows);
             setMatriculasCount(matriculasRes.count ?? 0);
             if (syncRes.data) setLastSync((syncRes.data as any).synced_at);
-            if ((maxDateRes as any).data) setLastDataDate((maxDateRes as any).data.date ?? null);
 
             // Budget info
             const statsRes = await supabase
@@ -537,11 +533,6 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                         {lastSync && (
                             <span className="ml-2 text-[10px] text-[var(--text-muted)]">
                                 Última sync: {new Date(lastSync).toLocaleString('pt-BR')}
-                                {lastDataDate && (
-                                    <span className="ml-2 opacity-75">
-                                        · Dados até: {new Date(lastDataDate + 'T12:00:00').toLocaleDateString('pt-BR')}
-                                    </span>
-                                )}
                             </span>
                         )}
                     </p>
