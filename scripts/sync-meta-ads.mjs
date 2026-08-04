@@ -140,10 +140,27 @@ async function syncCampaigns(token) {
     return rows;
 }
 
+const LEAD_ACTION_PRIORITY = [
+    'onsite_conversion.messaging_conversation_started_7d',
+    'onsite_conversion.total_messaging_connection',
+    'onsite_conversion.lead_grouped',
+    'lead',
+    'offsite_conversion.fb_pixel_lead',
+];
+
+function computeLeadsCount(actions) {
+    if (!Array.isArray(actions)) return 0;
+    for (const type of LEAD_ACTION_PRIORITY) {
+        const match = actions.find(a => a.action_type === type);
+        if (match) return parseInt(match.value) || 0;
+    }
+    return 0;
+}
+
 async function syncInsights(token) {
     console.log(`Insights Meta (${DATE_PRESET})...`);
     const rows = await metaGet(`${META_AD_ACCOUNT_ID}/insights`, {
-        fields: 'campaign_id,campaign_name,spend,impressions,clicks,reach,frequency,ctr,cpm',
+        fields: 'campaign_id,campaign_name,spend,impressions,clicks,reach,frequency,ctr,cpm,actions',
         level: 'campaign',
         time_increment: '1',
         date_preset: DATE_PRESET,
@@ -159,7 +176,7 @@ async function syncInsights(token) {
         `impressions:${sv(Number(r.impressions || 0))},clicks:${sv(Number(r.clicks || 0))},` +
         `reach:${sv(Number(r.reach || 0))},frequency:${sv(Number(r.frequency || 0))},` +
         `ctr:${sv(Number(r.ctr || 0))},cpm:${sv(Number(r.cpm || 0))},` +
-        `leads_count:0,synced_at:${sv(now)}}] RETURN NONE;`
+        `leads_count:${computeLeadsCount(r.actions)},synced_at:${sv(now)}}] RETURN NONE;`
     );
     return rows;
 }
