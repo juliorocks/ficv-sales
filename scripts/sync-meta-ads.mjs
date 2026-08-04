@@ -10,7 +10,7 @@ const SURREAL_USER = process.env.SURREAL_USER;
 const SURREAL_PASS = process.env.SURREAL_PASS;
 
 const META_BASE = 'https://graph.facebook.com/v21.0';
-const DATE_PRESET = process.argv[2] || 'last_90_days';
+const DATE_PRESET = process.argv[2] || 'last_90d';
 
 // ── SurrealDB ────────────────────────────────────────────────────────────────
 
@@ -131,25 +131,26 @@ async function syncInsights(token) {
 
 async function syncDemographics(token) {
     console.log(`Demographics Meta (${DATE_PRESET})...`);
+    // Sem level=campaign → agrega automaticamente ao nível da conta (1 linha por data+age+gender)
     const rows = await metaGet(`${META_AD_ACCOUNT_ID}/insights`, {
-        fields: 'campaign_id,impressions,clicks,spend',
+        fields: 'impressions,clicks,spend',
         breakdowns: 'age,gender',
-        level: 'campaign',
         time_increment: '1',
         date_preset: DATE_PRESET,
         limit: '500',
     });
     console.log(`  ${rows.length} registros`);
+    if (!rows.length) return;
     const now = new Date().toISOString();
-    if (rows.length) {
-        await surrealSQL(token, `DELETE meta_demographics_daily WHERE date >= "${rows[0]?.date_start || ''}";`);
-        await upsertBatch(token, 'meta_demographics_daily', rows, r =>
-            `INSERT INTO meta_demographics_daily [{` +
-            `date:${sv(r.date_start)},age_range:${sv(r.age)},gender:${sv(r.gender)},` +
-            `spend:${sv(Number(r.spend || 0))},impressions:${sv(Number(r.impressions || 0))},` +
-            `clicks:${sv(Number(r.clicks || 0))},leads_count:0,synced_at:${sv(now)}}] RETURN NONE;`
-        );
-    }
+    const startDate = rows[0]?.date_start || '';
+    const endDate = rows[rows.length - 1]?.date_start || '';
+    await surrealSQL(token, `DELETE meta_demographics_daily WHERE date >= "${startDate}" AND date <= "${endDate}";`);
+    await upsertBatch(token, 'meta_demographics_daily', rows, r =>
+        `INSERT INTO meta_demographics_daily [{` +
+        `date:${sv(r.date_start)},age_range:${sv(r.age)},gender:${sv(r.gender)},` +
+        `spend:${sv(Number(r.spend || 0))},impressions:${sv(Number(r.impressions || 0))},` +
+        `clicks:${sv(Number(r.clicks || 0))},leads_count:0,synced_at:${sv(now)}}] RETURN NONE;`
+    );
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────

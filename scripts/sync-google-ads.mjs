@@ -12,7 +12,8 @@ const SURREAL_DB = 'salespulse';
 const SURREAL_USER = process.env.SURREAL_USER;
 const SURREAL_PASS = process.env.SURREAL_PASS;
 
-const GADS_BASE = 'https://googleads.googleapis.com/v18';
+const GOOGLE_LOGIN_CUSTOMER_ID = process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID || GOOGLE_CUSTOMER_ID;
+const GADS_BASE = 'https://googleads.googleapis.com/v21';
 const DAYS_BACK = parseInt(process.argv[2] || '90', 10);
 
 // ── SurrealDB ────────────────────────────────────────────────────────────────
@@ -92,6 +93,7 @@ async function gadsSearch(accessToken, query) {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${accessToken}`,
             'developer-token': GOOGLE_DEVELOPER_TOKEN,
+            'login-customer-id': GOOGLE_LOGIN_CUSTOMER_ID,
         },
         body: JSON.stringify({ query, pageSize: 10000 }),
     });

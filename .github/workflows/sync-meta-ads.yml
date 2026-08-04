@@ -7,8 +7,8 @@ on:
   workflow_dispatch:
     inputs:
       date_preset:
-        description: 'Período (last_7_days, last_30_days, last_90_days)'
-        default: 'last_90_days'
+        description: 'Período (last_7d, last_30d, last_90d)'
+        default: 'last_90d'
         required: false
 
 jobs:
@@ -27,4 +27,4 @@ jobs:
           SURREAL_ENDPOINT: https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud
           SURREAL_USER: ficv_admin
           SURREAL_PASS: ${{ secrets.SURREAL_PASS }}
-        run: node scripts/sync-meta-ads.mjs "${{ github.event.inputs.date_preset || 'last_90_days' }}"
+        run: node scripts/sync-meta-ads.mjs "${{ github.event.inputs.date_preset || 'last_90d' }}"
