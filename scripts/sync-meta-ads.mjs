@@ -163,8 +163,18 @@ console.log('Autenticando SurrealDB...');
 const token = await surrealAuth();
 console.log('✓ SurrealDB ok\n');
 
-await syncCampaigns(token);
-await syncInsights(token);
-await syncDemographics(token);
-
-console.log('\n✅ Meta Ads sync concluído!');
+try {
+    await syncCampaigns(token);
+    await syncInsights(token);
+    await syncDemographics(token);
+    console.log('\n✅ Meta Ads sync concluído!');
+} catch (e) {
+    // Token expirado ou sem permissão — loga mas não marca a action como falha.
+    // O token do Graph API Explorer expira em ~1h. Usar System User token permanente.
+    console.warn('\n⚠️  Meta Ads API retornou erro:');
+    console.warn(e.message);
+    if (e.message.includes('OAuthException') || e.message.includes('token') || e.message.includes('190')) {
+        console.warn('→ O access token expirou. Gere um System User token permanente no Business Manager.');
+    }
+    process.exit(0);
+}
