@@ -476,11 +476,12 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     const [agentTeamMap, setAgentTeamMap] = useState<Record<string, string | null>>({});
     useEffect(() => {
         supabase
-            .from('agent_profiles')
-            .select('name, team_id')
+            .from('profiles')
+            .select('full_name, team_id')
+            .eq('role', 'agent')
             .then(({ data }) => {
                 const map: Record<string, string | null> = {};
-                (data ?? []).forEach(p => { map[p.name] = p.team_id ?? null; });
+                (data ?? []).forEach(p => { if (p.full_name) map[p.full_name] = p.team_id ?? null; });
                 setAgentTeamMap(map);
             });
     }, []);
