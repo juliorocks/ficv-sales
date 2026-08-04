@@ -17,8 +17,8 @@ const SURREAL_PASS = process.env.SURREAL_PASS ?? 'Ficv@Surreal2026!';
 const mode      = process.argv[2] ?? 'full';
 const now       = new Date();
 const year      = now.getFullYear();
-const startDate = process.argv[3] ?? `${year}-01-01`;
-const endDate   = process.argv[4] ?? `${year}-12-31`;
+const startDate = process.argv[3] || `${year}-01-01`;
+const endDate   = process.argv[4] || `${year}-12-31`;
 
 // ─── SurrealDB ────────────────────────────────────────────────────────────────
 
