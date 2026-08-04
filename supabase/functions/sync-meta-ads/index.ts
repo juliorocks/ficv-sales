@@ -325,6 +325,21 @@ serve(async (req) => {
                         updated_at: new Date().toISOString(),
                     }, { onConflict: 'id' });
                     result.account_balance = prepaidBalance;
+
+                    // Espelha no SurrealDB — usa MERGE para preservar google_balance e outros campos
+                    if (surrealToken) {
+                        const now = new Date().toISOString();
+                        const balSql = `UPDATE meta_account_stats:\`1\` MERGE {balance: ${prepaidBalance}, currency: ${sv(acc.currency ?? 'BRL')}, updated_at: d"${now}"} RETURN NONE;`;
+                        await fetch(`${SURREAL_ENDPOINT}/sql`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'text/plain', 'Accept': 'application/json',
+                                'Authorization': `Bearer ${surrealToken}`,
+                                'surreal-ns': SURREAL_NS, 'surreal-db': SURREAL_DB,
+                            },
+                            body: balSql,
+                        }).catch((e: any) => console.error('SurrealDB balance update:', e.message));
+                    }
                 }
             } catch (e: any) {
                 console.error('account balance error:', e.message);

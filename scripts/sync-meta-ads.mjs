@@ -84,6 +84,41 @@ async function metaGet(path, params = {}) {
     return rows;
 }
 
+async function syncAccountStats(token) {
+    console.log('Saldo da conta Meta...');
+    const res = await fetch(
+        `https://graph.facebook.com/v21.0/${META_AD_ACCOUNT_ID}?fields=balance,currency,funding_source_details&access_token=${META_ACCESS_TOKEN}`
+    );
+    const acc = await res.json();
+    if (acc.error) throw new Error(`Meta account: ${acc.error.message}`);
+
+    let prepaidBalance = null;
+    const fsd = acc.funding_source_details;
+    if (fsd?.display_string) {
+        const m = fsd.display_string.match(/\((R\$|BRL\s*)?([\d.]+),([\d]{2})\s*BRL\)/i)
+               ?? fsd.display_string.match(/\(([\d.]+),([\d]{2})/);
+        if (m) {
+            const intPart = (m[2] ?? m[1]).replace(/\./g, '');
+            const decPart = m[3] ?? m[2];
+            prepaidBalance = parseFloat(`${intPart}.${decPart}`);
+            console.log(`  balance source: display_string="${fsd.display_string}" → ${prepaidBalance}`);
+        }
+    }
+    if (prepaidBalance === null && acc.balance !== undefined) {
+        prepaidBalance = parseFloat(acc.balance) / 100;
+        console.log(`  balance source: account.balance=${acc.balance}`);
+    }
+
+    if (prepaidBalance !== null) {
+        const now = new Date().toISOString();
+        const sql = `UPDATE meta_account_stats:\`1\` MERGE {balance: ${prepaidBalance}, currency: ${sv(acc.currency ?? 'BRL')}, updated_at: d"${now}"} RETURN NONE;`;
+        await surrealSQL(token, sql);
+        console.log(`  ✓ saldo: R$ ${prepaidBalance}`);
+    } else {
+        console.log('  ⚠️  saldo não detectado na resposta da API');
+    }
+}
+
 async function syncCampaigns(token) {
     console.log('Campanhas Meta...');
     const rows = await metaGet(`${META_AD_ACCOUNT_ID}/campaigns`, {
@@ -164,6 +199,7 @@ const token = await surrealAuth();
 console.log('✓ SurrealDB ok\n');
 
 try {
+    await syncAccountStats(token);
     await syncCampaigns(token);
     await syncInsights(token);
     await syncDemographics(token);
