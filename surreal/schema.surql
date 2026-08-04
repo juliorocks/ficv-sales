@@ -507,7 +507,7 @@ DEFINE TABLE meta_campaign_insights_daily SCHEMAFULL
 
 DEFINE FIELD campaign_id   ON meta_campaign_insights_daily TYPE string;
 DEFINE FIELD campaign_name ON meta_campaign_insights_daily TYPE option<string>;
-DEFINE FIELD date          ON meta_campaign_insights_daily TYPE datetime;
+DEFINE FIELD date          ON meta_campaign_insights_daily TYPE string;
 DEFINE FIELD spend         ON meta_campaign_insights_daily TYPE decimal DEFAULT 0;
 DEFINE FIELD impressions   ON meta_campaign_insights_daily TYPE int DEFAULT 0;
 DEFINE FIELD clicks        ON meta_campaign_insights_daily TYPE int DEFAULT 0;
@@ -528,7 +528,7 @@ DEFINE TABLE meta_demographics_daily SCHEMAFULL
     FOR select WHERE $auth.id != NONE,
     FOR create, update, delete WHERE $auth.role = 'admin';
 
-DEFINE FIELD date        ON meta_demographics_daily TYPE datetime;
+DEFINE FIELD date        ON meta_demographics_daily TYPE string;
 DEFINE FIELD age_range   ON meta_demographics_daily TYPE option<string>;
 DEFINE FIELD gender      ON meta_demographics_daily TYPE option<string>;
 DEFINE FIELD spend       ON meta_demographics_daily TYPE decimal DEFAULT 0;
@@ -576,7 +576,7 @@ DEFINE TABLE google_ads_insights_daily SCHEMAFULL
 
 DEFINE FIELD campaign_id   ON google_ads_insights_daily TYPE string;
 DEFINE FIELD campaign_name ON google_ads_insights_daily TYPE option<string>;
-DEFINE FIELD date          ON google_ads_insights_daily TYPE datetime;
+DEFINE FIELD date          ON google_ads_insights_daily TYPE string;
 DEFINE FIELD spend         ON google_ads_insights_daily TYPE decimal DEFAULT 0;
 DEFINE FIELD impressions   ON google_ads_insights_daily TYPE int DEFAULT 0;
 DEFINE FIELD clicks        ON google_ads_insights_daily TYPE int DEFAULT 0;
