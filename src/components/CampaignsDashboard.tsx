@@ -165,6 +165,7 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState<'meta' | 'google' | null>(null);
     const [lastSync, setLastSync] = useState<string | null>(null);
+    const [lastDataDate, setLastDataDate] = useState<string | null>(null);
     const [budget, setBudget] = useState<BudgetInfo | null>(null);
     const [editingGoogleBalance, setEditingGoogleBalance] = useState(false);
     const [googleBalanceInput, setGoogleBalanceInput] = useState('');
@@ -276,7 +277,7 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                 ),
                 supabase.from('sponte_matriculas').select('contrato_id', { count: 'exact', head: true })
                     .gte('data_matricula', dateStart).lte('data_matricula', dateEnd),
-                supabase.from('meta_campaign_insights_daily').select('synced_at')
+                supabase.from('meta_campaign_insights_daily').select('synced_at,date')
                     .order('synced_at', { ascending: false }).limit(1).maybeSingle(),
             ]);
 
@@ -286,7 +287,10 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
             setPrevGInsights(prevGRows);
             setDemographics(demoRows);
             setMatriculasCount(matriculasRes.count ?? 0);
-            if (syncRes.data) setLastSync((syncRes.data as any).synced_at);
+            if (syncRes.data) {
+                setLastSync((syncRes.data as any).synced_at);
+                setLastDataDate((syncRes.data as any).date ?? null);
+            }
 
             // Budget info
             const statsRes = await supabase
@@ -294,8 +298,8 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                 .select('balance,google_balance')
                 .eq('id', 1)
                 .single();
-            const metaBalance   = (statsRes.data as any)?.balance        ?? 0;
-            const googleBalance = (statsRes.data as any)?.google_balance  ?? null;
+            const metaBalance   = Number((statsRes.data as any)?.balance)        || 0;
+            const googleBalance = (statsRes.data as any)?.google_balance != null ? Number((statsRes.data as any)?.google_balance) : null;
             setBudget({ metaBalance, googleBalance });
         } catch (e) {
             console.error('loadData error:', e);
@@ -533,6 +537,11 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                         {lastSync && (
                             <span className="ml-2 text-[10px] text-[var(--text-muted)]">
                                 Última sync: {new Date(lastSync).toLocaleString('pt-BR')}
+                                {lastDataDate && (
+                                    <span className="ml-2 opacity-75">
+                                        · Dados até: {new Date(lastDataDate + 'T12:00:00').toLocaleDateString('pt-BR')}
+                                    </span>
+                                )}
                             </span>
                         )}
                     </p>
@@ -704,10 +713,22 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                 <div className="glass-card p-12 flex flex-col items-center gap-4 text-center">
                     <AlertCircle size={32} className="text-[var(--text-muted)]" />
                     <div>
-                        <p className="font-bold text-[var(--text-main)]">Nenhum dado sincronizado ainda</p>
-                        <p className="text-[var(--text-muted)] text-sm mt-1">
-                            Clique em <strong>Sync Meta</strong> ou <strong>Sync Google</strong> para importar as campanhas.
-                        </p>
+                        {lastSync ? (
+                            <>
+                                <p className="font-bold text-[var(--text-main)]">Sem dados no período selecionado</p>
+                                <p className="text-[var(--text-muted)] text-sm mt-1">
+                                    A API do Meta Ads disponibiliza dados com <strong>1–2 dias de atraso</strong>.<br />
+                                    Selecione <strong>Semana</strong> ou <strong>Mês</strong> para ver os dados mais recentes.
+                                </p>
+                            </>
+                        ) : (
+                            <>
+                                <p className="font-bold text-[var(--text-main)]">Nenhum dado sincronizado ainda</p>
+                                <p className="text-[var(--text-muted)] text-sm mt-1">
+                                    Clique em <strong>Sync Meta</strong> ou <strong>Sync Google</strong> para importar as campanhas.
+                                </p>
+                            </>
+                        )}
                     </div>
                 </div>
             )}
