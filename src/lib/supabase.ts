@@ -428,11 +428,16 @@ const SURREAL_READ_TABLES = new Set([
     'leads', 'profiles', 'alunos',
     'lead_history', 'lead_notes',
     'tickets', 'ticket_messages', 'ticket_evaluations',
-    'widechat_messages', 'widechat_atendimentos',
+    'widechat_messages', 'widechat_atendimentos', 'widechat_raw_messages',
     'sponte_matriculas', 'sponte_parcelas',
     'messages_logs',
+    // Campanhas
     'meta_campaigns', 'meta_campaign_insights_daily', 'meta_demographics_daily',
+    'meta_account_stats',
     'google_ads_campaigns', 'google_ads_insights_daily',
+    // Agentes e admin
+    'agent_profiles', 'agent_reports',
+    'upload_logs', 'user_integrations', 'audit_logs',
 ]);
 
 function stripSurrealIds(v: unknown): unknown {
