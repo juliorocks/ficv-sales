@@ -1,0 +1,33 @@
+name: Sync Google Ads → SurrealDB
+
+on:
+  schedule:
+    # 08h e 18h horário de Brasília (UTC-3)
+    - cron: '30 11,21 * * *'
+  workflow_dispatch:
+    inputs:
+      days_back:
+        description: 'Quantos dias retroativos (padrão: 90)'
+        default: '90'
+        required: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Sync Google Ads → SurrealDB
+        env:
+          GOOGLE_ADS_CLIENT_ID: ${{ secrets.GOOGLE_ADS_CLIENT_ID }}
+          GOOGLE_ADS_CLIENT_SECRET: ${{ secrets.GOOGLE_ADS_CLIENT_SECRET }}
+          GOOGLE_ADS_REFRESH_TOKEN: ${{ secrets.GOOGLE_ADS_REFRESH_TOKEN }}
+          GOOGLE_ADS_DEVELOPER_TOKEN: ${{ secrets.GOOGLE_ADS_DEVELOPER_TOKEN }}
+          GOOGLE_ADS_CUSTOMER_ID: ${{ secrets.GOOGLE_ADS_CUSTOMER_ID }}
+          SURREAL_ENDPOINT: https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud
+          SURREAL_USER: ficv_admin
+          SURREAL_PASS: ${{ secrets.SURREAL_PASS }}
+        run: node scripts/sync-google-ads.mjs "${{ github.event.inputs.days_back || '90' }}"

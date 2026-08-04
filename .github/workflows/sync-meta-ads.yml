@@ -1,0 +1,30 @@
+name: Sync Meta Ads → SurrealDB
+
+on:
+  schedule:
+    # 08h e 18h horário de Brasília (UTC-3)
+    - cron: '0 11,21 * * *'
+  workflow_dispatch:
+    inputs:
+      date_preset:
+        description: 'Período (last_7_days, last_30_days, last_90_days)'
+        default: 'last_90_days'
+        required: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Sync Meta Ads → SurrealDB
+        env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          META_AD_ACCOUNT_ID: ${{ secrets.META_AD_ACCOUNT_ID }}
+          SURREAL_ENDPOINT: https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud
+          SURREAL_USER: ficv_admin
+          SURREAL_PASS: ${{ secrets.SURREAL_PASS }}
+        run: node scripts/sync-meta-ads.mjs "${{ github.event.inputs.date_preset || 'last_90_days' }}"
