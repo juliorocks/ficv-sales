@@ -10,10 +10,10 @@ on:
         default: 'full'
         required: false
       start_date:
-        description: 'Data início (YYYY-MM-DD)'
+        description: 'Data início (YYYY-MM-DD) — vazio = últimos 3 dias'
         required: false
       end_date:
-        description: 'Data fim (YYYY-MM-DD)'
+        description: 'Data fim (YYYY-MM-DD) — vazio = hoje'
         required: false
 
 jobs:
@@ -31,7 +31,13 @@ jobs:
           SURREAL_USER: ficv_admin
           SURREAL_PASS: ${{ secrets.SURREAL_PASS }}
         run: |
+          # Cron horária usa últimos 3 dias; execução manual usa datas fornecidas
+          INPUT_START="${{ github.event.inputs.start_date }}"
+          INPUT_END="${{ github.event.inputs.end_date }}"
+          START_DATE="${INPUT_START:-$(date -d '3 days ago' +%Y-%m-%d)}"
+          END_DATE="${INPUT_END:-$(date +%Y-%m-%d)}"
+          echo "Sincronizando $START_DATE → $END_DATE"
           node scripts/sync-sponte.mjs \
             "${{ github.event.inputs.mode || 'full' }}" \
-            "${{ github.event.inputs.start_date || '' }}" \
-            "${{ github.event.inputs.end_date || '' }}"
+            "$START_DATE" \
+            "$END_DATE"

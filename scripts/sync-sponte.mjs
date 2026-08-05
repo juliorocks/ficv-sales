@@ -8,11 +8,11 @@ const SPONTE_NS  = 'http://api.sponteeducacional.net.br/';
 const CODIGO_CLIENTE = 489166;
 const TOKEN = 'qBLjek3dpFxF';
 
-const SURREAL_ENDPOINT = process.env.SURREAL_ENDPOINT ?? 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
+const SURREAL_ENDPOINT = process.env.SURREAL_ENDPOINT || 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
 const SURREAL_NS   = 'ficv';
 const SURREAL_DB   = 'salespulse';
-const SURREAL_USER = process.env.SURREAL_USER ?? 'ficv_admin';
-const SURREAL_PASS = process.env.SURREAL_PASS ?? 'Ficv@Surreal2026!';
+const SURREAL_USER = process.env.SURREAL_USER || 'ficv_admin';
+const SURREAL_PASS = process.env.SURREAL_PASS || 'Ficv@Surreal2026!';
 
 const mode      = process.argv[2] ?? 'full';
 const now       = new Date();
