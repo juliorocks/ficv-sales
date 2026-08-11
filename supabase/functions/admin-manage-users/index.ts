@@ -70,6 +70,30 @@ serve(async (req) => {
             });
         }
 
+        if (action === 'create') {
+            const { email, password, full_name, role } = payload ?? {};
+            if (!email || !password || !full_name) throw new Error('email, password e full_name são obrigatórios.');
+            if (password.length < 6) throw new Error('A senha deve ter no mínimo 6 caracteres.');
+
+            const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+                email,
+                password,
+                email_confirm: true,
+                user_metadata: { full_name, role: role ?? 'agent' },
+            });
+            if (authError) throw authError;
+
+            await supabaseAdmin
+                .from('profiles')
+                .update({ full_name, role: role ?? 'agent' })
+                .eq('id', authData.user.id);
+
+            return new Response(JSON.stringify({ success: true, user: { id: authData.user.id, email } }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
+        }
+
         if (action === 'update_profile') {
             const { userId, full_name, email, role } = payload ?? {};
             if (!userId) throw new Error('userId é obrigatório.');

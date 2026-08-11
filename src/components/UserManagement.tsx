@@ -114,33 +114,25 @@ export const UserManagement: React.FC = () => {
         setFormLoading(true);
 
         try {
-            // Attempt to create the user in Supabase Auth
-            const { data: authData, error: authError } = await supabase.auth.signUp({
-                email: newUser.email,
-                password: newUser.password,
-                options: {
-                    data: {
+            const { data, error } = await supabase.functions.invoke('admin-manage-users', {
+                body: {
+                    action: 'create',
+                    payload: {
+                        email: newUser.email,
+                        password: newUser.password,
                         full_name: newUser.full_name,
-                        role: newUser.role
+                        role: newUser.role,
                     }
                 }
             });
 
-            if (authError) throw authError;
+            if (error) throw error;
+            if (data?.error) throw new Error(data.error);
 
-            // Notice: Due to the trigger previously created in SQL `on_auth_user_created`,
-            // the profile record should be automatically created.
-            // But we can fallback to manual insert if needed or alert success.
-            if (authData.user) {
-                alert(`Usuário ${newUser.full_name} criado com sucesso!`);
-
-                // Reset form
-                setNewUser({ email: '', password: '', full_name: '', role: 'agent' });
-                setIsAddingUser(false);
-
-                // Refresh list
-                fetchProfiles();
-            }
+            alert(`Usuário ${newUser.full_name} criado com sucesso!`);
+            setNewUser({ email: '', password: '', full_name: '', role: 'agent' });
+            setIsAddingUser(false);
+            fetchProfiles();
 
         } catch (error: any) {
             console.error('Erro ao criar usuário:', error);
