@@ -1,11 +1,76 @@
 import { serve } from "https://deno.land/std@0.177.1/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// ─── SurrealDB ────────────────────────────────────────────────────────────────
+const SURREAL_ENDPOINT = Deno.env.get('SURREAL_ENDPOINT')
+    ?? 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
+const SURREAL_NS = 'ficv';
+const SURREAL_DB = 'salespulse';
+
+async function getSurrealToken(): Promise<string> {
+    const res = await fetch(`${SURREAL_ENDPOINT}/signin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'surreal-ns': SURREAL_NS },
+        body: JSON.stringify({ ns: SURREAL_NS, user: 'ficv_admin', pass: 'Ficv@Surreal2026!' }),
+    });
+    if (!res.ok) throw new Error(`SurrealDB signin failed: ${res.status}`);
+    const { token } = await res.json() as { token?: string };
+    if (!token) throw new Error('SurrealDB: no token');
+    return token;
+}
+
+async function surrealSQL(token: string, sql: string): Promise<unknown[]> {
+    const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'text/plain', 'Accept': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            'surreal-ns': SURREAL_NS, 'surreal-db': SURREAL_DB,
+        },
+        body: sql,
+    });
+    if (!res.ok) throw new Error(`SurrealDB HTTP ${res.status}`);
+    const json = await res.json();
+    const entry = Array.isArray(json) ? json[0] : json;
+    if (entry?.status === 'ERR') throw new Error(entry.result);
+    return Array.isArray(entry?.result) ? entry.result : [];
+}
+
+function toS(v: unknown): string {
+    if (v === null || v === undefined) return 'NONE';
+    if (typeof v === 'boolean') return String(v);
+    if (typeof v === 'number') return String(v);
+    if (typeof v === 'string') return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
+    return JSON.stringify(v);
+}
+
+function parseId(v: unknown): number | string | null {
+    if (v === null || v === undefined) return null;
+    const s = String(v);
+    const m = s.match(/^[a-z_]+:⟨(.+)⟩$/) ?? s.match(/^[a-z_]+:`(.+)`$/);
+    if (m) {
+        const inner = m[1];
+        const asNum = Number(inner);
+        return Number.isFinite(asNum) && String(asNum) === inner ? asNum : inner;
+    }
+    if (typeof v === 'number') return v;
+    return s;
+}
+
+function ref(table: string, id: unknown): string {
+    return `${table}:⟨${id}⟩`;
+}
+
+async function nextLeadId(token: string): Promise<number> {
+    const rows = await surrealSQL(token, 'UPDATE ONLY seq:leads SET val += 1 RETURN val;');
+    return (rows[0] as any)?.val ?? 0;
+}
+
+// ─── Message filter ───────────────────────────────────────────────────────────
 const SYSTEM_PATTERNS = [
     'sessão irá expirar', 'sessão expirou', 'sua sessão',
     'atendimento encerrado', 'atendimento finalizado', 'atendimento transferido',
@@ -30,12 +95,7 @@ serve(async (req) => {
             return new Response(JSON.stringify({ error: "Invalid JSON" }), { status: 400 });
         }
 
-        const supabase = createClient(
-            Deno.env.get('SUPABASE_URL') ?? '',
-            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-        );
-
-        await supabase.from('widechat_webhook_logs').insert({ payload });
+        const token = await getSurrealToken();
 
         const { event, data } = payload;
         const webhookEvent = payload.webhook?.key;
@@ -65,21 +125,20 @@ serve(async (req) => {
             !!messageText
         );
 
-        // ── Capture every real message for transcript (keyed by session_id) ─────
+        // ── Capture every real message for transcript ─────────────────────────
         if (isMessage && sessionId && messageText && !isSystemMessage(messageText)) {
             let origin = "auto";
             if (eventName === "messageContact" || msgData.origin === "contact" || msgData.origin === "channel") origin = "channel";
             if (msgData.origin === "user" || msgData.origin === "agent" || webhookEvent === "agent_message" || msgData.user?.name) origin = "agent";
-
-            await supabase.from('widechat_raw_messages').insert({
-                session_id:  sessionId,
-                origin,
-                sender_name: msgData.user?.name || senderName || "",
-                message:     messageText,
-                platform_id: messagePhone || msgData.platform_id || "",
-                message_id:  msgData.message_id || null,
-                created_at:  msgData.created_at ? new Date(msgData.created_at).toISOString() : new Date().toISOString(),
-            });
+            await surrealSQL(token, `INSERT INTO widechat_raw_messages [{
+                session_id: ${toS(sessionId)},
+                origin: ${toS(origin)},
+                sender_name: ${toS(msgData.user?.name || senderName || "")},
+                message: ${toS(messageText)},
+                platform_id: ${toS(messagePhone || msgData.platform_id || "")},
+                message_id: ${toS(msgData.message_id || null)},
+                created_at: ${toS(msgData.created_at ? new Date(msgData.created_at).toISOString() : new Date().toISOString())}
+            }] RETURN NONE;`);
         }
 
         if (!isMessage && !isConversationEnd && !isAcceptAttendance) {
@@ -102,20 +161,21 @@ serve(async (req) => {
         const isTransfer   = webhookEvent === "attendance_transfer" || payload.data?.event === "humanTransfer";
 
         // Find existing lead
-        let leadId = null, foundBy = "";
+        let leadId: number | string | null = null;
+        let foundBy = "";
         if (sessionId) {
-            const { data: l } = await supabase.from('leads').select('id').eq('widechat_session_id', sessionId).maybeSingle();
-            if (l) { leadId = l.id; foundBy = "session"; }
+            const rows = await surrealSQL(token, `SELECT id FROM leads WHERE widechat_session_id = ${toS(sessionId)} LIMIT 1;`);
+            if (rows[0]) { leadId = parseId((rows[0] as any).id); foundBy = "session"; }
         }
         if (!leadId && data?.contact_id) {
-            const { data: l } = await supabase.from('leads').select('id').eq('widechat_contact_id', data.contact_id).maybeSingle();
-            if (l) { leadId = l.id; foundBy = "contact_id"; }
+            const rows = await surrealSQL(token, `SELECT id FROM leads WHERE widechat_contact_id = ${toS(data.contact_id)} LIMIT 1;`);
+            if (rows[0]) { leadId = parseId((rows[0] as any).id); foundBy = "contact_id"; }
         }
         if (!leadId && hasPhone) {
             const suffix = String(messagePhone).replace(/\D/g, '').slice(-8);
             if (suffix.length >= 8) {
-                const { data: l } = await supabase.from('leads').select('id').filter('telefone', 'ilike', `%${suffix}%`).limit(1).maybeSingle();
-                if (l) { leadId = l.id; foundBy = "phone"; }
+                const rows = await surrealSQL(token, `SELECT id FROM leads WHERE string::contains(telefone, ${toS(suffix)}) LIMIT 1;`);
+                if (rows[0]) { leadId = parseId((rows[0] as any).id); foundBy = "phone"; }
             }
         }
 
@@ -123,27 +183,28 @@ serve(async (req) => {
 
         // ── Accept attendance ──────────────────────────────────────────────────
         if (isAcceptAttendance) {
-            await supabase.from('widechat_atendimentos').insert({
-                lead_id: leadId, protocol: data?.protocol || null,
-                widechat_agent_id: data?.agent_id || null,
-                session_id: sessionId || null, contact_id: data?.contact_id || null,
-                aceito_em: new Date().toISOString(),
-            });
+            await surrealSQL(token, `INSERT INTO widechat_atendimentos [{
+                lead_id: ${leadId ? ref('leads', leadId) : 'NONE'},
+                protocol: ${toS(data?.protocol || null)},
+                widechat_agent_id: ${toS(data?.agent_id || null)},
+                session_id: ${toS(sessionId || null)},
+                contact_id: ${toS(data?.contact_id || null)},
+                aceito_em: ${toS(new Date().toISOString())}
+            }] RETURN NONE;`);
             return new Response(JSON.stringify({ success: true, lead_id: leadId, action: "attendance_accepted" }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
             });
         }
 
-        // ── Conversation end: move lead to final stage ─────────────────────────
+        // ── Conversation end ───────────────────────────────────────────────────
         if (isConversationEnd) {
             if (leadId) {
-                const { data: finalStage } = await supabase.from('stages').select('id, name')
-                    .or('name.ilike.%finaliza%,name.ilike.%encerra%,name.ilike.%conclu%')
-                    .order('order', { ascending: false }).limit(1).maybeSingle();
-                if (finalStage) {
-                    await supabase.from('leads').update({
-                        stage_id: finalStage.id, stage_entry_date: new Date().toISOString()
-                    }).eq('id', leadId);
+                const stages = await surrealSQL(token,
+                    `SELECT id FROM stages WHERE string::contains(string::lowercase(name), "finaliz") OR string::contains(string::lowercase(name), "encerr") OR string::contains(string::lowercase(name), "conclu") ORDER BY order DESC LIMIT 1;`
+                );
+                if (stages[0]) {
+                    const finalStageId = parseId((stages[0] as any).id);
+                    await surrealSQL(token, `UPDATE leads SET stage_id = ${ref('stages', finalStageId)}, stage_entry_date = ${toS(new Date().toISOString())} WHERE id = ${ref('leads', leadId)};`);
                 }
             }
             return new Response(JSON.stringify({ success: true, lead_id: leadId, action: "conversation_ended" }), {
@@ -166,76 +227,89 @@ serve(async (req) => {
             }
         }
 
-        // ── Create/update lead ─────────────────────────────────────────────────
-        let sourceId = 8;
-        const { data: src } = await supabase.from('lead_sources').select('id').ilike('name', 'Widechat').maybeSingle();
-        if (src) sourceId = src.id;
-        const { data: firstStage } = await supabase.from('stages').select('id').order('order', { ascending: true }).limit(1).maybeSingle();
+        // ── Source and stage lookup ────────────────────────────────────────────
+        const srcRows = await surrealSQL(token, `SELECT id FROM lead_sources WHERE string::contains(string::lowercase(name), "widechat") LIMIT 1;`);
+        const sourceId = srcRows[0] ? parseId((srcRows[0] as any).id) : 8;
 
+        // ── Create/update lead ─────────────────────────────────────────────────
         if (leadId) {
-            const upd: any = { source_id: sourceId, fonte_lead: 'Widechat', updated_at: new Date().toISOString() };
-            if (data?.contact_id) upd.widechat_contact_id = data.contact_id;
-            if (sessionId) upd.widechat_session_id = sessionId;
-            await supabase.from('leads').update(upd).eq('id', leadId);
+            let setClause = `source_id = ${ref('lead_sources', sourceId)}, fonte_lead = "Widechat", updated_at = ${toS(new Date().toISOString())}`;
+            if (data?.contact_id) setClause += `, widechat_contact_id = ${toS(data.contact_id)}`;
+            if (sessionId) setClause += `, widechat_session_id = ${toS(sessionId)}`;
+            await surrealSQL(token, `UPDATE leads SET ${setClause} WHERE id = ${ref('leads', leadId)};`);
         } else {
-            const { data: upserted } = await supabase.from('leads').insert({
-                nome_completo: senderName.trim() || `Lead WhatsApp - ${messagePhone}`,
-                telefone: messagePhone || "00000000000",
-                stage_id: firstStage?.id || 1, source_id: sourceId, fonte_lead: 'Widechat',
-                widechat_contact_id: data?.contact_id || null,
-                widechat_session_id: sessionId || null,
-                temperatura: 'frio', data_entrada: new Date().toISOString(), valor_oportunidade: 0
-            }).select('id').maybeSingle();
-            if (upserted) leadId = upserted.id;
+            const stageRows = await surrealSQL(token, `SELECT id FROM stages ORDER BY order ASC LIMIT 1;`);
+            const firstStageId = stageRows[0] ? parseId((stageRows[0] as any).id) : 1;
+            const newId = await nextLeadId(token);
+            const inserted = await surrealSQL(token, `INSERT INTO leads [{ id: ${newId},
+                nome_completo: ${toS(senderName.trim() || `Lead WhatsApp - ${messagePhone}`)},
+                telefone: ${toS(messagePhone || "00000000000")},
+                stage_id: ${ref('stages', firstStageId)},
+                source_id: ${ref('lead_sources', sourceId)},
+                fonte_lead: "Widechat",
+                widechat_contact_id: ${toS(data?.contact_id || null)},
+                widechat_session_id: ${toS(sessionId || null)},
+                temperatura: "frio",
+                data_entrada: ${toS(new Date().toISOString())},
+                valor_oportunidade: 0
+            }] RETURN id;`);
+            if (inserted[0]) leadId = parseId((inserted[0] as any).id);
         }
 
-        // ── Store message in widechat_messages (CRM kanban view) ──────────────
+        // ── Store message in widechat_messages ────────────────────────────────
         let origin = "auto";
         if (eventName === "messageContact" || msgData.origin === "contact") origin = "channel";
         if (msgData.origin === "user" || msgData.origin === "agent" || webhookEvent === "agent_message") origin = "agent";
 
         if (leadId) {
-            await supabase.from('widechat_messages').insert({
-                lead_id: leadId, session_id: sessionId || "unknown",
-                message_id: msgData.message_id || null, type: msgData.type || "text",
-                message: messageText || "[Mídia]", origin,
-                sender_name: senderName || "Desconhecido",
-                created_at: msgData.created_at ? new Date(msgData.created_at).toISOString() : new Date().toISOString(),
-                raw_data: payload
-            });
+            await surrealSQL(token, `INSERT INTO widechat_messages [{
+                lead_id: ${ref('leads', leadId)},
+                session_id: ${toS(sessionId || "unknown")},
+                message_id: ${toS(msgData.message_id || null)},
+                type: ${toS(msgData.type || "text")},
+                message: ${toS(messageText || "[Mídia]")},
+                origin: ${toS(origin)},
+                sender_name: ${toS(senderName || "Desconhecido")},
+                created_at: ${toS(msgData.created_at ? new Date(msgData.created_at).toISOString() : new Date().toISOString())}
+            }] RETURN NONE;`);
 
             // Intelligent CRM updates
-            const { data: currentLead } = await supabase.from('leads')
-                .select('assigned_to_id, curso_interesse, valor_oportunidade').eq('id', leadId).maybeSingle();
-            const updates: any = {};
+            const leadRows = await surrealSQL(token, `SELECT assigned_to_id, curso_interesse, valor_oportunidade FROM leads WHERE id = ${ref('leads', leadId)} LIMIT 1;`);
+            const currentLead = leadRows[0] as any;
+            const updates: string[] = [];
 
             if (origin === 'agent' && senderName && senderName !== 'Desconhecido' && !currentLead?.assigned_to_id) {
                 const firstName = senderName.trim().split(' ')[0];
-                const { data: profile } = await supabase.from('profiles').select('id, full_name')
-                    .or(`full_name.ilike.%${senderName.trim()}%,full_name.ilike.%${firstName}%`).limit(1).maybeSingle();
-                if (profile) updates.assigned_to_id = profile.id;
+                const profRows = await surrealSQL(token,
+                    `SELECT id FROM profiles WHERE string::contains(string::lowercase(full_name), ${toS(senderName.trim().toLowerCase())}) OR string::contains(string::lowercase(full_name), ${toS(firstName.toLowerCase())}) LIMIT 1;`
+                );
+                if (profRows[0]) {
+                    const profId = parseId((profRows[0] as any).id);
+                    updates.push(`assigned_to_id = ${ref('profiles', profId)}`);
+                }
             }
 
             if (!currentLead?.curso_interesse && messageText) {
-                const { data: courses } = await supabase.from('courses').select('id, name, default_value');
-                if (courses?.length) {
+                const courseRows = await surrealSQL(token, `SELECT id, name, default_value FROM courses;`) as any[];
+                if (courseRows.length) {
                     const msgNorm = messageText.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
-                    const match = courses.find((c: any) => {
-                        const cn = c.name.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+                    const match = courseRows.find((c: any) => {
+                        const cn = (c.name || '').toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
                         if (msgNorm.includes(cn)) return true;
                         const words = cn.split(/\s+/).filter((w: string) => w.length > 4);
                         return words.length > 0 && words.every((w: string) => msgNorm.includes(w));
                     });
                     if (match) {
-                        updates.curso_interesse = match.id;
+                        const courseId = parseId(match.id);
+                        updates.push(`curso_interesse = ${ref('courses', courseId)}`);
                         if (match.default_value && !currentLead?.valor_oportunidade)
-                            updates.valor_oportunidade = match.default_value;
+                            updates.push(`valor_oportunidade = ${match.default_value}`);
                     }
                 }
             }
 
-            if (Object.keys(updates).length > 0)
-                await supabase.from('leads').update(updates).eq('id', leadId);
+            if (updates.length > 0)
+                await surrealSQL(token, `UPDATE leads SET ${updates.join(', ')} WHERE id = ${ref('leads', leadId)};`);
         }
 
         return new Response(JSON.stringify({ success: true, lead_id: leadId }), {

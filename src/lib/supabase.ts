@@ -414,9 +414,6 @@ async function surrealMutate(
     const rows = (Array.isArray(entry?.result) ? entry.result : [entry?.result]).filter(Boolean);
     const stripped = rows.map((r: unknown) => stripSurrealIds(r));
 
-    // Fire-and-forget Supabase backup
-    _supabaseFireAndForget(table, op === 'insert' ? 'upsert' : op, finalData, filters);
-
     return { data: stripped, error: null };
 }
 
