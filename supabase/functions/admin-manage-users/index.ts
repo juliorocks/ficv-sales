@@ -17,8 +17,6 @@ serve(async (req) => {
             throw new Error('Nenhum token de autorização fornecido.');
         }
 
-        // Decodifica o JWT (assinatura já verificada pelo gateway do Supabase)
-        // e extrai o sub (user UUID) sem fazer chamada HTTP extra.
         const token = authHeader.replace('Bearer ', '');
         const jwtPayload = (() => {
             try {
@@ -28,25 +26,30 @@ serve(async (req) => {
                 return JSON.parse(atob(padded)) as Record<string, unknown>;
             } catch { return null; }
         })();
-        const callerId = jwtPayload?.sub as string | undefined;
-        if (!callerId) throw new Error('Usuário não autenticado.');
 
         const supabaseAdmin = createClient(
             Deno.env.get('SUPABASE_URL') ?? '',
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
         );
 
-        const { data: callerProfile, error: callerProfileError } = await supabaseAdmin
-            .from('profiles')
-            .select('role')
-            .eq('id', callerId)
-            .single();
+        // Service role key → acesso total (já é a chave mais privilegiada)
+        const isServiceRole = jwtPayload?.role === 'service_role';
+        if (!isServiceRole) {
+            const callerId = jwtPayload?.sub as string | undefined;
+            if (!callerId) throw new Error('Usuário não autenticado.');
 
-        if (callerProfileError || callerProfile?.role !== 'admin') {
-            return new Response(JSON.stringify({ error: 'Apenas administradores podem gerenciar usuários.' }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                status: 403,
-            });
+            const { data: callerProfile, error: callerProfileError } = await supabaseAdmin
+                .from('profiles')
+                .select('role')
+                .eq('id', callerId)
+                .single();
+
+            if (callerProfileError || callerProfile?.role !== 'admin') {
+                return new Response(JSON.stringify({ error: 'Apenas administradores podem gerenciar usuários.' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                });
+            }
         }
 
         const { action, payload } = await req.json();

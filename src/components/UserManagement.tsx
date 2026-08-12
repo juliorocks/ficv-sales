@@ -49,22 +49,11 @@ export const UserManagement: React.FC = () => {
     const fetchProfiles = async () => {
         setLoading(true);
         try {
-            const [{ data: authData, error: authErr }, { data: profilesData, error: profErr }] = await Promise.all([
-                supabase.auth.admin.listUsers({ perPage: 1000 }),
-                supabase.from('profiles').select('id, full_name, role, created_at').order('full_name'),
-            ]);
-            if (authErr) throw authErr;
-            if (profErr) throw profErr;
-
-            const profileMap = new Map((profilesData ?? []).map((p: any) => [p.id, p]));
-            const merged = (authData?.users ?? []).map((u: any) => ({
-                id: u.id,
-                email: u.email,
-                full_name: profileMap.get(u.id)?.full_name ?? u.user_metadata?.full_name ?? 'Usuário',
-                role: profileMap.get(u.id)?.role ?? 'agent',
-                created_at: u.created_at,
-            }));
-            setProfiles(merged);
+            const { data, error } = await supabase.functions.invoke('admin-manage-users', {
+                body: { action: 'list' },
+            });
+            if (error) throw error;
+            setProfiles((data as any).profiles ?? []);
         } catch (err: any) {
             console.error('fetchProfiles error:', err);
             const { data: fallback } = await supabase.from('profiles').select('*').order('full_name');
@@ -84,23 +73,31 @@ export const UserManagement: React.FC = () => {
         setEditLoading(true);
 
         try {
-            const authUpdates: Record<string, string> = {};
-            if (editForm.email) authUpdates.email = editForm.email;
+            if (editForm.newPassword && editForm.newPassword.length < 6) {
+                throw new Error('A nova senha deve ter no mínimo 6 caracteres.');
+            }
+
+            const { data, error } = await supabase.functions.invoke('admin-manage-users', {
+                body: {
+                    action: 'update_profile',
+                    payload: {
+                        userId: editingUser.id,
+                        full_name: editForm.full_name,
+                        email: editForm.email,
+                        role: editForm.role,
+                    },
+                },
+            });
+            if (error) throw error;
+            if ((data as any)?.error) throw new Error((data as any).error);
+
             if (editForm.newPassword) {
-                if (editForm.newPassword.length < 6) throw new Error('A nova senha deve ter no mínimo 6 caracteres.');
-                authUpdates.password = editForm.newPassword;
+                const { data: d2, error: e2 } = await supabase.functions.invoke('admin-manage-users', {
+                    body: { action: 'reset_password', payload: { userId: editingUser.id, password: editForm.newPassword } },
+                });
+                if (e2) throw e2;
+                if ((d2 as any)?.error) throw new Error((d2 as any).error);
             }
-
-            if (Object.keys(authUpdates).length > 0) {
-                const { error: authErr } = await supabase.auth.admin.updateUserById(editingUser.id, authUpdates);
-                if (authErr) throw authErr;
-            }
-
-            const { error: profErr } = await supabase
-                .from('profiles')
-                .update({ full_name: editForm.full_name, role: editForm.role })
-                .eq('id', editingUser.id);
-            if (profErr) throw profErr;
 
             setEditingUser(null);
             fetchProfiles();
@@ -117,20 +114,19 @@ export const UserManagement: React.FC = () => {
         setFormLoading(true);
 
         try {
-            const { data, error } = await supabase.auth.admin.createUser({
-                email: newUser.email,
-                password: newUser.password,
-                email_confirm: true,
-                user_metadata: { full_name: newUser.full_name, role: newUser.role },
+            const { data, error } = await supabase.functions.invoke('admin-manage-users', {
+                body: {
+                    action: 'create',
+                    payload: {
+                        email: newUser.email,
+                        password: newUser.password,
+                        full_name: newUser.full_name,
+                        role: newUser.role,
+                    },
+                },
             });
             if (error) throw error;
-
-            if (data.user) {
-                await supabase
-                    .from('profiles')
-                    .update({ full_name: newUser.full_name, role: newUser.role })
-                    .eq('id', data.user.id);
-            }
+            if ((data as any)?.error) throw new Error((data as any).error);
 
             alert(`Usuário ${newUser.full_name} criado com sucesso!`);
             setNewUser({ email: '', password: '', full_name: '', role: 'agent' });
