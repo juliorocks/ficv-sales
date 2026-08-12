@@ -17,26 +17,29 @@ serve(async (req) => {
             throw new Error('Nenhum token de autorização fornecido.');
         }
 
+        // Decodifica o JWT (assinatura já verificada pelo gateway do Supabase)
+        // e extrai o sub (user UUID) sem fazer chamada HTTP extra.
+        const token = authHeader.replace('Bearer ', '');
+        const jwtPayload = (() => {
+            try {
+                const part = token.split('.')[1];
+                const padded = part.replace(/-/g, '+').replace(/_/g, '/')
+                    .padEnd(part.length + (4 - part.length % 4) % 4, '=');
+                return JSON.parse(atob(padded)) as Record<string, unknown>;
+            } catch { return null; }
+        })();
+        const callerId = jwtPayload?.sub as string | undefined;
+        if (!callerId) throw new Error('Usuário não autenticado.');
+
         const supabaseAdmin = createClient(
             Deno.env.get('SUPABASE_URL') ?? '',
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
         );
 
-        // Validar o caller usando um client com o JWT do request (padrão oficial Supabase)
-        const supabaseUser = createClient(
-            Deno.env.get('SUPABASE_URL') ?? '',
-            Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-            { global: { headers: { Authorization: authHeader } } }
-        );
-        const { data: { user: caller }, error: callerError } = await supabaseUser.auth.getUser();
-        if (callerError || !caller) {
-            throw new Error('Usuário não autenticado.');
-        }
-
         const { data: callerProfile, error: callerProfileError } = await supabaseAdmin
             .from('profiles')
             .select('role')
-            .eq('id', caller.id)
+            .eq('id', callerId)
             .single();
 
         if (callerProfileError || callerProfile?.role !== 'admin') {
