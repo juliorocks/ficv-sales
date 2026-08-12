@@ -852,6 +852,26 @@ export const supabase = new Proxy(_supabase, {
 // Raw Supabase client — bypassa o proxy (usar apenas para leitura pós-sync)
 export const supabaseRaw = _supabase as typeof _supabase;
 
+// Executa SQL diretamente no SurrealDB com token admin — para operações privilegiadas no browser
+export async function surrealAdminSql(sql: string): Promise<unknown[]> {
+    const token = await ensureAdminToken();
+    if (!token) throw new Error('Falha ao obter token admin do SurrealDB');
+    const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'text/plain', 'Accept': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            'surreal-ns': SURREAL_NS, 'surreal-db': SURREAL_DB,
+        },
+        body: sql,
+    });
+    if (!res.ok) throw new Error(`SurrealDB HTTP ${res.status}`);
+    const json = await res.json();
+    const entry = Array.isArray(json) ? json[0] : json;
+    if (entry?.status === 'ERR') throw new Error(entry.result);
+    return (Array.isArray(entry?.result) ? entry.result : []).map((r: unknown) => stripSurrealIds(r));
+}
+
 // Upsert em lote no SurrealDB — deleta rows do período e reinsere com dados frescos.
 // Usa token admin para bypass de PERMISSIONS (operação privilegiada pós-sync).
 export async function surrealBatchUpsert(

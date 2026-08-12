@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
+import { surrealAdminSql } from '../lib/supabase';
 import {
     Users,
     Shield,
@@ -49,15 +49,12 @@ export const UserManagement: React.FC = () => {
     const fetchProfiles = async () => {
         setLoading(true);
         try {
-            const { data, error } = await supabase.functions.invoke('admin-manage-users', {
-                body: { action: 'list' },
-            });
-            if (error) throw error;
-            setProfiles((data as any).profiles ?? []);
+            const rows = await surrealAdminSql(
+                `SELECT id, email, full_name, role, created_at FROM profiles WHERE email != NONE ORDER BY full_name ASC;`
+            ) as any[];
+            setProfiles(rows);
         } catch (err: any) {
             console.error('fetchProfiles error:', err);
-            const { data: fallback } = await supabase.from('profiles').select('*').order('full_name');
-            if (fallback) setProfiles(fallback);
         }
         setLoading(false);
     };
@@ -77,27 +74,12 @@ export const UserManagement: React.FC = () => {
                 throw new Error('A nova senha deve ter no mínimo 6 caracteres.');
             }
 
-            const { data, error } = await supabase.functions.invoke('admin-manage-users', {
-                body: {
-                    action: 'update_profile',
-                    payload: {
-                        userId: editingUser.id,
-                        full_name: editForm.full_name,
-                        email: editForm.email,
-                        role: editForm.role,
-                    },
-                },
-            });
-            if (error) throw error;
-            if ((data as any)?.error) throw new Error((data as any).error);
-
+            const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+            let sql = `UPDATE profiles SET full_name = "${esc(editForm.full_name)}", email = "${esc(editForm.email)}", role = "${editForm.role}" WHERE id = profiles:⟨${editingUser.id}⟩;`;
             if (editForm.newPassword) {
-                const { data: d2, error: e2 } = await supabase.functions.invoke('admin-manage-users', {
-                    body: { action: 'reset_password', payload: { userId: editingUser.id, password: editForm.newPassword } },
-                });
-                if (e2) throw e2;
-                if ((d2 as any)?.error) throw new Error((d2 as any).error);
+                sql += `\nUPDATE profiles SET password = crypto::argon2::generate("${esc(editForm.newPassword)}") WHERE id = profiles:⟨${editingUser.id}⟩;`;
             }
+            await surrealAdminSql(sql);
 
             setEditingUser(null);
             fetchProfiles();
@@ -114,19 +96,17 @@ export const UserManagement: React.FC = () => {
         setFormLoading(true);
 
         try {
-            const { data, error } = await supabase.functions.invoke('admin-manage-users', {
-                body: {
-                    action: 'create',
-                    payload: {
-                        email: newUser.email,
-                        password: newUser.password,
-                        full_name: newUser.full_name,
-                        role: newUser.role,
-                    },
-                },
-            });
-            if (error) throw error;
-            if ((data as any)?.error) throw new Error((data as any).error);
+            const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+            const newId = crypto.randomUUID();
+            await surrealAdminSql(`INSERT INTO profiles [{
+                id: "${newId}",
+                email: "${esc(newUser.email)}",
+                full_name: "${esc(newUser.full_name)}",
+                role: "${newUser.role}",
+                password: crypto::argon2::generate("${esc(newUser.password)}"),
+                active: true,
+                created_at: time::now()
+            }] RETURN NONE;`);
 
             alert(`Usuário ${newUser.full_name} criado com sucesso!`);
             setNewUser({ email: '', password: '', full_name: '', role: 'agent' });
@@ -143,13 +123,11 @@ export const UserManagement: React.FC = () => {
 
     const toggleRole = async (userId: string, currentRole: string) => {
         const newRole = currentRole === 'admin' ? 'agent' : 'admin';
-        const { error } = await supabase
-            .from('profiles')
-            .update({ role: newRole })
-            .eq('id', userId);
-
-        if (!error) {
+        try {
+            await surrealAdminSql(`UPDATE profiles SET role = "${newRole}" WHERE id = profiles:⟨${userId}⟩;`);
             setProfiles(prev => prev.map(p => p.id === userId ? { ...p, role: newRole } : p));
+        } catch (err: any) {
+            console.error('toggleRole error:', err);
         }
     };
 
