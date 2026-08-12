@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.177.1/http/server.ts";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-surreal-token',
 };
 
 const SURREAL_ENDPOINT = 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
