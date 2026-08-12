@@ -22,8 +22,13 @@ serve(async (req) => {
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
         );
 
-        // Identify the caller and make sure they are an admin
-        const { data: { user: caller }, error: callerError } = await supabaseAdmin.auth.getUser(authHeader.replace('Bearer ', ''));
+        // Validar o caller usando um client com o JWT do request (padrão oficial Supabase)
+        const supabaseUser = createClient(
+            Deno.env.get('SUPABASE_URL') ?? '',
+            Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+            { global: { headers: { Authorization: authHeader } } }
+        );
+        const { data: { user: caller }, error: callerError } = await supabaseUser.auth.getUser();
         if (callerError || !caller) {
             throw new Error('Usuário não autenticado.');
         }
