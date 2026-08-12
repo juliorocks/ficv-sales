@@ -810,12 +810,16 @@ function makeFromProxy(table: string): ReturnType<typeof _supabase.from> {
 const _functionsProxy = {
     invoke(fnName: string, opts?: { body?: unknown; headers?: Record<string, string>; method?: string }) {
         const url = `${supabaseUrl}/functions/v1/${fnName}`;
+        const surrealToken = typeof localStorage !== 'undefined'
+            ? (localStorage.getItem('surreal_user_token') ?? '')
+            : '';
         return fetch(url, {
             method: opts?.method ?? 'POST',
             headers: {
                 'Authorization': `Bearer ${supabaseAnonKey}`,
                 'apikey': supabaseAnonKey,
                 'Content-Type': 'application/json',
+                'X-Surreal-Token': surrealToken,
                 ...(opts?.headers ?? {}),
             },
             body: opts?.body !== undefined ? JSON.stringify(opts.body) : undefined,

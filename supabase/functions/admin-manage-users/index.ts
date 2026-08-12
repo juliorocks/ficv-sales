@@ -3,8 +3,12 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-surreal-token',
 };
+
+const SURREAL_ENDPOINT = 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
+const SURREAL_NS = 'ficv';
+const SURREAL_DB = 'salespulse';
 
 serve(async (req) => {
     if (req.method === 'OPTIONS') {
@@ -17,40 +21,56 @@ serve(async (req) => {
             throw new Error('Nenhum token de autorização fornecido.');
         }
 
-        const token = authHeader.replace('Bearer ', '');
-        const jwtPayload = (() => {
+        // Autenticação via token SurrealDB do usuário logado
+        const surrealUserToken = req.headers.get('X-Surreal-Token') ?? '';
+        if (!surrealUserToken) throw new Error('Usuário não autenticado.');
+
+        // Decodifica o JWT SurrealDB para obter o profile ID
+        const surrealPayload = (() => {
             try {
-                const part = token.split('.')[1];
+                const part = surrealUserToken.split('.')[1];
                 const padded = part.replace(/-/g, '+').replace(/_/g, '/')
                     .padEnd(part.length + (4 - part.length % 4) % 4, '=');
                 return JSON.parse(atob(padded)) as Record<string, unknown>;
             } catch { return null; }
         })();
+        const idStr = String(surrealPayload?.ID ?? '');
+        const profileIdMatch = idStr.match(/^profiles:`(.+)`$/) ?? idStr.match(/^profiles:⟨(.+)⟩$/);
+        const profileId = profileIdMatch ? profileIdMatch[1] : '';
+        if (!profileId) throw new Error('Usuário não autenticado.');
+
+        // Verifica role=admin no SurrealDB
+        const signRes = await fetch(`${SURREAL_ENDPOINT}/signin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'surreal-ns': SURREAL_NS },
+            body: JSON.stringify({ ns: SURREAL_NS, user: 'ficv_admin', pass: 'Ficv@Surreal2026!' }),
+        });
+        if (!signRes.ok) throw new Error('Falha ao autenticar no SurrealDB.');
+        const { token: adminToken } = await signRes.json() as { token?: string };
+        if (!adminToken) throw new Error('Falha ao obter token do SurrealDB.');
+
+        const profileRes = await fetch(`${SURREAL_ENDPOINT}/sql`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'text/plain', 'Accept': 'application/json',
+                'Authorization': `Bearer ${adminToken}`,
+                'surreal-ns': SURREAL_NS, 'surreal-db': SURREAL_DB,
+            },
+            body: `SELECT role FROM profiles WHERE id = profiles:⟨${profileId}⟩ LIMIT 1;`,
+        });
+        const profileJson = await profileRes.json();
+        const profileRole = (Array.isArray(profileJson) ? profileJson[0]?.result?.[0] : null)?.role;
+        if (profileRole !== 'admin') {
+            return new Response(JSON.stringify({ error: 'Apenas administradores podem gerenciar usuários.' }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 403,
+            });
+        }
 
         const supabaseAdmin = createClient(
             Deno.env.get('SUPABASE_URL') ?? '',
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
         );
-
-        // Service role key → acesso total (já é a chave mais privilegiada)
-        const isServiceRole = jwtPayload?.role === 'service_role';
-        if (!isServiceRole) {
-            const callerId = jwtPayload?.sub as string | undefined;
-            if (!callerId) throw new Error('Usuário não autenticado.');
-
-            const { data: callerProfile, error: callerProfileError } = await supabaseAdmin
-                .from('profiles')
-                .select('role')
-                .eq('id', callerId)
-                .single();
-
-            if (callerProfileError || callerProfile?.role !== 'admin') {
-                return new Response(JSON.stringify({ error: 'Apenas administradores podem gerenciar usuários.' }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 403,
-                });
-            }
-        }
 
         const { action, payload } = await req.json();
 
