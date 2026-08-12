@@ -273,10 +273,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
         return () => document.removeEventListener('mousedown', handler);
     }, []);
 
-    // ─── Load data from Supabase ───────────────────────────────────────────────
-    // Matriculas: load the full year so counts match Sponte (students who enrolled
-    // before the selected month still appear in their turma/curso). Financial data
-    // (parcelas) keeps the period filter — only those two need date precision.
+    // ─── Load data via Edge Function (SurrealDB) ──────────────────────────────
     const selectedYear = dateStart ? new Date(dateStart + 'T00:00:00').getFullYear() : new Date().getFullYear();
     const yearStart = `${selectedYear}-01-01`;
     const yearEnd   = `${selectedYear}-12-31`;
@@ -284,47 +281,18 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
     const loadData = useCallback(async (opts?: { silent?: boolean }) => {
         if (!opts?.silent) setLoading(true);
         try {
-            // Busca matrículas do ano em requests paralelas de 5000 (reduz roundtrips)
-            const PAGE = 5000;
-            const allMatriculas: SponteMatricula[] = [];
-            for (let from = 0; ; from += PAGE) {
-                const { data, error } = await supabase
-                    .from('sponte_matriculas')
-                    .select('*')
-                    .gte('data_matricula', yearStart)
-                    .lte('data_matricula', yearEnd)
-                    .order('data_matricula', { ascending: false })
-                    .range(from, from + PAGE - 1);
-                if (error) throw error;
-                if (data?.length) allMatriculas.push(...data);
-                if (!data || data.length < PAGE) break;
-            }
+            const { data, error } = await supabase.functions.invoke('sponte-read', {
+                body: { yearStart, yearEnd, dateStart, dateEnd },
+            });
+            if (error) throw error;
+            if (!data?.success) throw new Error(data?.error ?? 'Resposta inválida');
 
-            // Parcelas pagas e pendentes em paralelo (mesma página grande)
-            const [parcelasRes, pendentesRes] = await Promise.all([
-                supabase.from('sponte_parcelas').select('*')
-                    .eq('situacao_parcela', 'Quitada').ilike('categoria', '%matr%')
-                    .gte('data_pagamento', dateStart).lte('data_pagamento', dateEnd)
-                    .range(0, PAGE - 1),
-                supabase.from('sponte_parcelas').select('*')
-                    .eq('situacao_parcela', 'Pendente').ilike('categoria', '%matr%')
-                    .gte('vencimento', dateStart).lte('vencimento', dateEnd)
-                    .range(0, PAGE - 1),
-            ]);
-            const allParcelas   = parcelasRes.data ?? [];
-            const allPendentes  = pendentesRes.data ?? [];
-
-            const syncRes = await supabase
-                .from('sponte_matriculas')
-                .select('synced_at')
-                .order('synced_at', { ascending: false })
-                .limit(1)
-                .single();
-
-            setMatriculas(allMatriculas);
-            setParcelas(allParcelas);
-            setParcelasPendentes(allPendentes);
-            if (syncRes.data) setLastSync(syncRes.data.synced_at);
+            setMatriculas(data.matriculas ?? []);
+            setParcelas(data.parcelas ?? []);
+            setParcelasPendentes(data.pendentes ?? []);
+            setMessagesLogs(data.messagesLogs ?? []);
+            setMessagesLogsReady(true);
+            if (data.lastSync) setLastSync(data.lastSync);
         } catch (e) {
             console.error('loadData error:', e);
         } finally {
@@ -334,37 +302,11 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
 
     useEffect(() => { loadData(); }, [loadData]);
 
-    // Atualiza em segundo plano (sem loading spinner) pra refletir os syncs
-    // automáticos do cron sem precisar dar refresh na página.
+    // Atualiza em segundo plano a cada 3 min para refletir syncs automáticos
     useEffect(() => {
         const id = setInterval(() => { loadData({ silent: true }); }, 3 * 60 * 1000);
         return () => clearInterval(id);
     }, [loadData]);
-
-    // Carrega messages_logs filtrados pelo ano selecionado menos 30 dias (buffer para atribuição)
-    useEffect(() => {
-        const load = async () => {
-            const PAGE = 5000;
-            const all: MessagesLog[] = [];
-            // 30 dias antes do início do ano para cobrir atribuições próximas ao limite
-            const logsFrom = new Date(yearStart + 'T00:00:00');
-            logsFrom.setDate(logsFrom.getDate() - 30);
-            const logsFromStr = logsFrom.toISOString().slice(0, 10);
-            for (let from = 0; ; from += PAGE) {
-                const { data, error } = await supabase
-                    .from('messages_logs')
-                    .select('agent_name, contact, timestamp')
-                    .gte('timestamp', logsFromStr)
-                    .range(from, from + PAGE - 1);
-                if (error) { console.warn('messages_logs load error:', error); break; }
-                if (data?.length) all.push(...(data as unknown as MessagesLog[]));
-                if (!data || data.length < PAGE) break;
-            }
-            setMessagesLogs(all);
-            setMessagesLogsReady(true);
-        };
-        load();
-    }, [yearStart]);
 
     // ─── Matrículas por agente — calculado client-side (SurrealDB não tem RPC PostgreSQL)
     useEffect(() => {
