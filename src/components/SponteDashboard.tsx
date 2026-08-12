@@ -677,6 +677,71 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                 )}
             </div>
 
+            {/* Loading skeleton */}
+            {loading && (
+                <div className="space-y-6">
+                    {/* Banner de status */}
+                    <div className="glass-card p-5 flex items-center gap-4 border border-primary/20">
+                        <div className="relative shrink-0">
+                            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                                <Loader2 size={20} className="animate-spin text-primary" />
+                            </div>
+                            <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-primary animate-ping" />
+                        </div>
+                        <div>
+                            <p className="text-sm font-bold text-[var(--text-main)]">Buscando dados do Sponte…</p>
+                            <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                                Consultando matrículas, parcelas e histórico de atendimentos no SurrealDB. Isso pode levar alguns segundos.
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Skeleton stat cards */}
+                    <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+                        {Array.from({ length: 6 }).map((_, i) => (
+                            <div key={i} className="glass-card p-5 space-y-3 animate-pulse">
+                                <div className="flex justify-between items-start">
+                                    <div className="w-8 h-8 rounded-lg bg-[var(--bg-card-hover)]" />
+                                    <div className="w-16 h-3 rounded bg-[var(--bg-card-hover)]" />
+                                </div>
+                                <div className="w-20 h-3 rounded bg-[var(--bg-card-hover)]" />
+                                <div className="w-16 h-6 rounded bg-[var(--bg-card-hover)]" />
+                                <div className="w-24 h-2.5 rounded bg-[var(--bg-card-hover)]" />
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Skeleton charts */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {Array.from({ length: 2 }).map((_, i) => (
+                            <div key={i} className="glass-card p-6 space-y-4 animate-pulse">
+                                <div className="w-40 h-3 rounded bg-[var(--bg-card-hover)]" />
+                                <div className="h-64 rounded-xl bg-[var(--bg-card-hover)]" />
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Skeleton tabela */}
+                    <div className="glass-card p-6 space-y-4 animate-pulse">
+                        <div className="flex justify-between">
+                            <div className="w-40 h-3 rounded bg-[var(--bg-card-hover)]" />
+                            <div className="w-20 h-3 rounded bg-[var(--bg-card-hover)]" />
+                        </div>
+                        <div className="space-y-3">
+                            {Array.from({ length: 8 }).map((_, i) => (
+                                <div key={i} className="flex gap-4">
+                                    <div className="flex-1 h-3 rounded bg-[var(--bg-card-hover)]" />
+                                    <div className="w-24 h-3 rounded bg-[var(--bg-card-hover)]" />
+                                    <div className="w-32 h-3 rounded bg-[var(--bg-card-hover)]" />
+                                    <div className="w-20 h-3 rounded bg-[var(--bg-card-hover)]" />
+                                    <div className="w-16 h-3 rounded bg-[var(--bg-card-hover)]" />
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Empty state when no data */}
             {!loading && matriculas.length === 0 && (
                 <div className="glass-card p-12 flex flex-col items-center gap-4 text-center">
@@ -691,7 +756,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
             )}
 
             {/* Stats cards */}
-            {matriculas.length > 0 && (
+            {!loading && matriculas.length > 0 && (
                 <>
                     <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
                         <StatCard
@@ -745,14 +810,9 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                             <h3 className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-widest mb-4">
                                 Matrículas por Curso
                             </h3>
-                            {loading ? (
-                                <div className="h-64 flex items-center justify-center">
-                                    <Loader2 size={24} className="animate-spin text-primary" />
-                                </div>
-                            ) : (
-                                <div className="h-64">
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <BarChart data={chartByCurso} layout="vertical" margin={{ left: 8, right: 24 }}>
+                            <div className="h-64">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={chartByCurso} layout="vertical" margin={{ left: 8, right: 24 }}>
                                             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
                                             <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 10 }} />
                                             <YAxis type="category" dataKey="name" width={150} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} />
@@ -769,7 +829,6 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                                         </BarChart>
                                     </ResponsiveContainer>
                                 </div>
-                            )}
                         </div>
 
                         {/* By month */}
@@ -777,26 +836,20 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                             <h3 className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-widest mb-4">
                                 {period === 'month' || period === 'week' ? 'Matrículas por Dia' : 'Matrículas por Mês'}
                             </h3>
-                            {loading ? (
-                                <div className="h-64 flex items-center justify-center">
-                                    <Loader2 size={24} className="animate-spin text-primary" />
-                                </div>
-                            ) : (
-                                <div className="h-64">
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <BarChart data={chartByMonth} margin={{ left: 0, right: 8 }}>
-                                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                                            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 10 }} />
-                                            <YAxis axisLine={false} tickLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 10 }} />
-                                            <Tooltip
-                                                contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }}
-                                                formatter={(v: any) => [`${v} matrículas`, '']}
-                                            />
-                                            <Bar dataKey="value" fill="#5551FF" radius={[6, 6, 0, 0]} />
-                                        </BarChart>
-                                    </ResponsiveContainer>
-                                </div>
-                            )}
+                            <div className="h-64">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={chartByMonth} margin={{ left: 0, right: 8 }}>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 10 }} />
+                                        <YAxis axisLine={false} tickLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 10 }} />
+                                        <Tooltip
+                                            contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }}
+                                            formatter={(v: any) => [`${v} matrículas`, '']}
+                                        />
+                                        <Bar dataKey="value" fill="#5551FF" radius={[6, 6, 0, 0]} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
                         </div>
                     </div>
 
@@ -901,11 +954,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                             </span>
                         </div>
 
-                        {loading ? (
-                            <div className="py-12 flex justify-center">
-                                <Loader2 size={24} className="animate-spin text-primary" />
-                            </div>
-                        ) : filtered.length === 0 ? (
+                        {filtered.length === 0 ? (
                             <p className="text-center py-8 text-[var(--text-muted)] text-sm">
                                 Nenhuma matrícula encontrada com os filtros aplicados.
                             </p>
