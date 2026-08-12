@@ -149,6 +149,9 @@ const _surrealAuth = {
     // updateUser and any other methods pass through to Supabase
     updateUser: _supabase.auth.updateUser.bind(_supabase.auth),
     getUser: _supabase.auth.getUser.bind(_supabase.auth),
+    // Admin methods pass through directly (service role key already in browser client)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    admin: (_supabase.auth as any).admin,
 } as unknown as typeof _supabase.auth;
 
 function toSurrealValue(v: unknown): string {
