@@ -427,11 +427,6 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
         return () => clearInterval(interval);
     }, [isTvMode]);
 
-    const mockAgentData = [
-        { name: 'Thayanne', value: 9.4, sales: 42, rank: '🥇' },
-        { name: 'Karina', value: 8.2, sales: 38, rank: '🥈' },
-        { name: 'João', value: 7.9, sales: 31, rank: '🥉' }
-    ];
 
     // Date Presets Logic
     const setDatePreset = (preset: string) => {
@@ -635,12 +630,8 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    const displayAgentData = leaderboardData.length > 0
-        ? leaderboardData
-        : (analysisData.length === 0 ? mockAgentData : []);
-    const conversionChartData = realAgentData.length > 0
-        ? realAgentData
-        : (analysisData.length === 0 ? mockAgentData : []);
+    const displayAgentData = leaderboardData;
+    const conversionChartData = realAgentData;
 
     // Build complete daily calendar for selected period (shows ALL days, not just ones with data)
     const dailyData = useMemo(() => {
@@ -862,8 +853,8 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                             {(profile?.role === 'admin') && <NavItem icon={FileUp} label="Uploads" active={activeTab === 'uploads'} onClick={() => setActiveTab('uploads')} />}
                             <NavItem icon={BookOpen} label="Base de Conhecimento" active={activeTab === 'knowledge'} onClick={() => setActiveTab('knowledge')} />
                             <NavItem icon={MessageSquare} label="Scripts" active={activeTab === 'scripts'} onClick={() => setActiveTab('scripts')} />
-                            <NavItem icon={MessageSquare} label="Meu Widechat" active={activeTab === 'widechat'} onClick={() => setActiveTab('widechat')} />
-                            {(profile?.role === 'admin' || profile?.role === 'agent') && (
+                            {profile?.role === 'admin' && <NavItem icon={MessageSquare} label="Meu Widechat" active={activeTab === 'widechat'} onClick={() => setActiveTab('widechat')} />}
+                            {profile?.role === 'admin' && (
                                 <NavItem icon={TicketIcon} label="Tickets" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
                             )}
                             {(profile?.role === 'admin' || profile?.role === 'agent') && (

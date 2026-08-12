@@ -341,15 +341,20 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
         return () => clearInterval(id);
     }, [loadData]);
 
-    // Carrega messages_logs do SurrealDB (sync histórico executado, dual-write ativo)
+    // Carrega messages_logs filtrados pelo ano selecionado menos 30 dias (buffer para atribuição)
     useEffect(() => {
         const load = async () => {
             const PAGE = 5000;
             const all: MessagesLog[] = [];
+            // 30 dias antes do início do ano para cobrir atribuições próximas ao limite
+            const logsFrom = new Date(yearStart + 'T00:00:00');
+            logsFrom.setDate(logsFrom.getDate() - 30);
+            const logsFromStr = logsFrom.toISOString().slice(0, 10);
             for (let from = 0; ; from += PAGE) {
                 const { data, error } = await supabase
                     .from('messages_logs')
                     .select('agent_name, contact, timestamp')
+                    .gte('timestamp', logsFromStr)
                     .range(from, from + PAGE - 1);
                 if (error) { console.warn('messages_logs load error:', error); break; }
                 if (data?.length) all.push(...(data as unknown as MessagesLog[]));
@@ -359,7 +364,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
             setMessagesLogsReady(true);
         };
         load();
-    }, []);
+    }, [yearStart]);
 
     // ─── Matrículas por agente — calculado client-side (SurrealDB não tem RPC PostgreSQL)
     useEffect(() => {
