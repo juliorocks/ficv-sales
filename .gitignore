@@ -30,3 +30,6 @@ dist-ssr
 
 # App specific
 .gemini
+
+# Backups locais gerados por surreal/purge-sendpulse-leads.js (contêm PII)
+surreal/backup-keeper-leads-*.json
