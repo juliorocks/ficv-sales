@@ -153,19 +153,20 @@ serve(async (req) => {
             if (typeof cid === 'number') courseVal.set(cid, Number(c.default_value) || 0);
         }
 
-        const nowSp = new Date(Date.now() - 1000).toISOString().slice(0, 19).replace('T', ' ');
         const backfillCutoff = new Date(Date.now() - BACKFILL_DAYS * 864e5).toISOString().slice(0, 19).replace('T', ' ');
 
-        const summary: Record<string, number> = {};
-        let totalNew = 0;
+        const onlyDigits = (v: unknown) => String(v ?? '').replace(/\D/g, '');
+        const normEmail = (v: unknown) => String(v ?? '').toLowerCase().trim();
+
+        // ── 1. coleta candidatos de TODOS os forms ──────────────────────────────
+        type Cand = { form: any; sub: any; add: string };
+        const candidates: Cand[] = [];
+        const maxSeenByBook = new Map<number, string>();
 
         for (const form of forms) {
             const watermark: string = form.last_add_date || backfillCutoff;
             let maxSeen = watermark;
-
-            // páginas de 100, mais novo primeiro; para quando passa do watermark
-            const fresh: any[] = [];
-            for (let offset = 0; offset < 1000; offset += 100) {
+            for (let offset = 0; offset < 2000; offset += 100) {
                 let page: any[];
                 try {
                     page = await spGet(`/addressbooks/${form.book_id}/emails?limit=100&offset=${offset}`);
@@ -179,72 +180,85 @@ serve(async (req) => {
                     const add = String(sub.add_date || '');
                     if (add && add <= watermark) { stop = true; break; }
                     if (add && add > maxSeen) maxSeen = add;
-                    fresh.push(sub);
+                    candidates.push({ form, sub, add });
                 }
                 if (stop || page.length < 100) break;
             }
+            maxSeenByBook.set(Number(form.book_id), maxSeen);
+        }
 
-            if (!fresh.length) continue;
-
-            // dedup: 1 query com IN dos emails candidatos (usa idx_leads_email)
-            const emails = [...new Set(fresh.map((s) => String(s.email || '').toLowerCase().trim()).filter(Boolean))];
-            const existing = new Set<string>();
-            if (emails.length && dedupEnabled) {
-                try {
+        // ── 2. dedup: contra o banco (email + telefone) e entre os candidatos ────
+        const emails = [...new Set(candidates.map((c) => normEmail(c.sub.email)).filter(Boolean))];
+        const phones = [...new Set(candidates.map((c) => onlyDigits(c.sub.phone)).filter((p) => p.length >= 8))];
+        const seenEmail = new Set<string>();
+        const seenPhone = new Set<string>();
+        if (dedupEnabled) {
+            try {
+                for (let i = 0; i < emails.length; i += 300) {
                     const rows = await surrealSQL(token,
-                        `SELECT VALUE string::lowercase(email) FROM leads WHERE email IN [${emails.map(toS).join(', ')}];`
-                    ) as string[];
-                    rows.forEach((e) => existing.add(String(e)));
-                } catch (e) {
-                    console.warn(`dedup falhou (${form.form_name}), seguindo sem: ${(e as Error).message}`);
+                        `SELECT VALUE string::lowercase(email) FROM leads WHERE email IN [${emails.slice(i, i + 300).map(toS).join(', ')}];`) as string[];
+                    rows.forEach((e) => seenEmail.add(String(e)));
                 }
+                for (let i = 0; i < phones.length; i += 300) {
+                    const rows = await surrealSQL(token,
+                        `SELECT VALUE telefone FROM leads WHERE telefone IN [${phones.slice(i, i + 300).map(toS).join(', ')}];`) as string[];
+                    rows.forEach((p) => seenPhone.add(onlyDigits(p)));
+                }
+            } catch (e) {
+                console.warn(`dedup parcial: ${(e as Error).message}`);
             }
+        }
+
+        // ── 3. insere (mais antigo -> mais novo), pulando duplicados ────────────
+        candidates.sort((a, b) => a.add.localeCompare(b.add));
+        const summary: Record<string, number> = {};
+        let totalNew = 0;
+
+        for (const { form, sub } of candidates) {
+            const email = normEmail(sub.email);
+            const phone = onlyDigits(sub.phone);
+            if (email && seenEmail.has(email)) continue;
+            if (phone.length >= 8 && seenPhone.has(phone)) continue;
+            if (email) seenEmail.add(email);
+            if (phone.length >= 8) seenPhone.add(phone);
 
             const courseId = form.course_id != null ? Number(form.course_id) : null;
             const sourceId = form.source_id != null ? Number(form.source_id) : 1;
             const valor = courseId != null ? (courseVal.get(courseId) ?? 0) : 0;
+            const v = sub.variables ?? {};
+            const local = [v.autoCity, v.autoRegion].filter(Boolean).join(' / ');
+            const obs = `SendPulse — formulário: ${form.form_name}` + (local ? `\nLocal: ${local}` : '');
 
-            // inserir do mais antigo pro mais novo
-            let novos = 0;
-            for (const sub of fresh.reverse()) {
-                const email = String(sub.email || '').toLowerCase().trim();
-                if (email && existing.has(email)) continue;
-                if (email) existing.add(email);
+            const newId = await nextLeadId(token);
+            // id STRING (leads:`123`) — id inteiro cru vira record id numérico que
+            // o update direto tbl:⟨id⟩ não alcança.
+            await surrealSQL(token, `INSERT INTO leads [{
+                id: "${newId}",
+                nome_completo: ${toS(subName(sub))},
+                email: ${toS(email || null)},
+                telefone: ${toS(phone || '00000000000')},
+                stage_id: stages:\`1\`,
+                source_id: lead_sources:\`${sourceId}\`,
+                curso_interesse: ${courseId != null ? `courses:\`${courseId}\`` : 'NONE'},
+                valor_oportunidade: ${valor},
+                fonte_lead: ${toS(form.form_name)},
+                observacoes: ${toS(obs)},
+                temperatura: "frio",
+                contact_count: 1,
+                data_entrada: d${toS(spDateToISO(String(sub.add_date || '')))},
+                stage_entry_date: d${toS(new Date().toISOString())}
+            }] RETURN NONE;`);
+            summary[form.form_name] = (summary[form.form_name] ?? 0) + 1;
+            totalNew++;
+        }
 
-                const phone = sub.phone ? String(sub.phone).replace(/\D/g, '') : '';
-                const nome = subName(sub);
-                const v = sub.variables ?? {};
-                const local = [v.autoCity, v.autoRegion].filter(Boolean).join(' / ');
-                const obs = `SendPulse — formulário: ${form.form_name}` + (local ? `\nLocal: ${local}` : '');
-
-                const newId = await nextLeadId(token);
-                // ids são STRING neste banco (leads:`123`, stages:`1`…) — id inteiro
-                // cru vira record id numérico que o update direto tbl:⟨id⟩ não alcança.
-                await surrealSQL(token, `INSERT INTO leads [{
-                    id: "${newId}",
-                    nome_completo: ${toS(nome)},
-                    email: ${toS(email || null)},
-                    telefone: ${toS(phone || '00000000000')},
-                    stage_id: stages:\`1\`,
-                    source_id: lead_sources:\`${sourceId}\`,
-                    curso_interesse: ${courseId != null ? `courses:\`${courseId}\`` : 'NONE'},
-                    valor_oportunidade: ${valor},
-                    fonte_lead: ${toS(form.form_name)},
-                    observacoes: ${toS(obs)},
-                    temperatura: "frio",
-                    contact_count: 1,
-                    data_entrada: d${toS(spDateToISO(String(sub.add_date || '')))},
-                    stage_entry_date: d${toS(new Date().toISOString())}
-                }] RETURN NONE;`);
-                novos++;
-            }
-
-            if (maxSeen !== watermark || !form.last_add_date) {
+        // ── 4. watermark por form (mesmo com novos=0, p/ não re-varrer o backfill) ─
+        for (const form of forms) {
+            const maxSeen = maxSeenByBook.get(Number(form.book_id));
+            if (maxSeen && (maxSeen !== form.last_add_date || !form.last_add_date)) {
                 await surrealSQL(token,
-                    `UPDATE sendpulse_forms SET last_add_date = ${toS(maxSeen)}, updated_at = time::now() WHERE book_id = ${Number(form.book_id)};`
-                );
+                    `UPDATE sendpulse_forms SET last_add_date = ${toS(maxSeen)}, updated_at = time::now() WHERE book_id = ${Number(form.book_id)};`);
             }
-            if (novos) { summary[form.form_name] = novos; totalNew += novos; }
         }
 
         return new Response(JSON.stringify({
