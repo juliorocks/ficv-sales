@@ -3,24 +3,26 @@
  * purge-sendpulse-leads.js
  * ---------------------------------------------------------------------------
  * A Edge Function `sync-sendpulse-api` importava TODOS os contatos de TODAS as
- * addressbooks do SendPulse como `leads` (stage "Entrada"). Isso inflou a tabela
- * `leads` para ~820k linhas — o Kanban fazia `SELECT * ... ORDER BY data_entrada`
- * sem índice e travava por minutos (full scan + sort de 820k linhas, estourando
- * a memória da instância SurrealDB Cloud).
+ * addressbooks do SendPulse como `leads` (stage "Entrada"). A tabela `leads`
+ * chegou a ~820k linhas e o Kanban (`SELECT * ... ORDER BY data_entrada`, sem
+ * índice) travava por minutos — full scan + sort estourava a memória da
+ * instância SurrealDB Cloud.
  *
- * Este script remove esse lixo, preservando qualquer lead com sinal de
- * engajamento real:
- *   - assigned_to_id != NONE        (atribuído a um agente)
- *   - widechat_contact_id != NONE   (conversa de WhatsApp vinculada)
- *   - stage_id fora de "Entrada"    (movido no funil)
- *
- * Antes de deletar, salva um backup JSON dos "keepers".
- * Deleta em lotes pequenos com pausa entre eles para não estourar a memória.
- * É resumível: se cair no meio, rode de novo que ele continua.
+ * ESTRATÉGIA: como a instância está sem memória para varrer a tabela, NÃO dá
+ * para deletar em lotes (`SELECT ... LIMIT n` nem responde). Em vez disso:
+ *   1. lê os ~98 leads reais por acesso direto de chave (assigned_to_id,
+ *      widechat_contact_id, stage != Entrada) — não varre nada;
+ *   2. salva backup JSON;
+ *   3. REMOVE TABLE leads  (operação de metadados, memória mínima);
+ *   4. recria a tabela + campos + índices (inclui idx_leads_data_entrada novo);
+ *   5. reinsere os ~98 leads reais com os MESMOS ids (links do WideChat etc
+ *      continuam válidos).
+ * Tudo dentro de um BEGIN/COMMIT — se qualquer passo falhar, faz rollback e a
+ * tabela fica intacta.
  *
  * Uso:
- *   node surreal/purge-sendpulse-leads.js            # dry-run: conta + backup, NÃO deleta
- *   node surreal/purge-sendpulse-leads.js --execute  # deleta de fato
+ *   node surreal/purge-sendpulse-leads.js            # dry-run: conta + backup
+ *   node surreal/purge-sendpulse-leads.js --execute  # executa de fato
  */
 
 import { writeFileSync } from 'node:fs';
@@ -33,12 +35,8 @@ const SURREAL_USER = process.env.SURREAL_USER || 'ficv_admin';
 const SURREAL_PASS = process.env.SURREAL_PASS || 'Ficv@Surreal2026!';
 
 const EXECUTE     = process.argv.includes('--execute');
-const BATCH_SIZE  = Number(process.env.BATCH_SIZE  || 4000);   // ids selecionados por rodada
-const DELETE_CHUNK = Number(process.env.DELETE_CHUNK || 1000); // ids por statement DELETE
-const PAUSE_MS    = Number(process.env.PAUSE_MS    || 1200);   // pausa entre lotes
-const MAX_RETRIES = 6;
-
 const KEEPER_STAGES = ['2', '3', '5', '6', '7']; // tudo que não é "Entrada" (1)
+const MAX_RETRIES = 5;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
@@ -50,13 +48,14 @@ async function signin() {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'surreal-ns': SURREAL_NS },
     body: JSON.stringify({ ns: SURREAL_NS, user: SURREAL_USER, pass: SURREAL_PASS }),
+    signal: AbortSignal.timeout(30000),
   });
   if (!res.ok) throw new Error(`signin HTTP ${res.status}`);
   TOKEN = (await res.json()).token;
   if (!TOKEN) throw new Error('signin: sem token');
 }
 
-async function sql(query, { retries = MAX_RETRIES } = {}) {
+async function sql(query, { retries = MAX_RETRIES, timeoutMs = 90000 } = {}) {
   for (let attempt = 1; ; attempt++) {
     let res, text;
     try {
@@ -70,12 +69,13 @@ async function sql(query, { retries = MAX_RETRIES } = {}) {
           'surreal-db': SURREAL_DB,
         },
         body: query,
+        signal: AbortSignal.timeout(timeoutMs),
       });
       text = await res.text();
     } catch (e) {
       if (attempt > retries) throw e;
-      log(`  network error (tentativa ${attempt}): ${e.message} — retry`);
-      await sleep(2000 * attempt);
+      log(`  erro de rede (tentativa ${attempt}): ${e.message} — retry em ${3 * attempt}s`);
+      await sleep(3000 * attempt);
       continue;
     }
 
@@ -83,103 +83,158 @@ async function sql(query, { retries = MAX_RETRIES } = {}) {
 
     let json;
     try { json = JSON.parse(text); } catch { json = null; }
-    const entry = Array.isArray(json) ? json[json.length - 1] : json;
+    const entries = Array.isArray(json) ? json : [json];
+    const bad = entries.find((e) => e && e.status === 'ERR');
 
-    if (res.ok && entry && entry.status === 'OK') return entry.result;
+    if (res.ok && !bad) return entries.map((e) => e && e.result);
 
-    const msg = entry?.result || text || `HTTP ${res.status}`;
+    const msg = bad?.result || text || `HTTP ${res.status}`;
     const isMem = String(msg).includes('memory threshold');
-    if (attempt > retries) throw new Error(`sql falhou: ${msg}`);
-    log(`  ${isMem ? 'memory threshold' : 'erro'} (tentativa ${attempt}) — aguardando…`);
-    await sleep((isMem ? 5000 : 2000) * attempt);
+    if (attempt > retries) throw new Error(String(msg));
+    log(`  ${isMem ? 'memory threshold' : 'erro'} (tentativa ${attempt}) — aguardando ${(isMem ? 8 : 3) * attempt}s`);
+    await sleep((isMem ? 8000 : 3000) * attempt);
   }
 }
 
-// record-id string -> literal usável em query. SurrealDB devolve "leads:123" ou
-// "leads:`abc`"; ambos os formatos são válidos como literais.
-const asRecordLiteral = (id) => String(id);
+// ── serialização de valores para reinsert ────────────────────────────────────
+const REF_FIELDS = {
+  stage_id: 'stages', source_id: 'lead_sources', assigned_to_id: 'profiles',
+  motivo_perda_id: 'motivos_perda', curso_interesse: 'courses',
+};
+const DATE_FIELDS = new Set(['data_entrada', 'stage_entry_date', 'created_at', 'updated_at']);
+const NUM_FIELDS = new Set(['valor_oportunidade', 'contact_count']);
 
-async function collectKeeperIds() {
-  const set = new Set();
-  const add = (rows) => (rows || []).forEach((id) => set.add(String(id)));
-
-  add(await sql('SELECT VALUE id FROM leads WHERE assigned_to_id != NONE;'));
-  log(`  keepers após assigned_to_id: ${set.size}`);
-  add(await sql('SELECT VALUE id FROM leads WHERE widechat_contact_id != NONE;'));
-  log(`  keepers após widechat_contact_id: ${set.size}`);
-  // stage ids são strings ("1".."7") — literal com crase
-  const stageList = KEEPER_STAGES.map((s) => `stages:\`${s}\``).join(', ');
-  add(await sql(`SELECT VALUE id FROM leads WHERE stage_id IN [${stageList}];`));
-  log(`  keepers após stages ${KEEPER_STAGES.join(',')}: ${set.size}`);
-  return set;
+function valLit(v) {
+  if (v === null || v === undefined) return 'NONE';
+  if (typeof v === 'boolean' || typeof v === 'number') return String(v);
+  if (typeof v === 'string') return JSON.stringify(v);
+  if (Array.isArray(v)) return `[${v.map(valLit).join(', ')}]`;
+  if (typeof v === 'object') {
+    return `{ ${Object.entries(v).map(([k, x]) => `${k}: ${valLit(x)}`).join(', ')} }`;
+  }
+  return JSON.stringify(v);
 }
 
-async function backupKeepers(keeperIds) {
-  if (keeperIds.size === 0) { log('Nenhum keeper para backup.'); return; }
-  const list = [...keeperIds].map(asRecordLiteral).join(', ');
-  const rows = await sql(`SELECT * FROM leads WHERE id INSIDE [${list}];`);
-  const file = `surreal/backup-keeper-leads-${Date.now()}.json`;
-  writeFileSync(file, JSON.stringify(rows, null, 2));
-  log(`Backup de ${rows.length} keeper(s) salvo em ${file}`);
+function fieldLit(key, val) {
+  if (val === null || val === undefined) return 'NONE';
+  if (REF_FIELDS[key]) return String(val);           // já vem como "stages:`1`"
+  if (DATE_FIELDS.has(key)) return `d${JSON.stringify(String(val))}`;
+  if (NUM_FIELDS.has(key)) {
+    const n = Number(val);
+    return Number.isFinite(n) ? String(n) : '0';
+  }
+  return valLit(val);
 }
 
-async function count() {
-  const r = await sql('SELECT count() FROM leads GROUP ALL;');
-  return r?.[0]?.count ?? 0;
+function rowLit(row) {
+  const parts = [];
+  for (const [k, v] of Object.entries(row)) {
+    if (k === 'id') { parts.push(`id: ${v}`); continue; } // record id, sem aspas
+    parts.push(`${k}: ${fieldLit(k, v)}`);
+  }
+  return `{ ${parts.join(', ')} }`;
 }
+
+// ── schema (espelho de surreal/schema.surql, linhas 188-221) + índice novo ────
+const SCHEMA = `
+DEFINE TABLE leads SCHEMAFULL
+  PERMISSIONS
+    FOR select WHERE $auth.id != NONE,
+    FOR create WHERE $auth.id != NONE,
+    FOR update WHERE $auth.id != NONE,
+    FOR delete WHERE $auth.role = 'admin';
+DEFINE FIELD nome_completo          ON leads TYPE string;
+DEFINE FIELD email                  ON leads TYPE option<string>;
+DEFINE FIELD telefone               ON leads TYPE string;
+DEFINE FIELD curso_interesse        ON leads TYPE option<record<courses>>;
+DEFINE FIELD valor_oportunidade     ON leads TYPE decimal DEFAULT 0;
+DEFINE FIELD stage_id               ON leads TYPE record<stages>;
+DEFINE FIELD data_entrada           ON leads TYPE datetime DEFAULT time::now();
+DEFINE FIELD stage_entry_date       ON leads TYPE option<datetime>;
+DEFINE FIELD observacoes            ON leads TYPE option<string>;
+DEFINE FIELD attachments            ON leads TYPE option<array<string>>;
+DEFINE FIELD source_id              ON leads TYPE option<record<lead_sources>>;
+DEFINE FIELD temperatura            ON leads TYPE option<string> ASSERT $value = NONE OR $value IN ['frio', 'morno', 'quente'];
+DEFINE FIELD assigned_to_id         ON leads TYPE option<record<profiles>>;
+DEFINE FIELD motivo_perda_id        ON leads TYPE option<record<motivos_perda>>;
+DEFINE FIELD contact_count          ON leads TYPE int DEFAULT 0;
+DEFINE FIELD widechat_contact_id    ON leads TYPE option<string>;
+DEFINE FIELD widechat_session_id    ON leads TYPE option<string>;
+DEFINE FIELD widechat_attendance_id ON leads TYPE option<string>;
+DEFINE FIELD fonte_lead             ON leads TYPE option<string>;
+DEFINE FIELD partner_id             ON leads TYPE option<string>;
+DEFINE FIELD created_at             ON leads TYPE datetime DEFAULT time::now();
+DEFINE FIELD updated_at             ON leads TYPE datetime DEFAULT time::now();
+DEFINE INDEX idx_leads_telefone      ON leads FIELDS telefone;
+DEFINE INDEX idx_leads_stage         ON leads FIELDS stage_id;
+DEFINE INDEX idx_leads_assigned      ON leads FIELDS assigned_to_id;
+DEFINE INDEX idx_leads_widechat      ON leads FIELDS widechat_contact_id;
+DEFINE INDEX idx_leads_data_entrada  ON leads FIELDS data_entrada;
+`.trim();
 
 async function main() {
   await signin();
-  log(`Conectado. Modo: ${EXECUTE ? 'EXECUTE (deleta)' : 'DRY-RUN (não deleta)'}`);
+  log(`Conectado. Modo: ${EXECUTE ? 'EXECUTE (recria a tabela)' : 'DRY-RUN'}`);
 
-  const total0 = await count();
+  const total0 = (await sql('SELECT count() FROM leads GROUP ALL;'))[0]?.[0]?.count ?? 0;
   log(`Total de leads agora: ${total0.toLocaleString('pt-BR')}`);
 
+  // 1. ids de keepers (queries indexadas, leves) ----------------------------
   log('Coletando ids de keepers…');
-  const keeperIds = await collectKeeperIds();
-  await backupKeepers(keeperIds);
+  const ids = new Set();
+  (await sql('SELECT VALUE id FROM leads WHERE assigned_to_id != NONE;'))[0]?.forEach((i) => ids.add(String(i)));
+  log(`  após assigned_to_id: ${ids.size}`);
+  (await sql('SELECT VALUE id FROM leads WHERE widechat_contact_id != NONE;'))[0]?.forEach((i) => ids.add(String(i)));
+  log(`  após widechat_contact_id: ${ids.size}`);
+  const stageList = KEEPER_STAGES.map((s) => `stages:\`${s}\``).join(', ');
+  (await sql(`SELECT VALUE id FROM leads WHERE stage_id IN [${stageList}];`))[0]?.forEach((i) => ids.add(String(i)));
+  log(`  após stages ${KEEPER_STAGES.join(',')}: ${ids.size}`);
 
-  const toDelete = total0 - keeperIds.size;
-  log(`A remover: ~${toDelete.toLocaleString('pt-BR')}   | a preservar: ${keeperIds.size}`);
+  const keeperIds = [...ids];
+
+  // 2. linhas completas por acesso direto de chave (sem varredura) ----------
+  let keepers = [];
+  if (keeperIds.length) {
+    const rows = (await sql(`SELECT * FROM ${keeperIds.join(', ')};`, { timeoutMs: 120000 }))[0] || [];
+    keepers = rows.filter(Boolean);
+  }
+  const file = `surreal/backup-keeper-leads-${Date.now()}.json`;
+  writeFileSync(file, JSON.stringify(keepers, null, 2));
+  log(`Backup de ${keepers.length} keeper(s) salvo em ${file}`);
+
+  if (keepers.length !== keeperIds.length) {
+    throw new Error(`esperava ${keeperIds.length} keepers no backup, obtive ${keepers.length} — abortando`);
+  }
+
+  log(`A remover: ~${(total0 - keepers.length).toLocaleString('pt-BR')}   | a preservar: ${keepers.length}`);
 
   if (!EXECUTE) {
-    log('DRY-RUN concluído. Rode com --execute para deletar.');
+    log('DRY-RUN concluído. Confira o backup e rode com --execute.');
     return;
   }
-  if (toDelete <= 0) { log('Nada a remover.'); return; }
 
-  let removed = 0;
-  let emptyStreak = 0;
-  const t0 = Date.now();
+  // 3-5. recria a tabela e reinsere os keepers, tudo numa transação ---------
+  const insert = keepers.length
+    ? `INSERT INTO leads [\n${keepers.map(rowLit).join(',\n')}\n];`
+    : '';
+  const tx = `BEGIN;\nREMOVE TABLE leads;\n${SCHEMA};\n${insert}\nCOMMIT;`;
 
-  while (true) {
-    const ids = (await sql(`SELECT VALUE id FROM leads LIMIT ${BATCH_SIZE};`))
-      .map(String)
-      .filter((id) => !keeperIds.has(id));
+  log('Executando REMOVE TABLE + recriação + reinsert (transação)…');
+  await sql(tx, { timeoutMs: 180000, retries: 3 });
 
-    if (ids.length === 0) {
-      if (++emptyStreak >= 3) break;
-      await sleep(PAUSE_MS);
-      continue;
-    }
-    emptyStreak = 0;
-
-    for (let i = 0; i < ids.length; i += DELETE_CHUNK) {
-      const chunk = ids.slice(i, i + DELETE_CHUNK).map(asRecordLiteral).join(', ');
-      await sql(`DELETE ${chunk};`);
-    }
-
-    removed += ids.length;
-    const rate = removed / ((Date.now() - t0) / 1000);
-    const eta = rate > 0 ? Math.round((toDelete - removed) / rate) : 0;
-    log(`removidos ${removed.toLocaleString('pt-BR')}/${toDelete.toLocaleString('pt-BR')}  (~${rate.toFixed(0)}/s, ETA ${Math.floor(eta / 60)}m${eta % 60}s)`);
-
-    await sleep(PAUSE_MS);
+  const total1 = (await sql('SELECT count() FROM leads GROUP ALL;'))[0]?.[0]?.count ?? 0;
+  log(`Concluído. Total de leads: ${total1} (esperado: ${keepers.length})`);
+  if (total1 !== keepers.length) {
+    log('⚠️  contagem diferente do esperado — verifique a tabela e o backup.');
+  } else {
+    log('✓ Tabela leads limpa. O Kanban deve abrir instantâneo agora.');
   }
-
-  const total1 = await count();
-  log(`Concluído. Total de leads: ${total1.toLocaleString('pt-BR')} (keepers esperados: ${keeperIds.size})`);
-  log('Sugestão: DEFINE INDEX idx_leads_data_entrada ON leads FIELDS data_entrada; (tabela pequena agora)');
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+main().catch((e) => {
+  console.error('\nFALHOU:', e.message);
+  console.error('Se a mensagem acima for de rede/memória, a transação fez ROLLBACK e a');
+  console.error('tabela `leads` está intacta — pode rodar de novo.');
+  console.error('Se a tabela sumiu, reaplique surreal/schema.surql e restaure o backup JSON.');
+  process.exit(1);
+});
