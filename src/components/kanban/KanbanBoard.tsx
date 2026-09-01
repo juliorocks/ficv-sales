@@ -24,7 +24,7 @@ export function KanbanBoard({ searchTerm }: { searchTerm: string }): JSX.Element
             return data
         },
         enabled: !isAuthLoading && !!user,
-        refetchInterval: 30000, // Refetch every 30 seconds
+        staleTime: 5 * 60 * 1000,
     })
 
     const { data: leads, isLoading: isLoadingLeads, error: leadsError } = useQuery<Lead[]>({
@@ -40,7 +40,10 @@ export function KanbanBoard({ searchTerm }: { searchTerm: string }): JSX.Element
             return data || []
         },
         enabled: !isAuthLoading && !!user,
-        refetchInterval: 60000, // Reduced polling frequency to 1 minute
+        // No polling: the realtime subscription below already invalidates on any
+        // change. Polling re-ran a full-table sort every minute and starved the DB.
+        staleTime: 60 * 1000,
+        retry: 1,
     })
 
     const { data: users, isLoading: isLoadingUsers } = useQuery<User[]>({

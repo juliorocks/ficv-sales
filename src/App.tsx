@@ -55,7 +55,6 @@ import {
 import confetti from 'canvas-confetti';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
-import { showSuccess, showError } from '@/utils/toast';
 import { KanbanBoard } from './components/kanban/KanbanBoard';
 import { CreateLeadFab } from './components/kanban/CreateLeadFab';
 import { CourseManagement } from './components/admin/CourseManagement';
@@ -1681,30 +1680,14 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                 <h1 className="text-2xl font-bold text-[var(--text-main)]">Funil de Leads</h1>
                                 <p className="text-[var(--text-muted)] text-sm">Gerencie o progresso das suas oportunidades</p>
                             </div>
-                            <Button
-                                variant="outline"
-                                className="bg-[#5946D2]/10 text-[#5946D2] hover:bg-[#5946D2]/20 border-[#5946D2]/20 hidden md:flex"
-                                onClick={async () => {
-                                    showSuccess("Buscando novos leads no SendPulse. Isso pode levar alguns segundos...");
-                                    try {
-                                        const { data, error } = await supabase.functions.invoke('sync-sendpulse-api');
-                                        if (error) throw error;
-                                        if (data?.success) {
-                                            showSuccess(`Sincronização concluída! ${data.newLeadsInserted} novos contatos baixados.`);
-                                            // Force React Query to refetch leads
-                                            queryClient.invalidateQueries({ queryKey: ['leads'] });
-                                        } else {
-                                            showError("Não foi possível puxar os dados, tente novamente.");
-                                        }
-                                    } catch (err: any) {
-                                        console.error(err);
-                                        showError("Erro ao sincronizar. " + err.message);
-                                    }
-                                }}
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-                                Sincronização SendPulse
-                            </Button>
+                            {/*
+                                Botão "Sincronização SendPulse" desativado.
+                                A Edge Function sync-sendpulse-api importava TODOS os contatos de
+                                TODAS as addressbooks do SendPulse como leads (stage "Entrada"),
+                                inflando a tabela leads para ~820k linhas e travando o Kanban.
+                                Reativar só depois de reescrever o sync para importar apenas
+                                addressbooks específicas de captação (allowlist).
+                            */}
                         </div>
                         <KanbanBoard searchTerm={kanbanSearch} />
                         <CreateLeadFab />
