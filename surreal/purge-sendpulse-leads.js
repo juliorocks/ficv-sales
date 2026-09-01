@@ -107,9 +107,9 @@ async function collectKeeperIds() {
   log(`  keepers após assigned_to_id: ${set.size}`);
   add(await sql('SELECT VALUE id FROM leads WHERE widechat_contact_id != NONE;'));
   log(`  keepers após widechat_contact_id: ${set.size}`);
-  for (const s of KEEPER_STAGES) {
-    add(await sql(`SELECT VALUE id FROM leads WHERE stage_id = type::thing('stages', '${s}');`));
-  }
+  // stage ids são strings ("1".."7") — literal com crase
+  const stageList = KEEPER_STAGES.map((s) => `stages:\`${s}\``).join(', ');
+  add(await sql(`SELECT VALUE id FROM leads WHERE stage_id IN [${stageList}];`));
   log(`  keepers após stages ${KEEPER_STAGES.join(',')}: ${set.size}`);
   return set;
 }
