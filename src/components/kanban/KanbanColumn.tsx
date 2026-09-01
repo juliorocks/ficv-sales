@@ -53,6 +53,7 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
     const [localSearchTerm, setLocalSearchTerm] = useState('');
     const debouncedLocalSearchTerm = useDebounce(localSearchTerm, 300);
+    const [visibleCount, setVisibleCount] = useState(50);
     const [sortBy, setSortBy] = useState<SortOption>({
         key: 'stage_entry_date',
         label: 'Data no Estágio',
@@ -105,6 +106,13 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
 
         return sorted;
     }, [locallyFilteredLeads, sortBy]);
+
+    // Renderiza a coluna em blocos: cada LeadCard monta hooks pesados, então
+    // pintar centenas de uma vez trava o browser. "Mostrar mais" expande.
+    const visibleLeads = useMemo(
+        () => sortedLeads.slice(0, visibleCount),
+        [sortedLeads, visibleCount]
+    );
 
     const deleteStageMutation = useMutation({
         mutationFn: async (stageId: number) => {
@@ -188,7 +196,7 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
                                         {...provided.droppableProps}
                                         className={`min-h-[500px] transition-colors rounded-md p-1 ${snapshot.isDraggingOver ? 'bg-primary/10' : ''}`}
                                     >
-                                        {sortedLeads.map((lead, index) => (
+                                        {visibleLeads.map((lead, index) => (
                                             <Draggable key={lead.id} draggableId={String(lead.id)} index={index}>
                                                 {(provided, snapshot) => (
                                                     <div
@@ -203,6 +211,15 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
                                             </Draggable>
                                         ))}
                                         {provided.placeholder}
+                                        {sortedLeads.length > visibleCount && (
+                                            <Button
+                                                variant="outline"
+                                                className="w-full mt-2"
+                                                onClick={() => setVisibleCount((c) => c + 50)}
+                                            >
+                                                Mostrar mais ({sortedLeads.length - visibleCount})
+                                            </Button>
+                                        )}
                                     </div>
                                 )}
                             </Droppable>

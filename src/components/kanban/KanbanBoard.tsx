@@ -34,7 +34,9 @@ export function KanbanBoard({ searchTerm }: { searchTerm: string }): JSX.Element
                 .from('leads')
                 .select('*')
                 .order('data_entrada', { ascending: false })
-                .limit(2000); // Fetch the 2000 most recent leads to prevent slowdown
+                .limit(500); // Cap: a coluna renderiza cada card com um EditLeadDialog
+                              // completo; acima disso o browser trava. Ver paginação
+                              // por coluna em KanbanColumn (visibleCount).
 
             if (error) throw error
             return data || []

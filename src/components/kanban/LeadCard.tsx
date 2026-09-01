@@ -112,12 +112,14 @@ export function LeadCard({ lead, users, leadSources, stages, courses }: LeadCard
                     </div>
                 </CardFooter>
             </Card>
-            <EditLeadDialog
-                lead={lead}
-                stages={stages}
-                isOpen={isEditDialogOpen}
-                onOpenChange={setIsEditDialogOpen}
-            />
+            {isEditDialogOpen && (
+                <EditLeadDialog
+                    lead={lead}
+                    stages={stages}
+                    isOpen={isEditDialogOpen}
+                    onOpenChange={setIsEditDialogOpen}
+                />
+            )}
         </>
     )
 }
