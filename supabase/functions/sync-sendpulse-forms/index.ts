@@ -96,8 +96,11 @@ function stripId(v: unknown): number | string | null {
 }
 
 async function nextLeadId(token: string): Promise<number> {
-    const rows = await surrealSQL(token, 'UPDATE ONLY seq:leads SET val += 1 RETURN val;');
-    return (rows[0] as any)?.val ?? 0;
+    // sem ONLY -> resultado é array [{val}]; com ONLY o parser devolve [] e o id sai 0
+    const rows = await surrealSQL(token, 'UPDATE seq:leads SET val += 1 RETURN val;');
+    const val = (rows[0] as any)?.val;
+    if (!val) throw new Error('seq:leads não retornou val');
+    return val;
 }
 
 // "2026-08-29 18:30:14" (tz da conta) -> ISO
@@ -228,8 +231,8 @@ serve(async (req) => {
                     observacoes: ${toS(obs)},
                     temperatura: "frio",
                     contact_count: 1,
-                    data_entrada: ${toS(spDateToISO(String(sub.add_date || '')))},
-                    stage_entry_date: ${toS(new Date().toISOString())}
+                    data_entrada: d${toS(spDateToISO(String(sub.add_date || '')))},
+                    stage_entry_date: d${toS(new Date().toISOString())}
                 }] RETURN NONE;`);
                 novos++;
             }
