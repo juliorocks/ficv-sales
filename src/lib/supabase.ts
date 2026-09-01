@@ -206,6 +206,11 @@ const DUAL_WRITE_TABLES = new Set([
     'messages_logs',
 ]);
 
+// Filtro só por id -> alveja o registro direto (`tbl:⟨id⟩`) em vez de
+// `UPDATE/DELETE tbl WHERE id = x`, que faz full scan no SurrealDB.
+const _isIdOnly = (filters: Record<string, unknown>) =>
+    !!filters && Object.keys(filters).length === 1 && filters['id'] != null;
+
 async function surrealWrite(
     table: string,
     op: 'insert' | 'upsert' | 'update' | 'delete',
@@ -225,7 +230,9 @@ async function surrealWrite(
 
         if (op === 'delete') {
             if (!filters || !Object.keys(filters).length) return;
-            query = `DELETE ${table} WHERE ${buildWhere(filters)}`;
+            query = _isIdOnly(filters)
+                ? `DELETE ${table}:⟨${filters['id']}⟩`
+                : `DELETE ${table} WHERE ${buildWhere(filters)}`;
         } else if (op === 'update') {
             if (!filters || !Object.keys(filters).length || !data) return;
             const refFields = REFERENCE_FIELDS[table] ?? {};
@@ -236,7 +243,9 @@ async function surrealWrite(
                     if (ref && v != null) return `${k} = ${ref}:⟨${v}⟩`;
                     return `${k} = ${toSurrealValue(v)}`;
                 }).join(', ');
-            query = `UPDATE ${table} SET ${sets} WHERE ${buildWhere(filters)}`;
+            query = _isIdOnly(filters)
+                ? `UPDATE ${table}:⟨${filters['id']}⟩ SET ${sets}`
+                : `UPDATE ${table} SET ${sets} WHERE ${buildWhere(filters)}`;
         } else {
             // insert / upsert
             const rows = Array.isArray(data) ? data : [data];
@@ -363,8 +372,11 @@ async function surrealMutate(
         const seeded = await Promise.all(rows.map(async (row) => {
             const r = { ...row };
             if (r['id'] === undefined || r['id'] === null) {
+                // id como STRING p/ o registro sair como leads:`123` — assim o
+                // update direto tbl:⟨id⟩ do _isIdOnly casa. id inteiro cru vira
+                // um record id numérico que ⟨id⟩ não alcança.
                 r['id'] = table === 'leads'
-                    ? await _nextLeadId()
+                    ? String(await _nextLeadId())
                     : crypto.randomUUID();
             }
             return r;
@@ -384,10 +396,16 @@ async function surrealMutate(
                 if (ref && v != null) return `${k} = ${ref}:⟨${v}⟩`;
                 return `${k} = ${toSurrealValue(v)}`;
             }).join(', ');
-        query = `UPDATE ${table} SET ${sets} WHERE ${_buildWhere(table, filters)} RETURN *;`;
+        // Filtro só por id -> alveja o registro diretamente. `UPDATE tbl SET ... WHERE id = x`
+        // faz full scan no SurrealDB (trava em tabelas grandes); `UPDATE tbl:⟨x⟩` é O(1).
+        query = _isIdOnly(filters)
+            ? `UPDATE ${table}:⟨${filters['id']}⟩ SET ${sets} RETURN *;`
+            : `UPDATE ${table} SET ${sets} WHERE ${_buildWhere(table, filters)} RETURN *;`;
 
     } else { // delete
-        query = `DELETE ${table} WHERE ${_buildWhere(table, filters)} RETURN BEFORE;`;
+        query = _isIdOnly(filters)
+            ? `DELETE ${table}:⟨${filters['id']}⟩ RETURN BEFORE;`
+            : `DELETE ${table} WHERE ${_buildWhere(table, filters)} RETURN BEFORE;`;
     }
 
     const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {

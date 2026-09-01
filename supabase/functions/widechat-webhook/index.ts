@@ -66,8 +66,11 @@ function ref(table: string, id: unknown): string {
 }
 
 async function nextLeadId(token: string): Promise<number> {
-    const rows = await surrealSQL(token, 'UPDATE ONLY seq:leads SET val += 1 RETURN val;');
-    return (rows[0] as any)?.val ?? 0;
+    // sem ONLY -> resultado é array [{val}]; com ONLY o parser devolve [] e o id sai 0
+    const rows = await surrealSQL(token, 'UPDATE seq:leads SET val += 1 RETURN val;');
+    const val = (rows[0] as any)?.val;
+    if (!val) throw new Error('seq:leads não retornou val');
+    return val;
 }
 
 // ─── Message filter ───────────────────────────────────────────────────────────
@@ -241,7 +244,7 @@ serve(async (req) => {
             const stageRows = await surrealSQL(token, `SELECT id FROM stages ORDER BY order ASC LIMIT 1;`);
             const firstStageId = stageRows[0] ? parseId((stageRows[0] as any).id) : 1;
             const newId = await nextLeadId(token);
-            const inserted = await surrealSQL(token, `INSERT INTO leads [{ id: ${newId},
+            const inserted = await surrealSQL(token, `INSERT INTO leads [{ id: "${newId}",
                 nome_completo: ${toS(senderName.trim() || `Lead WhatsApp - ${messagePhone}`)},
                 telefone: ${toS(messagePhone || "00000000000")},
                 stage_id: ${ref('stages', firstStageId)},
@@ -250,7 +253,7 @@ serve(async (req) => {
                 widechat_contact_id: ${toS(data?.contact_id || null)},
                 widechat_session_id: ${toS(sessionId || null)},
                 temperatura: "frio",
-                data_entrada: ${toS(new Date().toISOString())},
+                data_entrada: d${toS(new Date().toISOString())},
                 valor_oportunidade: 0
             }] RETURN id;`);
             if (inserted[0]) leadId = parseId((inserted[0] as any).id);

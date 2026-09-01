@@ -18,7 +18,8 @@ const SENDPULSE_API_KEY = Deno.env.get('SENDPULSE_API_KEY') ?? '';
 const SP_CLIENT_ID     = Deno.env.get('SENDPULSE_CLIENT_ID') ?? '';
 const SP_CLIENT_SECRET = Deno.env.get('SENDPULSE_CLIENT_SECRET') ?? '';
 const BACKFILL_DAYS    = Number(Deno.env.get('SENDPULSE_BACKFILL_DAYS') ?? '14');
-const SP_TZ_OFFSET     = Deno.env.get('SENDPULSE_TZ_OFFSET') ?? '-03:00'; // tz da conta SendPulse
+// A API do SendPulse devolve add_date em UTC (o time_zone da conta é só p/ o painel).
+const SP_TZ_OFFSET     = Deno.env.get('SENDPULSE_TZ_OFFSET') ?? 'Z';
 
 const SURREAL_ENDPOINT = Deno.env.get('SURREAL_ENDPOINT')
     ?? 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
@@ -217,9 +218,10 @@ serve(async (req) => {
                 const obs = `SendPulse — formulário: ${form.form_name}` + (local ? `\nLocal: ${local}` : '');
 
                 const newId = await nextLeadId(token);
-                // ids de referência neste banco são STRING (stages:`1`, courses:`14`…)
+                // ids são STRING neste banco (leads:`123`, stages:`1`…) — id inteiro
+                // cru vira record id numérico que o update direto tbl:⟨id⟩ não alcança.
                 await surrealSQL(token, `INSERT INTO leads [{
-                    id: ${newId},
+                    id: "${newId}",
                     nome_completo: ${toS(nome)},
                     email: ${toS(email || null)},
                     telefone: ${toS(phone || '00000000000')},

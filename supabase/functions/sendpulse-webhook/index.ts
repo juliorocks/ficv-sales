@@ -66,8 +66,11 @@ function ref(table: string, id: unknown): string {
 }
 
 async function nextLeadId(token: string): Promise<number> {
-    const rows = await surrealSQL(token, 'UPDATE ONLY seq:leads SET val += 1 RETURN val;');
-    return (rows[0] as any)?.val ?? 0;
+    // sem ONLY -> resultado é array [{val}]; com ONLY o parser devolve [] e o id sai 0
+    const rows = await surrealSQL(token, 'UPDATE seq:leads SET val += 1 RETURN val;');
+    const val = (rows[0] as any)?.val;
+    if (!val) throw new Error('seq:leads não retornou val');
+    return val;
 }
 
 serve(async (req) => {
@@ -137,7 +140,7 @@ serve(async (req) => {
 
         const newId = await nextLeadId(token);
         const inserted = await surrealSQL(token, `INSERT INTO leads [{
-            id: ${newId},
+            id: "${newId}",
             nome_completo: ${toS(nameStr)},
             email: ${toS(emailStr)},
             telefone: ${toS(phoneStr || "00000000000")},
@@ -146,7 +149,7 @@ serve(async (req) => {
             fonte_lead: "Site",
             observacoes: ${toS(observations)},
             valor_oportunidade: ${courseDefaultVal},
-            data_entrada: ${toS(new Date().toISOString())},
+            data_entrada: d${toS(new Date().toISOString())},
             curso_interesse: ${courseId ? ref('courses', courseId) : 'NONE'},
             temperatura: "frio"
         }] RETURN *;`);

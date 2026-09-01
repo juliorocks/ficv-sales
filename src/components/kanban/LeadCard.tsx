@@ -1,7 +1,7 @@
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Lead, User, LeadSource, Stage, Course } from "@/types/database"
 import { Button } from "@/components/ui/button"
-import { Clock, Mail, Pencil, Phone, RefreshCw } from "lucide-react"
+import { Clock, HandHelping, Mail, Pencil, Phone, RefreshCw } from "lucide-react"
 import { EditLeadDialog } from "./EditLeadDialog"
 import { useTimeInStage } from "@/hooks/use-time-in-stage"
 import { useState } from "react"
@@ -10,6 +10,10 @@ import { AssignedUser } from "./AssignedUser"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { IconPreview } from "../admin/IconPreview"
 import { Badge } from "@/components/ui/badge"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { supabase } from "@/lib/supabase"
+import { useAuth } from "@/hooks/use-auth"
+import { showError, showSuccess } from "@/utils/toast"
 
 interface LeadCardProps {
     lead: Lead
@@ -22,9 +26,27 @@ interface LeadCardProps {
 export function LeadCard({ lead, users, leadSources, stages, courses }: LeadCardProps) {
     const timeInStage = useTimeInStage(lead.stage_entry_date);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+    const { user } = useAuth();
+    const queryClient = useQueryClient();
 
     const source = lead.source_id ? leadSources.find(s => s.id === lead.source_id) : null;
     const course = lead.curso_interesse ? courses.find(c => c.id === lead.curso_interesse) : null;
+
+    const atenderMutation = useMutation({
+        mutationFn: async () => {
+            if (!user?.id) throw new Error("Sessão não identificada. Recarregue a página.");
+            const { error } = await supabase
+                .from('leads')
+                .update({ assigned_to_id: user.id, updated_at: new Date().toISOString() })
+                .eq('id', lead.id);
+            if (error) throw error;
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['leads'] });
+            showSuccess(`Lead atribuído a você.`);
+        },
+        onError: (e: any) => showError(`Não foi possível atender: ${e.message}`),
+    });
 
     return (
         <>
@@ -111,6 +133,19 @@ export function LeadCard({ lead, users, leadSources, stages, courses }: LeadCard
                         {new Date(lead.data_entrada).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} {new Date(lead.data_entrada).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                     </div>
                 </CardFooter>
+                {!lead.assigned_to_id && user && (
+                    <div className="px-4 pb-4">
+                        <Button
+                            size="sm"
+                            className="w-full bg-primary/90 hover:bg-primary"
+                            disabled={atenderMutation.isPending}
+                            onClick={() => atenderMutation.mutate()}
+                        >
+                            <HandHelping className="h-4 w-4 mr-2" />
+                            {atenderMutation.isPending ? "Atribuindo..." : "Atender"}
+                        </Button>
+                    </div>
+                )}
             </Card>
             {isEditDialogOpen && (
                 <EditLeadDialog

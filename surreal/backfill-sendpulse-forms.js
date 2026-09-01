@@ -23,7 +23,7 @@ try {
 const EXECUTE = process.argv.includes('--execute');
 const BACKFILL_DAYS = Number(process.env.BACKFILL_DAYS || 35);
 const MAX_TOTAL = Number(process.env.MAX_TOTAL || 3000);
-const TZ = process.env.SENDPULSE_TZ_OFFSET || '-03:00';
+const TZ = process.env.SENDPULSE_TZ_OFFSET || 'Z'; // add_date do SendPulse vem em UTC
 
 const API_KEY = process.env.SENDPULSE_API_KEY || '';
 if (!API_KEY) { console.error('sem SENDPULSE_API_KEY'); process.exit(1); }
@@ -164,7 +164,7 @@ async function main() {
     if (!nid) throw new Error('seq:leads não retornou val');
 
     await sql(`INSERT INTO leads [{
-      id: ${nid}, nome_completo: ${toS(subName(sub))}, email: ${toS(email || null)},
+      id: "${nid}", nome_completo: ${toS(subName(sub))}, email: ${toS(email || null)},
       telefone: ${toS(phone || '00000000000')}, stage_id: stages:\`1\`,
       source_id: lead_sources:\`${sid}\`,
       curso_interesse: ${cid != null ? `courses:\`${cid}\`` : 'NONE'},
