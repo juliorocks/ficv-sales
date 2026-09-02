@@ -3,10 +3,10 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap');
 
 :root {
-  --bg-main: #f0f2f5;
+  --bg-main: #f4f5f7;
   --bg-sidebar: #ffffff;
   --bg-card: #ffffff;
-  --bg-card-hover: #f8fafc;
+  --bg-card-hover: #f7f8fa;
   --primary: #5551FF;
   --text-main: #0F172A;
   --text-muted: #64748B;
@@ -14,26 +14,31 @@
   --success-text: #166534;
   --warning: #B45309;
   --danger: #DC2626;
-  --border: #E2E8F0;
-  --sidebar-shadow: 0 4px 12px rgba(85, 81, 255, 0.1);
-  --header-bg: rgba(255, 255, 255, 0.8);
-  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  /* borda quase invisível — só para casos que exigem separação nítida */
+  --border: #ECEEF1;
+  --sidebar-shadow: 0 1px 3px rgba(16, 24, 40, 0.08);
+  --header-bg: rgba(244, 245, 247, 0.85);
+  /* elevação suave em vez de linha de borda */
+  --card-shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.10);
+  --card-radius: 14px;
 }
 
 .dark {
-  --bg-main: #05070A;
-  --bg-sidebar: #05070A;
-  --bg-card: #0D1117;
-  --bg-card-hover: #161B22;
+  --bg-main: #0A0D12;
+  --bg-sidebar: #0A0D12;
+  --bg-card: #12161C;
+  --bg-card-hover: #1A1F27;
   --text-main: #FFFFFF;
   --text-muted: #8B949E;
   --success-text: #3FB950;
   --warning: #D29922;
   --danger: #F85149;
-  --border: #30363D;
-  --sidebar-shadow: 0 0 25px rgba(85, 81, 255, 0.4);
-  --header-bg: rgba(5, 7, 10, 0.8);
-  --card-shadow: none;
+  --border: #23272F;
+  --sidebar-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --header-bg: rgba(10, 13, 18, 0.85);
+  /* no escuro a separação vem do contraste de fundo + um anel sutil */
+  --card-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --card-radius: 14px;
 }
 
 @theme {
@@ -80,8 +85,7 @@
 @layer components {
   .glass-card {
     background-color: var(--bg-card);
-    border: 1px solid var(--border);
-    @apply rounded-[24px] transition-all duration-300;
+    @apply rounded-2xl transition-all duration-300;
     box-shadow: var(--card-shadow);
   }
 
@@ -89,7 +93,6 @@
     @apply px-3 py-1 rounded-full text-[10px] font-bold flex items-center gap-1;
     background-color: var(--bg-card-hover);
     color: var(--success-text);
-    border: 1px solid var(--border);
   }
 
   .sidebar-item {

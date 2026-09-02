@@ -141,9 +141,9 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
                     <div
                         {...provided.draggableProps}
                         ref={provided.innerRef}
-                        className="flex-1 min-w-[300px] rounded-lg bg-muted/50"
+                        className="flex-1 min-w-[300px]"
                     >
-                        <div className="p-4">
+                        <div className="p-1">
                             <div {...provided.dragHandleProps} className={`flex justify-between items-start mb-4 ${user?.role === 'admin' ? 'cursor-grab' : ''}`}>
                                 <div className="space-y-1">
                                     <h3 className="font-bold text-lg" style={{ color: stage.title_color || undefined }}>
