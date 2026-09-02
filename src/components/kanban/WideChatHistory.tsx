@@ -5,10 +5,12 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { format } from "date-fns"
 import { ptBR } from "date-fns/locale"
-import { AlertCircle, MessageSquare, Send, Loader2 } from "lucide-react"
+import { AlertCircle, MessageSquare, Send, Loader2, FileText } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
+import { showError, showSuccess } from "@/utils/toast"
 
 interface WideChatHistoryProps {
     widechatContactId: string
@@ -115,20 +117,51 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
         scrollRef.current?.scrollIntoView({ behavior: 'smooth' })
     }, [messages])
 
+    // Atendimento ativo do lead no WideChat (dá channel_id, attendance_id e a
+    // data da última mensagem do cliente -> janela de 24h)
+    const { data: att } = useQuery<{ match: any; agent_id?: string } | null>({
+        queryKey: ['widechat-attendance', String(leadId), phoneDigits],
+        queryFn: async () => {
+            if (phoneDigits.length < 8) return null
+            const { data } = await supabase.functions.invoke('widechat-api', {
+                body: { action: 'attendances', telefone: phoneDigits },
+            })
+            return data?.error ? null : data
+        },
+        enabled: phoneDigits.length >= 8,
+        staleTime: 60_000,
+    })
+    const attendance = att?.match ?? null
+    const within24h = attendance?.lastInteraction
+        ? (Date.now() - new Date(attendance.lastInteraction).getTime()) < 24 * 3600 * 1000
+        : false
+    const canSendText = !!attendance?.channel_id && within24h
+
     const sendMessageMutation = useMutation({
-        mutationFn: async (text: string) => {
-            if (!contactId) throw new Error("Não é possível enviar mensagens: identificador do contato ausente.")
+        mutationFn: async (arg: string | { hsm_template_name: string; hsm_placeholders: string[]; preview: string }) => {
+            if (!attendance?.channel_id) throw new Error("Sem atendimento ativo no WideChat para este cliente.")
+            const isHsm = typeof arg !== 'string'
             const { data, error } = await supabase.functions.invoke('widechat-api', {
-                body: { action: 'send_message', contact_id: contactId, message: text, lead_id: leadId },
+                body: {
+                    action: 'send_message',
+                    platform_id: phoneDigits,
+                    channel_id: attendance.channel_id,
+                    attendance_id: attendance._id,
+                    contact_name: attendance.contact_name,
+                    ...(isHsm
+                        ? { is_hsm: true, hsm_template_name: arg.hsm_template_name, hsm_placeholders: arg.hsm_placeholders, message: arg.preview }
+                        : { message: arg }),
+                },
             })
             if (error) throw error
-            if (data?.error) throw new Error(data.error)
+            if (data?.error) throw new Error(typeof data.error === 'string' ? data.error : JSON.stringify(data.error))
             return data
         },
-        onMutate: async (text) => {
+        onMutate: async (arg) => {
             await queryClient.cancelQueries({ queryKey: msgKey })
             const previous = queryClient.getQueryData(msgKey)
             const tempId = crypto.randomUUID()
+            const text = typeof arg === 'string' ? arg : arg.preview
             queryClient.setQueryData(msgKey, (old: any) => [...(old || []), {
                 id: tempId, lead_id: leadId, message_id: tempId, message: text,
                 created_at: new Date().toISOString(), origin: 'agent', type: 'text',
@@ -136,17 +169,42 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
             }])
             return { previous }
         },
-        onError: (_e, _v, ctx: any) => {
+        onError: (e: any, _v, ctx: any) => {
             if (ctx?.previous) queryClient.setQueryData(msgKey, ctx.previous)
+            showError(`Erro ao enviar: ${e.message}`)
         },
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: msgKey }),
+        onSuccess: () => { showSuccess('Mensagem enviada'); queryClient.invalidateQueries({ queryKey: msgKey }) },
     })
 
     const handleSend = (e: React.FormEvent) => {
         e.preventDefault()
-        if (!newMessage.trim() || sendMessageMutation.isPending) return
+        if (!newMessage.trim() || sendMessageMutation.isPending || !canSendText) return
         sendMessageMutation.mutate(newMessage)
         setNewMessage("")
+    }
+
+    // Templates HSM — usados quando a janela de 24h fechou
+    const { data: hsm } = useQuery<any[]>({
+        queryKey: ['widechat-hsm', attendance?.channel_id],
+        queryFn: async () => {
+            const { data } = await supabase.functions.invoke('widechat-api', {
+                body: { action: 'list_hsm', channel_id: attendance?.channel_id, attendance_id: attendance?._id },
+            })
+            return data?.error ? [] : (data?.templates ?? [])
+        },
+        enabled: !!attendance?.channel_id && !within24h,
+        staleTime: 5 * 60_000,
+    })
+
+    const sendTemplate = (t: any) => {
+        const tags: any[] = t.tags ?? []
+        const placeholders: string[] = tags.map((tag) => {
+            const label = tag.placeholder ?? '{{?}}'
+            return window.prompt(`Valor para ${label} (${tag.tags_value ?? ''})`) ?? ''
+        })
+        const preview = (Array.isArray(t.message) ? t.message.join('\n') : String(t.message ?? ''))
+            .replace(/\{\{(\d+)\}\}/g, (_m: string, i: string) => placeholders[Number(i) - 1] ?? `{{${i}}}`)
+        sendMessageMutation.mutate({ hsm_template_name: t.name, hsm_placeholders: placeholders, preview })
     }
 
     if (isLoading) {
@@ -170,11 +228,19 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
 
     return (
         <div className="flex flex-col rounded-xl overflow-hidden bg-[var(--bg-card)] shadow-[var(--card-shadow)]">
-            {!contactId && (
+            {!attendance && (
                 <Alert className="rounded-none border-x-0 border-t-0 bg-blue-50/50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800">
                     <AlertCircle className="h-4 w-4 text-blue-600" />
                     <AlertDescription className="text-xs text-blue-700 dark:text-blue-400">
-                        Histórico vinculado pelo telefone. O envio de mensagens é habilitado quando o cliente inicia uma conversa no WhatsApp.
+                        Sem atendimento ativo no WideChat. O envio é habilitado quando o cliente tem uma conversa aberta.
+                    </AlertDescription>
+                </Alert>
+            )}
+            {attendance && !within24h && (
+                <Alert className="rounded-none border-x-0 border-t-0 bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800">
+                    <AlertCircle className="h-4 w-4 text-amber-600" />
+                    <AlertDescription className="text-xs text-amber-700 dark:text-amber-400">
+                        Passou de 24h da última mensagem do cliente. Só é possível enviar um <strong>template aprovado</strong>.
                     </AlertDescription>
                 </Alert>
             )}
@@ -217,29 +283,49 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
                 )}
             </ScrollArea>
 
-            <div className={`p-3 border-t border-slate-200 ${!contactId ? 'bg-slate-100 opacity-70' : 'bg-slate-50'}`}>
-                <form onSubmit={handleSend} className="flex gap-2 items-center">
-                    <Input
-                        value={newMessage}
-                        onChange={(e) => setNewMessage(e.target.value)}
-                        placeholder={!contactId ? "Envio desabilitado (cliente não iniciou conversa)..." : "Digite sua mensagem via WhatsApp..."}
-                        className="flex-1 bg-white text-slate-800 border-slate-200 placeholder:text-slate-400 focus-visible:ring-primary shadow-sm rounded-full px-4"
-                        disabled={sendMessageMutation.isPending || !contactId}
-                    />
-                    <Button type="submit" size="icon"
-                        className="rounded-full shadow-md bg-primary hover:bg-primary/90 text-white transition-all w-10 h-10 shrink-0"
-                        disabled={!newMessage.trim() || sendMessageMutation.isPending || !contactId}>
-                        {sendMessageMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                    </Button>
-                </form>
+            <div className="p-3 border-t border-slate-200 bg-slate-50">
+                {canSendText ? (
+                    <form onSubmit={handleSend} className="flex gap-2 items-center">
+                        <Input
+                            value={newMessage}
+                            onChange={(e) => setNewMessage(e.target.value)}
+                            placeholder="Digite sua mensagem via WhatsApp..."
+                            className="flex-1 bg-white text-slate-800 border-slate-200 placeholder:text-slate-400 focus-visible:ring-primary shadow-sm rounded-full px-4"
+                            disabled={sendMessageMutation.isPending}
+                        />
+                        <Button type="submit" size="icon"
+                            className="rounded-full shadow-md bg-primary hover:bg-primary/90 text-white w-10 h-10 shrink-0"
+                            disabled={!newMessage.trim() || sendMessageMutation.isPending}>
+                            {sendMessageMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                        </Button>
+                    </form>
+                ) : attendance && !within24h ? (
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button variant="outline" className="w-full gap-2 text-slate-700" disabled={sendMessageMutation.isPending}>
+                                {sendMessageMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                                Enviar template
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="w-72 max-h-80 overflow-y-auto">
+                            <DropdownMenuLabel>Templates aprovados</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            {(!hsm || hsm.length === 0) && <div className="px-2 py-3 text-xs text-muted-foreground">Nenhum template disponível.</div>}
+                            {hsm?.map((t: any) => (
+                                <DropdownMenuItem key={t.name} onClick={() => sendTemplate(t)} className="flex flex-col items-start gap-0.5">
+                                    <span className="font-medium">{t.name}</span>
+                                    <span className="text-[11px] text-muted-foreground line-clamp-2">
+                                        {Array.isArray(t.message) ? t.message.join(' ') : t.message}
+                                    </span>
+                                </DropdownMenuItem>
+                            ))}
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                ) : (
+                    <Input disabled placeholder="Envio desabilitado (sem atendimento ativo)..."
+                        className="flex-1 bg-white text-slate-400 border-slate-200 rounded-full px-4 opacity-70" />
+                )}
             </div>
-
-            {sendMessageMutation.isError && (
-                <Alert variant="destructive" className="rounded-none border-x-0 border-b-0">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertDescription className="text-xs font-medium">Erro ao enviar: {sendMessageMutation.error?.message}</AlertDescription>
-                </Alert>
-            )}
         </div>
     )
 }
