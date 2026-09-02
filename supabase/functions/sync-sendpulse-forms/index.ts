@@ -158,12 +158,12 @@ serve(async (req) => {
         const onlyDigits = (v: unknown) => String(v ?? '').replace(/\D/g, '');
         const normEmail = (v: unknown) => String(v ?? '').toLowerCase().trim();
 
-        // ── 1. coleta candidatos de TODOS os forms ──────────────────────────────
+        // ── 1. coleta candidatos de TODOS os forms (books em paralelo) ──────────
         type Cand = { form: any; sub: any; add: string };
         const candidates: Cand[] = [];
         const maxSeenByBook = new Map<number, string>();
 
-        for (const form of forms) {
+        await Promise.all(forms.map(async (form) => {
             const watermark: string = form.last_add_date || backfillCutoff;
             let maxSeen = watermark;
             for (let offset = 0; offset < 2000; offset += 100) {
@@ -185,7 +185,7 @@ serve(async (req) => {
                 if (stop || page.length < 100) break;
             }
             maxSeenByBook.set(Number(form.book_id), maxSeen);
-        }
+        }));
 
         // ── 2. dedup contra o banco. Match REAL (atribuído / widechat / de um
         //    formulário) -> pula. Match só com LIXO (dump antigo do sync-sendpulse-api,
