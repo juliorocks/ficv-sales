@@ -677,6 +677,7 @@ DEFINE FIELD payload    ON widechat_raw_messages TYPE object;
 DEFINE FIELD created_at ON widechat_raw_messages TYPE datetime DEFAULT time::now();
 
 DEFINE INDEX idx_widechat_raw_created ON widechat_raw_messages FIELDS created_at;
+DEFINE INDEX idx_widechat_raw_platform ON widechat_raw_messages FIELDS platform_id;
 
 -- ──────────────────────────────────────────────────────────────
 DEFINE TABLE widechat_atendimentos SCHEMAFULL
