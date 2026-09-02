@@ -33,21 +33,26 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
     const [newMessage, setNewMessage] = useState("")
 
     // O mesmo cliente pode ter vários registros de lead (formulário + WhatsApp).
-    // Junta os ids que casam pelo telefone para não perder o histórico.
-    const phoneSuffix = (telefone || '').replace(/\D/g, '').slice(-9)
-    const msgKey = ['widechat-messages', String(leadId), phoneSuffix]
+    // Casa pelo telefone EXATO (telefone e platform_id são indexados e guardam o
+    // mesmo formato, ex: "258824984519").
+    const phoneRaw = (telefone || '').trim()
+    const phoneDigits = phoneRaw.replace(/\D/g, '')
+    const phoneVariants = [...new Set([phoneRaw, phoneDigits].filter((p) => p.length >= 8))]
+    const msgKey = ['widechat-messages', String(leadId), phoneDigits]
 
     const { data: related } = useQuery<{ ids: (number | string)[]; contactId: string }>({
-        queryKey: ['widechat-related-leads', String(leadId), phoneSuffix],
+        queryKey: ['widechat-related-leads', String(leadId), phoneDigits],
         queryFn: async () => {
             const ids = new Set<number | string>([leadId])
             let contactId = widechatContactId
-            if (phoneSuffix.length >= 8) {
-                const { data } = await supabase.from('leads').select('id, widechat_contact_id').ilike('telefone', `%${phoneSuffix}%`)
-                data?.forEach((l: any) => {
-                    ids.add(l.id)
-                    if (!contactId && l.widechat_contact_id) contactId = String(l.widechat_contact_id)
-                })
+            if (phoneVariants.length) {
+                try {
+                    const { data } = await supabase.from('leads').select('id, widechat_contact_id').in('telefone', phoneVariants)
+                    data?.forEach((l: any) => {
+                        ids.add(l.id)
+                        if (!contactId && l.widechat_contact_id) contactId = String(l.widechat_contact_id)
+                    })
+                } catch { /* segue */ }
             }
             return { ids: [...ids], contactId }
         },
@@ -69,9 +74,9 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
             }
             // 2. transcript bruto (widechat_raw_messages) — captado pelo telefone,
             //    mesmo quando o WhatsApp não gerou um lead (ex: fora da fila comercial)
-            if (phoneSuffix.length >= 8) {
+            if (phoneVariants.length) {
                 try {
-                    const { data } = await supabase.from('widechat_raw_messages').select('*').ilike('platform_id', `%${phoneSuffix}%`)
+                    const { data } = await supabase.from('widechat_raw_messages').select('*').in('platform_id', phoneVariants)
                     ;(data || []).forEach((m: any) => out.push({
                         id: m.id ?? m.message_id, lead_id: leadId, message_id: m.message_id ?? m.id,
                         message: m.message, created_at: m.created_at, origin: m.origin,
@@ -100,7 +105,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
             )
             .subscribe()
         return () => { supabase.removeChannel(channel) }
-    }, [leadId, phoneSuffix, queryClient])
+    }, [leadId, phoneDigits, queryClient])
 
     useEffect(() => {
         scrollRef.current?.scrollIntoView({ behavior: 'smooth' })
