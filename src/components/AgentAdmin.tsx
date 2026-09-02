@@ -141,8 +141,9 @@ const AgentCard: React.FC<{
         setUploading(false);
     };
 
-    const score = agentStats?.score ?? 0;
-    const target = agent.score_target;
+    const score = Number(agentStats?.score) || 0;
+    // score_target vem como string do SurrealDB (campo decimal)
+    const target = Number(agent.score_target) || 8;
     const pct = Math.min(100, (score / 10) * 100);
     const onTarget = score >= target;
 

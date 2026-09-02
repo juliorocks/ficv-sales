@@ -128,16 +128,17 @@ export const AgentReportPage: React.FC = () => {
 
     // Computed stats
     const totalConvs = data.length;
-    const avgScore = totalConvs > 0 ? data.reduce((a, d) => a + (d.final_score ?? 0), 0) / totalConvs : 0;
-    const target = agentProfile?.score_target ?? 8.0;
+    const avgScore = totalConvs > 0 ? data.reduce((a, d) => a + (Number(d.final_score) || 0), 0) / totalConvs : 0;
+    // score_target vem como string do SurrealDB (campo decimal)
+    const target = Number(agentProfile?.score_target) || 8.0;
     const onTarget = avgScore >= target;
 
     const radarData = [
-        { subject: 'Empatia', A: totalConvs > 0 ? data.reduce((a, d) => a + (d.empathy_score ?? 0), 0) / totalConvs : 0 },
-        { subject: 'Clareza', A: totalConvs > 0 ? data.reduce((a, d) => a + (d.clarity_score ?? 0), 0) / totalConvs : 0 },
-        { subject: 'Profundidade', A: totalConvs > 0 ? data.reduce((a, d) => a + (d.depth_score ?? 0), 0) / totalConvs : 0 },
-        { subject: 'Comercial', A: totalConvs > 0 ? data.reduce((a, d) => a + (d.commercial_score ?? 0), 0) / totalConvs : 0 },
-        { subject: 'Agilidade', A: totalConvs > 0 ? data.reduce((a, d) => a + (d.agility_score ?? 0), 0) / totalConvs : 0 },
+        { subject: 'Empatia', A: totalConvs > 0 ? data.reduce((a, d) => a + (Number(d.empathy_score) || 0), 0) / totalConvs : 0 },
+        { subject: 'Clareza', A: totalConvs > 0 ? data.reduce((a, d) => a + (Number(d.clarity_score) || 0), 0) / totalConvs : 0 },
+        { subject: 'Profundidade', A: totalConvs > 0 ? data.reduce((a, d) => a + (Number(d.depth_score) || 0), 0) / totalConvs : 0 },
+        { subject: 'Comercial', A: totalConvs > 0 ? data.reduce((a, d) => a + (Number(d.commercial_score) || 0), 0) / totalConvs : 0 },
+        { subject: 'Agilidade', A: totalConvs > 0 ? data.reduce((a, d) => a + (Number(d.agility_score) || 0), 0) / totalConvs : 0 },
     ];
 
     // Daily evolution
@@ -145,7 +146,7 @@ export const AgentReportPage: React.FC = () => {
     data.forEach(d => {
         const day = d.timestamp?.slice(0, 10) ?? '';
         if (!dailyMap[day]) dailyMap[day] = { score: 0, count: 0 };
-        dailyMap[day].score += d.final_score ?? 0;
+        dailyMap[day].score += Number(d.final_score) || 0;
         dailyMap[day].count++;
     });
     const dailyData = Object.entries(dailyMap).sort(([a], [b]) => a.localeCompare(b)).map(([date, v]) => ({
@@ -155,8 +156,8 @@ export const AgentReportPage: React.FC = () => {
     }));
 
     // Top analyses
-    const topConvs = [...data].sort((a, b) => (b.final_score ?? 0) - (a.final_score ?? 0)).slice(0, 5);
-    const lowConvs = [...data].sort((a, b) => (a.final_score ?? 0) - (b.final_score ?? 0)).slice(0, 3);
+    const topConvs = [...data].sort((a, b) => (Number(b.final_score)||0) - (Number(a.final_score)||0)).slice(0, 5);
+    const lowConvs = [...data].sort((a, b) => (Number(a.final_score)||0) - (Number(b.final_score)||0)).slice(0, 3);
 
     // Perspective text
     const perspective = avgScore >= target
@@ -270,7 +271,7 @@ export const AgentReportPage: React.FC = () => {
                                         <p className="font-bold text-sm text-[var(--text-main)] truncate">{c.contact}</p>
                                         <p className="text-[10px] text-[var(--text-muted)]">{c.timestamp ? new Date(c.timestamp).toLocaleDateString('pt-BR') : ''}</p>
                                     </div>
-                                    <span className="text-xl font-black text-[#00D4AA]">{(c.final_score ?? 0).toFixed(1)}</span>
+                                    <span className="text-xl font-black text-[#00D4AA]">{(Number(c.final_score) || 0).toFixed(1)}</span>
                                 </div>
                             ))}
                         </div>
@@ -290,7 +291,7 @@ export const AgentReportPage: React.FC = () => {
                                     <div key={i} className="flex items-center gap-3 p-3 bg-[var(--bg-card-hover)]/60 rounded-xl border border-[var(--border)]">
                                         <AlertTriangle size={14} className="text-[#FFB347] flex-shrink-0" />
                                         <span className="text-sm text-[var(--text-main)] flex-1 truncate">{c.contact}</span>
-                                        <span className="text-sm font-bold text-[#FFB347]">{(c.final_score ?? 0).toFixed(1)}</span>
+                                        <span className="text-sm font-bold text-[#FFB347]">{(Number(c.final_score) || 0).toFixed(1)}</span>
                                     </div>
                                 ))}
                             </div>
