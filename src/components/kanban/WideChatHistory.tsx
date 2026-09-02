@@ -73,11 +73,15 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
                 } catch { /* segue */ }
             }
             // 2. transcript bruto (widechat_raw_messages) — captado pelo telefone,
-            //    mesmo quando o WhatsApp não gerou um lead (ex: fora da fila comercial)
+            //    mesmo quando o WhatsApp não gerou um lead (ex: fora da fila comercial).
+            //    timeout de 45s: sem o índice ainda a instância pode demorar.
             if (phoneVariants.length) {
                 try {
-                    const { data } = await supabase.from('widechat_raw_messages').select('*').in('platform_id', phoneVariants)
-                    ;(data || []).forEach((m: any) => out.push({
+                    const raw = await Promise.race([
+                        supabase.from('widechat_raw_messages').select('*').in('platform_id', phoneVariants),
+                        new Promise<{ data: null }>((r) => setTimeout(() => r({ data: null }), 45000)),
+                    ]) as { data: any[] | null }
+                    ;(raw.data || []).forEach((m: any) => out.push({
                         id: m.id ?? m.message_id, lead_id: leadId, message_id: m.message_id ?? m.id,
                         message: m.message, created_at: m.created_at, origin: m.origin,
                         type: m.type ?? 'text', sender_name: m.sender_name,
