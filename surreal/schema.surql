@@ -204,6 +204,7 @@ DEFINE FIELD observacoes             ON leads TYPE option<string>;
 DEFINE FIELD attachments             ON leads TYPE option<array<string>>;
 DEFINE FIELD source_id               ON leads TYPE option<record<lead_sources>>;
 DEFINE FIELD temperatura             ON leads TYPE option<string> ASSERT $value = NONE OR $value IN ['frio', 'morno', 'quente'];
+DEFINE FIELD status_wide             ON leads TYPE option<string> ASSERT $value = NONE OR $value IN ['ok_wide', 'erro'];
 DEFINE FIELD assigned_to_id          ON leads TYPE option<record<profiles>>;
 DEFINE FIELD motivo_perda_id         ON leads TYPE option<record<motivos_perda>>;
 DEFINE FIELD contact_count           ON leads TYPE int DEFAULT 0;

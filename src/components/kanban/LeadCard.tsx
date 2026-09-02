@@ -56,11 +56,20 @@ export function LeadCard({ lead, users, leadSources, stages, courses }: LeadCard
                         <AssignedUser userId={lead.assigned_to_id} users={users} />
                         <CardTitle className="text-base font-semibold truncate flex flex-col" title={lead.nome_completo}>
                             <span>{lead.nome_completo}</span>
-                            {(course || lead.observacoes?.includes('[O]')) && (
-                                <span className="text-[10px] font-normal text-muted-foreground bg-muted px-1.5 py-0.5 rounded w-fit mt-0.5">
-                                    {course ? course.name : lead.observacoes?.match(/\[O\]\s*([^:\n]+)/)?.[1] || 'SendPulse'}
-                                </span>
-                            )}
+                            <span className="flex flex-wrap gap-1 mt-0.5">
+                                {(course || lead.observacoes?.includes('[O]')) && (
+                                    <span className="text-[10px] font-normal text-muted-foreground bg-muted px-1.5 py-0.5 rounded w-fit">
+                                        {course ? course.name : lead.observacoes?.match(/\[O\]\s*([^:\n]+)/)?.[1] || 'SendPulse'}
+                                    </span>
+                                )}
+                                {lead.status_wide && (
+                                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded w-fit ${lead.status_wide === 'ok_wide'
+                                        ? 'bg-green-500/15 text-green-600 dark:text-green-400'
+                                        : 'bg-red-500/15 text-red-600 dark:text-red-400'}`}>
+                                        {lead.status_wide === 'ok_wide' ? 'OK WIDE' : 'ERRO'}
+                                    </span>
+                                )}
+                            </span>
                         </CardTitle>
                     </div>
                     <div className="flex items-center flex-shrink-0 gap-2">

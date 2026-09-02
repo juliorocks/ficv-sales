@@ -42,6 +42,7 @@ const formSchema = z.object({
     valor_oportunidade: z.preprocess((val) => Number(val), z.number().min(0, "O valor deve ser positivo.")),
     observacoes: z.string().nullable().optional(),
     temperatura: z.enum(['frio', 'morno', 'quente']).nullable().optional(),
+    status_wide: z.enum(['ok_wide', 'erro']).nullable().optional(),
     assigned_to_id: z.string().nullable().optional(),
     source_id: z.preprocess((val) => val === "" || val === null ? null : Number(val), z.number().nullable()),
     curso_interesse: z.preprocess((val) => val === "" || val === null ? null : Number(val), z.number().nullable()),
@@ -104,6 +105,7 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange }:
                     valor_oportunidade: values.valor_oportunidade,
                     observacoes: values.observacoes,
                     temperatura: values.temperatura,
+                    status_wide: values.status_wide ?? null,
                     assigned_to_id: values.assigned_to_id,
                     source_id: values.source_id,
                     curso_interesse: values.curso_interesse,
@@ -174,6 +176,7 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange }:
             valor_oportunidade: lead.valor_oportunidade || 0,
             observacoes: lead.observacoes || "",
             temperatura: lead.temperatura || 'frio',
+            status_wide: lead.status_wide ?? null,
             assigned_to_id: lead.assigned_to_id || null,
             source_id: lead.source_id || null,
             curso_interesse: lead.curso_interesse || null,
@@ -262,6 +265,9 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange }:
                                                 <FormItem><FormLabel>Temperatura</FormLabel><Select onValueChange={field.onChange} value={field.value || 'frio'}><FormControl><SelectTrigger><SelectValue placeholder="Selecione a temperatura" /></SelectTrigger></FormControl><SelectContent><SelectItem value="frio">Frio</SelectItem><SelectItem value="morno">Morno</SelectItem><SelectItem value="quente">Quente</SelectItem></SelectContent></Select><FormMessage /></FormItem>
                                             )} />
                                         </div>
+                                        <FormField control={form.control} name="status_wide" render={({ field }) => (
+                                            <FormItem><FormLabel>Status</FormLabel><Select onValueChange={(v) => field.onChange(v === "none" ? null : v)} value={field.value || "none"}><FormControl><SelectTrigger><SelectValue placeholder="Não definido" /></SelectTrigger></FormControl><SelectContent><SelectItem value="none">Não definido</SelectItem><SelectItem value="ok_wide">OK WIDE</SelectItem><SelectItem value="erro">ERRO</SelectItem></SelectContent></Select><FormMessage /></FormItem>
+                                        )} />
                                         <FormField
                                             control={form.control}
                                             name="curso_interesse"

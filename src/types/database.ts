@@ -22,6 +22,7 @@ export interface Lead {
     attachments?: string[]
     source_id?: number | null
     temperatura?: 'frio' | 'morno' | 'quente' | null;
+    status_wide?: 'ok_wide' | 'erro' | null;
     assigned_to_id?: string | null;
     motivo_perda_id?: number | null;
     contact_count: number;
