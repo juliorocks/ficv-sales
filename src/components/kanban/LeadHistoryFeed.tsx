@@ -77,7 +77,7 @@ export function LeadHistoryFeed({ lead, stages, users, courses, leadSources }: L
         queryFn: async () => {
             const { data, error } = await supabase
                 .from('lead_notes')
-                .select('*, users:profiles(name:full_name, avatar_url)')
+                .select('*')
                 .eq('lead_id', lead.id)
                 .order('created_at', { ascending: false })
             if (error) {
@@ -130,7 +130,8 @@ export function LeadHistoryFeed({ lead, stages, users, courses, leadSources }: L
     }
 
     const renderEvent = (event: HistoryEvent) => {
-        const user = event.data.users
+        const uid = event.data.created_by ?? event.data.changed_by ?? event.data.user_id
+        const user = event.data.users ?? (uid != null ? users.find(u => u.id === uid) : undefined)
         const timestamp = format(new Date(event.timestamp), "dd MMM yyyy 'às' HH:mm", { locale: ptBR })
 
         const EventWrapper = ({ children }: { children: React.ReactNode }) => (

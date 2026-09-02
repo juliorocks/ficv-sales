@@ -145,18 +145,24 @@ serve(async (req) => {
             dedupEnabled = !((ix[0] as any)?.building);
         } catch { /* índice ainda não existe */ }
 
-        // default_value por curso (courses tem ids inconsistentes — casa pelo número)
-        const courseRows = await surrealSQL(token, 'SELECT id, default_value FROM courses;') as any[];
+        // default_value + nome por curso (courses tem ids inconsistentes — casa pelo número)
+        const courseRows = await surrealSQL(token, 'SELECT id, name, default_value FROM courses;') as any[];
         const courseVal = new Map<number, number>();
+        const courseName = new Map<number, string>();
         for (const c of courseRows) {
             const cid = stripId(c.id);
-            if (typeof cid === 'number') courseVal.set(cid, Number(c.default_value) || 0);
+            if (typeof cid === 'number') {
+                courseVal.set(cid, Number(c.default_value) || 0);
+                if (c.name && !courseName.has(cid)) courseName.set(cid, String(c.name));
+            }
         }
 
         const backfillCutoff = new Date(Date.now() - BACKFILL_DAYS * 864e5).toISOString().slice(0, 19).replace('T', ' ');
 
         const onlyDigits = (v: unknown) => String(v ?? '').replace(/\D/g, '');
         const normEmail = (v: unknown) => String(v ?? '').toLowerCase().trim();
+        // telefone só serve p/ dedup se tiver 8+ dígitos e não for placeholder
+        const validPhone = (p: string) => p.length >= 8 && !/^0+$/.test(p) && p !== '00000000000';
 
         // ── 1. coleta candidatos de TODOS os forms (books em paralelo) ──────────
         type Cand = { form: any; sub: any; add: string };
@@ -196,13 +202,14 @@ serve(async (req) => {
             r.assigned_to_id != null || r.widechat_contact_id != null
             || formNameSet.has(String(r.fonte_lead)) || REAL_FONTES.has(String(r.fonte_lead));
 
+        type Hit = { id: string; hasCurso: boolean };
         const emails = [...new Set(candidates.map((c) => normEmail(c.sub.email)).filter(Boolean))];
-        const phones = [...new Set(candidates.map((c) => onlyDigits(c.sub.phone)).filter((p) => p.length >= 8))];
-        const realEmail = new Set<string>();
-        const realPhone = new Set<string>();
+        const phones = [...new Set(candidates.map((c) => onlyDigits(c.sub.phone)).filter(validPhone))];
+        const realByEmail = new Map<string, Hit>();
+        const realByPhone = new Map<string, Hit>();
         const junkByEmail = new Map<string, string[]>();
         const junkByPhone = new Map<string, string[]>();
-        const FIELDS = 'id, string::lowercase(email ?? "") AS email, telefone, assigned_to_id, widechat_contact_id, fonte_lead';
+        const FIELDS = 'id, string::lowercase(email ?? "") AS email, telefone, assigned_to_id, widechat_contact_id, fonte_lead, curso_interesse';
         if (dedupEnabled) {
             try {
                 for (let i = 0; i < emails.length; i += 200) {
@@ -210,7 +217,7 @@ serve(async (req) => {
                         `SELECT ${FIELDS} FROM leads WHERE email IN [${emails.slice(i, i + 200).map(toS).join(', ')}];`) as any[];
                     for (const r of rows) {
                         const e = String(r.email || '');
-                        if (isReal(r)) realEmail.add(e);
+                        if (isReal(r)) realByEmail.set(e, { id: String(r.id), hasCurso: r.curso_interesse != null });
                         else (junkByEmail.get(e) ?? junkByEmail.set(e, []).get(e)!).push(String(r.id));
                     }
                 }
@@ -219,7 +226,7 @@ serve(async (req) => {
                         `SELECT ${FIELDS} FROM leads WHERE telefone IN [${phones.slice(i, i + 200).map(toS).join(', ')}];`) as any[];
                     for (const r of rows) {
                         const p = onlyDigits(r.telefone);
-                        if (isReal(r)) realPhone.add(p);
+                        if (isReal(r)) realByPhone.set(p, { id: String(r.id), hasCurso: r.curso_interesse != null });
                         else (junkByPhone.get(p) ?? junkByPhone.set(p, []).get(p)!).push(String(r.id));
                     }
                 }
@@ -228,25 +235,49 @@ serve(async (req) => {
             }
         }
 
-        // ── 3. insere (mais antigo -> mais novo) ───────────────────────────────
+        // ── 3. insere / registra re-entrada (mais antigo -> mais novo) ─────────
         candidates.sort((a, b) => a.add.localeCompare(b.add));
-        const seenEmail = new Set<string>();
-        const seenPhone = new Set<string>();
+        const createdByEmail = new Map<string, string>(); // lead criado nesta rodada
+        const createdByPhone = new Map<string, string>();
         const summary: Record<string, number> = {};
         let totalNew = 0;
+        let reentradas = 0;
         let junkRemoved = 0;
+
+        const dataBR = (iso: string) => {
+            const d = new Date(iso);
+            return isNaN(d.getTime()) ? '' : d.toLocaleDateString('pt-BR');
+        };
 
         for (const { form, sub } of candidates) {
             const email = normEmail(sub.email);
             const phone = onlyDigits(sub.phone);
-            // já é um lead real, ou já inserido nesta rodada -> pula
-            if (email && (realEmail.has(email) || seenEmail.has(email))) continue;
-            if (phone.length >= 8 && (realPhone.has(phone) || seenPhone.has(phone))) continue;
-            if (email) seenEmail.add(email);
-            if (phone.length >= 8) seenPhone.add(phone);
+            const courseId = form.course_id != null ? Number(form.course_id) : null;
+            const cName = courseId != null ? (courseName.get(courseId) ?? '') : '';
+
+            // Já existe um lead pra esse cliente (real, ou criado nesta rodada)?
+            const hit: { id: string; hasCurso: boolean } | undefined =
+                (email ? realByEmail.get(email) : undefined)
+                ?? (validPhone(phone) ? realByPhone.get(phone) : undefined)
+                ?? (email && createdByEmail.has(email) ? { id: createdByEmail.get(email)!, hasCurso: true } : undefined)
+                ?? (validPhone(phone) && createdByPhone.has(phone) ? { id: createdByPhone.get(phone)!, hasCurso: true } : undefined);
+
+            if (hit) {
+                // não cria card novo — registra a entrada no histórico do lead
+                const nota = `📋 Novo formulário: ${form.form_name}` +
+                    (cName ? ` — interesse em ${cName}` : '') +
+                    ` (${dataBR(spDateToISO(String(sub.add_date || '')))})`;
+                try {
+                    await surrealSQL(token, `UPDATE leads:⟨${hit.id.replace(/^leads:`?|`$/g, '')}⟩ SET contact_count = (contact_count ?? 0) + 1, updated_at = time::now()`
+                        + (!hit.hasCurso && courseId != null ? `, curso_interesse = courses:\`${courseId}\`` : '') + `;`);
+                    await surrealSQL(token, `INSERT INTO lead_notes [{ id: "${crypto.randomUUID()}", lead_id: leads:⟨${hit.id.replace(/^leads:`?|`$/g, '')}⟩, note: ${toS(nota)}, created_at: d${toS(spDateToISO(String(sub.add_date || '')))} }] RETURN NONE;`);
+                } catch (e) { console.warn(`re-entrada ${hit.id}: ${(e as Error).message}`); }
+                reentradas++;
+                continue;
+            }
 
             // só bateu com lixo -> apaga o lixo antes de criar o certo
-            const junk = [...(junkByEmail.get(email) ?? []), ...(phone.length >= 8 ? junkByPhone.get(phone) ?? [] : [])];
+            const junk = [...(junkByEmail.get(email) ?? []), ...(validPhone(phone) ? junkByPhone.get(phone) ?? [] : [])];
             if (junk.length && junkRemoved < 1000) {
                 const uniq = [...new Set(junk)]; // ids já vêm no formato leads:`x`
                 for (let i = 0; i < uniq.length; i += 100) {
@@ -255,7 +286,6 @@ serve(async (req) => {
                 junkRemoved += uniq.length;
             }
 
-            const courseId = form.course_id != null ? Number(form.course_id) : null;
             const sourceId = form.source_id != null ? Number(form.source_id) : 1;
             const valor = courseId != null ? (courseVal.get(courseId) ?? 0) : 0;
             const v = sub.variables ?? {};
@@ -263,6 +293,8 @@ serve(async (req) => {
             const obs = `SendPulse — formulário: ${form.form_name}` + (local ? `\nLocal: ${local}` : '');
 
             const newId = await nextLeadId(token);
+            if (email) createdByEmail.set(email, String(newId));
+            if (validPhone(phone)) createdByPhone.set(phone, String(newId));
             // id STRING (leads:`123`) — id inteiro cru vira record id numérico que
             // o update direto tbl:⟨id⟩ não alcança.
             await surrealSQL(token, `INSERT INTO leads [{
@@ -297,6 +329,7 @@ serve(async (req) => {
         return new Response(JSON.stringify({
             success: true,
             novos: totalNew,
+            reentradas,
             lixoRemovido: junkRemoved,
             porFormulario: summary,
             elapsedMs: Date.now() - started,
