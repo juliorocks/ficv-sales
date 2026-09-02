@@ -2,7 +2,7 @@ import { Droppable, Draggable } from "@hello-pangea/dnd";
 import { Lead, Stage, User, LeadSource, Course } from "@/types/database";
 import { LeadCard } from "./LeadCard";
 import { Button } from "@/components/ui/button";
-import { MoreHorizontal, Pencil, Trash2, Search } from "lucide-react";
+import { MoreHorizontal, Pencil, Trash2, Search, GraduationCap, ChevronDown, Check } from "lucide-react";
 import { useState, useMemo } from "react";
 import { EditStageForm } from "./EditStageForm";
 import {
@@ -54,23 +54,32 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
     const [localSearchTerm, setLocalSearchTerm] = useState('');
     const debouncedLocalSearchTerm = useDebounce(localSearchTerm, 300);
     const [visibleCount, setVisibleCount] = useState(50);
+    const [courseFilter, setCourseFilter] = useState<number | null>(null);
     const [sortBy, setSortBy] = useState<SortOption>({
         key: 'stage_entry_date',
         label: 'Data no Estágio',
         direction: 'desc'
     });
 
+    // cursos que realmente aparecem nesta coluna (pra não listar os 13)
+    const columnCourses = useMemo(() => {
+        const ids = new Set(leads.map(l => l.curso_interesse).filter((x): x is number => x != null));
+        return courses.filter(c => ids.has(c.id)).sort((a, b) => a.name.localeCompare(b.name));
+    }, [leads, courses]);
+
     const locallyFilteredLeads = useMemo(() => {
-        if (!debouncedLocalSearchTerm.trim()) {
-            return leads;
+        let r = leads;
+        if (courseFilter != null) r = r.filter(l => l.curso_interesse === courseFilter);
+        const term = debouncedLocalSearchTerm.trim().toLowerCase();
+        if (term) {
+            r = r.filter(lead =>
+                lead.nome_completo.toLowerCase().includes(term) ||
+                (lead.email && lead.email.toLowerCase().includes(term)) ||
+                (lead.telefone && lead.telefone.toLowerCase().includes(term))
+            );
         }
-        const term = debouncedLocalSearchTerm.toLowerCase();
-        return leads.filter(lead =>
-            lead.nome_completo.toLowerCase().includes(term) ||
-            (lead.email && lead.email.toLowerCase().includes(term)) ||
-            (lead.telefone && lead.telefone.toLowerCase().includes(term))
-        );
-    }, [leads, debouncedLocalSearchTerm]);
+        return r;
+    }, [leads, debouncedLocalSearchTerm, courseFilter]);
 
     const sortedLeads = useMemo(() => {
         const tempOrder: { [key: string]: number } = { 'quente': 3, 'morno': 2, 'frio': 1 };
@@ -188,6 +197,35 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
                                 </div>
                                 <KanbanSort sortBy={sortBy} onSortChange={setSortBy} />
                             </div>
+
+                            {columnCourses.length > 1 && (
+                                <div className="mb-4">
+                                    <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                            <Button variant="outline" size="sm" className="w-full justify-between h-9 font-normal">
+                                                <span className="flex items-center gap-2 truncate">
+                                                    <GraduationCap className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                                    {courseFilter == null ? 'Todos os cursos' : (courses.find(c => c.id === courseFilter)?.name ?? 'Curso')}
+                                                </span>
+                                                <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+                                            </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="start" className="w-56 max-h-72 overflow-y-auto">
+                                            <DropdownMenuItem onClick={() => setCourseFilter(null)} className="flex justify-between">
+                                                <span>Todos os cursos</span>
+                                                {courseFilter == null && <Check className="h-4 w-4 ml-2 shrink-0" />}
+                                            </DropdownMenuItem>
+                                            <DropdownMenuSeparator />
+                                            {columnCourses.map(c => (
+                                                <DropdownMenuItem key={c.id} onClick={() => setCourseFilter(c.id)} className="flex justify-between">
+                                                    <span className="truncate">{c.name}</span>
+                                                    {courseFilter === c.id && <Check className="h-4 w-4 ml-2 shrink-0" />}
+                                                </DropdownMenuItem>
+                                            ))}
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
+                                </div>
+                            )}
 
                             <Droppable droppableId={String(stage.id)} type="CARD">
                                 {(provided, snapshot) => (
