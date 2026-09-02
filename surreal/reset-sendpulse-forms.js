@@ -129,7 +129,7 @@ log(`   ${cands.length} candidatos`);
 // 5. dedup — real -> pula; só lixo -> apaga o lixo e cria o certo ----------
 const REAL_FONTES = new Set(['Widechat', 'Wide Chat', 'Brevo Form', ...formNames]);
 const isReal = (r) => r.assigned_to_id != null || r.widechat_contact_id != null || REAL_FONTES.has(String(r.fonte_lead));
-const F = 'id, string::lowercase(email) AS email, telefone, assigned_to_id, widechat_contact_id, fonte_lead';
+const F = 'id, string::lowercase(email ?? "") AS email, telefone, assigned_to_id, widechat_contact_id, fonte_lead';
 const emails = [...new Set(cands.map((c) => nemail(c.s.email)).filter(Boolean))];
 const phones = [...new Set(cands.map((c) => digits(c.s.phone)).filter((p) => p.length >= 8))];
 const realE = new Set(), realP = new Set(), junkE = new Map(), junkP = new Map();

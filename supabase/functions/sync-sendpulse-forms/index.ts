@@ -202,7 +202,7 @@ serve(async (req) => {
         const realPhone = new Set<string>();
         const junkByEmail = new Map<string, string[]>();
         const junkByPhone = new Map<string, string[]>();
-        const FIELDS = 'id, string::lowercase(email) AS email, telefone, assigned_to_id, widechat_contact_id, fonte_lead';
+        const FIELDS = 'id, string::lowercase(email ?? "") AS email, telefone, assigned_to_id, widechat_contact_id, fonte_lead';
         if (dedupEnabled) {
             try {
                 for (let i = 0; i < emails.length; i += 200) {
