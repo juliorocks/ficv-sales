@@ -186,8 +186,13 @@ export function LeadHistoryFeed({ lead, stages, users, courses, leadSources }: L
                     );
                 }
             }
-            case 'note':
-                return <EventWrapper><p className="font-semibold flex items-center gap-2"><MessageSquare size={16} /> Adicionou uma nota:</p><p className="pt-1">{event.data.note}</p></EventWrapper>
+            case 'note': {
+                const isSystem = /^\s*[\p{Emoji_Presentation}\p{Extended_Pictographic}]/u.test(event.data.note || '')
+                return <EventWrapper>
+                    {!isSystem && <p className="font-semibold flex items-center gap-2"><MessageSquare size={16} /> Adicionou uma nota:</p>}
+                    <p className={isSystem ? "" : "pt-1"}>{event.data.note}</p>
+                </EventWrapper>
+            }
             case 'stage_change': {
                 const isLoss = event.data.to_stage?.name.toLowerCase().includes('perdido');
                 const lossReason = event.data.motivos_perda?.motivo;
