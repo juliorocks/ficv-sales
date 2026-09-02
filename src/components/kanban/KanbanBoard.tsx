@@ -236,14 +236,14 @@ export function KanbanBoard({ searchTerm }: { searchTerm: string }): JSX.Element
     }
 
     return (
-        <div>
+        <div className="min-w-0 overflow-x-clip">
             <DragDropContext onDragEnd={onDragEnd}>
                 <Droppable droppableId="board" type="COLUMN" direction="horizontal" isDropDisabled={user?.role !== 'admin'}>
                     {(provided) => (
                         <div
                             ref={provided.innerRef}
                             {...provided.droppableProps}
-                            className="flex overflow-x-auto items-start gap-6 pb-4 -mx-6 px-6"
+                            className="flex overflow-x-auto items-start gap-5 pb-4 -mx-8 px-8 custom-scrollbar"
                         >
                             {orderedStages.map((stage, index) => (
                                 <KanbanColumn

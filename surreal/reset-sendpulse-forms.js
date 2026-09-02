@@ -126,26 +126,41 @@ for (const f of forms) {
 }
 log(`   ${cands.length} candidatos`);
 
-// 5. dedup ----------------------------------------------------------------
+// 5. dedup — real -> pula; só lixo -> apaga o lixo e cria o certo ----------
+const REAL_FONTES = new Set(['Widechat', 'Wide Chat', 'Brevo Form', ...formNames]);
+const isReal = (r) => r.assigned_to_id != null || r.widechat_contact_id != null || REAL_FONTES.has(String(r.fonte_lead));
+const F = 'id, string::lowercase(email) AS email, telefone, assigned_to_id, widechat_contact_id, fonte_lead';
 const emails = [...new Set(cands.map((c) => nemail(c.s.email)).filter(Boolean))];
 const phones = [...new Set(cands.map((c) => digits(c.s.phone)).filter((p) => p.length >= 8))];
-const seenE = new Set(), seenP = new Set();
-for (let i = 0; i < emails.length; i += 300) {
-  (await sql(`SELECT VALUE string::lowercase(email) FROM leads WHERE email IN [${emails.slice(i, i + 300).map(toS).join(', ')}];`) || []).forEach((e) => seenE.add(String(e)));
+const realE = new Set(), realP = new Set(), junkE = new Map(), junkP = new Map();
+for (let i = 0; i < emails.length; i += 200) {
+  for (const r of (await sql(`SELECT ${F} FROM leads WHERE email IN [${emails.slice(i, i + 200).map(toS).join(', ')}];`) || [])) {
+    const e = String(r.email || '');
+    if (isReal(r)) realE.add(e); else { if (!junkE.has(e)) junkE.set(e, []); junkE.get(e).push(String(r.id)); }
+  }
 }
-for (let i = 0; i < phones.length; i += 300) {
-  (await sql(`SELECT VALUE telefone FROM leads WHERE telefone IN [${phones.slice(i, i + 300).map(toS).join(', ')}];`) || []).forEach((p) => seenP.add(digits(p)));
+for (let i = 0; i < phones.length; i += 200) {
+  for (const r of (await sql(`SELECT ${F} FROM leads WHERE telefone IN [${phones.slice(i, i + 200).map(toS).join(', ')}];`) || [])) {
+    const p = digits(r.telefone);
+    if (isReal(r)) realP.add(p); else { if (!junkP.has(p)) junkP.set(p, []); junkP.get(p).push(String(r.id)); }
+  }
 }
+log(`   real: ${realE.size}e/${realP.size}t | lixo: ${junkE.size}e/${junkP.size}t`);
 
 // 6. insere ----------------------------------------------------------------
 cands.sort((a, b) => a.add.localeCompare(b.add));
-let novos = 0;
+const seenE = new Set(), seenP = new Set();
+let novos = 0, lixo = 0;
 for (const { f, s, add } of cands) {
   const email = nemail(s.email), phone = digits(s.phone);
-  if (email && seenE.has(email)) continue;
-  if (phone.length >= 8 && seenP.has(phone)) continue;
+  if (email && (realE.has(email) || seenE.has(email))) continue;
+  if (phone.length >= 8 && (realP.has(phone) || seenP.has(phone))) continue;
   if (email) seenE.add(email);
   if (phone.length >= 8) seenP.add(phone);
+
+  const junk = [...new Set([...(junkE.get(email) || []), ...(phone.length >= 8 ? junkP.get(phone) || [] : [])])];
+  for (let i = 0; i < junk.length; i += 100) { try { await sql(`DELETE ${junk.slice(i, i + 100).join(', ')} RETURN NONE;`); } catch {} }
+  lixo += junk.length;
 
   const cid = f.course_id != null ? Number(f.course_id) : null;
   const sid = f.source_id != null ? Number(f.source_id) : 1;
@@ -178,4 +193,4 @@ log('7. reativando forms...');
 await sql('UPDATE sendpulse_forms SET ativo = true, updated_at = time::now();');
 
 const cnt = await sql('SELECT count() FROM leads GROUP ALL;');
-log(`✓ ${del} apagados, ${novos} re-importados. total leads: ${JSON.stringify(cnt)}. Cron reativado (incremental).`);
+log(`✓ ${del} apagados, ${lixo} lixo promovido, ${novos} re-importados. total leads: ${JSON.stringify(cnt)}. Cron reativado.`);

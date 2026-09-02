@@ -916,25 +916,27 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
             }
 
             {/* Main Content */}
-            <main className={`flex-1 min-h-screen bg-[var(--bg-main)] p-8 transition-all overflow-x-clip ${isTvMode ? 'ml-0' : 'ml-[240px]'}`}>
+            <main className={`flex-1 min-w-0 min-h-screen bg-[var(--bg-main)] p-8 transition-all overflow-x-clip ${isTvMode ? 'ml-0' : 'ml-[240px]'}`}>
                 {(activeTab === 'dashboard' || activeTab === 'agents' || activeTab === 'history' || activeTab.startsWith('kanban')) && (
-                    <header className="flex justify-between items-start mb-10 relative">
+                    <header className={`flex justify-between items-start relative ${activeTab === 'kanban' ? 'mb-6 items-center' : 'mb-10'}`}>
+                        {activeTab === 'kanban' ? (
+                            <h2 className="text-2xl font-bold tracking-tight text-[var(--text-main)] shrink-0">Funil de Leads</h2>
+                        ) : (
                         <div>
                             <div className="flex items-center gap-2 text-primary mb-2">
                                 <TrendingUp size={14} />
                                 <span className="text-[10px] font-bold uppercase tracking-widest">
-                                    {activeTab === 'kanban' ? 'Gestão de Funil' : 'Dashboard em tempo real'}
+                                    Dashboard em tempo real
                                 </span>
                             </div>
                             <h2 className="text-3xl font-bold tracking-tight mb-2 text-[var(--text-main)]">
-                                {activeTab === 'kanban' ? 'Leads (Kanban)' : 'Visão Geral'}
+                                Visão Geral
                             </h2>
                             <p className="text-[var(--text-muted)] text-sm">
-                                {activeTab === 'kanban'
-                                    ? 'Acompanhe e organize suas oportunidades de vendas.'
-                                    : 'Acompanhe a performance completa da conta com insights gerados.'}
+                                Acompanhe a performance completa da conta com insights gerados.
                             </p>
                         </div>
+                        )}
 
                         {activeTab === 'kanban' && !isTvMode && (
                             <div className="flex gap-3 items-center mt-2">
@@ -1672,23 +1674,10 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                     </div>
                 )}
 
-                {/* Kanban/Leads View */}
+                {/* Kanban/Leads View — cabeçalho fica no <header> acima (fixo na largura da página);
+                    só as colunas do KanbanBoard rolam na horizontal. */}
                 {activeTab === 'kanban' && (
-                    <div className="animate-fade-in pt-4">
-                        <div className="flex justify-between items-center mb-6">
-                            <div>
-                                <h1 className="text-2xl font-bold text-[var(--text-main)]">Funil de Leads</h1>
-                                <p className="text-[var(--text-muted)] text-sm">Gerencie o progresso das suas oportunidades</p>
-                            </div>
-                            {/*
-                                Botão "Sincronização SendPulse" desativado.
-                                A Edge Function sync-sendpulse-api importava TODOS os contatos de
-                                TODAS as addressbooks do SendPulse como leads (stage "Entrada"),
-                                inflando a tabela leads para ~820k linhas e travando o Kanban.
-                                Reativar só depois de reescrever o sync para importar apenas
-                                addressbooks específicas de captação (allowlist).
-                            */}
-                        </div>
+                    <div className="animate-fade-in min-w-0">
                         <KanbanBoard searchTerm={kanbanSearch} />
                         <CreateLeadFab />
                     </div>

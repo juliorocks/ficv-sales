@@ -187,40 +187,73 @@ serve(async (req) => {
             maxSeenByBook.set(Number(form.book_id), maxSeen);
         }
 
-        // ── 2. dedup: contra o banco (email + telefone) e entre os candidatos ────
+        // ── 2. dedup contra o banco. Match REAL (atribuído / widechat / de um
+        //    formulário) -> pula. Match só com LIXO (dump antigo do sync-sendpulse-api,
+        //    ninguém trabalhando) -> apaga o lixo e cria o lead certo (limpeza gradual).
+        const formNameSet = new Set<string>(forms.map((f: any) => String(f.form_name)));
+        const REAL_FONTES = new Set(['Widechat', 'Wide Chat', 'Brevo Form']);
+        const isReal = (r: any) =>
+            r.assigned_to_id != null || r.widechat_contact_id != null
+            || formNameSet.has(String(r.fonte_lead)) || REAL_FONTES.has(String(r.fonte_lead));
+
         const emails = [...new Set(candidates.map((c) => normEmail(c.sub.email)).filter(Boolean))];
         const phones = [...new Set(candidates.map((c) => onlyDigits(c.sub.phone)).filter((p) => p.length >= 8))];
-        const seenEmail = new Set<string>();
-        const seenPhone = new Set<string>();
+        const realEmail = new Set<string>();
+        const realPhone = new Set<string>();
+        const junkByEmail = new Map<string, string[]>();
+        const junkByPhone = new Map<string, string[]>();
+        const FIELDS = 'id, string::lowercase(email) AS email, telefone, assigned_to_id, widechat_contact_id, fonte_lead';
         if (dedupEnabled) {
             try {
-                for (let i = 0; i < emails.length; i += 300) {
+                for (let i = 0; i < emails.length; i += 200) {
                     const rows = await surrealSQL(token,
-                        `SELECT VALUE string::lowercase(email) FROM leads WHERE email IN [${emails.slice(i, i + 300).map(toS).join(', ')}];`) as string[];
-                    rows.forEach((e) => seenEmail.add(String(e)));
+                        `SELECT ${FIELDS} FROM leads WHERE email IN [${emails.slice(i, i + 200).map(toS).join(', ')}];`) as any[];
+                    for (const r of rows) {
+                        const e = String(r.email || '');
+                        if (isReal(r)) realEmail.add(e);
+                        else (junkByEmail.get(e) ?? junkByEmail.set(e, []).get(e)!).push(String(r.id));
+                    }
                 }
-                for (let i = 0; i < phones.length; i += 300) {
+                for (let i = 0; i < phones.length; i += 200) {
                     const rows = await surrealSQL(token,
-                        `SELECT VALUE telefone FROM leads WHERE telefone IN [${phones.slice(i, i + 300).map(toS).join(', ')}];`) as string[];
-                    rows.forEach((p) => seenPhone.add(onlyDigits(p)));
+                        `SELECT ${FIELDS} FROM leads WHERE telefone IN [${phones.slice(i, i + 200).map(toS).join(', ')}];`) as any[];
+                    for (const r of rows) {
+                        const p = onlyDigits(r.telefone);
+                        if (isReal(r)) realPhone.add(p);
+                        else (junkByPhone.get(p) ?? junkByPhone.set(p, []).get(p)!).push(String(r.id));
+                    }
                 }
             } catch (e) {
                 console.warn(`dedup parcial: ${(e as Error).message}`);
             }
         }
 
-        // ── 3. insere (mais antigo -> mais novo), pulando duplicados ────────────
+        // ── 3. insere (mais antigo -> mais novo) ───────────────────────────────
         candidates.sort((a, b) => a.add.localeCompare(b.add));
+        const seenEmail = new Set<string>();
+        const seenPhone = new Set<string>();
         const summary: Record<string, number> = {};
         let totalNew = 0;
+        let junkRemoved = 0;
 
         for (const { form, sub } of candidates) {
             const email = normEmail(sub.email);
             const phone = onlyDigits(sub.phone);
-            if (email && seenEmail.has(email)) continue;
-            if (phone.length >= 8 && seenPhone.has(phone)) continue;
+            // já é um lead real, ou já inserido nesta rodada -> pula
+            if (email && (realEmail.has(email) || seenEmail.has(email))) continue;
+            if (phone.length >= 8 && (realPhone.has(phone) || seenPhone.has(phone))) continue;
             if (email) seenEmail.add(email);
             if (phone.length >= 8) seenPhone.add(phone);
+
+            // só bateu com lixo -> apaga o lixo antes de criar o certo
+            const junk = [...(junkByEmail.get(email) ?? []), ...(phone.length >= 8 ? junkByPhone.get(phone) ?? [] : [])];
+            if (junk.length && junkRemoved < 1000) {
+                const uniq = [...new Set(junk)]; // ids já vêm no formato leads:`x`
+                for (let i = 0; i < uniq.length; i += 100) {
+                    try { await surrealSQL(token, `DELETE ${uniq.slice(i, i + 100).join(', ')} RETURN NONE;`); } catch { /* segue */ }
+                }
+                junkRemoved += uniq.length;
+            }
 
             const courseId = form.course_id != null ? Number(form.course_id) : null;
             const sourceId = form.source_id != null ? Number(form.source_id) : 1;
@@ -264,6 +297,7 @@ serve(async (req) => {
         return new Response(JSON.stringify({
             success: true,
             novos: totalNew,
+            lixoRemovido: junkRemoved,
             porFormulario: summary,
             elapsedMs: Date.now() - started,
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
