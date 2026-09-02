@@ -339,7 +339,7 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange }:
                         </TabsContent>
                         <TabsContent value="chat">
                             <div className="py-2">
-                                <WideChatHistory widechatContactId={lead.widechat_contact_id || ""} leadId={lead.id} />
+                                <WideChatHistory widechatContactId={lead.widechat_contact_id || ""} leadId={lead.id} telefone={lead.telefone} />
                             </div>
                         </TabsContent>
                         <TabsContent value="history">
