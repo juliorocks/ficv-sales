@@ -178,9 +178,10 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
                     </AlertDescription>
                 </Alert>
             )}
-            <ScrollArea className="h-[400px] w-full p-4 bg-slate-50 dark:bg-[#0D1117]">
+            {/* área de conversa sempre em tema claro — legibilidade acima de tudo */}
+            <ScrollArea className="h-[400px] w-full p-4 bg-[#eef1f5]">
                 {!messages || messages.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full text-muted-foreground opacity-50">
+                    <div className="flex flex-col items-center justify-center h-full text-slate-400">
                         <MessageSquare className="h-8 w-8 mb-2" />
                         <p className="text-sm font-medium">Nenhuma conversa encontrada.</p>
                         <p className="text-xs mt-1">
@@ -196,15 +197,15 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
                             return (
                                 <div key={msg.id} className={`flex flex-col max-w-[85%] ${isUser ? "self-start" : "self-end items-end"}`}>
                                     <div className={`px-4 py-2 text-sm shadow-sm ${isUser
-                                        ? "bg-white dark:bg-[#161B22] text-[var(--text-main)] rounded-2xl rounded-tl-md"
+                                        ? "bg-white text-slate-800 rounded-2xl rounded-tl-md"
                                         : isBot
-                                            ? "bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-2xl rounded-tr-md"
-                                            : "bg-primary text-white rounded-2xl rounded-tr-md"}`}>
+                                            ? "bg-slate-200 text-slate-600 rounded-2xl rounded-tr-md"
+                                            : "bg-[#2563eb] text-white rounded-2xl rounded-tr-md"}`}>
                                         {msg.type === 'text'
                                             ? <p className="whitespace-pre-wrap leading-relaxed">{msg.message}</p>
                                             : <p className="italic text-xs opacity-70">Arquivo de mídia ({msg.type})</p>}
                                     </div>
-                                    <span className="text-[10px] text-muted-foreground mt-1 px-1">
+                                    <span className="text-[10px] text-slate-500 mt-1 px-1">
                                         {isAgent && msg.sender_name && <span className="mr-1 font-medium">{msg.sender_name} •</span>}
                                         {format(new Date(msg.created_at), "dd/MM HH:mm", { locale: ptBR })}
                                     </span>
@@ -216,13 +217,13 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
                 )}
             </ScrollArea>
 
-            <div className={`p-3 border-t border-[var(--border)] ${!contactId ? 'bg-slate-100/50 dark:bg-slate-900/50 opacity-60 grayscale' : 'bg-[var(--bg-card-hover)]'}`}>
+            <div className={`p-3 border-t border-slate-200 ${!contactId ? 'bg-slate-100 opacity-70' : 'bg-slate-50'}`}>
                 <form onSubmit={handleSend} className="flex gap-2 items-center">
                     <Input
                         value={newMessage}
                         onChange={(e) => setNewMessage(e.target.value)}
                         placeholder={!contactId ? "Envio desabilitado (cliente não iniciou conversa)..." : "Digite sua mensagem via WhatsApp..."}
-                        className="flex-1 bg-white dark:bg-[#0D1117] border-[var(--border)] focus-visible:ring-primary shadow-sm rounded-full px-4"
+                        className="flex-1 bg-white text-slate-800 border-slate-200 placeholder:text-slate-400 focus-visible:ring-primary shadow-sm rounded-full px-4"
                         disabled={sendMessageMutation.isPending || !contactId}
                     />
                     <Button type="submit" size="icon"
