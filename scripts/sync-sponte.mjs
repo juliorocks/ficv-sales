@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-// Sync Sponte CRM → SurrealDB
+// Sync Sponte CRM → SurrealDB (+ espelho Postgres/Supabase durante a transição)
 // Uso: node scripts/sync-sponte.mjs [full|matriculas|parcelas] [start_date] [end_date]
+
+import { pgUpsert, pgTry, pgEnabled } from './lib/pg-mirror.mjs';
 
 
 const SPONTE_URL = 'https://api.sponteeducacional.net.br/WSAPIEdu.asmx';
@@ -169,6 +171,7 @@ async function syncMatriculas(token) {
         process.stdout.write(`\r  ${synced}/${rows.length} inseridos...`);
     }
     console.log(`\n  ✓ ${synced} matrículas sincronizadas`);
+    await pgTry('sponte_matriculas', () => pgUpsert('sponte_matriculas', rows, 'contrato_id'));
     return synced;
 }
 
@@ -236,6 +239,7 @@ async function syncParcelas(token) {
             totalSynced += batch.length;
         }
         allRows.push(...rows);
+        await pgTry(`sponte_parcelas (+${rows.length})`, () => pgUpsert('sponte_parcelas', rows, 'conta_receber_id,numero_parcela'));
         process.stdout.write(`\r  ${totalSynced} parcelas processadas...`);
     }
     console.log(`\n  ✓ ${totalSynced} parcelas sincronizadas`);
@@ -255,6 +259,7 @@ async function syncParcelas(token) {
             .reduce((s, r) => s + (r.valor_pago || 0), 0);
         await surrealSQL(token,
             `UPSERT ${sid('financial_goals', `${y}_${m}`)} MERGE {year:${y},month:${m},monthly_achieved:${achieved}};`);
+        await pgTry(`financial_goals ${y}-${m}`, () => pgUpsert('financial_goals', [{ year: y, month: m, monthly_achieved: achieved }], 'year,month'));
         cur.setMonth(cur.getMonth() + 1);
     }
     console.log('  ✓ Metas atualizadas');
@@ -263,7 +268,7 @@ async function syncParcelas(token) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-console.log(`\n🔄 Sync Sponte → SurrealDB | modo=${mode} | ${startDate} → ${endDate}`);
+console.log(`\n🔄 Sync Sponte → SurrealDB${pgEnabled ? ' + Postgres' : ''} | modo=${mode} | ${startDate} → ${endDate}`);
 const token = await surrealAuth();
 console.log('✓ SurrealDB autenticado');
 
