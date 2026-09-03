@@ -3,8 +3,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabase"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
-import { format } from "date-fns"
-import { ptBR } from "date-fns/locale"
 import { AlertCircle, MessageSquare, Send, Loader2, FileText } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
@@ -16,6 +14,22 @@ interface WideChatHistoryProps {
     widechatContactId: string
     leadId: number | string
     telefone?: string | null // usado p/ achar conversas ligadas a outro registro do mesmo lead
+}
+
+// O WideChat mandava a hora em horário de Brasília SEM fuso e o webhook gravava
+// como se fosse UTC -> mensagens antigas estão 3h atrás do instante real.
+// A partir de WEBHOOK_TZFIX o webhook grava o UTC correto. Aqui: exibimos sempre
+// no fuso de Brasília (independente da máquina de quem olha) e somamos 3h nas
+// mensagens gravadas antes da correção.
+const WEBHOOK_TZFIX = new Date("2026-09-03T13:55:34Z").getTime()
+const fmtHora = (iso: string) => {
+    const t = new Date(iso).getTime()
+    if (isNaN(t)) return ""
+    const d = new Date(t < WEBHOOK_TZFIX ? t + 3 * 3600_000 : t)
+    return d.toLocaleString("pt-BR", {
+        day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+        timeZone: "America/Sao_Paulo",
+    })
 }
 
 interface WideChatMessage {
@@ -273,7 +287,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
                                     </div>
                                     <span className="text-[10px] text-slate-500 mt-1 px-1">
                                         {isAgent && msg.sender_name && <span className="mr-1 font-medium">{msg.sender_name} •</span>}
-                                        {format(new Date(msg.created_at), "dd/MM HH:mm", { locale: ptBR })}
+                                        {fmtHora(msg.created_at)}
                                     </span>
                                 </div>
                             )

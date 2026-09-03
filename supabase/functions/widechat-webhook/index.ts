@@ -40,6 +40,18 @@ async function surrealSQL(token: string, sql: string): Promise<unknown[]> {
     return Array.isArray(entry?.result) ? entry.result : [];
 }
 
+// O WideChat manda created_at em horário de Brasília SEM indicador de fuso
+// (ex: "2026-09-03T09:42:36.392" ou "2026-09-03 09:42:36"). new Date() no Deno
+// (runtime UTC) interpretaria como UTC -> ficava 3h adiantado no banco.
+// Aqui assumimos -03:00 quando não há fuso e devolvemos o instante real em UTC.
+function wcToISO(raw: unknown): string {
+    if (!raw) return new Date().toISOString();
+    let s = String(raw).trim().replace(' ', 'T');
+    if (!/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s)) s += '-03:00';
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+}
+
 function toS(v: unknown): string {
     if (v === null || v === undefined) return 'NONE';
     if (typeof v === 'boolean') return String(v);
@@ -140,7 +152,7 @@ serve(async (req) => {
                 message: ${toS(messageText)},
                 platform_id: ${toS(messagePhone || msgData.platform_id || "")},
                 message_id: ${toS(msgData.message_id || null)},
-                created_at: ${toS(msgData.created_at ? new Date(msgData.created_at).toISOString() : new Date().toISOString())}
+                created_at: ${toS(wcToISO(msgData.created_at))}
             }] RETURN NONE;`);
         }
 
@@ -273,7 +285,7 @@ serve(async (req) => {
                 message: ${toS(messageText || "[Mídia]")},
                 origin: ${toS(origin)},
                 sender_name: ${toS(senderName || "Desconhecido")},
-                created_at: ${toS(msgData.created_at ? new Date(msgData.created_at).toISOString() : new Date().toISOString())}
+                created_at: ${toS(wcToISO(msgData.created_at))}
             }] RETURN NONE;`);
 
             // Intelligent CRM updates
