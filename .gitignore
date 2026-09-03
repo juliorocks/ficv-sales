@@ -33,3 +33,6 @@ dist-ssr
 
 # Backups locais gerados por surreal/purge-sendpulse-leads.js (contêm PII)
 surreal/backup-keeper-leads-*.json
+
+# Backups da migração SurrealDB->Supabase (grandes, não versionar)
+_migration-backups/
