@@ -31,11 +31,18 @@ período de dual-write (ver `ROLLBACK.md`).
    git push origin main
    ```
 
-3. **Repontar os webhooks** para o projeto novo:
-   - **WideChat** (painel de integrações/webhooks): URL →
+3. **Repontar a ingestão de leads:**
+   - **WideChat** (painel → webhooks): URL →
      `https://jsswkmybkgoxpncnxgdd.supabase.co/functions/v1/widechat-webhook`
-   - **SendPulse** (Automations / webhook do formulário): URL →
-     `https://jsswkmybkgoxpncnxgdd.supabase.co/functions/v1/sendpulse-webhook`
+   - **SendPulse**: NÃO tem webhook (`sendpulse_webhook_logs` sempre teve 0 registros).
+     A ingestão é por **polling** — a edge function `sync-sendpulse-forms` chama a
+     API do SendPulse a cada 3 min. Trocar o poller:
+     a) **No projeto ANTIGO** (SQL Editor): `SELECT cron.unschedule('sync-sendpulse-forms');`
+     b) **No projeto NOVO** (via CLI já linkado):
+        ```
+        supabase db query "SELECT cron.schedule('sync-sendpulse-forms','*/3 * * * *', \$\$ SELECT net.http_post(url:='https://jsswkmybkgoxpncnxgdd.supabase.co/functions/v1/sync-sendpulse-forms', headers:=jsonb_build_object('Content-Type','application/json','Authorization','Bearer <ANON_KEY_NOVO>'), body:=jsonb_build_object('trigger','cron')); \$\$);" --linked
+        ```
+     (o cron novo está DESLIGADO de propósito até aqui, pra não haver dois pollers.)
 
 4. **Verificar** (com um usuário staff):
    - Login com a senha atual
