@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-// Sync Meta Ads → SurrealDB (GitHub Actions — sem Supabase)
+// Sync Meta Ads → SurrealDB (+ espelho Postgres/Supabase na transição)
+
+import { pgUpsert, pgTry } from './lib/pg-mirror.mjs';
 
 const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN;
 const META_AD_ACCOUNT_ID = process.env.META_AD_ACCOUNT_ID; // ex: act_1189439942268233
@@ -113,6 +115,8 @@ async function syncAccountStats(token) {
         const now = new Date().toISOString();
         const sql = `UPDATE meta_account_stats:\`1\` MERGE {balance: ${prepaidBalance}, currency: ${sv(acc.currency ?? 'BRL')}, updated_at: d"${now}"} RETURN NONE;`;
         await surrealSQL(token, sql);
+        await pgTry('meta_account_stats', () => pgUpsert('meta_account_stats',
+            [{ id: 1, balance: prepaidBalance, currency: acc.currency ?? 'BRL', updated_at: now }], 'id'));
         console.log(`  ✓ saldo: R$ ${prepaidBalance}`);
     } else {
         console.log('  ⚠️  saldo não detectado na resposta da API');
@@ -137,6 +141,11 @@ async function syncCampaigns(token) {
         `lifetime_budget=${sv(Number(r.lifetime_budget || 0) / 100)}, ` +
         `budget_remaining=${sv(Number(r.budget_remaining || 0) / 100)}, updated_at=${sv(now)};`
     );
+    await pgTry('meta_campaigns', () => pgUpsert('meta_campaigns', rows.map(r => ({
+        campaign_id: r.id, name: r.name, objective: r.objective || '', status: r.status,
+        daily_budget: Number(r.daily_budget || 0) / 100, lifetime_budget: Number(r.lifetime_budget || 0) / 100,
+        budget_remaining: Number(r.budget_remaining || 0) / 100, updated_at: now,
+    })), 'campaign_id'));
     return rows;
 }
 
@@ -178,6 +187,12 @@ async function syncInsights(token) {
         `ctr:${sv(Number(r.ctr || 0))},cpm:${sv(Number(r.cpm || 0))},` +
         `leads_count:${computeLeadsCount(r.actions)},synced_at:${sv(now)}}] RETURN NONE;`
     );
+    await pgTry('meta_campaign_insights_daily', () => pgUpsert('meta_campaign_insights_daily', rows.map(r => ({
+        campaign_id: r.campaign_id, campaign_name: r.campaign_name, date: r.date_start,
+        spend: Number(r.spend || 0), impressions: Number(r.impressions || 0), clicks: Number(r.clicks || 0),
+        reach: Number(r.reach || 0), frequency: Number(r.frequency || 0), ctr: Number(r.ctr || 0), cpm: Number(r.cpm || 0),
+        leads_count: computeLeadsCount(r.actions), synced_at: now,
+    })), 'campaign_id,date'));
     return rows;
 }
 
@@ -203,6 +218,11 @@ async function syncDemographics(token) {
         `spend:${sv(Number(r.spend || 0))},impressions:${sv(Number(r.impressions || 0))},` +
         `clicks:${sv(Number(r.clicks || 0))},leads_count:0,synced_at:${sv(now)}}] RETURN NONE;`
     );
+    await pgTry('meta_demographics_daily', () => pgUpsert('meta_demographics_daily', rows.map(r => ({
+        date: r.date_start, age_range: r.age || '?', gender: r.gender || '?',
+        spend: Number(r.spend || 0), impressions: Number(r.impressions || 0), clicks: Number(r.clicks || 0),
+        leads_count: 0, synced_at: now,
+    })), 'date,age_range,gender'));
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────

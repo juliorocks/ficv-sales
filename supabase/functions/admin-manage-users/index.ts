@@ -1,164 +1,115 @@
 import { serve } from "https://deno.land/std@0.177.1/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-surreal-token',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const SURREAL_ENDPOINT = 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
-const SURREAL_NS = 'ficv';
-const SURREAL_DB = 'salespulse';
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-function toS(v: unknown): string {
+// ── espelho SurrealDB (transição) — best-effort ──────────────────────────────
+const SURREAL_ENDPOINT = Deno.env.get('SURREAL_ENDPOINT') ?? 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
+const SURREAL_NS = 'ficv', SURREAL_DB = 'salespulse';
+const SURREAL_PASS = Deno.env.get('SURREAL_PASS') ?? 'Ficv@Surreal2026!';
+function sq(v: unknown): string {
     if (v === null || v === undefined) return 'NONE';
-    if (typeof v === 'boolean') return String(v);
-    if (typeof v === 'number') return String(v);
-    if (typeof v === 'string') return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
-    return JSON.stringify(v);
+    if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+    return `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
 }
-
-function parseId(v: unknown): string {
-    const s = String(v ?? '');
-    const m = s.match(/^[a-z_]+:⟨(.+)⟩$/) ?? s.match(/^[a-z_]+:`(.+)`$/);
-    return m ? m[1] : s;
-}
-
-async function surrealSQL(token: string, sql: string): Promise<unknown[]> {
-    const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'text/plain', 'Accept': 'application/json',
-            'Authorization': `Bearer ${token}`,
-            'surreal-ns': SURREAL_NS, 'surreal-db': SURREAL_DB,
-        },
-        body: sql,
-    });
-    if (!res.ok) throw new Error(`SurrealDB HTTP ${res.status}: ${await res.text()}`);
-    const json = await res.json();
-    const entry = Array.isArray(json) ? json[0] : json;
-    if (entry?.status === 'ERR') throw new Error(entry.result);
-    return Array.isArray(entry?.result) ? entry.result : [];
-}
-
-async function getAdminToken(): Promise<string> {
-    const res = await fetch(`${SURREAL_ENDPOINT}/signin`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'surreal-ns': SURREAL_NS },
-        body: JSON.stringify({ ns: SURREAL_NS, user: 'ficv_admin', pass: 'Ficv@Surreal2026!' }),
-    });
-    if (!res.ok) throw new Error('Falha ao autenticar no SurrealDB.');
-    const { token } = await res.json() as { token?: string };
-    if (!token) throw new Error('SurrealDB: no token');
-    return token;
+async function surrealMirror(sqlFn: (esc: typeof sq) => string) {
+    try {
+        const auth = await fetch(`${SURREAL_ENDPOINT}/signin`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'surreal-ns': SURREAL_NS },
+            body: JSON.stringify({ ns: SURREAL_NS, user: 'ficv_admin', pass: SURREAL_PASS }),
+        });
+        const { token } = await auth.json();
+        await fetch(`${SURREAL_ENDPOINT}/sql`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain', 'Authorization': `Bearer ${token}`, 'surreal-ns': SURREAL_NS, 'surreal-db': SURREAL_DB },
+            body: sqlFn(sq),
+        });
+    } catch (e) {
+        console.error('surrealMirror falhou (ignorado):', e);
+    }
 }
 
 serve(async (req) => {
-    if (req.method === 'OPTIONS') {
-        return new Response('ok', { headers: corsHeaders });
-    }
+    if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+    const json = (body: unknown, status = 200) =>
+        new Response(JSON.stringify(body), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status });
 
     try {
-        // Autenticação via token SurrealDB do usuário logado (enviado no header X-Surreal-Token)
-        const surrealUserToken = req.headers.get('X-Surreal-Token') ?? '';
-        if (!surrealUserToken) throw new Error('Usuário não autenticado.');
+        const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 
-        const surrealPayload = (() => {
-            try {
-                const part = surrealUserToken.split('.')[1];
-                const padded = part.replace(/-/g, '+').replace(/_/g, '/')
-                    .padEnd(part.length + (4 - part.length % 4) % 4, '=');
-                return JSON.parse(atob(padded)) as Record<string, unknown>;
-            } catch { return null; }
-        })();
+        // autentica o chamador pelo JWT Supabase
+        const jwt = (req.headers.get('Authorization') ?? '').replace('Bearer ', '');
+        if (!jwt) return json({ error: 'Não autenticado.' }, 401);
+        const { data: { user }, error: uErr } = await admin.auth.getUser(jwt);
+        if (uErr || !user) return json({ error: 'Sessão inválida.' }, 401);
 
-        const idStr = String(surrealPayload?.ID ?? '');
-        const m = idStr.match(/^profiles:`(.+)`$/) ?? idStr.match(/^profiles:⟨(.+)⟩$/);
-        const profileId = m ? m[1] : '';
-        if (!profileId) throw new Error('Usuário não autenticado.');
-
-        const adminToken = await getAdminToken();
-
-        const callerRows = await surrealSQL(adminToken,
-            `SELECT role FROM profiles WHERE id = profiles:⟨${profileId}⟩ LIMIT 1;`
-        );
-        const callerRole = (callerRows[0] as any)?.role;
-        if (callerRole !== 'admin') {
-            return new Response(JSON.stringify({ error: 'Apenas administradores podem gerenciar usuários.' }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                status: 403,
-            });
-        }
+        const { data: caller } = await admin.from('profiles').select('role').eq('id', user.id).single();
+        if (caller?.role !== 'admin') return json({ error: 'Apenas administradores podem gerenciar usuários.' }, 403);
 
         const { action, payload } = await req.json();
 
-        // ── list ──────────────────────────────────────────────────────────────
         if (action === 'list') {
-            const rows = await surrealSQL(adminToken,
-                `SELECT id, email, full_name, role, created_at FROM profiles WHERE email != NONE ORDER BY full_name ASC;`
-            ) as any[];
-            const profiles = rows.map(r => ({ ...r, id: parseId(r.id) }));
-            return new Response(JSON.stringify({ success: true, profiles }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
-            });
+            const { data, error } = await admin.from('profiles')
+                .select('id, email, full_name, role').order('full_name', { ascending: true });
+            if (error) throw error;
+            return json({ success: true, profiles: data });
         }
 
-        // ── create ────────────────────────────────────────────────────────────
         if (action === 'create') {
             const { email, password, full_name, role } = payload ?? {};
             if (!email || !password || !full_name) throw new Error('email, password e full_name são obrigatórios.');
             if (password.length < 6) throw new Error('A senha deve ter no mínimo 6 caracteres.');
 
-            const newId = crypto.randomUUID();
-            await surrealSQL(adminToken, `INSERT INTO profiles [{
-                id: ${toS(newId)},
-                email: ${toS(email)},
-                full_name: ${toS(full_name)},
-                role: ${toS(role ?? 'agent')},
-                password: crypto::argon2::generate(${toS(password)}),
-                active: true,
-                created_at: time::now()
-            }] RETURN NONE;`);
-
-            return new Response(JSON.stringify({ success: true, user: { id: newId, email } }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
+            const { data: created, error: cErr } = await admin.auth.admin.createUser({
+                email, password, email_confirm: true, user_metadata: { full_name },
             });
+            if (cErr) throw cErr;
+            const id = created.user.id;
+            const { error: pErr } = await admin.from('profiles')
+                .upsert({ id, email, full_name, role: role ?? 'agent' }, { onConflict: 'id' });
+            if (pErr) throw pErr;
+
+            await surrealMirror(esc => `INSERT INTO profiles [{ id: ${esc(id)}, email: ${esc(email)}, full_name: ${esc(full_name)}, role: ${esc(role ?? 'agent')}, password: crypto::argon2::generate(${esc(password)}), active: true, created_at: time::now() }] RETURN NONE;`);
+            return json({ success: true, user: { id, email } });
         }
 
-        // ── update_profile ────────────────────────────────────────────────────
         if (action === 'update_profile') {
             const { userId, full_name, email, role } = payload ?? {};
             if (!userId) throw new Error('userId é obrigatório.');
+            const patch: Record<string, unknown> = {};
+            if (full_name !== undefined) patch.full_name = full_name;
+            if (email !== undefined) patch.email = email;
+            if (role !== undefined) patch.role = role;
 
-            await surrealSQL(adminToken,
-                `UPDATE profiles SET full_name = ${toS(full_name)}, email = ${toS(email)}, role = ${toS(role)} WHERE id = profiles:⟨${userId}⟩;`
-            );
+            const { error } = await admin.from('profiles').update(patch).eq('id', userId);
+            if (error) throw error;
+            if (email) await admin.auth.admin.updateUserById(userId, { email }).catch(() => {});
 
-            return new Response(JSON.stringify({ success: true }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
-            });
+            const sets = Object.entries(patch).map(([k, v]) => `${k} = ${sq(v)}`).join(', ');
+            if (sets) await surrealMirror(() => `UPDATE profiles SET ${sets} WHERE id = profiles:⟨${userId}⟩;`);
+            return json({ success: true });
         }
 
-        // ── reset_password ────────────────────────────────────────────────────
         if (action === 'reset_password') {
             const { userId, password } = payload ?? {};
             if (!userId || !password) throw new Error('userId e password são obrigatórios.');
             if (password.length < 6) throw new Error('A senha deve ter no mínimo 6 caracteres.');
 
-            await surrealSQL(adminToken,
-                `UPDATE profiles SET password = crypto::argon2::generate(${toS(password)}) WHERE id = profiles:⟨${userId}⟩;`
-            );
-
-            return new Response(JSON.stringify({ success: true }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
-            });
+            const { error } = await admin.auth.admin.updateUserById(userId, { password });
+            if (error) throw error;
+            await surrealMirror(esc => `UPDATE profiles SET password = crypto::argon2::generate(${esc(password)}) WHERE id = profiles:⟨${userId}⟩;`);
+            return json({ success: true });
         }
 
         throw new Error(`Ação desconhecida: ${action}`);
-    } catch (error: any) {
+    } catch (error) {
         console.error('Erro em admin-manage-users:', error);
-        return new Response(JSON.stringify({ error: error.message }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 400,
-        });
+        return json({ error: (error as Error).message }, 400);
     }
 });

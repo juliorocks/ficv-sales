@@ -1,91 +1,11 @@
 import { serve } from "https://deno.land/std@0.177.1/http/server.ts";
+import { pg, mirror, sv, wcToISO } from "../_shared/db.ts";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// ─── SurrealDB ────────────────────────────────────────────────────────────────
-const SURREAL_ENDPOINT = Deno.env.get('SURREAL_ENDPOINT')
-    ?? 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
-const SURREAL_NS = 'ficv';
-const SURREAL_DB = 'salespulse';
-
-async function getSurrealToken(): Promise<string> {
-    const res = await fetch(`${SURREAL_ENDPOINT}/signin`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'surreal-ns': SURREAL_NS },
-        body: JSON.stringify({ ns: SURREAL_NS, user: 'ficv_admin', pass: 'Ficv@Surreal2026!' }),
-    });
-    if (!res.ok) throw new Error(`SurrealDB signin failed: ${res.status}`);
-    const { token } = await res.json() as { token?: string };
-    if (!token) throw new Error('SurrealDB: no token');
-    return token;
-}
-
-async function surrealSQL(token: string, sql: string): Promise<unknown[]> {
-    const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'text/plain', 'Accept': 'application/json',
-            'Authorization': `Bearer ${token}`,
-            'surreal-ns': SURREAL_NS, 'surreal-db': SURREAL_DB,
-        },
-        body: sql,
-    });
-    if (!res.ok) throw new Error(`SurrealDB HTTP ${res.status}`);
-    const json = await res.json();
-    const entry = Array.isArray(json) ? json[0] : json;
-    if (entry?.status === 'ERR') throw new Error(entry.result);
-    return Array.isArray(entry?.result) ? entry.result : [];
-}
-
-// O WideChat manda created_at em horário de Brasília SEM indicador de fuso
-// (ex: "2026-09-03T09:42:36.392" ou "2026-09-03 09:42:36"). new Date() no Deno
-// (runtime UTC) interpretaria como UTC -> ficava 3h adiantado no banco.
-// Aqui assumimos -03:00 quando não há fuso e devolvemos o instante real em UTC.
-function wcToISO(raw: unknown): string {
-    if (!raw) return new Date().toISOString();
-    let s = String(raw).trim().replace(' ', 'T');
-    if (!/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s)) s += '-03:00';
-    const d = new Date(s);
-    return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
-}
-
-function toS(v: unknown): string {
-    if (v === null || v === undefined) return 'NONE';
-    if (typeof v === 'boolean') return String(v);
-    if (typeof v === 'number') return String(v);
-    if (typeof v === 'string') return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
-    return JSON.stringify(v);
-}
-
-function parseId(v: unknown): number | string | null {
-    if (v === null || v === undefined) return null;
-    const s = String(v);
-    const m = s.match(/^[a-z_]+:⟨(.+)⟩$/) ?? s.match(/^[a-z_]+:`(.+)`$/);
-    if (m) {
-        const inner = m[1];
-        const asNum = Number(inner);
-        return Number.isFinite(asNum) && String(asNum) === inner ? asNum : inner;
-    }
-    if (typeof v === 'number') return v;
-    return s;
-}
-
-function ref(table: string, id: unknown): string {
-    return `${table}:⟨${id}⟩`;
-}
-
-async function nextLeadId(token: string): Promise<number> {
-    // sem ONLY -> resultado é array [{val}]; com ONLY o parser devolve [] e o id sai 0
-    const rows = await surrealSQL(token, 'UPDATE seq:leads SET val += 1 RETURN val;');
-    const val = (rows[0] as any)?.val;
-    if (!val) throw new Error('seq:leads não retornou val');
-    return val;
-}
-
-// ─── Message filter ───────────────────────────────────────────────────────────
 const SYSTEM_PATTERNS = [
     'sessão irá expirar', 'sessão expirou', 'sua sessão',
     'atendimento encerrado', 'atendimento finalizado', 'atendimento transferido',
@@ -98,29 +18,26 @@ const isSystemMessage = (text: string) => {
     return SYSTEM_PATTERNS.some(p => lower.includes(p));
 };
 
+const j = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status });
+
 serve(async (req) => {
-    if (req.method === 'OPTIONS') {
-        return new Response('ok', { headers: corsHeaders });
-    }
+    if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
     try {
         let payload: any;
-        const bodyText = await req.text();
-        try { payload = JSON.parse(bodyText); } catch {
-            return new Response(JSON.stringify({ error: "Invalid JSON" }), { status: 400 });
-        }
-
-        const token = await getSurrealToken();
+        try { payload = JSON.parse(await req.text()); } catch { return j({ error: "Invalid JSON" }, 400); }
+        const db = pg();
 
         const { event, data } = payload;
         const webhookEvent = payload.webhook?.key;
-        const msgData      = data?.content || data || {};
+        const msgData = data?.content || data || {};
 
-        let messageText  = msgData.message || msgData.interactive?.body?.text || msgData.text || "";
-        let senderName   = payload.vars?.name || data?.user?.name || data?.contact?.name || "";
-        let messagePhone = payload.vars?.number || data?.contact?.telephone || data?.content?.to || msgData.platform_id || "";
+        const messageText = msgData.message || msgData.interactive?.body?.text || msgData.text || "";
+        let senderName = payload.vars?.name || data?.user?.name || data?.contact?.name || "";
+        const messagePhone = payload.vars?.number || data?.contact?.telephone || data?.content?.to || msgData.platform_id || "";
 
-        if (!senderName && msgData.placeholders && Array.isArray(msgData.placeholders)) {
+        if (!senderName && Array.isArray(msgData.placeholders)) {
             const n = msgData.placeholders.find((p: any) => typeof p === 'string' && p.length > 2 && p.includes(' ') && !p.includes(':'));
             senderName = n || (msgData.placeholders[1] ? String(msgData.placeholders[1]) : '');
         }
@@ -128,213 +45,188 @@ serve(async (req) => {
         const eventName = String(data?.event || event || "");
         const sessionId = data?.session_id || msgData.session_id;
 
-        const CONV_END_WEBHOOKS  = ["attendance_end", "finalize", "attendance_closed", "attendance_finish"];
-        const CONV_END_EVENTS    = ["attendanceEnd", "finalize", "closed", "attendance_end", "finalized", "attendanceClosed", "autoFinish", "humanFinish"];
-        const isConversationEnd  = CONV_END_WEBHOOKS.includes(webhookEvent) || CONV_END_EVENTS.includes(eventName);
+        const CONV_END_WEBHOOKS = ["attendance_end", "finalize", "attendance_closed", "attendance_finish"];
+        const CONV_END_EVENTS = ["attendanceEnd", "finalize", "closed", "attendance_end", "finalized", "attendanceClosed", "autoFinish", "humanFinish"];
+        const isConversationEnd = CONV_END_WEBHOOKS.includes(webhookEvent) || CONV_END_EVENTS.includes(eventName);
         const isAcceptAttendance = webhookEvent === "accept_attendance" || eventName === "humanStart";
-        const isSystemNotif      = ["messageNotificationAgent", "Read", "Delivered"].includes(eventName);
-        const isMessage          = !isSystemNotif && (
+        const isSystemNotif = ["messageNotificationAgent", "Read", "Delivered"].includes(eventName);
+        const isMessage = !isSystemNotif && (
             eventName.toLowerCase().includes("message") ||
-            webhookEvent === "client_message" ||
-            webhookEvent === "agent_message" ||
-            !!messageText
+            webhookEvent === "client_message" || webhookEvent === "agent_message" || !!messageText
         );
 
-        // ── Capture every real message for transcript ─────────────────────────
+        // ── raw transcript ────────────────────────────────────────────────────
         if (isMessage && sessionId && messageText && !isSystemMessage(messageText)) {
             let origin = "auto";
             if (eventName === "messageContact" || msgData.origin === "contact" || msgData.origin === "channel") origin = "channel";
             if (msgData.origin === "user" || msgData.origin === "agent" || webhookEvent === "agent_message" || msgData.user?.name) origin = "agent";
-            await surrealSQL(token, `INSERT INTO widechat_raw_messages [{
-                session_id: ${toS(sessionId)},
-                origin: ${toS(origin)},
-                sender_name: ${toS(msgData.user?.name || senderName || "")},
-                message: ${toS(messageText)},
-                platform_id: ${toS(messagePhone || msgData.platform_id || "")},
-                message_id: ${toS(msgData.message_id || null)},
-                created_at: ${toS(wcToISO(msgData.created_at))}
-            }] RETURN NONE;`);
+            const raw = {
+                session_id: sessionId, origin,
+                sender_name: msgData.user?.name || senderName || "",
+                message: messageText,
+                platform_id: messagePhone || msgData.platform_id || "",
+                message_id: msgData.message_id ?? null,
+                created_at: wcToISO(msgData.created_at),
+            };
+            await db.from('widechat_raw_messages').insert(raw);
+            await mirror(`INSERT INTO widechat_raw_messages [{ session_id:${sv(raw.session_id)}, origin:${sv(raw.origin)}, sender_name:${sv(raw.sender_name)}, message:${sv(raw.message)}, platform_id:${sv(raw.platform_id)}, message_id:${sv(raw.message_id)}, created_at:${sv(raw.created_at)} }] RETURN NONE;`);
         }
 
-        if (!isMessage && !isConversationEnd && !isAcceptAttendance) {
-            return new Response(JSON.stringify({ success: true, ignored: true, event: eventName }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
-            });
-        }
+        if (!isMessage && !isConversationEnd && !isAcceptAttendance)
+            return j({ success: true, ignored: true, event: eventName });
 
         const hasPhone = messagePhone && !["00000000000", ""].includes(messagePhone);
-        const hasName  = senderName && senderName.trim().length > 0;
-
-        if (!hasPhone && !hasName && !isConversationEnd && !isAcceptAttendance) {
-            return new Response(JSON.stringify({ success: true, skipped: true }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
-            });
-        }
+        const hasName = senderName && senderName.trim().length > 0;
+        if (!hasPhone && !hasName && !isConversationEnd && !isAcceptAttendance)
+            return j({ success: true, skipped: true });
 
         const TARGET_QUEUE = "FICV - COMERCIAL";
-        const queueName    = payload.data?.transferHistory?.value;
-        const isTransfer   = webhookEvent === "attendance_transfer" || payload.data?.event === "humanTransfer";
+        const queueName = payload.data?.transferHistory?.value;
+        const isTransfer = webhookEvent === "attendance_transfer" || payload.data?.event === "humanTransfer";
 
-        // Find existing lead
-        let leadId: number | string | null = null;
+        // ── achar lead ────────────────────────────────────────────────────────
+        let leadId: number | null = null;
         let foundBy = "";
-        if (sessionId) {
-            const rows = await surrealSQL(token, `SELECT id FROM leads WHERE widechat_session_id = ${toS(sessionId)} LIMIT 1;`);
-            if (rows[0]) { leadId = parseId((rows[0] as any).id); foundBy = "session"; }
-        }
-        if (!leadId && data?.contact_id) {
-            const rows = await surrealSQL(token, `SELECT id FROM leads WHERE widechat_contact_id = ${toS(data.contact_id)} LIMIT 1;`);
-            if (rows[0]) { leadId = parseId((rows[0] as any).id); foundBy = "contact_id"; }
-        }
+        const findLead = async (col: string, val: string) => {
+            const { data } = await db.from('leads').select('id').eq(col, val).limit(1).maybeSingle();
+            return data?.id ?? null;
+        };
+        if (sessionId) { leadId = await findLead('widechat_session_id', sessionId); if (leadId) foundBy = "session"; }
+        if (!leadId && data?.contact_id) { leadId = await findLead('widechat_contact_id', data.contact_id); if (leadId) foundBy = "contact_id"; }
         if (!leadId && hasPhone) {
             const suffix = String(messagePhone).replace(/\D/g, '').slice(-8);
             if (suffix.length >= 8) {
-                const rows = await surrealSQL(token, `SELECT id FROM leads WHERE string::contains(telefone, ${toS(suffix)}) LIMIT 1;`);
-                if (rows[0]) { leadId = parseId((rows[0] as any).id); foundBy = "phone"; }
+                const { data } = await db.from('leads').select('id').ilike('telefone', `%${suffix}%`).limit(1).maybeSingle();
+                leadId = data?.id ?? null;
+                if (leadId) foundBy = "phone";
             }
         }
-
         console.log(`event=${eventName} wh=${webhookEvent} lead=${leadId}(${foundBy}) session=${sessionId}`);
 
-        // ── Accept attendance ──────────────────────────────────────────────────
+        // ── accept attendance ─────────────────────────────────────────────────
         if (isAcceptAttendance) {
-            await surrealSQL(token, `INSERT INTO widechat_atendimentos [{
-                lead_id: ${leadId ? ref('leads', leadId) : 'NONE'},
-                protocol: ${toS(data?.protocol || null)},
-                widechat_agent_id: ${toS(data?.agent_id || null)},
-                session_id: ${toS(sessionId || null)},
-                contact_id: ${toS(data?.contact_id || null)},
-                aceito_em: ${toS(new Date().toISOString())}
-            }] RETURN NONE;`);
-            return new Response(JSON.stringify({ success: true, lead_id: leadId, action: "attendance_accepted" }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
-            });
+            const at = {
+                lead_id: leadId, protocol: data?.protocol ?? null,
+                widechat_agent_id: data?.agent_id ?? null, session_id: sessionId ?? null,
+                contact_id: data?.contact_id ?? null, aceito_em: new Date().toISOString(),
+            };
+            await db.from('widechat_atendimentos').insert(at);
+            await mirror(`INSERT INTO widechat_atendimentos [{ lead_id:${leadId ? `leads:⟨${leadId}⟩` : 'NONE'}, protocol:${sv(at.protocol)}, widechat_agent_id:${sv(at.widechat_agent_id)}, session_id:${sv(at.session_id)}, contact_id:${sv(at.contact_id)}, aceito_em:${sv(at.aceito_em)} }] RETURN NONE;`);
+            return j({ success: true, lead_id: leadId, action: "attendance_accepted" });
         }
 
-        // ── Conversation end ───────────────────────────────────────────────────
+        // ── conversation end ──────────────────────────────────────────────────
         if (isConversationEnd) {
             if (leadId) {
-                const stages = await surrealSQL(token,
-                    `SELECT id FROM stages WHERE string::contains(string::lowercase(name), "finaliz") OR string::contains(string::lowercase(name), "encerr") OR string::contains(string::lowercase(name), "conclu") ORDER BY order DESC LIMIT 1;`
-                );
-                if (stages[0]) {
-                    const finalStageId = parseId((stages[0] as any).id);
-                    await surrealSQL(token, `UPDATE leads SET stage_id = ${ref('stages', finalStageId)}, stage_entry_date = ${toS(new Date().toISOString())} WHERE id = ${ref('leads', leadId)};`);
+                const { data: st } = await db.from('stages').select('id, name')
+                    .or('name.ilike.%finaliz%,name.ilike.%encerr%,name.ilike.%conclu%')
+                    .order('order', { ascending: false }).limit(1).maybeSingle();
+                if (st?.id) {
+                    const now = new Date().toISOString();
+                    await db.from('leads').update({ stage_id: st.id, stage_entry_date: now }).eq('id', leadId);
+                    await mirror(`UPDATE leads SET stage_id = stages:⟨${st.id}⟩, stage_entry_date = ${sv(now)} WHERE id = leads:⟨${leadId}⟩;`);
                 }
             }
-            return new Response(JSON.stringify({ success: true, lead_id: leadId, action: "conversation_ended" }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
-            });
+            return j({ success: true, lead_id: leadId, action: "conversation_ended" });
         }
 
-        // ── New lead filter ────────────────────────────────────────────────────
-        if (isTransfer && queueName && queueName !== TARGET_QUEUE) {
-            return new Response(JSON.stringify({ success: true, ignored: true, reason: `Queue ${queueName} is not ${TARGET_QUEUE}` }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
-            });
-        }
+        // ── filtro de admissão de lead novo ──────────────────────────────────
+        if (isTransfer && queueName && queueName !== TARGET_QUEUE)
+            return j({ success: true, ignored: true, reason: `Queue ${queueName} is not ${TARGET_QUEUE}` });
         if (!leadId) {
             const belongsToTargetQueue = !queueName || queueName === TARGET_QUEUE;
-            if (!belongsToTargetQueue || (!hasPhone && !hasName)) {
-                return new Response(JSON.stringify({ success: true, ignored: true, reason: "Lead admission denied" }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
-                });
-            }
+            if (!belongsToTargetQueue || (!hasPhone && !hasName))
+                return j({ success: true, ignored: true, reason: "Lead admission denied" });
         }
 
-        // ── Source and stage lookup ────────────────────────────────────────────
-        const srcRows = await surrealSQL(token, `SELECT id FROM lead_sources WHERE string::contains(string::lowercase(name), "widechat") LIMIT 1;`);
-        const sourceId = srcRows[0] ? parseId((srcRows[0] as any).id) : 8;
+        // ── source ────────────────────────────────────────────────────────────
+        const { data: src } = await db.from('lead_sources').select('id').ilike('name', '%widechat%').limit(1).maybeSingle();
+        const sourceId = src?.id ?? 8;
 
-        // ── Create/update lead ─────────────────────────────────────────────────
+        // ── criar / atualizar lead ───────────────────────────────────────────
         if (leadId) {
-            let setClause = `source_id = ${ref('lead_sources', sourceId)}, fonte_lead = "Widechat", updated_at = ${toS(new Date().toISOString())}`;
-            if (data?.contact_id) setClause += `, widechat_contact_id = ${toS(data.contact_id)}`;
-            if (sessionId) setClause += `, widechat_session_id = ${toS(sessionId)}`;
-            await surrealSQL(token, `UPDATE leads SET ${setClause} WHERE id = ${ref('leads', leadId)};`);
+            const patch: Record<string, unknown> = { source_id: sourceId, fonte_lead: "Widechat", updated_at: new Date().toISOString() };
+            if (data?.contact_id) patch.widechat_contact_id = data.contact_id;
+            if (sessionId) patch.widechat_session_id = sessionId;
+            await db.from('leads').update(patch).eq('id', leadId);
+            const sets = Object.entries(patch).map(([k, v]) => k === 'source_id' ? `source_id = lead_sources:⟨${v}⟩` : `${k} = ${sv(v)}`).join(', ');
+            await mirror(`UPDATE leads SET ${sets} WHERE id = leads:⟨${leadId}⟩;`);
         } else {
-            const stageRows = await surrealSQL(token, `SELECT id FROM stages ORDER BY order ASC LIMIT 1;`);
-            const firstStageId = stageRows[0] ? parseId((stageRows[0] as any).id) : 1;
-            const newId = await nextLeadId(token);
-            const inserted = await surrealSQL(token, `INSERT INTO leads [{ id: "${newId}",
-                nome_completo: ${toS(senderName.trim() || `Lead WhatsApp - ${messagePhone}`)},
-                telefone: ${toS(messagePhone || "00000000000")},
-                stage_id: ${ref('stages', firstStageId)},
-                source_id: ${ref('lead_sources', sourceId)},
-                fonte_lead: "Widechat",
-                widechat_contact_id: ${toS(data?.contact_id || null)},
-                widechat_session_id: ${toS(sessionId || null)},
-                temperatura: "frio",
-                data_entrada: d${toS(new Date().toISOString())},
-                valor_oportunidade: 0
-            }] RETURN id;`);
-            if (inserted[0]) leadId = parseId((inserted[0] as any).id);
+            const { data: st } = await db.from('stages').select('id').order('order', { ascending: true }).limit(1).maybeSingle();
+            const firstStageId = st?.id ?? 1;
+            const now = new Date().toISOString();
+            const newLead = {
+                nome_completo: senderName.trim() || `Lead WhatsApp - ${messagePhone}`,
+                telefone: messagePhone || "00000000000",
+                stage_id: firstStageId, source_id: sourceId, fonte_lead: "Widechat",
+                widechat_contact_id: data?.contact_id ?? null, widechat_session_id: sessionId ?? null,
+                temperatura: "frio", data_entrada: now, valor_oportunidade: 0,
+            };
+            const { data: created, error } = await db.from('leads').insert(newLead).select('id').single();
+            if (error) throw error;
+            leadId = created.id;
+            await mirror(
+                `UPDATE seq:leads SET val = math::max([val, ${leadId}]);\n` +
+                `INSERT INTO leads [{ id:"${leadId}", nome_completo:${sv(newLead.nome_completo)}, telefone:${sv(newLead.telefone)}, ` +
+                `stage_id:stages:⟨${firstStageId}⟩, source_id:lead_sources:⟨${sourceId}⟩, fonte_lead:"Widechat", ` +
+                `widechat_contact_id:${sv(newLead.widechat_contact_id)}, widechat_session_id:${sv(newLead.widechat_session_id)}, ` +
+                `temperatura:"frio", data_entrada:d${sv(now)}, valor_oportunidade:0 }] RETURN NONE;`
+            );
         }
 
-        // ── Store message in widechat_messages ────────────────────────────────
+        // ── mensagem ─────────────────────────────────────────────────────────
         let origin = "auto";
         if (eventName === "messageContact" || msgData.origin === "contact") origin = "channel";
         if (msgData.origin === "user" || msgData.origin === "agent" || webhookEvent === "agent_message") origin = "agent";
 
         if (leadId) {
-            await surrealSQL(token, `INSERT INTO widechat_messages [{
-                lead_id: ${ref('leads', leadId)},
-                session_id: ${toS(sessionId || "unknown")},
-                message_id: ${toS(msgData.message_id || null)},
-                type: ${toS(msgData.type || "text")},
-                message: ${toS(messageText || "[Mídia]")},
-                origin: ${toS(origin)},
-                sender_name: ${toS(senderName || "Desconhecido")},
-                created_at: ${toS(wcToISO(msgData.created_at))}
-            }] RETURN NONE;`);
+            const msg = {
+                lead_id: leadId, session_id: sessionId || "unknown", message_id: msgData.message_id ?? null,
+                type: msgData.type || "text", message: messageText || "[Mídia]", origin,
+                sender_name: senderName || "Desconhecido", created_at: wcToISO(msgData.created_at),
+            };
+            await db.from('widechat_messages').insert(msg);
+            await mirror(`INSERT INTO widechat_messages [{ lead_id:leads:⟨${leadId}⟩, session_id:${sv(msg.session_id)}, message_id:${sv(msg.message_id)}, type:${sv(msg.type)}, message:${sv(msg.message)}, origin:${sv(msg.origin)}, sender_name:${sv(msg.sender_name)}, created_at:${sv(msg.created_at)} }] RETURN NONE;`);
 
-            // Intelligent CRM updates
-            const leadRows = await surrealSQL(token, `SELECT assigned_to_id, curso_interesse, valor_oportunidade FROM leads WHERE id = ${ref('leads', leadId)} LIMIT 1;`);
-            const currentLead = leadRows[0] as any;
-            const updates: string[] = [];
+            // ── CRM inteligente ───────────────────────────────────────────────
+            const { data: cur } = await db.from('leads').select('assigned_to_id, curso_interesse, valor_oportunidade').eq('id', leadId).maybeSingle();
+            const updates: Record<string, unknown> = {};
 
-            if (origin === 'agent' && senderName && senderName !== 'Desconhecido' && !currentLead?.assigned_to_id) {
-                const firstName = senderName.trim().split(' ')[0];
-                const profRows = await surrealSQL(token,
-                    `SELECT id FROM profiles WHERE string::contains(string::lowercase(full_name), ${toS(senderName.trim().toLowerCase())}) OR string::contains(string::lowercase(full_name), ${toS(firstName.toLowerCase())}) LIMIT 1;`
-                );
-                if (profRows[0]) {
-                    const profId = parseId((profRows[0] as any).id);
-                    updates.push(`assigned_to_id = ${ref('profiles', profId)}`);
+            if (origin === 'agent' && senderName && senderName !== 'Desconhecido' && !cur?.assigned_to_id) {
+                const first = senderName.trim().split(' ')[0].toLowerCase();
+                const { data: prof } = await db.from('profiles').select('id')
+                    .or(`full_name.ilike.%${senderName.trim().toLowerCase()}%,full_name.ilike.%${first}%`).limit(1).maybeSingle();
+                if (prof?.id) updates.assigned_to_id = prof.id;
+            }
+
+            if (!cur?.curso_interesse && messageText) {
+                const { data: courses } = await db.from('courses').select('id, name, default_value');
+                const msgNorm = messageText.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+                const match = (courses ?? []).find((c: any) => {
+                    const cn = (c.name || '').toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+                    if (cn && msgNorm.includes(cn)) return true;
+                    const words = cn.split(/\s+/).filter((w: string) => w.length > 4);
+                    return words.length > 0 && words.every((w: string) => msgNorm.includes(w));
+                });
+                if (match) {
+                    updates.curso_interesse = match.id;
+                    if (match.default_value && !cur?.valor_oportunidade) updates.valor_oportunidade = match.default_value;
                 }
             }
 
-            if (!currentLead?.curso_interesse && messageText) {
-                const courseRows = await surrealSQL(token, `SELECT id, name, default_value FROM courses;`) as any[];
-                if (courseRows.length) {
-                    const msgNorm = messageText.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
-                    const match = courseRows.find((c: any) => {
-                        const cn = (c.name || '').toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
-                        if (msgNorm.includes(cn)) return true;
-                        const words = cn.split(/\s+/).filter((w: string) => w.length > 4);
-                        return words.length > 0 && words.every((w: string) => msgNorm.includes(w));
-                    });
-                    if (match) {
-                        const courseId = parseId(match.id);
-                        updates.push(`curso_interesse = ${ref('courses', courseId)}`);
-                        if (match.default_value && !currentLead?.valor_oportunidade)
-                            updates.push(`valor_oportunidade = ${match.default_value}`);
-                    }
-                }
+            if (Object.keys(updates).length) {
+                await db.from('leads').update(updates).eq('id', leadId);
+                const sets = Object.entries(updates).map(([k, v]) =>
+                    k === 'assigned_to_id' ? `assigned_to_id = profiles:⟨${v}⟩`
+                    : k === 'curso_interesse' ? `curso_interesse = courses:⟨${v}⟩`
+                    : `${k} = ${sv(v)}`).join(', ');
+                await mirror(`UPDATE leads SET ${sets} WHERE id = leads:⟨${leadId}⟩;`);
             }
-
-            if (updates.length > 0)
-                await surrealSQL(token, `UPDATE leads SET ${updates.join(', ')} WHERE id = ${ref('leads', leadId)};`);
         }
 
-        return new Response(JSON.stringify({ success: true, lead_id: leadId }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
-        });
-
-    } catch (error: any) {
+        return j({ success: true, lead_id: leadId });
+    } catch (error) {
         console.error("Critical error Widechat webhook:", error);
-        return new Response(JSON.stringify({ error: error.message }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200,
-        });
+        return j({ error: (error as Error).message }, 200);
     }
 });

@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-// Sync Google Ads → SurrealDB (GitHub Actions — sem Supabase)
+// Sync Google Ads → SurrealDB (+ espelho Postgres/Supabase na transição)
+
+import { pgUpsert, pgTry } from './lib/pg-mirror.mjs';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_ADS_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_ADS_CLIENT_SECRET;
@@ -140,6 +142,7 @@ async function syncCampaigns(sToken, accessToken) {
         `budget_amount:${sv(r.budget_amount)},budget_type:${sv(r.budget_type)},` +
         `synced_at:${sv(r.synced_at)}}] RETURN NONE;`
     );
+    await pgTry('google_ads_campaigns', () => pgUpsert('google_ads_campaigns', rows, 'campaign_id'));
     return rows;
 }
 
@@ -174,6 +177,7 @@ async function syncInsights(sToken, accessToken) {
         `clicks:${sv(r.clicks)},conversions:${sv(r.conversions)},` +
         `synced_at:${sv(r.synced_at)}}] RETURN NONE;`
     );
+    await pgTry('google_ads_insights_daily', () => pgUpsert('google_ads_insights_daily', rows, 'campaign_id,date'));
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────

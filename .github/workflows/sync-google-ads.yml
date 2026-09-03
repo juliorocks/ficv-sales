@@ -1,4 +1,4 @@
-name: Sync Google Ads → SurrealDB
+name: Sync Google Ads → SurrealDB + Supabase
 
 on:
   schedule:
@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Sync Google Ads → SurrealDB
+      - name: Sync Google Ads → SurrealDB + Supabase
         env:
           GOOGLE_ADS_CLIENT_ID: ${{ secrets.GOOGLE_ADS_CLIENT_ID }}
           GOOGLE_ADS_CLIENT_SECRET: ${{ secrets.GOOGLE_ADS_CLIENT_SECRET }}
@@ -30,4 +30,6 @@ jobs:
           SURREAL_ENDPOINT: https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud
           SURREAL_USER: ficv_admin
           SURREAL_PASS: ${{ secrets.SURREAL_PASS }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/sync-google-ads.mjs "${{ github.event.inputs.days_back || '90' }}"
