@@ -363,17 +363,15 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
         return () => clearInterval(id);
     }, [loadData, loadMonthly]);
 
-    // ─── Sync via Edge Functions ───────────────────────────────────────────────
-    // As Edge Functions sincronizam Meta/Google → Supabase → SurrealDB internamente.
+    // ─── Sync via Edge Functions (disparam o GitHub Actions, que faz dual-write) ─
     const handleSyncMeta = async () => {
         setSyncing('meta');
         try {
-            const { data, error } = await supabase.functions.invoke('sync-meta-ads', {
-                body: { start_date: dateStart, end_date: dateEnd },
-            });
+            const { data, error } = await supabase.functions.invoke('sync-meta-ads', { body: {} });
             if (error) throw error;
-            showSuccess(`Meta: ${data?.campaigns?.synced ?? 0} campanhas, ${data?.insights?.synced ?? 0} registros`);
-            await Promise.all([loadData(), loadMonthly()]);
+            if (data?.error) throw new Error(data.error);
+            showSuccess(data?.message ?? 'Sync Meta iniciado (~2 min).');
+            setTimeout(() => { loadData({ silent: true }); loadMonthly(); }, 150_000);
         } catch (e: any) {
             showError('Erro Meta Ads: ' + e.message);
         } finally {
@@ -384,12 +382,11 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
     const handleSyncGoogle = async () => {
         setSyncing('google');
         try {
-            const { data, error } = await supabase.functions.invoke('sync-google-ads', {
-                body: { start_date: dateStart, end_date: dateEnd },
-            });
+            const { data, error } = await supabase.functions.invoke('sync-google-ads', { body: {} });
             if (error) throw error;
-            showSuccess(`Google Ads: ${data?.campaigns?.synced ?? 0} campanhas, ${data?.insights?.synced ?? 0} registros`);
-            await Promise.all([loadData(), loadMonthly()]);
+            if (data?.error) throw new Error(data.error);
+            showSuccess(data?.message ?? 'Sync Google iniciado (~2 min).');
+            setTimeout(() => { loadData({ silent: true }); loadMonthly(); }, 150_000);
         } catch (e: any) {
             showError('Erro Google Ads: ' + e.message);
         } finally {

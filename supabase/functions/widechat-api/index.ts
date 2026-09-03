@@ -15,7 +15,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-surreal-token',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
 const WIDECHAT_BASE = 'https://igrejabatista.widechat.com.br/api/v4';
@@ -26,32 +26,21 @@ function jsonRes(body: unknown, status = 200) {
     });
 }
 
-// profile id (uuid) a partir do JWT de RECORD-access do SurrealDB
-function profileIdFromSurrealToken(token: string): { id: string; email: string } | null {
-    try {
-        const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-        const p = JSON.parse(atob(b64)) as Record<string, unknown>;
-        if (p['exp'] && Date.now() / 1000 > (p['exp'] as number)) return null;
-        const idStr = String(p['ID'] ?? '');
-        const m = idStr.match(/^profiles:`(.+)`$/) ?? idStr.match(/^profiles:⟨(.+)⟩$/) ?? idStr.match(/^profiles:(.+)$/);
-        return m ? { id: m[1], email: String(p['email'] ?? '') } : null;
-    } catch {
-        return null;
-    }
-}
-
 serve(async (req) => {
     if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
     try {
-        const surrealToken = req.headers.get('x-surreal-token') ?? '';
-        const who = profileIdFromSurrealToken(surrealToken);
-        if (!who) return jsonRes({ error: 'Sessão não identificada. Faça login de novo.' }, 401);
-
         const supabase = createClient(
             Deno.env.get('SUPABASE_URL') ?? '',
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+            { auth: { persistSession: false } },
         );
+
+        // auth: JWT Supabase do agente logado
+        const jwt = (req.headers.get('Authorization') ?? '').replace('Bearer ', '');
+        const { data: { user } } = await supabase.auth.getUser(jwt);
+        if (!user) return jsonRes({ error: 'Sessão não identificada. Faça login de novo.' }, 401);
+        const who = { id: user.id, email: user.email ?? '' };
 
         const { data: integ } = await supabase
             .from('user_integrations')

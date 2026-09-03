@@ -406,3 +406,17 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 # declarative_schema_path = "./database"
 # JSON string passed through to pg-delta SQL formatting.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":80,\"commaStyle\":\"trailing\"}"
+
+# ── Edge functions públicas (webhooks / cron) — sem verificação de JWT ──────
+[functions.widechat-webhook]
+verify_jwt = false
+[functions.sendpulse-webhook]
+verify_jwt = false
+[functions.sync-sendpulse-forms]
+verify_jwt = false
+[functions.sync-sponte]
+verify_jwt = false
+[functions.sync-meta-ads]
+verify_jwt = false
+[functions.sync-google-ads]
+verify_jwt = false

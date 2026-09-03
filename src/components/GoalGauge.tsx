@@ -150,12 +150,13 @@ export const GoalsPage: React.FC<GoalsPageProps> = ({ isAdmin }) => {
     const recalcGoals = async () => {
         setRecalculating(true);
         try {
-            const { error } = await supabase.functions.invoke('sync-sponte', {
+            const { data, error } = await supabase.functions.invoke('sync-sponte', {
                 body: { mode: 'recalc_goals', start_date: `${year}-01-01`, end_date: `${year}-12-31` },
             });
             if (error) throw error;
-            await refresh();
-            showSuccess('Metas recalculadas a partir dos dados do Sponte.');
+            if (data?.error) throw new Error(data.error);
+            showSuccess('Recálculo iniciado — as metas atualizam em ~2 minutos.');
+            setTimeout(() => refresh(), 150_000);
         } catch (e: any) {
             showError('Erro ao recalcular: ' + e.message);
         } finally {
