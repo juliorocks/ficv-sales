@@ -189,8 +189,25 @@ serve(async (req) => {
             await mirror(`INSERT INTO widechat_messages [{ lead_id:leads:⟨${leadId}⟩, session_id:${sv(msg.session_id)}, message_id:${sv(msg.message_id)}, type:${sv(msg.type)}, message:${sv(msg.message)}, origin:${sv(msg.origin)}, sender_name:${sv(msg.sender_name)}, created_at:${sv(msg.created_at)} }] RETURN NONE;`);
 
             // ── CRM inteligente ───────────────────────────────────────────────
-            const { data: cur } = await db.from('leads').select('assigned_to_id, curso_interesse, valor_oportunidade').eq('id', leadId).maybeSingle();
+            const { data: cur } = await db.from('leads').select('assigned_to_id, curso_interesse, valor_oportunidade, perfil').eq('id', leadId).maybeSingle();
             const updates: Record<string, unknown> = {};
+
+            // perfil "aluno": telefone casa com matrícula do Sponte
+            if (cur?.perfil !== 'aluno' && messagePhone) {
+                const { data: al } = await db.rpc('match_aluno_by_phone', { p_phone: messagePhone }).maybeSingle();
+                if (al) {
+                    updates.perfil = 'aluno';
+                    if (!cur?.curso_interesse && al.nome_curso) {
+                        const nc = String(al.nome_curso).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+                        const { data: cs } = await db.from('courses').select('id, name');
+                        const cm = (cs ?? []).find((c: any) => {
+                            const cn = (c.name || '').toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+                            return cn && nc.includes(cn);
+                        });
+                        if (cm) updates.curso_interesse = cm.id;
+                    }
+                }
+            }
 
             if (origin === 'agent' && senderName && senderName !== 'Desconhecido' && !cur?.assigned_to_id) {
                 const first = senderName.trim().split(' ')[0].toLowerCase();

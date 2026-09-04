@@ -65,6 +65,15 @@ serve(async (req) => {
         if (error) throw error;
         const leadId = created.id;
 
+        // perfil "aluno": telefone casa com matrícula do Sponte
+        if (phone) {
+            const { data: al } = await db.rpc('match_aluno_by_phone', { p_phone: phone }).maybeSingle();
+            if (al) {
+                await db.from('leads').update({ perfil: 'aluno' }).eq('id', leadId);
+                await mirror(`UPDATE leads:⟨${leadId}⟩ SET perfil = 'aluno';`);
+            }
+        }
+
         await mirror(
             `UPDATE seq:leads SET val = math::max([val, ${leadId}]);\n` +
             `INSERT INTO leads [{ id:"${leadId}", nome_completo:${sv(name)}, email:${sv(email)}, telefone:${sv(phone || "00000000000")}, ` +

@@ -23,6 +23,7 @@ export interface Lead {
     source_id?: number | null
     temperatura?: 'frio' | 'morno' | 'quente' | null;
     status_wide?: 'ok_wide' | 'erro' | null;
+    perfil?: 'aluno' | null;
     assigned_to_id?: string | null;
     motivo_perda_id?: number | null;
     contact_count: number;

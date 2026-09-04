@@ -57,7 +57,12 @@ export function LeadCard({ lead, users, leadSources, stages, courses }: LeadCard
                         <CardTitle className="text-base font-semibold truncate flex flex-col" title={lead.nome_completo}>
                             <span>{lead.nome_completo}</span>
                             <span className="flex flex-wrap gap-1 mt-0.5">
-                                {(course || lead.observacoes?.includes('[O]')) && (
+                                {lead.perfil === 'aluno' && (
+                                    <span className="text-[10px] font-semibold bg-blue-500/15 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded w-fit">
+                                        Aluno{course ? ` · ${course.name}` : ''}
+                                    </span>
+                                )}
+                                {lead.perfil !== 'aluno' && (course || lead.observacoes?.includes('[O]')) && (
                                     <span className="text-[10px] font-normal text-muted-foreground bg-muted px-1.5 py-0.5 rounded w-fit">
                                         {course ? course.name : lead.observacoes?.match(/\[O\]\s*([^:\n]+)/)?.[1] || 'SendPulse'}
                                     </span>
