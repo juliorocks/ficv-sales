@@ -352,7 +352,11 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
                 <Alert className="rounded-none border-x-0 border-t-0 bg-blue-50/50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800">
                     <AlertCircle className="h-4 w-4 text-blue-600" />
                     <AlertDescription className="text-xs text-blue-700 dark:text-blue-400">
-                        Sem atendimento ativo no WideChat ainda. Para conversar por texto livre é preciso o cliente escrever primeiro — mas dá pra <strong>iniciar a conversa agora com um template aprovado</strong>.
+                        {messages && messages.length > 0 ? (
+                            <>Essa conversa já foi encerrada do lado do WideChat (sem sessão ativa agora). Pra continuar, é preciso <strong>iniciar de novo com um template aprovado</strong> — depois que o cliente responder, o texto livre volta a funcionar.</>
+                        ) : (
+                            <>Ainda não teve nenhuma conversa por aqui. Para texto livre é preciso o cliente escrever primeiro — mas dá pra <strong>iniciar a conversa agora com um template aprovado</strong>.</>
+                        )}
                     </AlertDescription>
                 </Alert>
             )}
