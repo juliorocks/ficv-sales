@@ -27,7 +27,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useAuth } from "@/hooks/use-auth"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { LossReasonDialog } from "./LossReasonDialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AddLeadNoteForm } from "./AddLeadNoteForm"
@@ -61,7 +61,6 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange }:
     const queryClient = useQueryClient()
     const { user, isLoading: isAuthLoading } = useAuth()
     const [isLossReasonOpen, setIsLossReasonOpen] = useState(false)
-    const [localSaving, setLocalSaving] = useState(false)
 
     const { data: users, isLoading: isLoadingUsers } = useQuery<User[]>({
         queryKey: ['users'],
@@ -167,7 +166,7 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange }:
 
     const form = useForm({
         resolver: zodResolver(formSchema),
-        values: {
+        defaultValues: {
             nome_completo: lead.nome_completo,
             email: lead.email || "",
             telefone: lead.telefone || "",
@@ -179,6 +178,27 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange }:
             curso_interesse: lead.curso_interesse || null,
         },
     })
+
+    // Reescreve os campos só quando o diálogo ABRE, não a cada refetch de `leads` em segundo
+    // plano. Antes usava `values:` (modo controlado do react-hook-form), que resincroniza sempre
+    // que o objeto `lead` muda de referência — inclusive com o diálogo já aberto e o usuário no
+    // meio de uma edição, revertendo silenciosamente a seleção antes do Salvar (bug real: o
+    // realtime dispara a QUALQUER mudança em QUALQUER lead, não só neste).
+    useEffect(() => {
+        if (!isOpen) return;
+        form.reset({
+            nome_completo: lead.nome_completo,
+            email: lead.email || "",
+            telefone: lead.telefone || "",
+            valor_oportunidade: lead.valor_oportunidade || 0,
+            observacoes: lead.observacoes || "",
+            temperatura: lead.temperatura || 'frio',
+            assigned_to_id: lead.assigned_to_id || null,
+            source_id: lead.source_id || null,
+            curso_interesse: lead.curso_interesse || null,
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isOpen, lead.id]);
 
 
     const moveLeadMutation = useMutation({
@@ -331,7 +351,7 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange }:
                                                     </>
                                                 )}
                                                 <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancelar</Button>
-                                                <Button type="submit" disabled={localSaving}>{localSaving ? "Salvando..." : "Salvar"}</Button>
+                                                <Button type="submit" disabled={updateLeadMutation.isPending}>{updateLeadMutation.isPending ? "Salvando..." : "Salvar"}</Button>
                                             </div>
                                         </DialogFooter>
                                     </form>

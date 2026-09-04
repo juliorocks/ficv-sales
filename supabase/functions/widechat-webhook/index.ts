@@ -97,7 +97,12 @@ serve(async (req) => {
 
         const CONV_END_WEBHOOKS = ["attendance_end", "finalize", "attendance_closed", "attendance_finish"];
         const CONV_END_EVENTS = ["attendanceEnd", "finalize", "closed", "attendance_end", "finalized", "attendanceClosed", "autoFinish", "humanFinish"];
-        const isConversationEnd = CONV_END_WEBHOOKS.includes(webhookEvent) || CONV_END_EVENTS.includes(eventName);
+        // o WideChat manda "Atendimento Finalizado!"/"Conversa finalizada com sucesso!" como
+        // mensagem normal do bot (origin=auto), não como um event/webhook.key estruturado — só dá
+        // pra pegar pelo TEXTO da mensagem de fechamento.
+        const CONV_END_TEXT = /atendimento finalizado|conversa finalizada|atendimento encerrado/i;
+        const isConversationEnd = CONV_END_WEBHOOKS.includes(webhookEvent) || CONV_END_EVENTS.includes(eventName)
+            || CONV_END_TEXT.test(messageText);
         const isAcceptAttendance = webhookEvent === "accept_attendance" || eventName === "humanStart";
         const isSystemNotif = ["messageNotificationAgent", "Read", "Delivered"].includes(eventName);
         const isMessage = !isSystemNotif && (
