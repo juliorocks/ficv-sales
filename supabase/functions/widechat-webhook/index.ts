@@ -51,6 +51,16 @@ serve(async (req) => {
         const LEAD_CHANNELS = (Deno.env.get('WIDECHAT_LEAD_CHANNELS')
             ?? '694534a0132843fbb436bd48').split(',').map(s => s.trim()).filter(Boolean);
 
+        // O número da Faculdade é compartilhado com outros setores do grupo (RH,
+        // Secretaria, Escola, Fundação). Só queremos a fila FICV - COMERCIAL.
+        const queueVal = String(data?.transferHistory?.value ?? "");
+        const agentName = String(msgData.user?.name ?? data?.name ?? "");
+        const NON_COMMERCIAL = /\b(RH|secretaria|financeiro|escola|funda[çc][ãa]o|sistema cidade viva)\b/i;
+        const isNonCommercial =
+            (queueVal && !/comercial/i.test(queueVal) && NON_COMMERCIAL.test(queueVal)) ||
+            NON_COMMERCIAL.test(agentName) ||
+            NON_COMMERCIAL.test(String(msgData.prefix ?? ""));
+
         const CONV_END_WEBHOOKS = ["attendance_end", "finalize", "attendance_closed", "attendance_finish"];
         const CONV_END_EVENTS = ["attendanceEnd", "finalize", "closed", "attendance_end", "finalized", "attendanceClosed", "autoFinish", "humanFinish"];
         const isConversationEnd = CONV_END_WEBHOOKS.includes(webhookEvent) || CONV_END_EVENTS.includes(eventName);
@@ -108,7 +118,29 @@ serve(async (req) => {
                 if (leadId) foundBy = "phone";
             }
         }
-        console.log(`event=${eventName} wh=${webhookEvent} lead=${leadId}(${foundBy}) session=${sessionId}`);
+        console.log(`event=${eventName} wh=${webhookEvent} lead=${leadId}(${foundBy}) session=${sessionId} nonComm=${isNonCommercial} q=${queueVal} agent=${agentName}`);
+
+        const { data: stg0 } = await db.from('stages').select('id').order('order', { ascending: true }).limit(1).maybeSingle();
+        const firstStageId = stg0?.id ?? 1;
+
+        // ── setor não-comercial (RH/Secretaria/Escola/Fundação) ───────────────
+        if (isNonCommercial) {
+            // se um lead vazou pra esse contato e ninguém da comercial trabalhou nele, remove
+            if (leadId) {
+                const { data: l } = await db.from('leads')
+                    .select('id, assigned_to_id, stage_id').eq('id', leadId).maybeSingle();
+                const { count: notes } = await db.from('lead_notes')
+                    .select('id', { count: 'exact', head: true }).eq('lead_id', leadId);
+                if (l && !l.assigned_to_id && l.stage_id === firstStageId && !notes) {
+                    await db.from('widechat_messages').delete().eq('lead_id', leadId);
+                    await db.from('widechat_atendimentos').delete().eq('lead_id', leadId);
+                    await db.from('leads').delete().eq('id', leadId);
+                    await mirror(`DELETE leads:⟨${leadId}⟩; DELETE widechat_messages WHERE lead_id = leads:⟨${leadId}⟩;`);
+                    return j({ success: true, ignored: true, reason: `setor não-comercial (${queueVal || agentName}) — lead ${leadId} removido` });
+                }
+            }
+            return j({ success: true, ignored: true, reason: `setor não-comercial (${queueVal || agentName})` });
+        }
 
         // ── accept attendance ─────────────────────────────────────────────────
         if (isAcceptAttendance) {
@@ -160,8 +192,6 @@ serve(async (req) => {
         const sourceId = src?.id ?? 8;
 
         // ── achar-ou-criar lead (atômico, sem corrida) ───────────────────────
-        const { data: st } = await db.from('stages').select('id').order('order', { ascending: true }).limit(1).maybeSingle();
-        const firstStageId = st?.id ?? 1;
         const now = new Date().toISOString();
         const leadName = senderName.trim() || `Lead WhatsApp - ${messagePhone}`;
         const { data: foc, error: focErr } = await db.rpc('wc_find_or_create_lead', {
