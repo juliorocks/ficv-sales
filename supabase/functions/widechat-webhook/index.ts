@@ -52,14 +52,22 @@ serve(async (req) => {
             ?? '694534a0132843fbb436bd48').split(',').map(s => s.trim()).filter(Boolean);
 
         // O número da Faculdade é compartilhado com outros setores do grupo (RH,
-        // Secretaria, Escola, Fundação). Só queremos a fila FICV - COMERCIAL.
+        // Secretaria, Escola, Fundação, Igreja). Só queremos a fila FICV - COMERCIAL.
         const queueVal = String(data?.transferHistory?.value ?? "");
-        const agentName = String(msgData.user?.name ?? data?.name ?? "");
-        const NON_COMMERCIAL = /\b(RH|secretaria|financeiro|escola|funda[çc][ãa]o|sistema cidade viva)\b/i;
+        // nome do agente: content.user.name, data.name, ou o prefixo "*Nome:*" da mensagem
+        const prefixName = (String(messageText).match(/^\*([^:*]+):\*/) ?? [])[1] ?? "";
+        const agentName = String(msgData.user?.name ?? data?.name ?? prefixName ?? "");
+        const NON_COMMERCIAL = /\b(RH|secretaria|financeiro|escola|funda[çc][ãa]o|sistema cidade viva|conex[ãa]o de casais)\b/i;
+        // agentes de outros setores sem marcador no nome (extensível via env)
+        const BLOCK_AGENTS = (Deno.env.get('WIDECHAT_BLOCK_AGENTS')
+            ?? 'kardilania almeida,alméria,almeria,thaysa paredes').toLowerCase()
+            .split(',').map(s => s.trim()).filter(Boolean);
+        const agentLc = agentName.toLowerCase();
         const isNonCommercial =
             (queueVal && !/comercial/i.test(queueVal) && NON_COMMERCIAL.test(queueVal)) ||
             NON_COMMERCIAL.test(agentName) ||
-            NON_COMMERCIAL.test(String(msgData.prefix ?? ""));
+            NON_COMMERCIAL.test(String(msgData.prefix ?? "")) ||
+            BLOCK_AGENTS.some(a => agentLc.includes(a));
 
         const CONV_END_WEBHOOKS = ["attendance_end", "finalize", "attendance_closed", "attendance_finish"];
         const CONV_END_EVENTS = ["attendanceEnd", "finalize", "closed", "attendance_end", "finalized", "attendanceClosed", "autoFinish", "humanFinish"];
