@@ -143,35 +143,35 @@ serve(async (req) => {
         const { data: src } = await db.from('lead_sources').select('id').ilike('name', '%widechat%').limit(1).maybeSingle();
         const sourceId = src?.id ?? 8;
 
-        // ── criar / atualizar lead ───────────────────────────────────────────
-        if (leadId) {
-            const patch: Record<string, unknown> = { source_id: sourceId, fonte_lead: "Widechat", updated_at: new Date().toISOString() };
+        // ── achar-ou-criar lead (atômico, sem corrida) ───────────────────────
+        const { data: st } = await db.from('stages').select('id').order('order', { ascending: true }).limit(1).maybeSingle();
+        const firstStageId = st?.id ?? 1;
+        const now = new Date().toISOString();
+        const leadName = senderName.trim() || `Lead WhatsApp - ${messagePhone}`;
+        const { data: foc, error: focErr } = await db.rpc('wc_find_or_create_lead', {
+            p_session: sessionId ?? null, p_contact: data?.contact_id ?? null,
+            p_phone: messagePhone || null, p_name: leadName,
+            p_stage_id: firstStageId, p_source_id: sourceId,
+        }).single();
+        if (focErr) throw focErr;
+        leadId = (foc as { lead_id: number }).lead_id;
+        const wasCreated = (foc as { created: boolean }).created;
+
+        if (wasCreated) {
+            await mirror(
+                `UPDATE seq:leads SET val = math::max([val, ${leadId}]);\n` +
+                `INSERT INTO leads [{ id:"${leadId}", nome_completo:${sv(leadName)}, telefone:${sv(messagePhone || "00000000000")}, ` +
+                `stage_id:stages:⟨${firstStageId}⟩, source_id:lead_sources:⟨${sourceId}⟩, fonte_lead:"Widechat", ` +
+                `widechat_contact_id:${sv(data?.contact_id ?? null)}, widechat_session_id:${sv(sessionId ?? null)}, ` +
+                `temperatura:"frio", data_entrada:d${sv(now)}, valor_oportunidade:0 }] RETURN NONE;`
+            );
+        } else {
+            const patch: Record<string, unknown> = { source_id: sourceId, fonte_lead: "Widechat", updated_at: now };
             if (data?.contact_id) patch.widechat_contact_id = data.contact_id;
             if (sessionId) patch.widechat_session_id = sessionId;
             await db.from('leads').update(patch).eq('id', leadId);
             const sets = Object.entries(patch).map(([k, v]) => k === 'source_id' ? `source_id = lead_sources:⟨${v}⟩` : `${k} = ${sv(v)}`).join(', ');
             await mirror(`UPDATE leads SET ${sets} WHERE id = leads:⟨${leadId}⟩;`);
-        } else {
-            const { data: st } = await db.from('stages').select('id').order('order', { ascending: true }).limit(1).maybeSingle();
-            const firstStageId = st?.id ?? 1;
-            const now = new Date().toISOString();
-            const newLead = {
-                nome_completo: senderName.trim() || `Lead WhatsApp - ${messagePhone}`,
-                telefone: messagePhone || "00000000000",
-                stage_id: firstStageId, source_id: sourceId, fonte_lead: "Widechat",
-                widechat_contact_id: data?.contact_id ?? null, widechat_session_id: sessionId ?? null,
-                temperatura: "frio", data_entrada: now, valor_oportunidade: 0,
-            };
-            const { data: created, error } = await db.from('leads').insert(newLead).select('id').single();
-            if (error) throw error;
-            leadId = created.id;
-            await mirror(
-                `UPDATE seq:leads SET val = math::max([val, ${leadId}]);\n` +
-                `INSERT INTO leads [{ id:"${leadId}", nome_completo:${sv(newLead.nome_completo)}, telefone:${sv(newLead.telefone)}, ` +
-                `stage_id:stages:⟨${firstStageId}⟩, source_id:lead_sources:⟨${sourceId}⟩, fonte_lead:"Widechat", ` +
-                `widechat_contact_id:${sv(newLead.widechat_contact_id)}, widechat_session_id:${sv(newLead.widechat_session_id)}, ` +
-                `temperatura:"frio", data_entrada:d${sv(now)}, valor_oportunidade:0 }] RETURN NONE;`
-            );
         }
 
         // ── mensagem ─────────────────────────────────────────────────────────
