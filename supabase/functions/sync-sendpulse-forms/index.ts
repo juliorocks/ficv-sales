@@ -150,7 +150,10 @@ serve(async (req) => {
                 await db.from('leads').update({
                     contact_count: (hit.cc ?? 0) + 1,
                     updated_at: new Date().toISOString(),
-                    ...(isStaleReentry ? { data_entrada: noteAt } : {}),
+                    // "Data no Estágio" (stage_entry_date) é o critério de ordenação PADRÃO da
+                    // coluna no Kanban (não data_entrada) — sem bumpar os dois, o card continua
+                    // enterrado no fim da lista mesmo com data_entrada corrigida.
+                    ...(isStaleReentry ? { data_entrada: noteAt, stage_entry_date: noteAt } : {}),
                     ...(courseId != null && (isStaleReentry || hit.curso == null) ? { curso_interesse: courseId } : {}),
                     ...(fillEmail ? { email } : {}),
                     ...(cameFromWidechat ? { fonte_lead: form.form_name, source_id: sourceId } : {}),
@@ -163,7 +166,7 @@ serve(async (req) => {
                 await db.from('lead_notes').insert({ lead_id: hit.id, note: nota, created_at: noteAt });
                 await mirror(
                     `UPDATE leads:⟨${hit.id}⟩ SET contact_count = (contact_count ?? 0) + 1, updated_at = time::now()` +
-                    (isStaleReentry ? `, data_entrada = d${sv(noteAt)}` : '') +
+                    (isStaleReentry ? `, data_entrada = d${sv(noteAt)}, stage_entry_date = d${sv(noteAt)}` : '') +
                     (courseId != null && (isStaleReentry || hit.curso == null) ? `, curso_interesse = courses:⟨${courseId}⟩` : '') +
                     (fillEmail ? `, email = ${sv(email)}` : '') +
                     (cameFromWidechat ? `, fonte_lead = ${sv(form.form_name)}, source_id = lead_sources:⟨${sourceId}⟩` : '') + `;\n` +

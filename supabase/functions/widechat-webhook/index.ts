@@ -264,7 +264,10 @@ serve(async (req) => {
             if (data?.contact_id) patch.widechat_contact_id = data.contact_id;
             if (sessionId) patch.widechat_session_id = sessionId;
             if (justConfirmed) patch.status_wide = 'ok_wide';
-            if (isStaleReentry) patch.data_entrada = now;
+            // "Data no Estágio" (stage_entry_date) é o critério de ordenação PADRÃO da coluna no
+            // Kanban (não data_entrada) — sem bumpar os dois, o card continua enterrado no fim
+            // da lista mesmo com data_entrada corrigida.
+            if (isStaleReentry) { patch.data_entrada = now; patch.stage_entry_date = now; }
             await db.from('leads').update(patch).eq('id', leadId);
             const sets = Object.entries(patch).map(([k, v]) => k === 'source_id' ? `source_id = lead_sources:⟨${v}⟩` : `${k} = ${sv(v)}`).join(', ');
             await mirror(`UPDATE leads SET ${sets} WHERE id = leads:⟨${leadId}⟩;`);
