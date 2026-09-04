@@ -18,17 +18,19 @@ export function AssignedUser({ userId, users }: AssignedUserProps) {
         return null
     }
 
+    const nome = user.full_name || 'Sem nome'
+
     return (
         <TooltipProvider delayDuration={100}>
             <Tooltip>
                 <TooltipTrigger>
                     <Avatar className="h-6 w-6">
-                        <AvatarImage src={user.avatar_url || undefined} alt={user.full_name} />
-                        <AvatarFallback>{user.full_name.slice(0, 2).toUpperCase()}</AvatarFallback>
+                        <AvatarImage src={user.avatar_url || undefined} alt={nome} />
+                        <AvatarFallback>{nome.slice(0, 2).toUpperCase()}</AvatarFallback>
                     </Avatar>
                 </TooltipTrigger>
                 <TooltipContent>
-                    <p>Responsável: {user.full_name}</p>
+                    <p>Responsável: {nome}</p>
                 </TooltipContent>
             </Tooltip>
         </TooltipProvider>
