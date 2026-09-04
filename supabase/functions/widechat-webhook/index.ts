@@ -44,6 +44,12 @@ serve(async (req) => {
 
         const eventName = String(data?.event || event || "");
         const sessionId = data?.session_id || msgData.session_id;
+        const channelId = data?.channel_id || msgData.channel_id || "";
+
+        // Só criamos lead das conversas do WhatsApp da FACULDADE (não Escola / outras
+        // empresas do grupo). Transcript continua sendo gravado pra todos os canais.
+        const LEAD_CHANNELS = (Deno.env.get('WIDECHAT_LEAD_CHANNELS')
+            ?? '694534a0132843fbb436bd48').split(',').map(s => s.trim()).filter(Boolean);
 
         const CONV_END_WEBHOOKS = ["attendance_end", "finalize", "attendance_closed", "attendance_finish"];
         const CONV_END_EVENTS = ["attendanceEnd", "finalize", "closed", "attendance_end", "finalized", "attendanceClosed", "autoFinish", "humanFinish"];
@@ -67,6 +73,7 @@ serve(async (req) => {
                 platform_id: messagePhone || msgData.platform_id || "",
                 message_id: msgData.message_id ?? null,
                 created_at: wcToISO(msgData.created_at),
+                payload: { channel_id: channelId, event: eventName, wh: webhookEvent, vars: payload.vars, data },
             };
             await db.from('widechat_raw_messages').insert(raw);
             await mirror(`INSERT INTO widechat_raw_messages [{ session_id:${sv(raw.session_id)}, origin:${sv(raw.origin)}, sender_name:${sv(raw.sender_name)}, message:${sv(raw.message)}, platform_id:${sv(raw.platform_id)}, message_id:${sv(raw.message_id)}, created_at:${sv(raw.created_at)} }] RETURN NONE;`);
@@ -134,9 +141,18 @@ serve(async (req) => {
         if (isTransfer && queueName && queueName !== TARGET_QUEUE)
             return j({ success: true, ignored: true, reason: `Queue ${queueName} is not ${TARGET_QUEUE}` });
         if (!leadId) {
+            // canal errado (Escola / outra empresa do grupo) → só transcript, sem lead
+            if (channelId && !LEAD_CHANNELS.includes(channelId))
+                return j({ success: true, ignored: true, reason: `channel ${channelId} não é da Faculdade` });
+            // sem channel_id identificável → não cria lead novo (estrito)
+            if (!channelId)
+                return j({ success: true, ignored: true, reason: "sem channel_id — lead novo não criado" });
             const belongsToTargetQueue = !queueName || queueName === TARGET_QUEUE;
             if (!belongsToTargetQueue || (!hasPhone && !hasName))
                 return j({ success: true, ignored: true, reason: "Lead admission denied" });
+        } else if (channelId && !LEAD_CHANNELS.includes(channelId)) {
+            // lead já existe mas veio por canal errado — não mexe nele
+            return j({ success: true, ignored: true, reason: `channel ${channelId} não é da Faculdade (lead existente intacto)` });
         }
 
         // ── source ────────────────────────────────────────────────────────────
