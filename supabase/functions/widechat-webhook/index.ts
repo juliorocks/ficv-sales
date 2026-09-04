@@ -220,20 +220,36 @@ serve(async (req) => {
         const wasCreated = (foc as { created: boolean }).created;
 
         if (wasCreated) {
+            // lead nasceu agora pelo Widechat: o próprio contato via WhatsApp já É a confirmação.
             await mirror(
                 `UPDATE seq:leads SET val = math::max([val, ${leadId}]);\n` +
                 `INSERT INTO leads [{ id:"${leadId}", nome_completo:${sv(leadName)}, telefone:${sv(messagePhone || "00000000000")}, ` +
                 `stage_id:stages:⟨${firstStageId}⟩, source_id:lead_sources:⟨${sourceId}⟩, fonte_lead:"Widechat", ` +
                 `widechat_contact_id:${sv(data?.contact_id ?? null)}, widechat_session_id:${sv(sessionId ?? null)}, ` +
-                `temperatura:"frio", data_entrada:d${sv(now)}, valor_oportunidade:0 }] RETURN NONE;`
+                `temperatura:"frio", data_entrada:d${sv(now)}, valor_oportunidade:0, status_wide:"ok_wide" }] RETURN NONE;`
             );
         } else {
-            const patch: Record<string, unknown> = { source_id: sourceId, fonte_lead: "Widechat", updated_at: now };
+            // lead já existia — pode ter vindo antes do formulário do SendPulse (LP → form → link do
+            // WhatsApp). Nesse caso NÃO sobrescreve fonte_lead/source_id (preserva a origem/atribuição
+            // de marketing), só confirma que o contato de fato prosseguiu pro WhatsApp.
+            const { data: existing } = await db.from('leads').select('fonte_lead, status_wide').eq('id', leadId).maybeSingle();
+            const cameFromForm = !!existing?.fonte_lead && existing.fonte_lead !== 'Widechat';
+            const justConfirmed = existing?.status_wide !== 'ok_wide';
+
+            const patch: Record<string, unknown> = { updated_at: now };
+            if (!cameFromForm) { patch.source_id = sourceId; patch.fonte_lead = 'Widechat'; }
             if (data?.contact_id) patch.widechat_contact_id = data.contact_id;
             if (sessionId) patch.widechat_session_id = sessionId;
+            if (justConfirmed) patch.status_wide = 'ok_wide';
             await db.from('leads').update(patch).eq('id', leadId);
             const sets = Object.entries(patch).map(([k, v]) => k === 'source_id' ? `source_id = lead_sources:⟨${v}⟩` : `${k} = ${sv(v)}`).join(', ');
             await mirror(`UPDATE leads SET ${sets} WHERE id = leads:⟨${leadId}⟩;`);
+
+            if (justConfirmed) {
+                const nota = `✅ Confirmado contato via WhatsApp (${new Date(now).toLocaleDateString('pt-BR')})`;
+                await db.from('lead_notes').insert({ lead_id: leadId, note: nota, created_at: now });
+                await mirror(`INSERT INTO lead_notes [{ lead_id: leads:⟨${leadId}⟩, note: ${sv(nota)}, created_at: d${sv(now)} }] RETURN NONE;`);
+            }
         }
 
         // ── mensagem ─────────────────────────────────────────────────────────

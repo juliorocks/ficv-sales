@@ -98,17 +98,18 @@ serve(async (req) => {
         // 2. dedup contra Postgres (email/telefone indexados)
         const emails = [...new Set(candidates.map(c => normEmail(c.sub.email)).filter(Boolean))];
         const phones = [...new Set(candidates.map(c => onlyDigits(c.sub.phone)).filter(validPhone))];
-        const byEmail = new Map<string, { id: number; email: string | null; curso: number | null; cc: number }>();
-        const byPhone = new Map<string, { id: number; email: string | null; curso: number | null; cc: number }>();
+        type Hit = { id: number; email: string | null; curso: number | null; cc: number; fonte: string | null };
+        const byEmail = new Map<string, Hit>();
+        const byPhone = new Map<string, Hit>();
         for (let i = 0; i < emails.length; i += 300) {
-            const { data } = await db.from('leads').select('id, email, telefone, curso_interesse, contact_count')
+            const { data } = await db.from('leads').select('id, email, telefone, curso_interesse, contact_count, fonte_lead')
                 .in('email', emails.slice(i, i + 300));
-            for (const r of data ?? []) if (r.email) byEmail.set(String(r.email).toLowerCase(), { id: r.id, email: r.email, curso: r.curso_interesse, cc: r.contact_count ?? 0 });
+            for (const r of data ?? []) if (r.email) byEmail.set(String(r.email).toLowerCase(), { id: r.id, email: r.email, curso: r.curso_interesse, cc: r.contact_count ?? 0, fonte: r.fonte_lead });
         }
         for (let i = 0; i < phones.length; i += 300) {
-            const { data } = await db.from('leads').select('id, telefone, email, curso_interesse, contact_count')
+            const { data } = await db.from('leads').select('id, telefone, email, curso_interesse, contact_count, fonte_lead')
                 .in('telefone', phones.slice(i, i + 300));
-            for (const r of data ?? []) byPhone.set(onlyDigits(r.telefone), { id: r.id, email: r.email, curso: r.curso_interesse, cc: r.contact_count ?? 0 });
+            for (const r of data ?? []) byPhone.set(onlyDigits(r.telefone), { id: r.id, email: r.email, curso: r.curso_interesse, cc: r.contact_count ?? 0, fonte: r.fonte_lead });
         }
 
         // 3. processa (antigo -> novo)
@@ -123,33 +124,38 @@ serve(async (req) => {
             const courseId: number | null = form.course_id != null ? Number(form.course_id) : null;
             const cName = courseId != null ? (courseName.get(courseId) ?? '') : '';
 
+            const sourceId = form.source_id != null ? Number(form.source_id) : 1;
             const hit = (email && byEmail.get(email)) || (validPhone(phone) && byPhone.get(phone))
-                || (email && createdByEmail.has(email) && { id: createdByEmail.get(email)!, email, curso: courseId, cc: 1 })
-                || (validPhone(phone) && createdByPhone.has(phone) && { id: createdByPhone.get(phone)!, email: null, curso: courseId, cc: 1 }) || null;
+                || (email && createdByEmail.has(email) && { id: createdByEmail.get(email)!, email, curso: courseId, cc: 1, fonte: form.form_name })
+                || (validPhone(phone) && createdByPhone.has(phone) && { id: createdByPhone.get(phone)!, email: null, curso: courseId, cc: 1, fonte: form.form_name }) || null;
 
             if (hit) {
                 const nota = `📋 Novo formulário: ${form.form_name}` + (cName ? ` — interesse em ${cName}` : '')
                     + ` (${dataBR(spDateToISO(String(sub.add_date || '')))})`;
                 const noteAt = spDateToISO(String(sub.add_date || ''));
                 const fillEmail = !hit.email && !!email;
+                // se o lead nasceu antes pelo Widechat (chegou no Whats antes do poller rodar),
+                // agora que sabemos o formulário/curso real, corrige a origem/atribuição.
+                const cameFromWidechat = hit.fonte === 'Widechat';
                 await db.from('leads').update({
                     contact_count: (hit.cc ?? 0) + 1,
                     updated_at: new Date().toISOString(),
                     ...(hit.curso == null && courseId != null ? { curso_interesse: courseId } : {}),
                     ...(fillEmail ? { email } : {}),
+                    ...(cameFromWidechat ? { fonte_lead: form.form_name, source_id: sourceId } : {}),
                 }).eq('id', hit.id);
                 await db.from('lead_notes').insert({ lead_id: hit.id, note: nota, created_at: noteAt });
                 await mirror(
                     `UPDATE leads:⟨${hit.id}⟩ SET contact_count = (contact_count ?? 0) + 1, updated_at = time::now()` +
                     (hit.curso == null && courseId != null ? `, curso_interesse = courses:⟨${courseId}⟩` : '') +
-                    (fillEmail ? `, email = ${sv(email)}` : '') + `;\n` +
+                    (fillEmail ? `, email = ${sv(email)}` : '') +
+                    (cameFromWidechat ? `, fonte_lead = ${sv(form.form_name)}, source_id = lead_sources:⟨${sourceId}⟩` : '') + `;\n` +
                     `INSERT INTO lead_notes [{ lead_id: leads:⟨${hit.id}⟩, note: ${sv(nota)}, created_at: d${sv(noteAt)} }] RETURN NONE;`
                 );
                 reentradas++;
                 continue;
             }
 
-            const sourceId = form.source_id != null ? Number(form.source_id) : 1;
             const valor = courseId != null ? (courseVal.get(courseId) ?? 0) : 0;
             const v = sub.variables ?? {};
             const local = [v.autoCity, v.autoRegion].filter(Boolean).join(' / ');
