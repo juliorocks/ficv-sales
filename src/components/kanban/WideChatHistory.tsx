@@ -3,12 +3,17 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabase"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
-import { AlertCircle, MessageSquare, Send, Loader2, FileText } from "lucide-react"
+import { AlertCircle, MessageSquare, Send, Loader2, FileText, Zap, Plus } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 import { showError, showSuccess } from "@/utils/toast"
+
+// Canal padrão da Faculdade (mesmo default usado no widechat-webhook) — usado como
+// fallback pra listar/enviar template quando ainda não existe nenhum atendimento
+// (ex: iniciar conversa nova com um lead que só preencheu formulário até agora).
+const DEFAULT_CHANNEL_ID = '694534a0132843fbb436bd48'
 
 interface WideChatHistoryProps {
     widechatContactId: string
@@ -150,18 +155,21 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
         ? (Date.now() - new Date(attendance.lastInteraction).getTime()) < 24 * 3600 * 1000
         : false
     const canSendText = !!attendance?.channel_id && within24h
+    // sem atendimento (ainda) ativo -> usa o canal padrão pra listar/enviar template e
+    // iniciar a conversa do zero, em vez de ficar travado esperando o cliente escrever primeiro.
+    const effectiveChannelId = attendance?.channel_id || DEFAULT_CHANNEL_ID
 
     const sendMessageMutation = useMutation({
         mutationFn: async (arg: string | { hsm_template_name: string; hsm_placeholders: string[]; preview: string }) => {
-            if (!attendance?.channel_id) throw new Error("Sem atendimento ativo no WideChat para este cliente.")
             const isHsm = typeof arg !== 'string'
+            if (!isHsm && !attendance?.channel_id) throw new Error("Sem atendimento ativo no WideChat para este cliente.")
             const { data, error } = await supabase.functions.invoke('widechat-api', {
                 body: {
                     action: 'send_message',
                     platform_id: phoneDigits,
-                    channel_id: attendance.channel_id,
-                    attendance_id: attendance._id,
-                    contact_name: attendance.contact_name,
+                    channel_id: effectiveChannelId,
+                    attendance_id: attendance?._id,
+                    contact_name: attendance?.contact_name,
                     ...(isHsm
                         ? { is_hsm: true, hsm_template_name: arg.hsm_template_name, hsm_placeholders: arg.hsm_placeholders, message: arg.preview }
                         : { message: arg }),
@@ -197,17 +205,45 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
         setNewMessage("")
     }
 
-    // Templates HSM — usados quando a janela de 24h fechou
+    // Templates HSM — usados quando a janela de 24h fechou OU quando ainda não existe
+    // nenhum atendimento (inicia a conversa do zero com um template aprovado).
     const { data: hsm } = useQuery<any[]>({
-        queryKey: ['widechat-hsm', attendance?.channel_id],
+        queryKey: ['widechat-hsm', effectiveChannelId],
         queryFn: async () => {
             const { data } = await supabase.functions.invoke('widechat-api', {
-                body: { action: 'list_hsm', channel_id: attendance?.channel_id, attendance_id: attendance?._id },
+                body: { action: 'list_hsm', channel_id: effectiveChannelId, attendance_id: attendance?._id },
             })
             return data?.error ? [] : (data?.templates ?? [])
         },
-        enabled: !!attendance?.channel_id && !within24h,
+        enabled: !canSendText && phoneDigits.length >= 8,
         staleTime: 5 * 60_000,
+    })
+
+    // Mensagens rápidas (atalhos nossos, não dependem do WideChat)
+    const { data: quickReplies } = useQuery<{ id: number; title: string; content: string }[]>({
+        queryKey: ['quick-replies'],
+        queryFn: async () => {
+            const { data, error } = await supabase.from('quick_replies').select('id, title, content').order('title')
+            if (error) throw error
+            return data || []
+        },
+        staleTime: 5 * 60_000,
+    })
+
+    const addQuickReplyMutation = useMutation({
+        mutationFn: async () => {
+            const title = window.prompt('Título do atalho (ex: "Pedir documento"):')
+            if (!title) return null
+            const content = window.prompt('Texto da mensagem:')
+            if (!content) return null
+            const { error } = await supabase.from('quick_replies').insert({ title, content })
+            if (error) throw error
+            return true
+        },
+        onSuccess: (created) => {
+            if (created) { showSuccess('Atalho criado.'); queryClient.invalidateQueries({ queryKey: ['quick-replies'] }) }
+        },
+        onError: (e: any) => showError(`Erro ao criar atalho: ${e.message}`),
     })
 
     const sendTemplate = (t: any) => {
@@ -246,7 +282,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
                 <Alert className="rounded-none border-x-0 border-t-0 bg-blue-50/50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800">
                     <AlertCircle className="h-4 w-4 text-blue-600" />
                     <AlertDescription className="text-xs text-blue-700 dark:text-blue-400">
-                        Sem atendimento ativo no WideChat. O envio é habilitado quando o cliente tem uma conversa aberta.
+                        Sem atendimento ativo no WideChat ainda. Para conversar por texto livre é preciso o cliente escrever primeiro — mas dá pra <strong>iniciar a conversa agora com um template aprovado</strong>.
                     </AlertDescription>
                 </Alert>
             )}
@@ -297,9 +333,31 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
                 )}
             </ScrollArea>
 
-            <div className="p-3 border-t border-slate-200 bg-slate-50">
+            <div className="p-3 border-t border-slate-200 bg-slate-50 space-y-2">
                 {canSendText ? (
                     <form onSubmit={handleSend} className="flex gap-2 items-center">
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button type="button" variant="outline" size="icon" className="rounded-full shrink-0 text-slate-600" title="Mensagens rápidas">
+                                    <Zap className="h-4 w-4" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start" className="w-72 max-h-80 overflow-y-auto">
+                                <DropdownMenuLabel>Mensagens rápidas</DropdownMenuLabel>
+                                <DropdownMenuSeparator />
+                                {(!quickReplies || quickReplies.length === 0) && <div className="px-2 py-3 text-xs text-muted-foreground">Nenhum atalho cadastrado ainda.</div>}
+                                {quickReplies?.map((q) => (
+                                    <DropdownMenuItem key={q.id} onClick={() => setNewMessage((prev) => prev ? `${prev} ${q.content}` : q.content)} className="flex flex-col items-start gap-0.5">
+                                        <span className="font-medium">{q.title}</span>
+                                        <span className="text-[11px] text-muted-foreground line-clamp-2">{q.content}</span>
+                                    </DropdownMenuItem>
+                                ))}
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={() => addQuickReplyMutation.mutate()} className="gap-2 text-primary">
+                                    <Plus className="h-3.5 w-3.5" /> Novo atalho
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
                         <Input
                             value={newMessage}
                             onChange={(e) => setNewMessage(e.target.value)}
@@ -313,12 +371,12 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
                             {sendMessageMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                         </Button>
                     </form>
-                ) : attendance && !within24h ? (
+                ) : (
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                             <Button variant="outline" className="w-full gap-2 text-slate-700" disabled={sendMessageMutation.isPending}>
                                 {sendMessageMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-                                Enviar template
+                                {attendance ? "Enviar template" : "Iniciar conversa (template)"}
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="start" className="w-72 max-h-80 overflow-y-auto">
@@ -335,9 +393,6 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
                             ))}
                         </DropdownMenuContent>
                     </DropdownMenu>
-                ) : (
-                    <Input disabled placeholder="Envio desabilitado (sem atendimento ativo)..."
-                        className="flex-1 bg-white text-slate-400 border-slate-200 rounded-full px-4 opacity-70" />
                 )}
             </div>
         </div>
