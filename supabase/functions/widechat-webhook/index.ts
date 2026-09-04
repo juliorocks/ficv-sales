@@ -250,15 +250,21 @@ serve(async (req) => {
             // lead já existia — pode ter vindo antes do formulário do SendPulse (LP → form → link do
             // WhatsApp). Nesse caso NÃO sobrescreve fonte_lead/source_id (preserva a origem/atribuição
             // de marketing), só confirma que o contato de fato prosseguiu pro WhatsApp.
-            const { data: existing } = await db.from('leads').select('fonte_lead, status_wide').eq('id', leadId).maybeSingle();
+            const { data: existing } = await db.from('leads').select('fonte_lead, status_wide, stage_id').eq('id', leadId).maybeSingle();
             const cameFromForm = !!existing?.fonte_lead && existing.fonte_lead !== 'Widechat';
             const justConfirmed = existing?.status_wide !== 'ok_wide';
+            // lead "esquecido" (ainda em Entrada) que volta a dar sinal de vida — o Kanban busca só
+            // os ~500 mais recentes por data_entrada, então um lead antigo intocado fica invisível
+            // pra sempre pro time comercial mesmo com contato novo acontecendo agora. Traz de volta
+            // pro topo. Lead que já saiu de Entrada (alguém já está trabalhando) não mexe na data.
+            const isStaleReentry = existing?.stage_id === firstStageId;
 
             const patch: Record<string, unknown> = { updated_at: now };
             if (!cameFromForm) { patch.source_id = sourceId; patch.fonte_lead = 'Widechat'; }
             if (data?.contact_id) patch.widechat_contact_id = data.contact_id;
             if (sessionId) patch.widechat_session_id = sessionId;
             if (justConfirmed) patch.status_wide = 'ok_wide';
+            if (isStaleReentry) patch.data_entrada = now;
             await db.from('leads').update(patch).eq('id', leadId);
             const sets = Object.entries(patch).map(([k, v]) => k === 'source_id' ? `source_id = lead_sources:⟨${v}⟩` : `${k} = ${sv(v)}`).join(', ');
             await mirror(`UPDATE leads SET ${sets} WHERE id = leads:⟨${leadId}⟩;`);

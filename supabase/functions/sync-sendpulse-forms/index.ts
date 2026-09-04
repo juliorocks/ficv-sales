@@ -98,18 +98,18 @@ serve(async (req) => {
         // 2. dedup contra Postgres (email/telefone indexados)
         const emails = [...new Set(candidates.map(c => normEmail(c.sub.email)).filter(Boolean))];
         const phones = [...new Set(candidates.map(c => onlyDigits(c.sub.phone)).filter(validPhone))];
-        type Hit = { id: number; email: string | null; curso: number | null; cc: number; fonte: string | null };
+        type Hit = { id: number; email: string | null; curso: number | null; cc: number; fonte: string | null; stage: number | null };
         const byEmail = new Map<string, Hit>();
         const byPhone = new Map<string, Hit>();
         for (let i = 0; i < emails.length; i += 300) {
-            const { data } = await db.from('leads').select('id, email, telefone, curso_interesse, contact_count, fonte_lead')
+            const { data } = await db.from('leads').select('id, email, telefone, curso_interesse, contact_count, fonte_lead, stage_id')
                 .in('email', emails.slice(i, i + 300));
-            for (const r of data ?? []) if (r.email) byEmail.set(String(r.email).toLowerCase(), { id: r.id, email: r.email, curso: r.curso_interesse, cc: r.contact_count ?? 0, fonte: r.fonte_lead });
+            for (const r of data ?? []) if (r.email) byEmail.set(String(r.email).toLowerCase(), { id: r.id, email: r.email, curso: r.curso_interesse, cc: r.contact_count ?? 0, fonte: r.fonte_lead, stage: r.stage_id });
         }
         for (let i = 0; i < phones.length; i += 300) {
-            const { data } = await db.from('leads').select('id, telefone, email, curso_interesse, contact_count, fonte_lead')
+            const { data } = await db.from('leads').select('id, telefone, email, curso_interesse, contact_count, fonte_lead, stage_id')
                 .in('telefone', phones.slice(i, i + 300));
-            for (const r of data ?? []) byPhone.set(onlyDigits(r.telefone), { id: r.id, email: r.email, curso: r.curso_interesse, cc: r.contact_count ?? 0, fonte: r.fonte_lead });
+            for (const r of data ?? []) byPhone.set(onlyDigits(r.telefone), { id: r.id, email: r.email, curso: r.curso_interesse, cc: r.contact_count ?? 0, fonte: r.fonte_lead, stage: r.stage_id });
         }
 
         // 3. processa (antigo -> novo)
@@ -126,8 +126,8 @@ serve(async (req) => {
 
             const sourceId = form.source_id != null ? Number(form.source_id) : 1;
             const hit = (email && byEmail.get(email)) || (validPhone(phone) && byPhone.get(phone))
-                || (email && createdByEmail.has(email) && { id: createdByEmail.get(email)!, email, curso: courseId, cc: 1, fonte: form.form_name })
-                || (validPhone(phone) && createdByPhone.has(phone) && { id: createdByPhone.get(phone)!, email: null, curso: courseId, cc: 1, fonte: form.form_name }) || null;
+                || (email && createdByEmail.has(email) && { id: createdByEmail.get(email)!, email, curso: courseId, cc: 1, fonte: form.form_name, stage: 1 })
+                || (validPhone(phone) && createdByPhone.has(phone) && { id: createdByPhone.get(phone)!, email: null, curso: courseId, cc: 1, fonte: form.form_name, stage: 1 }) || null;
 
             if (hit) {
                 const nota = `📋 Novo formulário: ${form.form_name}` + (cName ? ` — interesse em ${cName}` : '')
@@ -137,17 +137,25 @@ serve(async (req) => {
                 // se o lead nasceu antes pelo Widechat (chegou no Whats antes do poller rodar),
                 // agora que sabemos o formulário/curso real, corrige a origem/atribuição.
                 const cameFromWidechat = hit.fonte === 'Widechat';
+                // lead "esquecido" ainda em Entrada: o Kanban só busca os ~500 mais recentes por
+                // data_entrada, então um lead antigo intocado (ex: de meses atrás) fica invisível pro
+                // time comercial mesmo com interesse novo chegando agora — traz de volta pro topo e
+                // atualiza curso/valor pro que a pessoa quer HOJE (não o que ficou preso de antes).
+                // Lead que já saiu de Entrada (alguém já está trabalhando) não é mexido.
+                const isStaleReentry = hit.stage === 1;
                 await db.from('leads').update({
                     contact_count: (hit.cc ?? 0) + 1,
                     updated_at: new Date().toISOString(),
-                    ...(hit.curso == null && courseId != null ? { curso_interesse: courseId } : {}),
+                    ...(isStaleReentry ? { data_entrada: noteAt } : {}),
+                    ...(courseId != null && (isStaleReentry || hit.curso == null) ? { curso_interesse: courseId } : {}),
                     ...(fillEmail ? { email } : {}),
                     ...(cameFromWidechat ? { fonte_lead: form.form_name, source_id: sourceId } : {}),
                 }).eq('id', hit.id);
                 await db.from('lead_notes').insert({ lead_id: hit.id, note: nota, created_at: noteAt });
                 await mirror(
                     `UPDATE leads:⟨${hit.id}⟩ SET contact_count = (contact_count ?? 0) + 1, updated_at = time::now()` +
-                    (hit.curso == null && courseId != null ? `, curso_interesse = courses:⟨${courseId}⟩` : '') +
+                    (isStaleReentry ? `, data_entrada = d${sv(noteAt)}` : '') +
+                    (courseId != null && (isStaleReentry || hit.curso == null) ? `, curso_interesse = courses:⟨${courseId}⟩` : '') +
                     (fillEmail ? `, email = ${sv(email)}` : '') +
                     (cameFromWidechat ? `, fonte_lead = ${sv(form.form_name)}, source_id = lead_sources:⟨${sourceId}⟩` : '') + `;\n` +
                     `INSERT INTO lead_notes [{ lead_id: leads:⟨${hit.id}⟩, note: ${sv(nota)}, created_at: d${sv(noteAt)} }] RETURN NONE;`
