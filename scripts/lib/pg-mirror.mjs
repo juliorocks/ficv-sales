@@ -19,13 +19,18 @@ async function req(path, opts) {
 }
 
 // upsert em lote; onConflict = coluna(s) da chave natural (ex: "campaign_id" ou "campaign_id,date")
+// PostgREST não aceita 2 linhas com a mesma chave no mesmo request -> dedup (última vence).
 export async function pgUpsert(table, rows, onConflict) {
   if (!pgEnabled || !rows.length) return;
-  for (let i = 0; i < rows.length; i += 500) {
+  const keys = onConflict.split(',').map(s => s.trim());
+  const seen = new Map();
+  for (const r of rows) seen.set(keys.map(k => r[k]).join(''), r);
+  const deduped = [...seen.values()];
+  for (let i = 0; i < deduped.length; i += 500) {
     await req(`${table}?on_conflict=${onConflict}`, {
       method: 'POST',
       headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-      body: JSON.stringify(rows.slice(i, i + 500)),
+      body: JSON.stringify(deduped.slice(i, i + 500)),
     });
   }
 }
