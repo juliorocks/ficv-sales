@@ -143,6 +143,10 @@ serve(async (req) => {
                 // atualiza curso/valor pro que a pessoa quer HOJE (não o que ficou preso de antes).
                 // Lead que já saiu de Entrada (alguém já está trabalhando) não é mexido.
                 const isStaleReentry = hit.stage === 1;
+                // se vamos trocar o curso registrado, deixa rastro de qual era o interesse anterior —
+                // quem for atender precisa saber que essa pessoa já veio antes por outro motivo.
+                const courseChanging = isStaleReentry && courseId != null && hit.curso != null && hit.curso !== courseId;
+                const oldCourseName = courseChanging ? (courseName.get(hit.curso!) ?? `curso #${hit.curso}`) : '';
                 await db.from('leads').update({
                     contact_count: (hit.cc ?? 0) + 1,
                     updated_at: new Date().toISOString(),
@@ -151,6 +155,11 @@ serve(async (req) => {
                     ...(fillEmail ? { email } : {}),
                     ...(cameFromWidechat ? { fonte_lead: form.form_name, source_id: sourceId } : {}),
                 }).eq('id', hit.id);
+                if (courseChanging) {
+                    const notaAntiga = `🔁 Reentrada: essa pessoa já tinha demonstrado interesse em ${oldCourseName} anteriormente — agora quer ${cName || 'outro curso'}.`;
+                    await db.from('lead_notes').insert({ lead_id: hit.id, note: notaAntiga, created_at: noteAt });
+                    await mirror(`INSERT INTO lead_notes [{ lead_id: leads:⟨${hit.id}⟩, note: ${sv(notaAntiga)}, created_at: d${sv(noteAt)} }] RETURN NONE;`);
+                }
                 await db.from('lead_notes').insert({ lead_id: hit.id, note: nota, created_at: noteAt });
                 await mirror(
                     `UPDATE leads:⟨${hit.id}⟩ SET contact_count = (contact_count ?? 0) + 1, updated_at = time::now()` +
