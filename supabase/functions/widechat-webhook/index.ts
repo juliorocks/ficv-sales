@@ -71,11 +71,29 @@ serve(async (req) => {
             if (names.length > 0) agentInRoster = names.some(n => agentLc.includes(n) || n.includes(agentLc));
         }
 
-        const isNonCommercial =
+        // memória durável por telefone: uma vez identificado o setor não-comercial (via
+        // agente/fila), toda mensagem SEGUINTE dessa mesma pessoa é bloqueada de novo —
+        // mesmo vindo do próprio cliente, sem nome de agente nenhum no payload (senão o
+        // lead reaparecia toda vez que o cliente respondia "ok"/"obrigada").
+        const phoneSuffix = String(messagePhone || '').replace(/\D/g, '').slice(-8);
+        let alreadyBlocked = false;
+        if (phoneSuffix.length >= 8) {
+            const { data: bl } = await db.from('widechat_blocklist_contacts')
+                .select('telefone').eq('telefone', phoneSuffix).maybeSingle();
+            alreadyBlocked = !!bl;
+        }
+
+        const isNonCommercial = alreadyBlocked ||
             (queueVal && !/comercial/i.test(queueVal) && NON_COMMERCIAL.test(queueVal)) ||
             NON_COMMERCIAL.test(agentName) ||
             NON_COMMERCIAL.test(String(msgData.prefix ?? "")) ||
             (!!agentLc && !agentInRoster);
+
+        if (isNonCommercial && !alreadyBlocked && phoneSuffix.length >= 8) {
+            const motivo = queueVal || agentName || 'roster';
+            await db.from('widechat_blocklist_contacts')
+                .upsert({ telefone: phoneSuffix, motivo }, { onConflict: 'telefone' });
+        }
 
         const CONV_END_WEBHOOKS = ["attendance_end", "finalize", "attendance_closed", "attendance_finish"];
         const CONV_END_EVENTS = ["attendanceEnd", "finalize", "closed", "attendance_end", "finalized", "attendanceClosed", "autoFinish", "humanFinish"];
