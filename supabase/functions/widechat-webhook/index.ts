@@ -314,10 +314,14 @@ serve(async (req) => {
                 }
             }
 
-            if (origin === 'agent' && senderName && senderName !== 'Desconhecido' && !cur?.assigned_to_id) {
-                const first = senderName.trim().split(' ')[0].toLowerCase();
+            // atribui pro agente que respondeu. Usa agentName (extraído de content.user.name / prefixo
+            // "*Nome:*") — NÃO senderName, que prioriza payload.vars.name (nome do CONTATO, sempre
+            // presente, inclusive em mensagens de agente) e por isso quase nunca casava com um agente
+            // de verdade (medido: Izabelly 4/24, Karina 2/23 atribuições em 2 dias).
+            if (origin === 'agent' && agentName && !cur?.assigned_to_id) {
+                const first = agentName.trim().split(' ')[0].toLowerCase();
                 const { data: prof } = await db.from('profiles').select('id')
-                    .or(`full_name.ilike.%${senderName.trim().toLowerCase()}%,full_name.ilike.%${first}%`).limit(1).maybeSingle();
+                    .or(`full_name.ilike.%${agentName.trim().toLowerCase()}%,full_name.ilike.%${first}%`).limit(1).maybeSingle();
                 if (prof?.id) updates.assigned_to_id = prof.id;
             }
 
