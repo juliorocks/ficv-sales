@@ -61,26 +61,29 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
     const phoneVariants = [...new Set([phoneRaw, phoneDigits].filter((p) => p.length >= 8))]
     const msgKey = ['widechat-messages', String(leadId), phoneDigits]
 
-    const { data: related } = useQuery<{ ids: (number | string)[]; contactId: string }>({
+    const { data: related } = useQuery<{ ids: (number | string)[]; contactId: string; sessionId: string }>({
         queryKey: ['widechat-related-leads', String(leadId), phoneDigits],
         queryFn: async () => {
             const ids = new Set<number | string>([leadId])
             let contactId = widechatContactId
+            let sessionId = ''
             if (phoneVariants.length) {
                 try {
-                    const { data } = await supabase.from('leads').select('id, widechat_contact_id').in('telefone', phoneVariants)
+                    const { data } = await supabase.from('leads').select('id, widechat_contact_id, widechat_session_id').in('telefone', phoneVariants)
                     data?.forEach((l: any) => {
                         ids.add(l.id)
                         if (!contactId && l.widechat_contact_id) contactId = String(l.widechat_contact_id)
+                        if (!sessionId && l.widechat_session_id) sessionId = String(l.widechat_session_id)
                     })
                 } catch { /* segue */ }
             }
-            return { ids: [...ids], contactId }
+            return { ids: [...ids], contactId, sessionId }
         },
         enabled: !!leadId,
     })
     const relatedIds = related?.ids
     const contactId = related?.contactId || widechatContactId
+    const sessionId = related?.sessionId || ''
 
     const { data: messages, isLoading, error } = useQuery<WideChatMessage[]>({
         queryKey: msgKey,
@@ -246,6 +249,41 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
         onError: (e: any) => showError(`Erro ao criar atalho: ${e.message}`),
     })
 
+    // Transferir a conversa pra outro agente ou fila/equipe — só faz sentido com um
+    // atendimento de fato ativo (é a "session" do WideChat que está sendo transferida).
+    const canTransfer = !!attendance && !!sessionId
+    const { data: agentsForTransfer, refetch: loadAgents } = useQuery<any[]>({
+        queryKey: ['widechat-agents'],
+        queryFn: async () => {
+            const { data } = await supabase.functions.invoke('widechat-api', { body: { action: 'list_agents' } })
+            return data?.error ? [] : (data?.agents ?? [])
+        },
+        enabled: false,
+        staleTime: 60_000,
+    })
+    const { data: teamsForTransfer, refetch: loadTeams } = useQuery<any[]>({
+        queryKey: ['widechat-teams'],
+        queryFn: async () => {
+            const { data } = await supabase.functions.invoke('widechat-api', { body: { action: 'list_teams' } })
+            return data?.error ? [] : (data?.teams ?? [])
+        },
+        enabled: false,
+        staleTime: 60_000,
+    })
+
+    const transferMutation = useMutation({
+        mutationFn: async (arg: { type: 'agent'; agent_id: string; label: string } | { type: 'attendance'; team_id: string; label: string }) => {
+            const { data, error } = await supabase.functions.invoke('widechat-api', {
+                body: { action: 'transfer', session_id: sessionId, ...arg },
+            })
+            if (error) throw error
+            if (data?.error) throw new Error(typeof data.error === 'string' ? data.error : JSON.stringify(data.error))
+            return arg.label
+        },
+        onSuccess: (label) => showSuccess(`Conversa transferida para ${label}.`),
+        onError: (e: any) => showError(`Erro ao transferir: ${e.message}`),
+    })
+
     const sendTemplate = (t: any) => {
         const tags: any[] = t.tags ?? []
         const placeholders: string[] = tags.map((tag) => {
@@ -278,6 +316,38 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
 
     return (
         <div className="flex flex-col rounded-xl overflow-hidden bg-[var(--bg-card)] shadow-[var(--card-shadow)]">
+            {canTransfer && (
+                <div className="flex justify-end px-3 pt-2 bg-[var(--bg-card)]">
+                    <DropdownMenu onOpenChange={(open) => { if (open) { loadAgents(); loadTeams() } }}>
+                        <DropdownMenuTrigger asChild>
+                            <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 text-xs text-muted-foreground" disabled={transferMutation.isPending}>
+                                {transferMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5 rotate-45" />}
+                                Transferir
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-64 max-h-80 overflow-y-auto">
+                            <DropdownMenuLabel>Transferir para agente</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            {(!agentsForTransfer || agentsForTransfer.length === 0) && <div className="px-2 py-2 text-xs text-muted-foreground">Carregando / nenhum agente online.</div>}
+                            {agentsForTransfer?.map((a: any) => (
+                                <DropdownMenuItem key={a._id} onClick={() => transferMutation.mutate({ type: 'agent', agent_id: a._id, label: a.name })}>
+                                    <span className={`mr-2 h-1.5 w-1.5 rounded-full ${a.status === 'online' ? 'bg-green-500' : 'bg-slate-300'}`} />
+                                    {a.name}
+                                </DropdownMenuItem>
+                            ))}
+                            <DropdownMenuSeparator />
+                            <DropdownMenuLabel>Transferir para fila/equipe</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            {(!teamsForTransfer || teamsForTransfer.length === 0) && <div className="px-2 py-2 text-xs text-muted-foreground">Carregando / nenhuma fila encontrada.</div>}
+                            {teamsForTransfer?.map((t: any) => (
+                                <DropdownMenuItem key={t._id} onClick={() => transferMutation.mutate({ type: 'attendance', team_id: t._id, label: t.name })}>
+                                    {t.name}
+                                </DropdownMenuItem>
+                            ))}
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                </div>
+            )}
             {!attendance && (
                 <Alert className="rounded-none border-x-0 border-t-0 bg-blue-50/50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800">
                     <AlertCircle className="h-4 w-4 text-blue-600" />

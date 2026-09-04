@@ -11,6 +11,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 //   attendances  -> GET /user/agents/attendances_plus  (acha o atendimento do lead)
 //   list_hsm     -> POST /hsm/listAll                   (templates aprovados)
 //   send_message -> POST /message/send                  (texto ou HSM)
+//   list_agents  -> GET /user/agents/online              (agentes p/ transferir)
+//   list_teams   -> GET /campaigns                       (filas/equipes p/ transferir)
+//   transfer     -> POST /attendances/transfer           (transfere a conversa)
 // ============================================================================
 
 const corsHeaders = {
@@ -149,6 +152,44 @@ serve(async (req) => {
             }
 
             const r = await fetch(`${WIDECHAT_BASE}/message/send`, {
+                method: 'POST', headers: wcHeaders, body: JSON.stringify(payload),
+            });
+            const data = await r.json();
+            return jsonRes(r.ok ? { success: true, data } : { error: data }, r.ok ? 200 : r.status);
+        }
+
+        // ── list_agents: agentes online p/ transferir a conversa ────────────
+        if (action === 'list_agents') {
+            const r = await fetch(`${WIDECHAT_BASE}/user/agents/online?allUsers=true&paginate=false`, { headers: wcHeaders });
+            const data = await r.json();
+            return jsonRes(r.ok ? { success: true, agents: data?.data ?? data ?? [] } : { error: data }, r.ok ? 200 : r.status);
+        }
+
+        // ── list_teams: filas/equipes (campanhas) p/ transferir a conversa ───
+        if (action === 'list_teams') {
+            const r = await fetch(`${WIDECHAT_BASE}/campaigns`, { headers: wcHeaders });
+            const data = await r.json();
+            return jsonRes(r.ok ? { success: true, teams: data?.data ?? data ?? [] } : { error: data }, r.ok ? 200 : r.status);
+        }
+
+        // ── transfer: manda a conversa pra outro agente ou fila/equipe ───────
+        // Doc: https://igrejabatista.widechat.com.br/docs/pt-br/attendances/transfer
+        // body.type = 'agent' (usa body.agent_id) ou 'attendance' (usa body.team_id,
+        // que na terminologia do WideChat é chamado de "attendance_id" — é o id da
+        // FILA/CAMPANHA de /campaigns, não o id da conversa em si; renomeado aqui pra
+        // não confundir com o attendance_id usado em send_message/list_hsm, que é o
+        // id da conversa).
+        if (action === 'transfer') {
+            if (!body.session_id) return jsonRes({ error: 'session_id é obrigatório (widechat_session_id do lead).' }, 400);
+            if (body.type !== 'agent' && body.type !== 'attendance') return jsonRes({ error: "type deve ser 'agent' ou 'attendance'." }, 400);
+            const payload: Record<string, unknown> = {
+                session_id: body.session_id,
+                type: body.type,
+                transfer_wait: body.transfer_wait ?? true,
+            };
+            if (body.type === 'agent') payload.agent_id = body.agent_id;
+            if (body.type === 'attendance') payload.attendance_id = body.team_id;
+            const r = await fetch(`${WIDECHAT_BASE}/attendances/transfer`, {
                 method: 'POST', headers: wcHeaders, body: JSON.stringify(payload),
             });
             const data = await r.json();
