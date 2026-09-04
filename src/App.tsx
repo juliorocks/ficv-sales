@@ -852,7 +852,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                             {(profile?.role === 'admin') && <NavItem icon={FileUp} label="Uploads" active={activeTab === 'uploads'} onClick={() => setActiveTab('uploads')} />}
                             <NavItem icon={BookOpen} label="Base de Conhecimento" active={activeTab === 'knowledge'} onClick={() => setActiveTab('knowledge')} />
                             <NavItem icon={MessageSquare} label="Scripts" active={activeTab === 'scripts'} onClick={() => setActiveTab('scripts')} />
-                            {profile?.role === 'admin' && <NavItem icon={MessageSquare} label="Meu Widechat" active={activeTab === 'widechat'} onClick={() => setActiveTab('widechat')} />}
+                            <NavItem icon={MessageSquare} label="Meu Widechat" active={activeTab === 'widechat'} onClick={() => setActiveTab('widechat')} />
                             {profile?.role === 'admin' && (
                                 <NavItem icon={TicketIcon} label="Tickets" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
                             )}
