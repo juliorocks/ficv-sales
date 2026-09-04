@@ -98,17 +98,17 @@ serve(async (req) => {
         // 2. dedup contra Postgres (email/telefone indexados)
         const emails = [...new Set(candidates.map(c => normEmail(c.sub.email)).filter(Boolean))];
         const phones = [...new Set(candidates.map(c => onlyDigits(c.sub.phone)).filter(validPhone))];
-        const byEmail = new Map<string, { id: number; curso: number | null; cc: number }>();
-        const byPhone = new Map<string, { id: number; curso: number | null; cc: number }>();
+        const byEmail = new Map<string, { id: number; email: string | null; curso: number | null; cc: number }>();
+        const byPhone = new Map<string, { id: number; email: string | null; curso: number | null; cc: number }>();
         for (let i = 0; i < emails.length; i += 300) {
             const { data } = await db.from('leads').select('id, email, telefone, curso_interesse, contact_count')
                 .in('email', emails.slice(i, i + 300));
-            for (const r of data ?? []) if (r.email) byEmail.set(String(r.email).toLowerCase(), { id: r.id, curso: r.curso_interesse, cc: r.contact_count ?? 0 });
+            for (const r of data ?? []) if (r.email) byEmail.set(String(r.email).toLowerCase(), { id: r.id, email: r.email, curso: r.curso_interesse, cc: r.contact_count ?? 0 });
         }
         for (let i = 0; i < phones.length; i += 300) {
-            const { data } = await db.from('leads').select('id, telefone, curso_interesse, contact_count')
+            const { data } = await db.from('leads').select('id, telefone, email, curso_interesse, contact_count')
                 .in('telefone', phones.slice(i, i + 300));
-            for (const r of data ?? []) byPhone.set(onlyDigits(r.telefone), { id: r.id, curso: r.curso_interesse, cc: r.contact_count ?? 0 });
+            for (const r of data ?? []) byPhone.set(onlyDigits(r.telefone), { id: r.id, email: r.email, curso: r.curso_interesse, cc: r.contact_count ?? 0 });
         }
 
         // 3. processa (antigo -> novo)
@@ -124,22 +124,25 @@ serve(async (req) => {
             const cName = courseId != null ? (courseName.get(courseId) ?? '') : '';
 
             const hit = (email && byEmail.get(email)) || (validPhone(phone) && byPhone.get(phone))
-                || (email && createdByEmail.has(email) && { id: createdByEmail.get(email)!, curso: courseId, cc: 1 })
-                || (validPhone(phone) && createdByPhone.has(phone) && { id: createdByPhone.get(phone)!, curso: courseId, cc: 1 }) || null;
+                || (email && createdByEmail.has(email) && { id: createdByEmail.get(email)!, email, curso: courseId, cc: 1 })
+                || (validPhone(phone) && createdByPhone.has(phone) && { id: createdByPhone.get(phone)!, email: null, curso: courseId, cc: 1 }) || null;
 
             if (hit) {
                 const nota = `📋 Novo formulário: ${form.form_name}` + (cName ? ` — interesse em ${cName}` : '')
                     + ` (${dataBR(spDateToISO(String(sub.add_date || '')))})`;
                 const noteAt = spDateToISO(String(sub.add_date || ''));
+                const fillEmail = !hit.email && !!email;
                 await db.from('leads').update({
                     contact_count: (hit.cc ?? 0) + 1,
                     updated_at: new Date().toISOString(),
                     ...(hit.curso == null && courseId != null ? { curso_interesse: courseId } : {}),
+                    ...(fillEmail ? { email } : {}),
                 }).eq('id', hit.id);
                 await db.from('lead_notes').insert({ lead_id: hit.id, note: nota, created_at: noteAt });
                 await mirror(
                     `UPDATE leads:⟨${hit.id}⟩ SET contact_count = (contact_count ?? 0) + 1, updated_at = time::now()` +
-                    (hit.curso == null && courseId != null ? `, curso_interesse = courses:⟨${courseId}⟩` : '') + `;\n` +
+                    (hit.curso == null && courseId != null ? `, curso_interesse = courses:⟨${courseId}⟩` : '') +
+                    (fillEmail ? `, email = ${sv(email)}` : '') + `;\n` +
                     `INSERT INTO lead_notes [{ lead_id: leads:⟨${hit.id}⟩, note: ${sv(nota)}, created_at: d${sv(noteAt)} }] RETURN NONE;`
                 );
                 reentradas++;
