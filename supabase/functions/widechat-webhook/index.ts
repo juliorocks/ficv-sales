@@ -58,16 +58,24 @@ serve(async (req) => {
         const prefixName = (String(messageText).match(/^\*([^:*]+):\*/) ?? [])[1] ?? "";
         const agentName = String(msgData.user?.name ?? data?.name ?? prefixName ?? "");
         const NON_COMMERCIAL = /\b(RH|secretaria|financeiro|escola|funda[çc][ãa]o|sistema cidade viva|conex[ãa]o de casais)\b/i;
-        // agentes de outros setores sem marcador no nome (extensível via env)
-        const BLOCK_AGENTS = (Deno.env.get('WIDECHAT_BLOCK_AGENTS')
-            ?? 'kardilania almeida,alméria,almeria,thaysa paredes').toLowerCase()
-            .split(',').map(s => s.trim()).filter(Boolean);
-        const agentLc = agentName.toLowerCase();
+        const agentLc = agentName.toLowerCase().trim();
+
+        // roster da(s) equipe(s) que atendem lead (por padrão só Comercial — ver
+        // Equipes no app). Um agente fora da lista = não-comercial.
+        const LEAD_TEAMS = (Deno.env.get('WIDECHAT_LEAD_TEAMS') ?? 'Comercial').split(',').map(s => s.trim()).filter(Boolean);
+        let agentInRoster = true; // sem agente ainda (fase de bot), ou roster vazio -> não bloqueia por isso
+        if (agentLc) {
+            const { data: roster } = await db.rpc('agent_names_in_teams', { p_teams: LEAD_TEAMS });
+            const names: string[] = (roster ?? []).map((r: any) => r.name);
+            // equipe ainda não configurada em Equipes -> não usa o roster como filtro (só os marcadores abaixo)
+            if (names.length > 0) agentInRoster = names.some(n => agentLc.includes(n) || n.includes(agentLc));
+        }
+
         const isNonCommercial =
             (queueVal && !/comercial/i.test(queueVal) && NON_COMMERCIAL.test(queueVal)) ||
             NON_COMMERCIAL.test(agentName) ||
             NON_COMMERCIAL.test(String(msgData.prefix ?? "")) ||
-            BLOCK_AGENTS.some(a => agentLc.includes(a));
+            (!!agentLc && !agentInRoster);
 
         const CONV_END_WEBHOOKS = ["attendance_end", "finalize", "attendance_closed", "attendance_finish"];
         const CONV_END_EVENTS = ["attendanceEnd", "finalize", "closed", "attendance_end", "finalized", "attendanceClosed", "autoFinish", "humanFinish"];

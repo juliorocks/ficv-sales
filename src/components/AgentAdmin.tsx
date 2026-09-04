@@ -5,6 +5,8 @@ import { supabase } from '../lib/supabase';
 const MONTH_NAMES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
     'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 
+export interface TeamRef { id: string; name: string; icon: string; color: string }
+
 export interface AgentProfileData {
     id: string;
     name: string;
@@ -15,7 +17,8 @@ export interface AgentProfileData {
     notes: string | null;
     active: boolean;
     team_id?: string | null;
-    team?: { id: string; name: string; icon: string; color: string } | null;
+    team?: TeamRef | null;
+    teams?: TeamRef[];
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -25,15 +28,22 @@ export const useAgentProfiles = () => {
 
     const fetch = useCallback(async () => {
         setLoading(true);
-        const [{ data: profData }, { data: teamsData }] = await Promise.all([
+        const [{ data: profData }, { data: teamsData }, { data: atData }] = await Promise.all([
             supabase.from('agent_profiles').select('*').order('name'),
             supabase.from('teams').select('id, name, icon, color'),
+            supabase.from('agent_team').select('agent_id, team_id'),
         ]);
         const teamsById = Object.fromEntries((teamsData ?? []).map((t: any) => [t.id, t]));
-        const merged = (profData ?? []).map((p: any) => ({
-            ...p,
-            team: p.team_id ? (teamsById[p.team_id] ?? null) : null,
-        }));
+        const teamsByAgent: Record<string, TeamRef[]> = {};
+        for (const row of atData ?? []) {
+            const t = teamsById[(row as any).team_id];
+            if (!t) continue;
+            (teamsByAgent[(row as any).agent_id] ??= []).push(t);
+        }
+        const merged = (profData ?? []).map((p: any) => {
+            const teams = teamsByAgent[p.id] ?? (p.team_id && teamsById[p.team_id] ? [teamsById[p.team_id]] : []);
+            return { ...p, teams, team: teams[0] ?? null };
+        });
         setProfiles(merged);
         setLoading(false);
     }, []);
@@ -88,7 +98,7 @@ const AgentCard: React.FC<{
         email: agent.email ?? '',
         phone: agent.phone ?? '',
         notes: agent.notes ?? '',
-        team_id: agent.team_id ?? null,
+        team_ids: (agent.teams ?? []).map(t => t.id) as string[],
     });
 
     useEffect(() => {
@@ -98,7 +108,7 @@ const AgentCard: React.FC<{
             email: agent.email ?? '',
             phone: agent.phone ?? '',
             notes: agent.notes ?? '',
-            team_id: agent.team_id ?? null,
+            team_ids: (agent.teams ?? []).map(t => t.id),
         });
     }, [agent]);
 
@@ -120,11 +130,21 @@ const AgentCard: React.FC<{
             email: form.email || null,
             phone: form.phone || null,
             notes: form.notes || null,
-            team_id: form.team_id || null,
+            team_id: form.team_ids[0] || null, // mantém compat com telas antigas (1ª equipe)
         }).eq('id', agent.id);
+        await supabase.from('agent_team').delete().eq('agent_id', agent.id);
+        if (form.team_ids.length) {
+            await supabase.from('agent_team').insert(form.team_ids.map(team_id => ({ agent_id: agent.id, team_id })));
+        }
         setSaving(false);
         setEditing(false);
         onRefresh();
+    };
+    const toggleTeam = (teamId: string) => {
+        setForm(f => ({
+            ...f,
+            team_ids: f.team_ids.includes(teamId) ? f.team_ids.filter(id => id !== teamId) : [...f.team_ids, teamId],
+        }));
     };
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -226,30 +246,40 @@ const AgentCard: React.FC<{
                                 <input placeholder="Email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} className="bg-[var(--bg-card-hover)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-main)] focus:outline-none focus:border-primary" />
                                 <input placeholder="Telefone" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} className="bg-[var(--bg-card-hover)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-main)] focus:outline-none focus:border-primary" />
                             </div>
-                            <div className="grid grid-cols-2 gap-2">
-                                <div>
-                                    <label className="text-[10px] text-[var(--text-muted)] font-bold uppercase">Equipe:</label>
-                                    <select value={form.team_id || ''} onChange={e => setForm(f => ({ ...f, team_id: e.target.value || null }))} className="w-full bg-[var(--bg-card-hover)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-main)] focus:outline-none focus:border-primary mt-1">
-                                        <option value="">Sem equipe</option>
-                                        {teams.map(team => (
-                                            <option key={team.id} value={team.id}>{team.icon} {team.name}</option>
-                                        ))}
-                                    </select>
+                            <div>
+                                <label className="text-[10px] text-[var(--text-muted)] font-bold uppercase">Equipes (pode marcar mais de uma):</label>
+                                <div className="flex flex-wrap gap-1.5 mt-1">
+                                    {teams.map(team => {
+                                        const on = form.team_ids.includes(team.id);
+                                        return (
+                                            <button
+                                                type="button"
+                                                key={team.id}
+                                                onClick={() => toggleTeam(team.id)}
+                                                className="text-[10px] px-2 py-1 rounded-full border transition-all"
+                                                style={on
+                                                    ? { background: team.color + '30', borderColor: team.color, color: team.color }
+                                                    : { borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+                                            >
+                                                {team.icon} {team.name}
+                                            </button>
+                                        );
+                                    })}
                                 </div>
-                                <div>
-                                    <label className="text-[10px] text-[var(--text-muted)] font-bold uppercase">Meta Score:</label>
-                                    <input type="number" min={0} max={10} step={0.1} value={form.score_target} onChange={e => setForm(f => ({ ...f, score_target: e.target.value }))} className="w-full bg-[var(--bg-card-hover)] border border-[var(--border)] rounded-lg px-3 py-1 text-xs text-[var(--text-main)] focus:outline-none focus:border-primary mt-1" />
-                                </div>
+                            </div>
+                            <div>
+                                <label className="text-[10px] text-[var(--text-muted)] font-bold uppercase">Meta Score:</label>
+                                <input type="number" min={0} max={10} step={0.1} value={form.score_target} onChange={e => setForm(f => ({ ...f, score_target: e.target.value }))} className="w-full bg-[var(--bg-card-hover)] border border-[var(--border)] rounded-lg px-3 py-1 text-xs text-[var(--text-main)] focus:outline-none focus:border-primary mt-1" />
                             </div>
                             <textarea placeholder="Notas internas..." value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={2} className="w-full bg-[var(--bg-card-hover)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-main)] focus:outline-none focus:border-primary resize-none" />
                         </div>
                     ) : (
-                        <div className="flex items-center gap-2">
-                            {agent.team && (
-                                <span className="text-[10px] px-2 py-1 rounded-full" style={{ background: agent.team.color + '20', color: agent.team.color }}>
-                                    {agent.team.icon} {agent.team.name}
+                        <div className="flex items-center gap-2 flex-wrap">
+                            {(agent.teams ?? []).map(team => (
+                                <span key={team.id} className="text-[10px] px-2 py-1 rounded-full" style={{ background: team.color + '20', color: team.color }}>
+                                    {team.icon} {team.name}
                                 </span>
-                            )}
+                            ))}
                             {agent.notes && <p className="text-[10px] text-[var(--text-muted)] truncate">{agent.notes}</p>}
                         </div>
                     )}

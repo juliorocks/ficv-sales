@@ -1,6 +1,93 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Edit3, Trash2, Check, X, Loader2, Copy } from 'lucide-react';
+import { Plus, Edit3, Trash2, Check, X, Loader2, Copy, UserPlus } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+
+// ─── Membros da equipe (agentes) ───────────────────────────────────────────
+interface AgentRef { id: string; name: string; active: boolean }
+
+const TeamMembers: React.FC<{ teamId: string; isAdmin: boolean }> = ({ teamId, isAdmin }) => {
+    const [allAgents, setAllAgents] = useState<AgentRef[]>([]);
+    const [memberIds, setMemberIds] = useState<string[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [adding, setAdding] = useState(false);
+    const [pick, setPick] = useState('');
+
+    const load = useCallback(async () => {
+        setLoading(true);
+        const [{ data: agents }, { data: members }] = await Promise.all([
+            supabase.from('agent_profiles').select('id, name, active').eq('active', true).order('name'),
+            supabase.from('agent_team').select('agent_id').eq('team_id', teamId),
+        ]);
+        setAllAgents(agents ?? []);
+        setMemberIds((members ?? []).map((m: any) => m.agent_id));
+        setLoading(false);
+    }, [teamId]);
+
+    useEffect(() => { load(); }, [load]);
+
+    const members = allAgents.filter(a => memberIds.includes(a.id));
+    const available = allAgents.filter(a => !memberIds.includes(a.id));
+
+    const addMember = async () => {
+        if (!pick) return;
+        await supabase.from('agent_team').insert({ agent_id: pick, team_id: teamId });
+        setPick('');
+        setAdding(false);
+        load();
+    };
+    const removeMember = async (agentId: string) => {
+        await supabase.from('agent_team').delete().eq('agent_id', agentId).eq('team_id', teamId);
+        load();
+    };
+
+    if (loading) return null;
+
+    return (
+        <div className="mt-4 border-t border-[var(--border)] pt-3">
+            <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase mb-2">
+                Agentes ({members.length})
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+                {members.map(a => (
+                    <span key={a.id} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-[var(--bg-card-hover)] text-[var(--text-main)]">
+                        {a.name}
+                        {isAdmin && (
+                            <button onClick={() => removeMember(a.id)} className="text-[var(--text-muted)] hover:text-red-400">
+                                <X size={11} />
+                            </button>
+                        )}
+                    </span>
+                ))}
+                {!members.length && <span className="text-[11px] text-[var(--text-muted)]">Nenhum agente nesta equipe.</span>}
+            </div>
+            {isAdmin && (
+                adding ? (
+                    <div className="flex gap-2 mt-2">
+                        <select
+                            autoFocus
+                            value={pick}
+                            onChange={e => setPick(e.target.value)}
+                            className="bg-[var(--bg-card-hover)] border border-[var(--border)] rounded-lg px-2 py-1.5 text-xs text-[var(--text-main)] focus:outline-none focus:border-primary flex-1"
+                        >
+                            <option value="">Selecione um agente...</option>
+                            {available.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                        </select>
+                        <button onClick={addMember} disabled={!pick} className="w-8 h-8 rounded-lg bg-[#00D4AA]/20 text-[#00D4AA] flex items-center justify-center flex-shrink-0"><Check size={14} /></button>
+                        <button onClick={() => { setAdding(false); setPick(''); }} className="w-8 h-8 rounded-lg bg-[var(--bg-card-hover)] text-[var(--text-muted)] flex items-center justify-center flex-shrink-0"><X size={14} /></button>
+                    </div>
+                ) : (
+                    <button
+                        onClick={() => setAdding(true)}
+                        className="mt-2 flex items-center gap-1 text-[11px] text-primary hover:underline"
+                        disabled={!available.length}
+                    >
+                        <UserPlus size={12} /> Adicionar agente
+                    </button>
+                )
+            )}
+        </div>
+    );
+};
 
 export interface Team {
     id: string;
@@ -204,6 +291,8 @@ const TeamCard: React.FC<{
                     </span>
                 </div>
             )}
+
+            <TeamMembers teamId={team.id} isAdmin={isAdmin} />
         </div>
     );
 };
