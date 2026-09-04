@@ -294,7 +294,7 @@ serve(async (req) => {
             await mirror(`INSERT INTO widechat_messages [{ lead_id:leads:⟨${leadId}⟩, session_id:${sv(msg.session_id)}, message_id:${sv(msg.message_id)}, type:${sv(msg.type)}, message:${sv(msg.message)}, origin:${sv(msg.origin)}, sender_name:${sv(msg.sender_name)}, created_at:${sv(msg.created_at)} }] RETURN NONE;`);
 
             // ── CRM inteligente ───────────────────────────────────────────────
-            const { data: cur } = await db.from('leads').select('assigned_to_id, curso_interesse, valor_oportunidade, perfil').eq('id', leadId).maybeSingle();
+            const { data: cur } = await db.from('leads').select('assigned_to_id, curso_interesse, valor_oportunidade, perfil, stage_id').eq('id', leadId).maybeSingle();
             const updates: Record<string, unknown> = {};
 
             // perfil "aluno": telefone casa com matrícula do Sponte
@@ -321,6 +321,17 @@ serve(async (req) => {
                 if (prof?.id) updates.assigned_to_id = prof.id;
             }
 
+            // agente respondeu e o lead ainda está em "Entrada" (ninguém tinha atendido) →
+            // avança pra "Em Contato" sozinho, sem precisar o agente mexer no Kanban.
+            if (origin === 'agent' && cur?.stage_id === firstStageId) {
+                const { data: emContato } = await db.from('stages').select('id')
+                    .ilike('name', '%contato%').order('order', { ascending: true }).limit(1).maybeSingle();
+                if (emContato?.id) {
+                    updates.stage_id = emContato.id;
+                    updates.stage_entry_date = now;
+                }
+            }
+
             if (!cur?.curso_interesse && messageText) {
                 const { data: courses } = await db.from('courses').select('id, name, default_value');
                 const msgNorm = messageText.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
@@ -341,6 +352,7 @@ serve(async (req) => {
                 const sets = Object.entries(updates).map(([k, v]) =>
                     k === 'assigned_to_id' ? `assigned_to_id = profiles:⟨${v}⟩`
                     : k === 'curso_interesse' ? `curso_interesse = courses:⟨${v}⟩`
+                    : k === 'stage_id' ? `stage_id = stages:⟨${v}⟩`
                     : `${k} = ${sv(v)}`).join(', ');
                 await mirror(`UPDATE leads SET ${sets} WHERE id = leads:⟨${leadId}⟩;`);
             }

@@ -104,8 +104,11 @@ serve(async (req) => {
             if (!r.ok) return jsonRes({ error: data }, r.status);
             const digits = String(body.telefone ?? '').replace(/\D/g, '');
             const all = [...(data.attendance ?? []), ...(data.wait ?? [])];
+            // platform_id é um id interno do WideChat (ex: "BR.3020350278297153"), NÃO o telefone —
+            // o telefone de verdade vem em wa_id/phone. Comparar com platform_id nunca casava.
             const match = digits
-                ? all.find((a: any) => String(a.platform_id ?? '').replace(/\D/g, '').endsWith(digits.slice(-8)))
+                ? all.find((a: any) =>
+                    String(a.wa_id ?? a.phone ?? '').replace(/\D/g, '').endsWith(digits.slice(-8)))
                 : null;
             return jsonRes({ success: true, match: match ?? null, all, agent_email: integ.widechat_email });
         }
