@@ -18,6 +18,40 @@ const isSystemMessage = (text: string) => {
     return SYSTEM_PATTERNS.some(p => lower.includes(p));
 };
 
+const norm = (s: string) => (s || '').toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+
+// "já preenchi meus dados na página X" -> o lead veio do SITE (LP), não do WhatsApp.
+const SITE_ORIGIN_RE = /preenchi\s+meus\s+dados|vim\s+(?:pelo|do|atrav[ée]s\s+do)\s+site|pelo\s+site|no\s+formul[áa]rio\s+d[oa]\s+site/i;
+
+// Casa o nome que a pessoa citou ("página <X>") com o curso, por sobreposição de
+// palavras — exige um vencedor claro pra não chutar no genérico ("teologia" sozinho
+// bate com 5 cursos). Ex: "Teologia Novo Testamento" -> "Teologia Bíblica e
+// Exegética do Novo Testamento" (2 palavras em comum) ganha de "Teologia EAD" (1).
+function bestCourseByPhrase(phrase: string, courses: any[]): any | null {
+    const pWords = new Set(norm(phrase).split(/\s+/).filter((w) => w.length >= 3));
+    if (!pWords.size) return null;
+    const scored = courses.map((c) => {
+        const cWords = norm(c.name).split(/\s+/).filter((w: string) => w.length >= 3);
+        const overlap = cWords.filter((w: string) => pWords.has(w)).length;
+        return { c, overlap, frac: cWords.length ? overlap / cWords.length : 0 };
+    }).filter((x) => x.overlap > 0).sort((a, b) => b.overlap - a.overlap || b.frac - a.frac);
+    if (!scored.length) return null;
+    if (scored.length === 1 || scored[0].overlap > scored[1].overlap || scored[0].overlap >= 2) return scored[0].c;
+    return null;
+}
+
+// Varredura genérica no texto todo — trava: exige o nome inteiro OU >= 2 palavras
+// significativas (antes bastava 1, e "teologia" sozinho já bagunçava tudo).
+function looseCourseScan(text: string, courses: any[]): any | null {
+    const t = norm(text);
+    return courses.find((c) => {
+        const cn = norm(c.name);
+        if (cn && t.includes(cn)) return true;
+        const words = cn.split(/\s+/).filter((w: string) => w.length > 4);
+        return words.length >= 2 && words.every((w: string) => t.includes(w));
+    }) ?? null;
+}
+
 const j = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status });
 
@@ -299,8 +333,17 @@ serve(async (req) => {
             await mirror(`INSERT INTO widechat_messages [{ lead_id:leads:⟨${leadId}⟩, session_id:${sv(msg.session_id)}, message_id:${sv(msg.message_id)}, type:${sv(msg.type)}, message:${sv(msg.message)}, origin:${sv(msg.origin)}, sender_name:${sv(msg.sender_name)}, created_at:${sv(msg.created_at)} }] RETURN NONE;`);
 
             // ── CRM inteligente ───────────────────────────────────────────────
-            const { data: cur } = await db.from('leads').select('assigned_to_id, curso_interesse, valor_oportunidade, perfil, stage_id').eq('id', leadId).maybeSingle();
+            const { data: cur } = await db.from('leads').select('assigned_to_id, curso_interesse, valor_oportunidade, perfil, stage_id, fonte_lead, source_id').eq('id', leadId).maybeSingle();
             const updates: Record<string, unknown> = {};
+            const stillFresh = cur?.stage_id === firstStageId; // ninguém trabalhou o lead ainda
+
+            // ── origem SITE: "já preenchi meus dados na página X" ──────────────
+            const cameFromSite = SITE_ORIGIN_RE.test(messageText);
+            const pagePhrase = (messageText.match(/p[áa]gina\s+(.+?)(?:\s+e\s+(?:quero|gostaria|preciso|tenho)\b|[.!?\n]|$)/i) ?? [])[1]?.trim() ?? '';
+            if (cameFromSite && (!cur?.fonte_lead || cur.fonte_lead === 'Widechat')) {
+                updates.source_id = 1; // "Site"
+                updates.fonte_lead = pagePhrase ? `Site — ${pagePhrase}` : 'Site';
+            }
 
             // perfil "aluno": telefone casa com matrícula do Sponte
             if (cur?.perfil !== 'aluno' && messagePhone) {
@@ -341,16 +384,14 @@ serve(async (req) => {
                 }
             }
 
-            if (!cur?.curso_interesse && messageText) {
+            // curso: preenche se vazio; e CORRIGE um curso errado quando a pessoa cita a
+            // página que preencheu e o lead ainda está fresco (o auto-chute anterior errou).
+            const canSetCourse = !cur?.curso_interesse || (!!pagePhrase && stillFresh);
+            if (canSetCourse && messageText) {
                 const { data: courses } = await db.from('courses').select('id, name, default_value');
-                const msgNorm = messageText.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
-                const match = (courses ?? []).find((c: any) => {
-                    const cn = (c.name || '').toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
-                    if (cn && msgNorm.includes(cn)) return true;
-                    const words = cn.split(/\s+/).filter((w: string) => w.length > 4);
-                    return words.length > 0 && words.every((w: string) => msgNorm.includes(w));
-                });
-                if (match) {
+                const match = (pagePhrase ? bestCourseByPhrase(pagePhrase, courses ?? []) : null)
+                    ?? looseCourseScan(messageText, courses ?? []);
+                if (match && match.id !== cur?.curso_interesse) {
                     updates.curso_interesse = match.id;
                     if (match.default_value && !cur?.valor_oportunidade) updates.valor_oportunidade = match.default_value;
                 }
@@ -362,6 +403,7 @@ serve(async (req) => {
                     k === 'assigned_to_id' ? `assigned_to_id = profiles:⟨${v}⟩`
                     : k === 'curso_interesse' ? `curso_interesse = courses:⟨${v}⟩`
                     : k === 'stage_id' ? `stage_id = stages:⟨${v}⟩`
+                    : k === 'source_id' ? `source_id = lead_sources:⟨${v}⟩`
                     : `${k} = ${sv(v)}`).join(', ');
                 await mirror(`UPDATE leads SET ${sets} WHERE id = leads:⟨${leadId}⟩;`);
             }
