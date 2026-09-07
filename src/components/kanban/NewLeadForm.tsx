@@ -82,10 +82,14 @@ export function NewLeadForm({ onSuccess }: NewLeadFormProps) {
 
     const createLeadMutation = useMutation({
         mutationFn: async (values: NewLeadFormValues) => {
+            // normaliza telefone BR: só dígitos, e prepende 55 se veio sem DDI
+            let tel = (values.telefone || '').replace(/\D/g, '')
+            if ((tel.length === 10 || tel.length === 11) && !tel.startsWith('55')) tel = '55' + tel
             const { data: leadData, error } = await supabase
                 .from('leads')
                 .insert({
                     ...values,
+                    telefone: tel || values.telefone,
                     data_entrada: new Date().toISOString(),
                     stage_entry_date: new Date().toISOString(),
                     temperatura: 'frio',

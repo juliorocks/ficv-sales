@@ -8,6 +8,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
+import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command"
 import { showError, showSuccess } from "@/utils/toast"
 
 // Canal padrão da Faculdade (mesmo default usado no widechat-webhook) — usado como
@@ -52,7 +54,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
     const queryClient = useQueryClient()
     const scrollRef = useRef<HTMLDivElement>(null)
     const [newMessage, setNewMessage] = useState("")
-    const [hsmSearch, setHsmSearch] = useState("")
+    const [hsmOpen, setHsmOpen] = useState(false)
 
     // O mesmo cliente pode ter vários registros de lead (formulário + WhatsApp).
     // Casa pelo telefone EXATO (telefone e platform_id são indexados e guardam o
@@ -447,36 +449,33 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
                         </Button>
                     </form>
                 ) : (
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
+                    <Popover open={hsmOpen} onOpenChange={setHsmOpen}>
+                        <PopoverTrigger asChild>
                             <Button variant="outline" className="w-full gap-2 text-slate-700" disabled={sendMessageMutation.isPending}>
                                 {sendMessageMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
                                 {attendance ? "Enviar template" : "Iniciar conversa (template)"}
                             </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start" className="w-80 max-h-96 overflow-y-auto">
-                            <DropdownMenuLabel>Templates aprovados</DropdownMenuLabel>
-                            <div className="px-2 pb-2" onKeyDown={(e) => e.stopPropagation()}>
-                                <Input autoFocus value={hsmSearch} onChange={(e) => setHsmSearch(e.target.value)}
-                                    placeholder="Buscar template..." className="h-8 text-sm" />
-                            </div>
-                            <DropdownMenuSeparator />
-                            {(!hsm || hsm.length === 0) && <div className="px-2 py-3 text-xs text-muted-foreground">Nenhum template disponível.</div>}
-                            {(hsm ?? []).filter((t: any) => {
-                                const q = hsmSearch.trim().toLowerCase()
-                                if (!q) return true
-                                const body = (Array.isArray(t.message) ? t.message.join(' ') : String(t.message ?? '')).toLowerCase()
-                                return String(t.name ?? '').toLowerCase().includes(q) || body.includes(q)
-                            }).map((t: any) => (
-                                <DropdownMenuItem key={t.name} onClick={() => sendTemplate(t)} className="flex flex-col items-start gap-0.5">
-                                    <span className="font-medium">{t.name}</span>
-                                    <span className="text-[11px] text-muted-foreground line-clamp-2">
-                                        {Array.isArray(t.message) ? t.message.join(' ') : t.message}
-                                    </span>
-                                </DropdownMenuItem>
-                            ))}
-                        </DropdownMenuContent>
-                    </DropdownMenu>
+                        </PopoverTrigger>
+                        <PopoverContent align="start" className="w-[22rem] p-0">
+                            <Command filter={(value, search) => value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0}>
+                                <CommandInput placeholder="Buscar template..." />
+                                <CommandList className="max-h-80">
+                                    <CommandEmpty>{(!hsm || hsm.length === 0) ? "Nenhum template disponível." : "Nenhum resultado."}</CommandEmpty>
+                                    <CommandGroup heading="Templates aprovados">
+                                        {(hsm ?? []).map((t: any) => {
+                                            const body = Array.isArray(t.message) ? t.message.join(' ') : String(t.message ?? '')
+                                            return (
+                                                <CommandItem key={t.name} value={`${t.name} ${body}`} onSelect={() => { setHsmOpen(false); sendTemplate(t) }} className="flex flex-col items-start gap-0.5">
+                                                    <span className="font-medium">{t.name}</span>
+                                                    <span className="text-[11px] text-muted-foreground line-clamp-2">{body}</span>
+                                                </CommandItem>
+                                            )
+                                        })}
+                                    </CommandGroup>
+                                </CommandList>
+                            </Command>
+                        </PopoverContent>
+                    </Popover>
                 )}
             </div>
         </div>
