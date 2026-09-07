@@ -104,8 +104,33 @@ serve(async (req) => {
         // nome do agente: content.user.name, data.name, ou o prefixo "*Nome:*" da mensagem
         const prefixName = (String(messageText).match(/^\*([^:*]+):\*/) ?? [])[1] ?? "";
         const agentName = String(msgData.user?.name ?? data?.name ?? prefixName ?? "");
-        const NON_COMMERCIAL = /\b(RH|secretaria|financeiro|escola|funda[çc][ãa]o|sistema cidade viva|conex[ãa]o de casais)\b/i;
+        const NON_COMMERCIAL = /\b(RH|secretaria|financeiro|escola|funda[çc][ãa]o|sistema cidade viva|cidade viva education|livraria|igreja|conex[ãa]o de casais|conex[õo]es e redes|c[ée]lula|pastoral|di[áa]cono|redes de pequenos grupos)\b/i;
         const agentLc = agentName.toLowerCase().trim();
+
+        // ── área escolhida no menu do BOT (antes de cair pra um agente) ───────
+        // o número é compartilhado: no menu "com qual área da Cidade Viva você deseja
+        // falar" a pessoa escolhe Igreja / Faculdade / Fundação / Livraria / Sistema de
+        // Ensino. Só Faculdade interessa. Se escolheu outra área e NÃO há sinal de
+        // Faculdade na conversa, não vira lead.
+        const CLIENT_PICKED_NON_COMM = /^\s*(igreja cidade viva|funda[çc][ãa]o cidade viva|livraria|sistema de ensino|cidade viva education)\b/i;
+        const CLIENT_PICKED_FACULDADE = /\b(faculdade|ficv|gradua[çc][ãa]o|p[óo]s[- ]?gradua|vestibular)\b/i;
+        const BOT_NON_COMM_AREA = /canal de atendimento da (igreja|funda[çc][ãa]o)|atendimento digital da (igreja|funda[çc][ãa]o)|encaminhando voc[êe] para a equipe respons[áa]vel por (conex|c[ée]lulas|redes)|bem-vindo\(a\) ao \*?cidade viva education/i;
+        let botAreaNonComm = false;
+        if (!agentLc && sessionId && !queueVal) {
+            const { data: recent } = await db.from('widechat_raw_messages')
+                .select('message, origin').eq('session_id', sessionId)
+                .order('created_at', { ascending: false }).limit(15);
+            const rows: { message: string; origin: string }[] = [
+                { message: messageText, origin: 'channel' },
+                ...((recent ?? []) as { message: string; origin: string }[]),
+            ];
+            // sinal de Faculdade só vale vindo do CLIENTE — o bot lista TODAS as áreas
+            // ("dúvidas sobre Igreja, Faculdade, Fundação...") em toda conversa.
+            const pickedFaculdade = rows.some(r => r.origin === 'channel' && CLIENT_PICKED_FACULDADE.test(r.message || ''));
+            const pickedNonComm = rows.some(r => r.origin === 'channel' && CLIENT_PICKED_NON_COMM.test(r.message || ''))
+                || rows.some(r => r.origin !== 'channel' && BOT_NON_COMM_AREA.test(r.message || ''));
+            botAreaNonComm = pickedNonComm && !pickedFaculdade;
+        }
 
         // roster da(s) equipe(s) que atendem lead (por padrão só Comercial — ver
         // Equipes no app). Um agente fora da lista = não-comercial.
@@ -130,14 +155,25 @@ serve(async (req) => {
             alreadyBlocked = !!bl;
         }
 
+        // um agente DA COMERCIAL respondendo desfaz um bloqueio antigo — a pessoa pode
+        // ter falado com a Igreja mês passado e agora estar de fato num atendimento
+        // comercial. O agente no atendimento é a fonte de verdade mais forte.
+        // (agentLc só é preenchido quando há nome de agente no payload — msg de cliente não tem.)
+        const commercialAgentReplying = !!agentLc && agentInRoster && !NON_COMMERCIAL.test(agentName);
+        if (alreadyBlocked && commercialAgentReplying && phoneSuffix.length >= 8) {
+            await db.from('widechat_blocklist_contacts').delete().eq('telefone', phoneSuffix);
+            alreadyBlocked = false;
+        }
+
         const isNonCommercial = alreadyBlocked ||
+            botAreaNonComm ||
             (queueVal && !/comercial/i.test(queueVal) && NON_COMMERCIAL.test(queueVal)) ||
             NON_COMMERCIAL.test(agentName) ||
             NON_COMMERCIAL.test(String(msgData.prefix ?? "")) ||
             (!!agentLc && !agentInRoster);
 
         if (isNonCommercial && !alreadyBlocked && phoneSuffix.length >= 8) {
-            const motivo = queueVal || agentName || 'roster';
+            const motivo = queueVal || agentName || (botAreaNonComm ? 'menu-bot' : 'roster');
             await db.from('widechat_blocklist_contacts')
                 .upsert({ telefone: phoneSuffix, motivo }, { onConflict: 'telefone' });
         }
@@ -209,8 +245,9 @@ serve(async (req) => {
         const { data: stg0 } = await db.from('stages').select('id').order('order', { ascending: true }).limit(1).maybeSingle();
         const firstStageId = stg0?.id ?? 1;
 
-        // ── setor não-comercial (RH/Secretaria/Escola/Fundação) ───────────────
+        // ── setor não-comercial (RH/Secretaria/Escola/Fundação/Igreja/CV Education) ──
         if (isNonCommercial) {
+            const motivoTxt = queueVal || agentName || (botAreaNonComm ? 'área do menu do bot' : alreadyBlocked ? 'blocklist' : 'roster');
             // se um lead vazou pra esse contato e ninguém da comercial trabalhou nele, remove
             if (leadId) {
                 const { data: l } = await db.from('leads')
@@ -222,10 +259,10 @@ serve(async (req) => {
                     await db.from('widechat_atendimentos').delete().eq('lead_id', leadId);
                     await db.from('leads').delete().eq('id', leadId);
                     await mirror(`DELETE leads:⟨${leadId}⟩; DELETE widechat_messages WHERE lead_id = leads:⟨${leadId}⟩;`);
-                    return j({ success: true, ignored: true, reason: `setor não-comercial (${queueVal || agentName}) — lead ${leadId} removido` });
+                    return j({ success: true, ignored: true, reason: `setor não-comercial (${motivoTxt}) — lead ${leadId} removido` });
                 }
             }
-            return j({ success: true, ignored: true, reason: `setor não-comercial (${queueVal || agentName})` });
+            return j({ success: true, ignored: true, reason: `setor não-comercial (${motivoTxt})` });
         }
 
         // ── accept attendance ─────────────────────────────────────────────────
