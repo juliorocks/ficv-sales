@@ -16,9 +16,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabase"
 import { showError, showSuccess } from "@/utils/toast"
-import { Stage, LeadSource, Course } from "@/types/database"
-import { useAuth } from "@/hooks/use-auth"
+import { Stage, LeadSource, Course, Lead } from "@/types/database"
 
+const numOrNull = z.preprocess((v) => (v === '' || v === undefined || v === null ? null : Number(v)), z.number().nullable())
 const formSchema = z.object({
     nome_completo: z.string().min(2, "O nome é obrigatório."),
     email: z.string().email("E-mail inválido.").or(z.literal("")).optional(),
@@ -26,19 +26,18 @@ const formSchema = z.object({
     valor_oportunidade: z.coerce.number().min(0, "O valor deve ser positivo.").default(0),
     observacoes: z.string().optional(),
     stage_id: z.coerce.number().min(1, "Selecione um estágio inicial."),
-    curso_interesse: z.coerce.number().nullable(),
-    source_id: z.coerce.number().nullable(),
+    curso_interesse: numOrNull,
+    source_id: numOrNull,
 })
 
 interface NewLeadFormProps {
-    onSuccess?: () => void;
+    onSuccess?: (lead: Lead) => void;
 }
 
 type NewLeadFormValues = z.infer<typeof formSchema>
 
 export function NewLeadForm({ onSuccess }: NewLeadFormProps) {
     const queryClient = useQueryClient()
-    const { user, isLoading: isAuthLoading } = useAuth()
 
     const { data: stages, isLoading: isLoadingStages } = useQuery<Stage[]>({
         queryKey: ['stages'],
@@ -47,7 +46,6 @@ export function NewLeadForm({ onSuccess }: NewLeadFormProps) {
             if (error) throw error
             return data
         },
-        enabled: !isAuthLoading && !!user,
     })
 
     const { data: courses, isLoading: isLoadingCourses } = useQuery<Course[]>({
@@ -57,7 +55,6 @@ export function NewLeadForm({ onSuccess }: NewLeadFormProps) {
             if (error) throw error
             return data
         },
-        enabled: !isAuthLoading && !!user,
     })
 
     const { data: leadSources, isLoading: isLoadingSources } = useQuery<LeadSource[]>({
@@ -67,7 +64,6 @@ export function NewLeadForm({ onSuccess }: NewLeadFormProps) {
             if (error) throw error
             return data
         },
-        enabled: !isAuthLoading && !!user,
     })
 
     const form = useForm({
@@ -78,6 +74,9 @@ export function NewLeadForm({ onSuccess }: NewLeadFormProps) {
             telefone: "",
             valor_oportunidade: 0,
             observacoes: "",
+            stage_id: 1,
+            curso_interesse: null,
+            source_id: null,
         },
     })
 
@@ -101,20 +100,21 @@ export function NewLeadForm({ onSuccess }: NewLeadFormProps) {
                 .map(([key, value]) => ({ field: key, from: null, to: value }))
 
             if (changes.length > 0) {
+                const { data: authData } = await supabase.auth.getUser()
                 await supabase.from('audit_logs').insert({
-                    user_id: user?.id,
+                    user_id: authData.user?.id ?? null,
                     action: 'lead_created',
                     details: { lead_id: leadData.id, changes }
                 })
             }
-            return leadData
+            return leadData as Lead
         },
         onSuccess: (data) => {
             queryClient.invalidateQueries({ queryKey: ['leads'] })
             queryClient.invalidateQueries({ queryKey: ['audit_logs', data.id] })
             showSuccess("Lead criado com sucesso!")
             form.reset()
-            onSuccess?.()
+            onSuccess?.(data)
         },
         onError: (error: any) => {
             showError(`Erro ao criar lead: ${error.message}`)

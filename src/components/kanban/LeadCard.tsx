@@ -1,13 +1,15 @@
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Lead, User, LeadSource, Stage, Course } from "@/types/database"
 import { Button } from "@/components/ui/button"
-import { Clock, HandHelping, Mail, Pencil, Phone, RefreshCw } from "lucide-react"
+import { ArrowRightLeft, Check, Clock, HandHelping, Mail, Pencil, Phone, RefreshCw } from "lucide-react"
 import { EditLeadDialog } from "./EditLeadDialog"
+import { LossReasonDialog } from "./LossReasonDialog"
 import { useTimeInStage } from "@/hooks/use-time-in-stage"
 import { useState } from "react"
 import { LeadTemperature } from "./LeadTemperature"
 import { AssignedUser } from "./AssignedUser"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { IconPreview } from "../admin/IconPreview"
 import { Badge } from "@/components/ui/badge"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -26,11 +28,34 @@ interface LeadCardProps {
 export function LeadCard({ lead, users, leadSources, stages, courses }: LeadCardProps) {
     const timeInStage = useTimeInStage(lead.stage_entry_date);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+    const [isLossOpen, setIsLossOpen] = useState(false);
     const { user } = useAuth();
     const queryClient = useQueryClient();
 
     const source = lead.source_id ? leadSources.find(s => s.id === lead.source_id) : null;
     const course = lead.curso_interesse ? courses.find(c => c.id === lead.curso_interesse) : null;
+    const orderedStages = [...stages].sort((a, b) => a.order - b.order);
+    const lostStage = stages.find(s => s.name.toLowerCase().includes('perdido'));
+
+    const moveStageMutation = useMutation({
+        mutationFn: async (stageId: number) => {
+            const now = new Date().toISOString();
+            const { error } = await supabase.from('leads')
+                .update({ stage_id: stageId, stage_entry_date: now, updated_at: now })
+                .eq('id', lead.id);
+            if (error) throw error;
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['leads'] });
+            showSuccess('Lead movido.');
+        },
+        onError: (e: any) => showError(`Não foi possível mover: ${e.message}`),
+    });
+
+    const handleMove = (stageId: number) => {
+        if (lostStage && stageId === lostStage.id) { setIsLossOpen(true); return; }
+        moveStageMutation.mutate(stageId);
+    };
 
     const atenderMutation = useMutation({
         mutationFn: async () => {
@@ -105,6 +130,24 @@ export function LeadCard({ lead, users, leadSources, stages, courses }: LeadCard
                                 </Tooltip>
                             </TooltipProvider>
                         )}
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-6 w-6" title="Mover para coluna" disabled={moveStageMutation.isPending}>
+                                    <ArrowRightLeft className="h-4 w-4" />
+                                    <span className="sr-only">Mover Lead</span>
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-48">
+                                <DropdownMenuLabel>Mover para</DropdownMenuLabel>
+                                <DropdownMenuSeparator />
+                                {orderedStages.map(s => (
+                                    <DropdownMenuItem key={s.id} disabled={s.id === lead.stage_id} onClick={() => handleMove(s.id)}>
+                                        {s.id === lead.stage_id && <Check className="h-3.5 w-3.5 mr-2" />}
+                                        <span className={s.id === lead.stage_id ? 'font-medium' : ''}>{s.name}</span>
+                                    </DropdownMenuItem>
+                                ))}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
                         <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setIsEditDialogOpen(true)}>
                             <Pencil className="h-4 w-4" />
                             <span className="sr-only">Editar Lead</span>
@@ -167,6 +210,15 @@ export function LeadCard({ lead, users, leadSources, stages, courses }: LeadCard
                     stages={stages}
                     isOpen={isEditDialogOpen}
                     onOpenChange={setIsEditDialogOpen}
+                />
+            )}
+            {isLossOpen && lostStage && (
+                <LossReasonDialog
+                    isOpen={isLossOpen}
+                    onOpenChange={setIsLossOpen}
+                    leadId={Number(lead.id)}
+                    lostStageId={lostStage.id}
+                    onSuccess={() => { setIsLossOpen(false); queryClient.invalidateQueries({ queryKey: ['leads'] }); }}
                 />
             )}
         </>

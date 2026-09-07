@@ -18,11 +18,9 @@ import {
     DialogDescription,
     DialogFooter,
 } from "@/components/ui/dialog"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabase"
 import { showError, showSuccess } from "@/utils/toast"
-import { useAuth } from "@/hooks/use-auth"
 
 const formSchema = z.object({
     motivo_perda_id: z.coerce.number().min(1, "A seleção do motivo é obrigatória."),
@@ -45,16 +43,18 @@ interface LossReasonDialogProps {
 
 export function LossReasonDialog({ isOpen, onOpenChange, onSuccess, leadId, lostStageId }: LossReasonDialogProps) {
     const queryClient = useQueryClient()
-    const { user, isLoading: isAuthLoading } = useAuth()
 
+    // sem gate de auth: o RLS (is_staff) já garante a segurança. O gate anterior
+    // (useAuth, que roda a checagem do zero em cada componente por não ser um contexto)
+    // deixava o dropdown vazio enquanto a sessão não resolvia.
     const { data: reasons, isLoading } = useQuery<LossReason[]>({
         queryKey: ["motivos_perda"],
         queryFn: async () => {
-            const { data, error } = await supabase.from("motivos_perda").select("*").order("motivo")
+            const { data, error } = await supabase.from("motivos_perda").select("id, motivo").order("motivo")
             if (error) throw error
             return data || []
         },
-        enabled: !isAuthLoading && !!user,
+        staleTime: 10 * 60_000,
     })
 
     const form = useForm({
@@ -102,18 +102,22 @@ export function LossReasonDialog({ isOpen, onOpenChange, onSuccess, leadId, lost
                             render={({ field }) => (
                                 <FormItem>
                                     <FormLabel>Motivo</FormLabel>
-                                    <Select onValueChange={field.onChange} value={field.value?.toString()}>
-                                        <FormControl>
-                                            <SelectTrigger disabled={isLoading || isAuthLoading}>
-                                                <SelectValue placeholder="Selecione um motivo..." />
-                                            </SelectTrigger>
-                                        </FormControl>
-                                        <SelectContent>
+                                    <FormControl>
+                                        <select
+                                            className="flex h-10 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                                            value={(field.value as any)?.toString() ?? ''}
+                                            onChange={(e) => field.onChange(e.target.value)}
+                                            disabled={isLoading}
+                                        >
+                                            <option value="" disabled>{isLoading ? 'Carregando motivos...' : 'Selecione um motivo...'}</option>
                                             {reasons?.map(reason => (
-                                                <SelectItem key={reason.id} value={reason.id.toString()}>{reason.motivo}</SelectItem>
+                                                <option key={reason.id} value={String(reason.id)}>{reason.motivo}</option>
                                             ))}
-                                        </SelectContent>
-                                    </Select>
+                                        </select>
+                                    </FormControl>
+                                    {!isLoading && (!reasons || reasons.length === 0) && (
+                                        <p className="text-xs text-destructive">Nenhum motivo cadastrado. Peça pra um admin cadastrar em Motivos de Perda.</p>
+                                    )}
                                     <FormMessage />
                                 </FormItem>
                             )}

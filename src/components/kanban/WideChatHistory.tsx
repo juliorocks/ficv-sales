@@ -52,6 +52,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
     const queryClient = useQueryClient()
     const scrollRef = useRef<HTMLDivElement>(null)
     const [newMessage, setNewMessage] = useState("")
+    const [hsmSearch, setHsmSearch] = useState("")
 
     // O mesmo cliente pode ter vários registros de lead (formulário + WhatsApp).
     // Casa pelo telefone EXATO (telefone e platform_id são indexados e guardam o
@@ -453,11 +454,20 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
                                 {attendance ? "Enviar template" : "Iniciar conversa (template)"}
                             </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start" className="w-72 max-h-80 overflow-y-auto">
+                        <DropdownMenuContent align="start" className="w-80 max-h-96 overflow-y-auto">
                             <DropdownMenuLabel>Templates aprovados</DropdownMenuLabel>
+                            <div className="px-2 pb-2" onKeyDown={(e) => e.stopPropagation()}>
+                                <Input autoFocus value={hsmSearch} onChange={(e) => setHsmSearch(e.target.value)}
+                                    placeholder="Buscar template..." className="h-8 text-sm" />
+                            </div>
                             <DropdownMenuSeparator />
                             {(!hsm || hsm.length === 0) && <div className="px-2 py-3 text-xs text-muted-foreground">Nenhum template disponível.</div>}
-                            {hsm?.map((t: any) => (
+                            {(hsm ?? []).filter((t: any) => {
+                                const q = hsmSearch.trim().toLowerCase()
+                                if (!q) return true
+                                const body = (Array.isArray(t.message) ? t.message.join(' ') : String(t.message ?? '')).toLowerCase()
+                                return String(t.name ?? '').toLowerCase().includes(q) || body.includes(q)
+                            }).map((t: any) => (
                                 <DropdownMenuItem key={t.name} onClick={() => sendTemplate(t)} className="flex flex-col items-start gap-0.5">
                                     <span className="font-medium">{t.name}</span>
                                     <span className="text-[11px] text-muted-foreground line-clamp-2">

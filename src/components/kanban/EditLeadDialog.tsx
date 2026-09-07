@@ -55,9 +55,10 @@ interface EditLeadDialogProps {
     children?: React.ReactNode
     isOpen: boolean
     onOpenChange: (isOpen: boolean) => void
+    initialTab?: "details" | "chat" | "history"
 }
 
-export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange }: EditLeadDialogProps) {
+export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, initialTab = "details" }: EditLeadDialogProps) {
     const queryClient = useQueryClient()
     const { user, isLoading: isAuthLoading } = useAuth()
     const [isLossReasonOpen, setIsLossReasonOpen] = useState(false)
@@ -255,7 +256,7 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange }:
                         <DialogTitle>Lead: {lead.nome_completo}</DialogTitle>
                         <DialogDescription>Gerencie as informações e o histórico do lead.</DialogDescription>
                     </DialogHeader>
-                    <Tabs defaultValue="details" className="w-full">
+                    <Tabs defaultValue={initialTab} className="w-full">
                         <TabsList className="grid w-full grid-cols-3">
                             <TabsTrigger value="details">Detalhes</TabsTrigger>
                             <TabsTrigger value="chat">Conversas</TabsTrigger>

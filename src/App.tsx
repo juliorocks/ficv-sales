@@ -1679,7 +1679,6 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {activeTab === 'kanban' && (
                     <div className="animate-fade-in min-w-0">
                         <KanbanBoard searchTerm={kanbanSearch} />
-                        <CreateLeadFab />
                     </div>
                 )}
 
@@ -1742,6 +1741,10 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 )}
 
             </main>
+            {/* FAB fora do <main> e do wrapper .animate-fade-in — esse wrapper tem transform
+                (animação), o que quebra position:fixed (o botão ficava ancorado no fim do
+                conteúdo, fora da tela). */}
+            {activeTab === 'kanban' && <CreateLeadFab />}
             {
                 selectedAnalysis && (
                     <AnalysisDetail
