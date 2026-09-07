@@ -84,14 +84,21 @@ serve(async (req) => {
         const body = await req.json().catch(() => ({}));
         const action = body.action as string;
 
-        // Endpoints de LEITURA (templates, agentes, filas) não funcionam pra conta ADMIN do
-        // WideChat (retorna 401 "sem permissão"). Se o usuário logado for admin, cai pra
-        // credencial de um AGENTE qualquer cadastrado em user_integrations — é só leitura de
-        // dado compartilhado, não afeta atribuição de mensagem.
-        let agentFallback: { token: string; email: string; id: string } | null | undefined = undefined;
-        async function getAgentFallback(): Promise<{ token: string; email: string; id: string } | null> {
-            if (agentFallback !== undefined) return agentFallback;
-            agentFallback = null;
+        // Número BR sem DDI -> prepende 55 (WideChat espera "55" + DDD + número).
+        const brDigits = (raw: unknown): string => {
+            let d = String(raw ?? '').replace(/\D/g, '');
+            if ((d.length === 10 || d.length === 11) && !d.startsWith('55')) d = '55' + d;
+            return d;
+        };
+
+        // Endpoints de leitura/envio não funcionam pra conta ADMIN do WideChat (401 "sem
+        // permissão"). Nesse caso cai pra credencial de um AGENTE qualquer de
+        // user_integrations. É leitura de dado compartilhado / envio já atribuído ao agente.
+        let _afTried = false;
+        let _af: { token: string; email: string; id: string } | null = null;
+        const getAgentFallback = async () => {
+            if (_afTried) return _af;
+            _afTried = true;
             const { data: rows } = await supabase.from('user_integrations')
                 .select('widechat_email, widechat_password')
                 .not('widechat_email', 'is', null).not('widechat_password', 'is', null)
@@ -105,33 +112,27 @@ serve(async (req) => {
                     if (!lr.ok) continue;
                     const lj = await lr.json();
                     if (lj?.user?.type === 'admin' || !lj?.token) continue;
-                    agentFallback = { token: lj.token as string, email: row.widechat_email as string, id: lj.user?._id ?? '' };
-                    return agentFallback;
-                } catch { /* tenta o próximo */ }
+                    _af = { token: lj.token, email: row.widechat_email as string, id: lj.user?._id ?? '' };
+                    return _af;
+                } catch { /* próximo */ }
             }
             return null;
-        }
-        const getAgentFallbackToken = async () => (await getAgentFallback())?.token ?? null;
-
-        // Número BR sem DDI -> prepende 55 (WideChat espera "55" + DDD + número).
-        const brDigits = (raw: unknown) => {
-            let d = String(raw ?? '').replace(/\D/g, '');
-            if ((d.length === 10 || d.length === 11) && !d.startsWith('55')) d = '55' + d;
-            return d;
         };
-        async function readAsAgent(url: string, init?: RequestInit): Promise<{ ok: boolean; status: number; data: any }> {
-            let r = await fetch(url, { ...init, headers: { ...wcHeaders, ...(init?.headers as any ?? {}) } });
+        // faz a chamada com o token do usuário; se der 401/403/{status:false}, refaz como agente.
+        const wcCall = async (path: string, init: RequestInit = {}): Promise<{ ok: boolean; status: number; data: any; asAgent: boolean }> => {
+            const hdr = (auth: string) => ({ 'Content-Type': 'application/json', 'Authorization': `Bearer ${auth}` });
+            let r = await fetch(`${WIDECHAT_BASE}${path}`, { ...init, headers: hdr(wcToken) });
             let data = await r.json().catch(() => null);
-            const denied = r.status === 401 || r.status === 403 || (data && data.status === false);
-            if (denied) {
-                const t = await getAgentFallbackToken();
-                if (t) {
-                    r = await fetch(url, { ...init, headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${t}`, ...(init?.headers as any ?? {}) } });
+            if (r.status === 401 || r.status === 403 || (data && data.status === false)) {
+                const af = await getAgentFallback();
+                if (af) {
+                    r = await fetch(`${WIDECHAT_BASE}${path}`, { ...init, headers: hdr(af.token) });
                     data = await r.json().catch(() => null);
+                    return { ok: r.ok, status: r.status, data, asAgent: true };
                 }
             }
-            return { ok: r.ok, status: r.status, data };
-        }
+            return { ok: r.ok, status: r.status, data, asAgent: false };
+        };
 
         if (action === 'whoami') {
             const r = await fetch(`${WIDECHAT_BASE}/agents/profile`, { headers: wcHeaders });
@@ -167,14 +168,11 @@ serve(async (req) => {
 
         // ── list_hsm: templates aprovados ─────────────────────────────────────
         if (action === 'list_hsm') {
-            const { ok, status, data } = await readAsAgent(`${WIDECHAT_BASE}/hsm/listAll`, {
+            const { ok, status, data } = await wcCall('/hsm/listAll', {
                 method: 'POST',
-                body: JSON.stringify({
-                    attendance_id: body.attendance_id ?? undefined,
-                    channel_id: body.channel_id ?? undefined,
-                }),
+                body: JSON.stringify({ attendance_id: body.attendance_id ?? undefined, channel_id: body.channel_id ?? undefined }),
             });
-            return jsonRes(ok ? { success: true, templates: data } : { error: data }, ok ? 200 : status);
+            return jsonRes(ok ? { success: true, templates: Array.isArray(data) ? data : (data?.data ?? []) } : { error: data }, ok ? 200 : status);
         }
 
         // ── send_message: texto ou HSM ───────────────────────────────────────
@@ -196,39 +194,30 @@ serve(async (req) => {
                 base.message = body.message;
             }
 
-            async function trySend(headers: Record<string, string>, agentIdVal: string | undefined, agentEmail: string) {
-                const r = await fetch(`${WIDECHAT_BASE}/message/send`, {
-                    method: 'POST', headers,
-                    body: JSON.stringify({ ...base, agent_id: agentIdVal, agent: agentEmail }),
-                });
-                const data = await r.json().catch(() => null);
-                return { r, data };
+            // O WideChat só aceita os campos agent/agent_id quando há attendance_id
+            // ("attendance id é obrigatório quando agent está presente"). Numa conversa
+            // nova (iniciada por template, sem atendimento) NÃO manda agent — a mensagem
+            // já sai atribuída ao dono do token.
+            if (body.attendance_id) {
+                base.agent_id = await agentId();
+                base.agent = integ.widechat_email;
             }
-
-            let { r, data } = await trySend(wcHeaders, await agentId(), integ.widechat_email);
-            // conta admin não pode enviar -> tenta de novo como um agente
-            if ((r.status === 401 || r.status === 403 || (data && data.status === false))) {
-                const af = await getAgentFallback();
-                if (af) {
-                    ({ r, data } = await trySend(
-                        { 'Content-Type': 'application/json', 'Authorization': `Bearer ${af.token}` },
-                        af.id, af.email,
-                    ));
-                }
-            }
-            return jsonRes(r.ok ? { success: true, data } : { error: data }, r.ok ? 200 : r.status);
+            const { ok, status, data } = await wcCall('/message/send', {
+                method: 'POST', body: JSON.stringify(base),
+            });
+            return jsonRes(ok ? { success: true, data } : { error: data }, ok ? 200 : status);
         }
 
         // ── list_agents: agentes online p/ transferir a conversa ────────────
         if (action === 'list_agents') {
-            const { ok, status, data } = await readAsAgent(`${WIDECHAT_BASE}/user/agents/online?allUsers=true&paginate=false`);
-            return jsonRes(ok ? { success: true, agents: data?.data ?? data ?? [] } : { error: data }, ok ? 200 : status);
+            const { ok, status, data } = await wcCall('/user/agents/online?allUsers=true&paginate=false');
+            return jsonRes(ok ? { success: true, agents: Array.isArray(data) ? data : (data?.data ?? []) } : { error: data }, ok ? 200 : status);
         }
 
         // ── list_teams: filas/equipes (campanhas) p/ transferir a conversa ───
         if (action === 'list_teams') {
-            const { ok, status, data } = await readAsAgent(`${WIDECHAT_BASE}/campaigns`);
-            return jsonRes(ok ? { success: true, teams: data?.data ?? data ?? [] } : { error: data }, ok ? 200 : status);
+            const { ok, status, data } = await wcCall('/campaigns');
+            return jsonRes(ok ? { success: true, teams: Array.isArray(data) ? data : (data?.data ?? []) } : { error: data }, ok ? 200 : status);
         }
 
         // ── transfer: manda a conversa pra outro agente ou fila/equipe ───────
@@ -248,11 +237,10 @@ serve(async (req) => {
             };
             if (body.type === 'agent') payload.agent_id = body.agent_id;
             if (body.type === 'attendance') payload.attendance_id = body.team_id;
-            const r = await fetch(`${WIDECHAT_BASE}/attendances/transfer`, {
-                method: 'POST', headers: wcHeaders, body: JSON.stringify(payload),
+            const { ok, status, data } = await wcCall('/attendances/transfer', {
+                method: 'POST', body: JSON.stringify(payload),
             });
-            const data = await r.json();
-            return jsonRes(r.ok ? { success: true, data } : { error: data }, r.ok ? 200 : r.status);
+            return jsonRes(ok ? { success: true, data } : { error: data }, ok ? 200 : status);
         }
 
         return jsonRes({ error: `Ação não suportada: ${action}` }, 400);
