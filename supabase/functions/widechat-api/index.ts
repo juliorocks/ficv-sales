@@ -228,7 +228,26 @@ serve(async (req) => {
             const { ok, status, data } = await wcCall('/message/send', {
                 method: 'POST', body: JSON.stringify(base),
             });
-            return jsonRes(ok ? { success: true, data } : { error: data }, ok ? 200 : status);
+
+            // registra a mensagem enviada no histórico com o TEXTO de verdade — o
+            // webhook de `templateMessage` às vezes chega sem o corpo e grava só
+            // "[Mídia]"; aqui a gente já tem o texto renderizado (base.message).
+            const wcMsgId = (data as any)?.messages?.message_id ?? null;
+            if (ok && body.lead_id && base.message) {
+                try {
+                    await supabase.from('widechat_messages').insert({
+                        lead_id: body.lead_id,
+                        session_id: body.attendance_id ?? 'api',
+                        message_id: wcMsgId,
+                        type: body.is_hsm ? 'template' : 'text',
+                        message: String(base.message),
+                        origin: 'agent',
+                        sender_name: integ.widechat_email,
+                        created_at: new Date().toISOString(),
+                    });
+                } catch { /* histórico é best-effort */ }
+            }
+            return jsonRes(ok ? { success: true, data, message_id: wcMsgId } : { error: data }, ok ? 200 : status);
         }
 
         // ── message_status: confere se a mensagem foi ENTREGUE (o /message/send só

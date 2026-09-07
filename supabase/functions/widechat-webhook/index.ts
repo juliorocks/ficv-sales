@@ -352,8 +352,18 @@ serve(async (req) => {
                 type: msgData.type || "text", message: messageText || "[Mídia]", origin,
                 sender_name: senderName || "Desconhecido", created_at: wcToISO(msgData.created_at),
             };
-            await db.from('widechat_messages').insert(msg);
-            await mirror(`INSERT INTO widechat_messages [{ lead_id:leads:⟨${leadId}⟩, session_id:${sv(msg.session_id)}, message_id:${sv(msg.message_id)}, type:${sv(msg.type)}, message:${sv(msg.message)}, origin:${sv(msg.origin)}, sender_name:${sv(msg.sender_name)}, created_at:${sv(msg.created_at)} }] RETURN NONE;`);
+            // a widechat-api já grava a mensagem enviada (com o texto renderizado) na
+            // hora do envio; se essa mesma msg já está no histórico, não duplica.
+            let already = false;
+            if (msg.message_id) {
+                const { data: dup } = await db.from('widechat_messages')
+                    .select('id').eq('message_id', msg.message_id).limit(1).maybeSingle();
+                already = !!dup;
+            }
+            if (!already) {
+                await db.from('widechat_messages').insert(msg);
+                await mirror(`INSERT INTO widechat_messages [{ lead_id:leads:⟨${leadId}⟩, session_id:${sv(msg.session_id)}, message_id:${sv(msg.message_id)}, type:${sv(msg.type)}, message:${sv(msg.message)}, origin:${sv(msg.origin)}, sender_name:${sv(msg.sender_name)}, created_at:${sv(msg.created_at)} }] RETURN NONE;`);
+            }
 
             // ── CRM inteligente ───────────────────────────────────────────────
             const { data: cur } = await db.from('leads').select('assigned_to_id, curso_interesse, valor_oportunidade, perfil, stage_id, fonte_lead, source_id').eq('id', leadId).maybeSingle();

@@ -34,16 +34,14 @@ function parseTemplate(t: any): { body: string; slots: TplSlot[] } {
     const tags: any[] = Array.isArray(t?.tags) ? t.tags : []
     let slots: TplSlot[]
     if (tags.length) {
+        // O WideChat casa hsm_placeholders[i] com tags[i] (ordem do array), NÃO com o
+        // número do {{n}}. Ex: tags [{{2}},{{1}}] + valores ["A","B"] => {{2}}=A, {{1}}=B.
+        // Então NÃO reordena — mantém a ordem de `tags`.
         slots = tags.map((tag) => ({
             placeholder: String(tag?.placeholder ?? ""),
             variable: String(tag?.variable ?? tag?.placeholder ?? ""),
             example: String(tag?.example ?? ""),
         }))
-        // placeholders numerados ({{1}}, {{2}}): a ordem POSICIONAL que a Meta espera é
-        // a ordem do número, não a ordem em que vieram em `tags`.
-        if (slots.every((s) => /^\{\{\d+\}\}$/.test(s.placeholder))) {
-            slots.sort((a, b) => Number(a.placeholder.replace(/\D/g, "")) - Number(b.placeholder.replace(/\D/g, "")))
-        }
     } else {
         const nums = [...new Set([...body.matchAll(/\{\{(\d+)\}\}/g)].map((m) => Number(m[1])))].sort((a, b) => a - b)
         slots = nums.map((n) => ({ placeholder: `{{${n}}}`, variable: `{{${n}}}`, example: "" }))
@@ -179,10 +177,22 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                     }))
                 } catch { /* segue */ }
             }
-            // dedup por message_id + ordena
-            const seen = new Set<string>()
-            return out
-                .filter((m) => { const k = String(m.message_id || m.id); if (seen.has(k)) return false; seen.add(k); return true })
+            // ruído do WideChat que não interessa na conversa
+            const NOISE = /sua sess[ãa]o (ir[áa] expirar|expirou)|sess[ãa]o encerrada por inatividade/i
+            // dedup por message_id — se houver duplicata, fica com a que tem texto de
+            // verdade (o webhook às vezes grava "[Mídia]" pra mesma msg que a API já
+            // gravou com o corpo renderizado).
+            const byId = new Map<string, any>()
+            const loose: any[] = []
+            for (const m of out) {
+                if (m.message && NOISE.test(m.message)) continue
+                const k = String(m.message_id || '')
+                if (!k) { loose.push(m); continue }
+                const prev = byId.get(k)
+                const better = (x: any) => x && x.message && x.message !== '[Mídia]'
+                if (!prev || (better(m) && !better(prev))) byId.set(k, m)
+            }
+            return [...byId.values(), ...loose]
                 .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
         },
         enabled: relatedIds !== undefined,
@@ -239,7 +249,8 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                     platform_id: phoneDigits,
                     channel_id: effectiveChannelId,
                     attendance_id: attendance?._id,
-                    contact_name: attendance?.contact_name,
+                    contact_name: attendance?.contact_name ?? leadName,
+                    lead_id: leadId,
                     ...(isHsm
                         ? { is_hsm: true, hsm_template_name: arg.hsm_template_name, hsm_placeholders: arg.hsm_placeholders, message: arg.preview }
                         : { message: arg }),
@@ -273,7 +284,8 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
             // falhar depois (ex: erro 131049 — a Meta limita quantos templates de
             // marketing um número recebe). Confere o status real alguns segundos depois.
             showSuccess('Template enviado — confirmando a entrega no WhatsApp…')
-            window.setTimeout(async () => {
+            // a Meta demora alguns segundos pra confirmar entrega/falha — checa 2x.
+            const checkDelivery = async (tries: number) => {
                 try {
                     const { data } = await supabase.functions.invoke('widechat-api', {
                         body: { action: 'message_status', platform_id: phoneDigits, channel_id: effectiveChannelId },
@@ -282,14 +294,21 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                     if (last?.status === 'failed') {
                         const cod = last.error_code ? ` (Meta ${last.error_code})` : ''
                         const dica = last.error_code === 131049
-                            ? ' A Meta limita quantos templates de marketing um número recebe por período. Use um template UTILITY, outro número, ou aguarde ~24h.'
+                            ? ' A Meta limita quantos templates de MARKETING um número recebe por período. Use um template UTILITY, outro número, ou aguarde ~24h.'
                             : (last.error_message ? ` ${last.error_message}` : '')
                         showError(`O WhatsApp NÃO entregou o template${cod}.${dica}`)
-                    } else if (last?.status === 'delivered' || last?.status === 'read') {
-                        showSuccess('Template entregue no WhatsApp ✔')
+                        return
                     }
-                } catch { /* silencioso — o status é só um reforço */ }
-            }, 6000)
+                    if (last?.status === 'delivered' || last?.status === 'read') {
+                        showSuccess('Template entregue no WhatsApp ✔')
+                        return
+                    }
+                    if (tries > 0) window.setTimeout(() => checkDelivery(tries - 1), 8000)
+                } catch {
+                    if (tries > 0) window.setTimeout(() => checkDelivery(tries - 1), 8000)
+                }
+            }
+            window.setTimeout(() => checkDelivery(2), 6000)
         },
     })
 
