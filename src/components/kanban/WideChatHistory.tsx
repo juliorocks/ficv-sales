@@ -10,7 +10,68 @@ import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
 import { showError, showSuccess } from "@/utils/toast"
+
+// ── Templates HSM: variáveis ────────────────────────────────────────────────
+// Um template pode ter variáveis no corpo — numeradas ({{1}}, {{2}}) ou nomeadas
+// ({{NOME}}, {{SALUTATION}}). O WideChat manda essas variáveis em `tags`
+// ({placeholder, variable, example}); quando `tags` vem vazio, a gente descobre
+// pelos {{n}} do próprio corpo. Cada variável precisa de um valor ANTES de enviar
+// (a Meta rejeita o template com variável em branco).
+type TplSlot = { placeholder: string; variable: string; example: string }
+
+const saudacaoAgora = () => {
+    const h = Number(new Date().toLocaleString("en-US", { hour: "2-digit", hour12: false, timeZone: "America/Sao_Paulo" }))
+    return h < 12 ? "Bom dia" : h < 18 ? "Boa tarde" : "Boa noite"
+}
+
+const tplBody = (t: any) => (Array.isArray(t?.message) ? t.message.join("\n") : String(t?.message ?? ""))
+
+function parseTemplate(t: any): { body: string; slots: TplSlot[] } {
+    const body = tplBody(t)
+    const tags: any[] = Array.isArray(t?.tags) ? t.tags : []
+    let slots: TplSlot[]
+    if (tags.length) {
+        slots = tags.map((tag) => ({
+            placeholder: String(tag?.placeholder ?? ""),
+            variable: String(tag?.variable ?? tag?.placeholder ?? ""),
+            example: String(tag?.example ?? ""),
+        }))
+        // placeholders numerados ({{1}}, {{2}}): a ordem POSICIONAL que a Meta espera é
+        // a ordem do número, não a ordem em que vieram em `tags`.
+        if (slots.every((s) => /^\{\{\d+\}\}$/.test(s.placeholder))) {
+            slots.sort((a, b) => Number(a.placeholder.replace(/\D/g, "")) - Number(b.placeholder.replace(/\D/g, "")))
+        }
+    } else {
+        const nums = [...new Set([...body.matchAll(/\{\{(\d+)\}\}/g)].map((m) => Number(m[1])))].sort((a, b) => a - b)
+        slots = nums.map((n) => ({ placeholder: `{{${n}}}`, variable: `{{${n}}}`, example: "" }))
+    }
+    return { body, slots }
+}
+
+function suggestValue(slot: TplSlot, ctx: { leadName?: string; agentName?: string }): string {
+    const v = (slot.variable || "").toUpperCase()
+    if (/SALUTATION|SAUDA/.test(v)) return saudacaoAgora()
+    if (/NAME|NOME|CLIENTE|ALUNO/.test(v)) return (ctx.leadName || "").trim().split(/\s+/)[0] || slot.example
+    if (/AGENT|ATENDENTE|CONSULTOR|VENDEDOR/.test(v)) return (ctx.agentName || "").trim().split(/\s+/)[0] || slot.example
+    return slot.example
+}
+
+function fillTemplate(body: string, slots: TplSlot[], values: string[]): string {
+    let out = body
+    slots.forEach((s, i) => {
+        if (s.placeholder) out = out.split(s.placeholder).join(values[i] ?? s.placeholder)
+    })
+    return out
+}
+
+const rotuloVar = (s: TplSlot) => {
+    const v = (s.variable || s.placeholder).replace(/[{}]/g, "")
+    const map: Record<string, string> = { SALUTATION: "Saudação", NAME: "Nome do cliente", AGENT: "Seu nome", NAN: "Saudação" }
+    return map[v.toUpperCase()] || v
+}
 
 // Canal padrão da Faculdade (mesmo default usado no widechat-webhook) — usado como
 // fallback pra listar/enviar template quando ainda não existe nenhum atendimento
@@ -21,6 +82,7 @@ interface WideChatHistoryProps {
     widechatContactId: string
     leadId: number | string
     telefone?: string | null // usado p/ achar conversas ligadas a outro registro do mesmo lead
+    leadName?: string // p/ preencher {{NOME}} nos templates
 }
 
 // O WideChat mandava a hora em horário de Brasília SEM fuso e o webhook gravava
@@ -50,11 +112,13 @@ interface WideChatMessage {
     sender_name?: string
 }
 
-export function WideChatHistory({ widechatContactId, leadId, telefone }: WideChatHistoryProps) {
+export function WideChatHistory({ widechatContactId, leadId, telefone, leadName }: WideChatHistoryProps) {
     const queryClient = useQueryClient()
     const scrollRef = useRef<HTMLDivElement>(null)
     const [newMessage, setNewMessage] = useState("")
     const [hsmOpen, setHsmOpen] = useState(false)
+    // template escolhido aguardando o preenchimento das variáveis
+    const [tplForm, setTplForm] = useState<{ t: any; slots: TplSlot[]; values: string[] } | null>(null)
 
     // O mesmo cliente pode ter vários registros de lead (formulário + WhatsApp).
     // Casa pelo telefone EXATO (telefone e platform_id são indexados e guardam o
@@ -211,6 +275,18 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
         setNewMessage("")
     }
 
+    // nome de quem está logado — pra sugerir o valor de {{AGENT}} nos templates
+    const { data: agentName } = useQuery<string>({
+        queryKey: ['me-full-name'],
+        queryFn: async () => {
+            const { data: u } = await supabase.auth.getUser()
+            if (!u.user) return ''
+            const { data: p } = await supabase.from('profiles').select('full_name').eq('id', u.user.id).maybeSingle()
+            return (p?.full_name || u.user.email || '').split('@')[0]
+        },
+        staleTime: 30 * 60_000,
+    })
+
     // Templates HSM — usados quando a janela de 24h fechou OU quando ainda não existe
     // nenhum atendimento (inicia a conversa do zero com um template aprovado).
     const { data: hsm } = useQuery<any[]>({
@@ -219,7 +295,17 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
             const { data } = await supabase.functions.invoke('widechat-api', {
                 body: { action: 'list_hsm', channel_id: effectiveChannelId, attendance_id: attendance?._id },
             })
-            return data?.error ? [] : (data?.templates ?? [])
+            const raw: any[] = data?.error ? [] : (data?.templates ?? [])
+            // o WideChat costuma devolver cada template DUAS vezes (uma sem `tags`, outra
+            // com). Fica só com uma por nome, preferindo a que traz as variáveis.
+            const byName = new Map<string, any>()
+            for (const t of raw) {
+                if (!t?.name) continue
+                const prev = byName.get(t.name)
+                const score = Array.isArray(t.tags) ? t.tags.length : 0
+                if (!prev || score > (Array.isArray(prev.tags) ? prev.tags.length : 0)) byName.set(t.name, t)
+            }
+            return [...byName.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)))
         },
         enabled: !canSendText && phoneDigits.length >= 8,
         staleTime: 5 * 60_000,
@@ -287,15 +373,27 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
         onError: (e: any) => showError(`Erro ao transferir: ${e.message}`),
     })
 
-    const sendTemplate = (t: any) => {
-        const tags: any[] = t.tags ?? []
-        const placeholders: string[] = tags.map((tag) => {
-            const label = tag.placeholder ?? '{{?}}'
-            return window.prompt(`Valor para ${label} (${tag.tags_value ?? ''})`) ?? ''
+    // escolheu um template: se tem variável, abre o formulário pra preencher;
+    // se não tem, envia direto.
+    const openTemplate = (t: any) => {
+        const { slots } = parseTemplate(t)
+        if (slots.length === 0) {
+            sendMessageMutation.mutate({ hsm_template_name: t.name, hsm_placeholders: [], preview: tplBody(t) })
+            return
+        }
+        setTplForm({
+            t,
+            slots,
+            values: slots.map((s) => suggestValue(s, { leadName, agentName })),
         })
-        const preview = (Array.isArray(t.message) ? t.message.join('\n') : String(t.message ?? ''))
-            .replace(/\{\{(\d+)\}\}/g, (_m: string, i: string) => placeholders[Number(i) - 1] ?? `{{${i}}}`)
-        sendMessageMutation.mutate({ hsm_template_name: t.name, hsm_placeholders: placeholders, preview })
+    }
+
+    const confirmTemplate = () => {
+        if (!tplForm) return
+        const { t, slots, values } = tplForm
+        const preview = fillTemplate(tplBody(t), slots, values)
+        sendMessageMutation.mutate({ hsm_template_name: t.name, hsm_placeholders: values, preview })
+        setTplForm(null)
     }
 
     if (isLoading) {
@@ -464,9 +562,13 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
                                     <CommandGroup heading="Templates aprovados">
                                         {(hsm ?? []).map((t: any) => {
                                             const body = Array.isArray(t.message) ? t.message.join(' ') : String(t.message ?? '')
+                                            const nVars = parseTemplate(t).slots.length
                                             return (
-                                                <CommandItem key={t.name} value={`${t.name} ${body}`} onSelect={() => { setHsmOpen(false); sendTemplate(t) }} className="flex flex-col items-start gap-0.5">
-                                                    <span className="font-medium">{t.name}</span>
+                                                <CommandItem key={t.name} value={`${t.name} ${body}`} onSelect={() => { setHsmOpen(false); openTemplate(t) }} className="flex flex-col items-start gap-0.5">
+                                                    <span className="font-medium">
+                                                        {t.name}
+                                                        {nVars > 0 && <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">· {nVars} variáve{nVars > 1 ? 'is' : 'l'}</span>}
+                                                    </span>
                                                     <span className="text-[11px] text-muted-foreground line-clamp-2">{body}</span>
                                                 </CommandItem>
                                             )
@@ -478,6 +580,52 @@ export function WideChatHistory({ widechatContactId, leadId, telefone }: WideCha
                     </Popover>
                 )}
             </div>
+
+            {/* preenchimento das variáveis do template antes de enviar */}
+            <Dialog open={!!tplForm} onOpenChange={(o) => { if (!o) setTplForm(null) }}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="text-base">
+                            Preencher o template <span className="font-mono text-sm">{tplForm?.t?.name}</span>
+                        </DialogTitle>
+                    </DialogHeader>
+                    {tplForm && (
+                        <div className="space-y-4">
+                            <p className="text-xs text-muted-foreground">
+                                Esse template tem {tplForm.slots.length} variáve{tplForm.slots.length > 1 ? 'is' : 'l'}. Confira os valores — já sugerimos com base no lead e no horário.
+                            </p>
+                            <div className="space-y-3">
+                                {tplForm.slots.map((s, i) => (
+                                    <div key={`${s.placeholder}-${i}`} className="space-y-1">
+                                        <Label className="text-xs flex items-center gap-1.5">
+                                            {rotuloVar(s)}
+                                            <span className="font-mono text-[10px] text-muted-foreground">{s.placeholder}</span>
+                                        </Label>
+                                        <Input
+                                            value={tplForm.values[i] ?? ''}
+                                            onChange={(e) => setTplForm((f) => f && ({ ...f, values: f.values.map((v, k) => k === i ? e.target.value : v) }))}
+                                            placeholder={s.example || 'valor'}
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="rounded-lg bg-[#eef1f5] p-3 text-sm text-slate-800 whitespace-pre-wrap max-h-40 overflow-y-auto">
+                                {fillTemplate(tplBody(tplForm.t), tplForm.slots, tplForm.values)}
+                            </div>
+                        </div>
+                    )}
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setTplForm(null)}>Cancelar</Button>
+                        <Button
+                            onClick={confirmTemplate}
+                            disabled={sendMessageMutation.isPending || !!tplForm?.values.some((v) => !v.trim())}
+                        >
+                            {sendMessageMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                            Enviar
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }

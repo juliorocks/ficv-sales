@@ -195,7 +195,11 @@ serve(async (req) => {
                 platform_id: brDigits(body.platform_id),
                 channel_id: body.channel_id,
                 type: 'text',
-                close_session: '3', // mantém o atendimento como está
+                // '0' = a sessão continua ABERTA. Com '3' ("mantém o status atual"), numa
+                // conversa nova iniciada por template (sem sessão aberta), o WideChat
+                // finaliza na hora a sessão recém-criada -> dispara o webhook de
+                // "atendimento finalizado" e o card pulava direto pra coluna Finalizado.
+                close_session: '0',
             };
             if (body.attendance_id) base.attendance_id = body.attendance_id;
             if (body.contact_name) base.contact_name = body.contact_name;

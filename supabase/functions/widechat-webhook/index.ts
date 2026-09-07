@@ -230,6 +230,16 @@ serve(async (req) => {
         // ── conversation end ──────────────────────────────────────────────────
         if (isConversationEnd) {
             if (leadId) {
+                // só manda pra "Finalizado" se o cliente de fato participou da conversa.
+                // Sem nenhuma mensagem do cliente (origin=channel) é uma conversa que a
+                // gente iniciou por template e que o WideChat encerrou sozinho (sessão
+                // sem agente / sem resposta) — o lead deve continuar onde está.
+                const { count: inbound } = await db.from('widechat_messages')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('lead_id', leadId).eq('origin', 'channel');
+                if (!inbound) {
+                    return j({ success: true, lead_id: leadId, action: "conversation_ended_ignored_no_client_reply" });
+                }
                 const { data: st } = await db.from('stages').select('id, name')
                     .or('name.ilike.%finaliz%,name.ilike.%encerr%,name.ilike.%conclu%')
                     .order('order', { ascending: false }).limit(1).maybeSingle();
