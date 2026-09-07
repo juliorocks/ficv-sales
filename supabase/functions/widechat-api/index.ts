@@ -60,16 +60,17 @@ serve(async (req) => {
         let wcAgentId: string | undefined;
         const exp = integ.widechat_token_expires_at ? new Date(integ.widechat_token_expires_at) : null;
 
-        if (!wcToken || !exp || new Date() > exp) {
+        // login fresco (o WideChat só permite 1 sessão por conta — se alguém logou
+        // do painel/outra aba, o token cacheado aqui foi revogado; por isso o wcCall
+        // também refaz login no 401).
+        async function freshLogin(): Promise<boolean> {
             const loginRes = await fetch(`${WIDECHAT_BASE}/auth/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email: integ.widechat_email, password: integ.widechat_password }),
             });
-            if (!loginRes.ok) {
-                return jsonRes({ error: `Falha ao logar no WideChat: ${await loginRes.text()}`, code: 'LOGIN_FAILED' }, 400);
-            }
+            if (!loginRes.ok) return false;
             const login = await loginRes.json();
+            if (!login?.token) return false;
             wcToken = login.token;
             wcAgentId = login.user?._id;
             const newExp = new Date(); newExp.setHours(newExp.getHours() + 23);
@@ -78,9 +79,16 @@ serve(async (req) => {
                 widechat_token_expires_at: newExp.toISOString(),
                 updated_at: new Date().toISOString(),
             }).eq('user_id', who.id);
+            return true;
         }
 
-        const wcHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${wcToken}` };
+        if (!wcToken || !exp || new Date() > exp) {
+            if (!await freshLogin()) {
+                return jsonRes({ error: 'Falha ao logar no WideChat. Revise a senha em Configurações > Integração WideChat.', code: 'LOGIN_FAILED' }, 400);
+            }
+        }
+
+        const wcHeaders = () => ({ 'Content-Type': 'application/json', 'Authorization': `Bearer ${wcToken}` });
         const body = await req.json().catch(() => ({}));
         const action = body.action as string;
 
@@ -118,12 +126,19 @@ serve(async (req) => {
             }
             return null;
         };
-        // faz a chamada com o token do usuário; se der 401/403/{status:false}, refaz como agente.
+        // faz a chamada com o token do usuário; no 401/403/{status:false}:
+        //   1) refaz login do próprio usuário (token cacheado pode estar revogado) e tenta de novo
+        //   2) se ainda falhar (ex: conta admin), refaz como um agente qualquer
         const wcCall = async (path: string, init: RequestInit = {}): Promise<{ ok: boolean; status: number; data: any; asAgent: boolean }> => {
             const hdr = (auth: string) => ({ 'Content-Type': 'application/json', 'Authorization': `Bearer ${auth}` });
+            const denied = (r: Response, d: any) => r.status === 401 || r.status === 403 || (d && d.status === false);
             let r = await fetch(`${WIDECHAT_BASE}${path}`, { ...init, headers: hdr(wcToken) });
             let data = await r.json().catch(() => null);
-            if (r.status === 401 || r.status === 403 || (data && data.status === false)) {
+            if (denied(r, data) && await freshLogin()) {
+                r = await fetch(`${WIDECHAT_BASE}${path}`, { ...init, headers: hdr(wcToken) });
+                data = await r.json().catch(() => null);
+            }
+            if (denied(r, data)) {
                 const af = await getAgentFallback();
                 if (af) {
                     r = await fetch(`${WIDECHAT_BASE}${path}`, { ...init, headers: hdr(af.token) });
@@ -135,7 +150,7 @@ serve(async (req) => {
         };
 
         if (action === 'whoami') {
-            const r = await fetch(`${WIDECHAT_BASE}/agents/profile`, { headers: wcHeaders });
+            const r = await fetch(`${WIDECHAT_BASE}/agents/profile`, { headers: wcHeaders() });
             return jsonRes({ crm_profile: who, widechat_email: integ.widechat_email, profile_status: r.status, profile: await r.json().catch(() => null) });
         }
 
@@ -143,7 +158,7 @@ serve(async (req) => {
         async function agentId(): Promise<string | undefined> {
             if (wcAgentId) return wcAgentId;
             try {
-                const r = await fetch(`${WIDECHAT_BASE}/agents/profile`, { headers: wcHeaders });
+                const r = await fetch(`${WIDECHAT_BASE}/agents/profile`, { headers: wcHeaders() });
                 const p = await r.json();
                 wcAgentId = p?._id ?? p?.user?._id ?? p?.agent?._id;
             } catch { /* opcional */ }
@@ -152,9 +167,8 @@ serve(async (req) => {
 
         // ── attendances: acha o atendimento do lead pelo telefone ──────────────
         if (action === 'attendances') {
-            const r = await fetch(`${WIDECHAT_BASE}/user/agents/attendances_plus`, { headers: wcHeaders });
-            const data = await r.json();
-            if (!r.ok) return jsonRes({ error: data }, r.status);
+            const { ok, status, data } = await wcCall('/user/agents/attendances_plus');
+            if (!ok) return jsonRes({ error: data }, status);
             const digits = String(body.telefone ?? '').replace(/\D/g, '');
             const all = [...(data.attendance ?? []), ...(data.wait ?? [])];
             // platform_id é um id interno do WideChat (ex: "BR.3020350278297153"), NÃO o telefone —
