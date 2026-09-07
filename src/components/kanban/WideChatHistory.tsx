@@ -314,13 +314,18 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
 
     // Templates HSM — usados quando a janela de 24h fechou OU quando ainda não existe
     // nenhum atendimento (inicia a conversa do zero com um template aprovado).
-    const { data: hsm } = useQuery<any[]>({
+    const { data: hsm, isFetching: hsmLoading, isError: hsmError, refetch: refetchHsm } = useQuery<any[]>({
         queryKey: ['widechat-hsm', effectiveChannelId],
         queryFn: async () => {
-            const { data } = await supabase.functions.invoke('widechat-api', {
+            const { data, error } = await supabase.functions.invoke('widechat-api', {
                 body: { action: 'list_hsm', channel_id: effectiveChannelId, attendance_id: attendance?._id },
             })
-            const raw: any[] = data?.error ? [] : (data?.templates ?? [])
+            // erro do WideChat (ex: token da conta em disputa com o painel) — deixa o
+            // React Query marcar isError pra UI oferecer "tentar de novo", em vez de
+            // mostrar "nenhum template" (que faz parecer que não existe nenhum).
+            if (error) throw error
+            if (data?.error) throw new Error(typeof data.error === 'string' ? data.error : 'Falha ao listar templates no WideChat.')
+            const raw: any[] = data?.templates ?? []
             // o WideChat costuma devolver cada template DUAS vezes (uma sem `tags`, outra
             // com). Fica só com uma por nome, preferindo a que traz as variáveis.
             const byName = new Map<string, any>()
@@ -334,6 +339,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
         },
         enabled: !canSendText && phoneDigits.length >= 8,
         staleTime: 5 * 60_000,
+        retry: 2,
     })
 
     // Mensagens rápidas (atalhos nossos, não dependem do WideChat)
@@ -591,10 +597,22 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                             </Button>
                         </PopoverTrigger>
                         <PopoverContent align="start" className="w-[22rem] p-0">
+                            {hsmError ? (
+                                <div className="p-4 text-center space-y-2">
+                                    <p className="text-xs text-muted-foreground">
+                                        Não consegui carregar os templates do WideChat agora. Costuma ser a sessão da conta em disputa com o painel do WideChat aberto em outra aba.
+                                    </p>
+                                    <Button size="sm" variant="outline" onClick={() => refetchHsm()} disabled={hsmLoading}>
+                                        {hsmLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null} Tentar de novo
+                                    </Button>
+                                </div>
+                            ) : (
                             <Command filter={(value, search) => value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0}>
                                 <CommandInput placeholder="Buscar template..." />
                                 <CommandList className="max-h-80">
-                                    <CommandEmpty>{(!hsm || hsm.length === 0) ? "Nenhum template disponível." : "Nenhum resultado."}</CommandEmpty>
+                                    <CommandEmpty>
+                                        {hsmLoading ? "Carregando templates…" : (!hsm || hsm.length === 0) ? "Nenhum template disponível." : "Nenhum resultado."}
+                                    </CommandEmpty>
                                     <CommandGroup heading="Templates aprovados">
                                         {(hsm ?? []).map((t: any) => {
                                             const body = Array.isArray(t.message) ? t.message.join(' ') : String(t.message ?? '')
@@ -612,6 +630,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                                     </CommandGroup>
                                 </CommandList>
                             </Command>
+                            )}
                         </PopoverContent>
                     </Popover>
                 )}

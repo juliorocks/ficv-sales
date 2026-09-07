@@ -129,12 +129,17 @@ serve(async (req) => {
         // faz a chamada com o token do usuário; no 401/403/{status:false}:
         //   1) refaz login do próprio usuário (token cacheado pode estar revogado) e tenta de novo
         //   2) se ainda falhar (ex: conta admin), refaz como um agente qualquer
+        // O WideChat só deixa 1 sessão por conta: se um humano usa o painel do WideChat
+        // com a MESMA conta, o token daqui é revogado a cada login dele. Por isso o
+        // re-login + retry roda até 3x — em alguma das voltas a corrida é ganha.
         const wcCall = async (path: string, init: RequestInit = {}): Promise<{ ok: boolean; status: number; data: any; asAgent: boolean }> => {
             const hdr = (auth: string) => ({ 'Content-Type': 'application/json', 'Authorization': `Bearer ${auth}` });
             const denied = (r: Response, d: any) => r.status === 401 || r.status === 403 || (d && d.status === false);
             let r = await fetch(`${WIDECHAT_BASE}${path}`, { ...init, headers: hdr(wcToken) });
             let data = await r.json().catch(() => null);
-            if (denied(r, data) && await freshLogin()) {
+            for (let attempt = 0; attempt < 3 && denied(r, data); attempt++) {
+                if (attempt > 0) await new Promise((res) => setTimeout(res, 400 * attempt));
+                if (!await freshLogin()) break;
                 r = await fetch(`${WIDECHAT_BASE}${path}`, { ...init, headers: hdr(wcToken) });
                 data = await r.json().catch(() => null);
             }
