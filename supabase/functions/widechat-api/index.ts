@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.177.1/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 
 // ============================================================================
 // widechat-api — envio de WhatsApp pelo Kanban, via WideChat, no login do agente.
@@ -224,6 +224,30 @@ serve(async (req) => {
                 method: 'POST', body: JSON.stringify(base),
             });
             return jsonRes(ok ? { success: true, data } : { error: data }, ok ? 200 : status);
+        }
+
+        // ── message_status: confere se a mensagem foi ENTREGUE (o /message/send só
+        // confirma que a Meta ACEITOU o pedido; a entrega pode falhar depois, ex.
+        // erro 131049 da Meta — limite de engajamento pra template de marketing) ──
+        if (action === 'message_status') {
+            const { ok, status, data } = await wcCall('/message/read', {
+                method: 'POST',
+                body: JSON.stringify({ platform_id: brDigits(body.platform_id), channel_id: body.channel_id }),
+            });
+            if (!ok) return jsonRes({ error: data }, status);
+            const msgs = Array.isArray(data) ? data : (data?.data ?? []);
+            const outbound = msgs.filter((m: any) => m?.origin === 'api' || m?.origin === 'agent' || m?.origin === 'user');
+            const last = outbound[outbound.length - 1] ?? null;
+            return jsonRes({
+                success: true,
+                last: last && {
+                    message_id: last.message_id,
+                    status: last.status ?? null,          // 'failed' | 'sent' | 'delivered' | 'read' | ...
+                    created_at: last.created_at,
+                    error_code: last.details?.code ?? null,
+                    error_message: last.details?.error_data?.details ?? last.details?.message ?? null,
+                },
+            });
         }
 
         // ── list_agents: agentes online p/ transferir a conversa ────────────

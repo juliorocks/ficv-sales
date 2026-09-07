@@ -67,7 +67,20 @@ serve(async (req) => {
         const webhookEvent = payload.webhook?.key;
         const msgData = data?.content || data || {};
 
-        const messageText = msgData.message || msgData.interactive?.body?.text || msgData.text || "";
+        // texto de uma mensagem de TEMPLATE/HSM: às vezes vem em msgData.message, às
+        // vezes só no objeto do template (msgData.template/hsm) com {{n}} pra substituir
+        // pelos placeholders. Sem isso o histórico gravava só "[Mídia]".
+        const hsmText = (): string => {
+            const tpl = msgData.template || msgData.hsm || msgData.templateMessage;
+            if (!tpl) return "";
+            const body = Array.isArray(tpl.message) ? tpl.message.join("\n") : String(tpl.message ?? tpl.body ?? "");
+            if (!body) return "";
+            const raw = Array.isArray(msgData.placeholders) ? msgData.placeholders
+                : Array.isArray(tpl.placeholders) ? tpl.placeholders : [];
+            const ph = raw.map((p: any) => typeof p === "string" ? p : String(p?.value ?? p?.text ?? ""));
+            return body.replace(/\{\{(\d+)\}\}/g, (_m: string, i: string) => ph[Number(i) - 1] ?? `{{${i}}}`);
+        };
+        const messageText = msgData.message || msgData.interactive?.body?.text || msgData.text || hsmText() || "";
         let senderName = payload.vars?.name || data?.user?.name || data?.contact?.name || "";
         const messagePhone = payload.vars?.number || data?.contact?.telephone || data?.content?.to || msgData.platform_id || "";
 

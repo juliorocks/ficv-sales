@@ -265,7 +265,32 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
             if (ctx?.previous) queryClient.setQueryData(msgKey, ctx.previous)
             showError(`Erro ao enviar: ${e.message}`)
         },
-        onSuccess: () => { showSuccess('Mensagem enviada'); queryClient.invalidateQueries({ queryKey: msgKey }) },
+        onSuccess: (_data, variables) => {
+            const isHsm = typeof variables !== 'string'
+            queryClient.invalidateQueries({ queryKey: msgKey })
+            if (!isHsm) { showSuccess('Mensagem enviada'); return }
+            // O /message/send só confirma que a Meta ACEITOU o pedido. A entrega pode
+            // falhar depois (ex: erro 131049 — a Meta limita quantos templates de
+            // marketing um número recebe). Confere o status real alguns segundos depois.
+            showSuccess('Template enviado — confirmando a entrega no WhatsApp…')
+            window.setTimeout(async () => {
+                try {
+                    const { data } = await supabase.functions.invoke('widechat-api', {
+                        body: { action: 'message_status', platform_id: phoneDigits, channel_id: effectiveChannelId },
+                    })
+                    const last = data?.last
+                    if (last?.status === 'failed') {
+                        const cod = last.error_code ? ` (Meta ${last.error_code})` : ''
+                        const dica = last.error_code === 131049
+                            ? ' A Meta limita quantos templates de marketing um número recebe por período. Use um template UTILITY, outro número, ou aguarde ~24h.'
+                            : (last.error_message ? ` ${last.error_message}` : '')
+                        showError(`O WhatsApp NÃO entregou o template${cod}.${dica}`)
+                    } else if (last?.status === 'delivered' || last?.status === 'read') {
+                        showSuccess('Template entregue no WhatsApp ✔')
+                    }
+                } catch { /* silencioso — o status é só um reforço */ }
+            }, 6000)
+        },
     })
 
     const handleSend = (e: React.FormEvent) => {
@@ -492,9 +517,20 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                                         : isBot
                                             ? "bg-slate-200 text-slate-600 rounded-2xl rounded-tr-md"
                                             : "bg-[#2563eb] text-white rounded-2xl rounded-tr-md"}`}>
-                                        {msg.type === 'text'
-                                            ? <p className="whitespace-pre-wrap leading-relaxed">{msg.message}</p>
-                                            : <p className="italic text-xs opacity-70">Arquivo de mídia ({msg.type})</p>}
+                                        {(() => {
+                                            const isTpl = msg.type === 'template' || msg.type === 'hsm'
+                                            const hasText = !!msg.message && msg.message !== '[Mídia]'
+                                            if (msg.type === 'text' || (isTpl && hasText)) {
+                                                return (
+                                                    <p className="whitespace-pre-wrap leading-relaxed">
+                                                        {isTpl && <span className="block text-[10px] font-semibold uppercase tracking-wide opacity-70 mb-0.5">Template</span>}
+                                                        {msg.message}
+                                                    </p>
+                                                )
+                                            }
+                                            if (isTpl) return <p className="text-xs opacity-80">📄 Template enviado</p>
+                                            return <p className="italic text-xs opacity-70">Arquivo de mídia ({msg.type})</p>
+                                        })()}
                                     </div>
                                     <span className="text-[10px] text-slate-500 mt-1 px-1">
                                         {isAgent && msg.sender_name && <span className="mr-1 font-medium">{msg.sender_name} •</span>}

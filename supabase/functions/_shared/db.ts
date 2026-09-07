@@ -1,7 +1,7 @@
 // Helper compartilhado das edge functions durante a migração SurrealDB -> Postgres.
 // Postgres (Supabase) é o primário; SurrealDB recebe um espelho best-effort
 // para manter o rollback sem perda durante a transição.
-import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2.47.10";
 
 export function pg(): SupabaseClient {
     return createClient(
