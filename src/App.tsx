@@ -466,19 +466,30 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
         });
     };
 
-    // Get agent-to-team mapping (query simples sem JOIN para não depender de FK no schema)
-    const { profiles } = useAgentProfiles();
-    const [agentTeamMap, setAgentTeamMap] = useState<Record<string, string | null>>({});
+    // Mapa nome-do-agente -> equipes. A equipe fica em `agent_profiles.team_id` e/ou
+    // na tabela de junção `agent_team` (um agente pode estar em várias). O nome que casa
+    // com `messages_logs.agent_name` é o `agent_profiles.name`. (A query antiga lia
+    // `profiles.team_id`, coluna que não existe mais — o filtro por equipe zerava tudo.)
+    const [agentTeamMap, setAgentTeamMap] = useState<Record<string, string[]>>({});
     useEffect(() => {
-        supabase
-            .from('profiles')
-            .select('full_name, team_id')
-            .eq('role', 'agent')
-            .then(({ data }) => {
-                const map: Record<string, string | null> = {};
-                (data ?? []).forEach(p => { if (p.full_name) map[p.full_name] = p.team_id ?? null; });
-                setAgentTeamMap(map);
+        (async () => {
+            const [{ data: aps }, { data: at }] = await Promise.all([
+                supabase.from('agent_profiles').select('id, name, team_id'),
+                supabase.from('agent_team').select('agent_id, team_id'),
+            ]);
+            const map: Record<string, string[]> = {};
+            const nameById = new Map<string, string>();
+            (aps ?? []).forEach((a: any) => {
+                if (!a.name) return;
+                nameById.set(a.id, a.name);
+                if (a.team_id) (map[a.name] ??= []).push(a.team_id);
             });
+            (at ?? []).forEach((row: any) => {
+                const name = nameById.get(row.agent_id);
+                if (name && row.team_id && !(map[name] ?? []).includes(row.team_id)) (map[name] ??= []).push(row.team_id);
+            });
+            setAgentTeamMap(map);
+        })();
     }, []);
 
     // Filter results
@@ -504,8 +515,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
             // Team filter: check if agent belongs to selected team
             let matchesTeam = true;
             if (selectedTeamId) {
-                const agentTeamId = agentTeamMap[d.agent];
-                matchesTeam = agentTeamId === selectedTeamId;
+                matchesTeam = (agentTeamMap[d.agent] ?? []).includes(selectedTeamId);
             }
 
             return matchesAgent && matchesDate && matchesTeam;
