@@ -78,6 +78,40 @@ export function KanbanBoard({ searchTerm }: { searchTerm: string }): JSX.Element
         enabled: !isAuthLoading && !!user,
     })
 
+    // Deixa o cache de motivos de perda quente ANTES de qualquer card abrir o
+    // LossReasonDialog — a query de lá (mesma queryKey) disparava no mount sem gate
+    // de auth e falhava correndo com o refresh de token.
+    useQuery<{ id: number; motivo: string }[]>({
+        queryKey: ['motivos_perda'],
+        queryFn: async () => {
+            const { data, error } = await supabase.from('motivos_perda').select('id, motivo').order('motivo')
+            if (error) throw error
+            return data || []
+        },
+        enabled: !isAuthLoading && !!user,
+        staleTime: 10 * 60 * 1000,
+    })
+
+    // Leads com mensagem do cliente ainda sem resposta (badge piscante no card).
+    // A view devolve só as linhas com pending_count > 0.
+    const { data: pendingReplies } = useQuery<{ lead_id: number; pending_count: number }[]>({
+        queryKey: ['lead_pending_replies'],
+        queryFn: async () => {
+            const { data, error } = await supabase.from('lead_pending_replies').select('lead_id, pending_count')
+            if (error) throw error
+            return data || []
+        },
+        enabled: !isAuthLoading && !!user,
+        staleTime: 30 * 1000,
+        refetchInterval: 45 * 1000,
+    })
+
+    const pendingByLead = useMemo(() => {
+        const m = new Map<number, number>()
+        for (const r of pendingReplies || []) m.set(r.lead_id, r.pending_count)
+        return m
+    }, [pendingReplies])
+
     const filteredLeads = useMemo(() => {
         if (!leads) return [];
         if (!searchTerm.trim()) return leads;
@@ -122,6 +156,7 @@ export function KanbanBoard({ searchTerm }: { searchTerm: string }): JSX.Element
                 (payload) => {
                     console.log('Realtime change detected in leads:', payload);
                     queryClient.invalidateQueries({ queryKey: ['leads'] });
+                    queryClient.invalidateQueries({ queryKey: ['lead_pending_replies'] });
 
                     // Show a subtle notification if a new lead enters
                     if (payload.eventType === 'INSERT') {
@@ -130,6 +165,11 @@ export function KanbanBoard({ searchTerm }: { searchTerm: string }): JSX.Element
                         showSuccess(`Novo lead: ${leadName}`);
                     }
                 }
+            )
+            .on(
+                'postgres_changes',
+                { event: 'INSERT', schema: 'public', table: 'widechat_messages' },
+                () => queryClient.invalidateQueries({ queryKey: ['lead_pending_replies'] }),
             )
             .subscribe((status) => {
                 console.log('Realtime subscription status:', status);
@@ -255,6 +295,7 @@ export function KanbanBoard({ searchTerm }: { searchTerm: string }): JSX.Element
                                     courses={courses || []}
                                     index={index}
                                     allStages={orderedStages}
+                                    pendingByLead={pendingByLead}
                                 />
                             ))}
                             {provided.placeholder}

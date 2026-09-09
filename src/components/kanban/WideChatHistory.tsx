@@ -13,6 +13,7 @@ import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, Command
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { showError, showSuccess } from "@/utils/toast"
+import { useAuth } from "@/hooks/use-auth"
 
 // ── Templates HSM: variáveis ────────────────────────────────────────────────
 // Um template pode ter variáveis no corpo — numeradas ({{1}}, {{2}}) ou nomeadas
@@ -112,8 +113,28 @@ interface WideChatMessage {
 
 export function WideChatHistory({ widechatContactId, leadId, telefone, leadName }: WideChatHistoryProps) {
     const queryClient = useQueryClient()
+    const { user } = useAuth()
     const scrollRef = useRef<HTMLDivElement>(null)
     const [newMessage, setNewMessage] = useState("")
+
+    // id numérico do lead (a tela "Histórico WideChat" usa leadId="" — aí não marca nada)
+    const numericLeadId = typeof leadId === 'number'
+        ? leadId
+        : (/^\d+$/.test(String(leadId)) ? Number(leadId) : null)
+
+    // "conversa vista" (compartilhada): zera o badge de mensagem nova no card do
+    // Kanban. Marca ao abrir a aba Conversas e de novo depois de responder.
+    const markSeen = () => {
+        if (numericLeadId == null) return
+        supabase
+            .from('lead_conversation_seen')
+            .upsert({ lead_id: numericLeadId, seen_at: new Date().toISOString(), seen_by: user?.id ?? null }, { onConflict: 'lead_id' })
+            .then(() => queryClient.invalidateQueries({ queryKey: ['lead_pending_replies'] }))
+    }
+    useEffect(() => {
+        markSeen()
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [numericLeadId, user?.id])
     const [hsmOpen, setHsmOpen] = useState(false)
     // template escolhido aguardando o preenchimento das variáveis
     const [tplForm, setTplForm] = useState<{ t: any; slots: TplSlot[]; values: string[] } | null>(null)
@@ -279,6 +300,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
         onSuccess: (_data, variables) => {
             const isHsm = typeof variables !== 'string'
             queryClient.invalidateQueries({ queryKey: msgKey })
+            markSeen()
             if (!isHsm) { showSuccess('Mensagem enviada'); return }
             // O /message/send só confirma que a Meta ACEITOU o pedido. A entrega pode
             // falhar depois (ex: erro 131049 — a Meta limita quantos templates de

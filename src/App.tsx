@@ -27,7 +27,8 @@ import {
     Search,
     Ticket as TicketIcon,
     GraduationCap,
-    Megaphone
+    Megaphone,
+    CalendarClock
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { reprocessAllAnalyses } from './services/reprocessor';
@@ -68,6 +69,8 @@ import { UserWidechatConfig } from './components/admin/UserWidechatConfig';
 import { TicketDashboard } from './components/tickets/TicketDashboard';
 import { SponteDashboard } from './components/SponteDashboard';
 import { CampaignsDashboard } from './components/CampaignsDashboard';
+import { NotificationBell } from './components/notifications/NotificationBell';
+import { FollowupsPage } from './components/followups/FollowupsPage';
 
 const queryClient = new QueryClient({
     defaultOptions: {
@@ -785,13 +788,19 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
             {/* Sidebar */}
             {!isTvMode && (
                 <aside className="w-[240px] flex flex-col bg-[var(--bg-sidebar)] border-r border-[var(--border)] fixed h-screen z-50">
-                    <div className="px-4 pt-6 pb-8 flex items-center">
+                    <div className="px-4 pt-6 pb-8 flex items-center justify-between gap-2">
                         <img
                             src="https://siteficv.vercel.app/images/test-logo.png"
                             alt="FICV"
                             className="h-16 w-auto object-contain"
                             onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
                         />
+                        {profile && (
+                            <NotificationBell
+                                profile={profile}
+                                onOpenTab={setActiveTab}
+                            />
+                        )}
                     </div>
 
                     <div className="px-4 py-2 flex-1 overflow-y-auto custom-scrollbar">
@@ -865,6 +874,9 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                             <NavItem icon={BookOpen} label="Base de Conhecimento" active={activeTab === 'knowledge'} onClick={() => setActiveTab('knowledge')} />
                             <NavItem icon={MessageSquare} label="Scripts" active={activeTab === 'scripts'} onClick={() => setActiveTab('scripts')} />
                             <NavItem icon={MessageSquare} label="Meu Widechat" active={activeTab === 'widechat'} onClick={() => setActiveTab('widechat')} />
+                            {(profile?.role === 'admin' || profile?.role === 'agent') && (
+                                <NavItem icon={CalendarClock} label="Follow-ups" active={activeTab === 'followups'} onClick={() => setActiveTab('followups')} />
+                            )}
                             {profile?.role === 'admin' && (
                                 <NavItem icon={TicketIcon} label="Tickets" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
                             )}
@@ -1769,6 +1781,13 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {activeTab === 'campanhas' && profile?.role === 'admin' && (
                     <div className="animate-fade-in">
                         <CampaignsDashboard isAdmin={profile?.role === 'admin'} />
+                    </div>
+                )}
+
+                {/* Follow-ups & Tarefas */}
+                {activeTab === 'followups' && (profile?.role === 'admin' || profile?.role === 'agent') && (
+                    <div className="animate-fade-in">
+                        <FollowupsPage profile={profile} />
                     </div>
                 )}
 

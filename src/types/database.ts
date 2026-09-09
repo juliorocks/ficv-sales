@@ -133,6 +133,32 @@ export interface LeadNote {
     users?: { name: string } | null;
 }
 
+export type FollowupStatus = 'pending' | 'done' | 'cancelled';
+
+export interface LeadFollowup {
+    id: number;
+    lead_id: number | null;
+    title: string | null;
+    note: string | null;
+    due_at: string;
+    status: FollowupStatus;
+    assigned_to: string | null;
+    created_by: string | null;
+    created_at: string;
+    completed_at: string | null;
+    completed_by: string | null;
+    // joins opcionais
+    lead?: { id: number; nome_completo: string; telefone: string | null } | null;
+    assignee?: { full_name: string | null; avatar_url: string | null } | null;
+    creator?: { full_name: string | null } | null;
+}
+
+export interface LeadPendingReply {
+    lead_id: number;
+    pending_count: number;
+    last_inbound_at: string | null;
+}
+
 export interface AuditLog {
     id: number;
     created_at: string;

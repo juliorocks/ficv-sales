@@ -1,7 +1,7 @@
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Lead, User, LeadSource, Stage, Course } from "@/types/database"
 import { Button } from "@/components/ui/button"
-import { ArrowRightLeft, Check, Clock, HandHelping, Mail, Pencil, Phone, RefreshCw } from "lucide-react"
+import { ArrowRightLeft, Check, Clock, HandHelping, Mail, MessageCircle, Pencil, Phone, RefreshCw } from "lucide-react"
 import { EditLeadDialog } from "./EditLeadDialog"
 import { LossReasonDialog } from "./LossReasonDialog"
 import { useTimeInStage } from "@/hooks/use-time-in-stage"
@@ -23,12 +23,16 @@ interface LeadCardProps {
     leadSources: LeadSource[]
     stages: Stage[]
     courses: Course[]
+    /** nº de mensagens do cliente ainda sem resposta (badge piscante) */
+    pending?: number
 }
 
-export function LeadCard({ lead, users, leadSources, stages, courses }: LeadCardProps) {
+export function LeadCard({ lead, users, leadSources, stages, courses, pending }: LeadCardProps) {
     const timeInStage = useTimeInStage(lead.stage_entry_date);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+    const [editTab, setEditTab] = useState<"details" | "chat">("details");
     const [isLossOpen, setIsLossOpen] = useState(false);
+    const openEdit = (tab: "details" | "chat") => { setEditTab(tab); setIsEditDialogOpen(true); };
     const { user } = useAuth();
     const queryClient = useQueryClient();
 
@@ -103,6 +107,27 @@ export function LeadCard({ lead, users, leadSources, stages, courses }: LeadCard
                         </CardTitle>
                     </div>
                     <div className="flex items-center flex-shrink-0 gap-2">
+                        {typeof pending === 'number' && pending > 0 && (
+                            <TooltipProvider>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <button
+                                            type="button"
+                                            onClick={() => openEdit('chat')}
+                                            className="relative inline-flex items-center gap-1 rounded-full bg-amber-500 px-1.5 py-0.5 text-[11px] font-bold text-white animate-pulse"
+                                            aria-label={`${pending} mensagem(ns) do cliente sem resposta`}
+                                        >
+                                            <span className="absolute -inset-0.5 rounded-full bg-amber-500/60 animate-ping" />
+                                            <MessageCircle className="relative h-3 w-3" />
+                                            <span className="relative">{pending > 99 ? '99+' : pending}</span>
+                                        </button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                        <p>{pending} mensagem{pending > 1 ? 's' : ''} nova{pending > 1 ? 's' : ''} do cliente — clique para abrir a conversa.</p>
+                                    </TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
+                        )}
                         {lead.contact_count > 1 && (
                             <TooltipProvider>
                                 <Tooltip>
@@ -148,7 +173,7 @@ export function LeadCard({ lead, users, leadSources, stages, courses }: LeadCard
                                 ))}
                             </DropdownMenuContent>
                         </DropdownMenu>
-                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setIsEditDialogOpen(true)}>
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEdit('details')}>
                             <Pencil className="h-4 w-4" />
                             <span className="sr-only">Editar Lead</span>
                         </Button>
@@ -210,6 +235,7 @@ export function LeadCard({ lead, users, leadSources, stages, courses }: LeadCard
                     stages={stages}
                     isOpen={isEditDialogOpen}
                     onOpenChange={setIsEditDialogOpen}
+                    initialTab={editTab}
                 />
             )}
             {isLossOpen && lostStage && (

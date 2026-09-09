@@ -38,6 +38,7 @@ interface KanbanColumnProps {
     index: number;
     allStages: Stage[];
     courses: Course[];
+    pendingByLead?: Map<number, number>;
 }
 
 type SortOption = {
@@ -46,7 +47,7 @@ type SortOption = {
     direction: 'asc' | 'desc';
 };
 
-export function KanbanColumn({ stage, leads, users, leadSources, courses, index, allStages }: KanbanColumnProps) {
+export function KanbanColumn({ stage, leads, users, leadSources, courses, index, allStages, pendingByLead }: KanbanColumnProps) {
     const queryClient = useQueryClient();
     const { user } = useAuth();
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -243,7 +244,7 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
                                                         {...provided.dragHandleProps}
                                                         className={`${snapshot.isDragging ? 'shadow-lg ring-2 ring-primary' : ''}`}
                                                     >
-                                                        <LeadCard lead={lead} users={users} leadSources={leadSources} stages={allStages} courses={courses} />
+                                                        <LeadCard lead={lead} users={users} leadSources={leadSources} stages={allStages} courses={courses} pending={pendingByLead?.get(lead.id)} />
                                                     </div>
                                                 )}
                                             </Draggable>

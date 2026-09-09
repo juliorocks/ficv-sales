@@ -33,7 +33,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AddLeadNoteForm } from "./AddLeadNoteForm"
 import { LeadHistoryFeed } from "./LeadHistoryFeed"
 import { WideChatHistory } from "./WideChatHistory"
-import { MessageCircle } from "lucide-react"
+import { LeadFollowupPanel } from "@/components/followups/LeadFollowupPanel"
 
 const formSchema = z.object({
     nome_completo: z.string().min(2, "O nome é obrigatório."),
@@ -360,8 +360,9 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
                             </div>
                         </TabsContent>
                         <TabsContent value="chat">
-                            <div className="py-2">
+                            <div className="py-2 max-h-[60vh] overflow-y-auto pr-2 space-y-4">
                                 <WideChatHistory widechatContactId={lead.widechat_contact_id || ""} leadId={lead.id} telefone={lead.telefone} leadName={lead.nome_completo} />
+                                <LeadFollowupPanel lead={lead} users={users || []} />
                             </div>
                         </TabsContent>
                         <TabsContent value="history">
