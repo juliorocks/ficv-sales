@@ -41,6 +41,7 @@ import { KnowledgeBase } from './components/KnowledgeBase';
 import { Scripts } from './components/Scripts';
 import { ArcGauge, GoalsPage, useFinancialGoals } from './components/GoalGauge';
 import { AgentAdmin, useAgentProfiles, AgentAvatar } from './components/AgentAdmin';
+import { MyProfile } from './components/MyProfile';
 import { TeamsAdmin } from './components/TeamsAdmin';
 import { HistoryLog } from './components/HistoryLog';
 import { UserManagement } from './components/UserManagement';
@@ -80,8 +81,9 @@ const queryClient = new QueryClient({
 interface Profile {
     id: string;
     full_name: string;
+    email: string;
     role: 'admin' | 'agent';
-    avatar_url: string;
+    avatar_url: string | null;
     score: number;
 }
 
@@ -891,14 +893,24 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                     <div className="p-4 border-t border-[var(--border)]">
                         <div className="space-y-4">
                             <div className="flex items-center gap-3 p-2 bg-[var(--bg-card)] rounded-xl border border-[var(--border)]">
-                                <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center font-bold text-primary text-xs">
-                                    {profile?.full_name?.charAt(0) || 'U'}
-                                </div>
-                                <div className="flex-1 overflow-hidden">
-                                    <p className="text-[11px] font-bold truncate text-[var(--text-main)]">{profile?.full_name || 'Usuário'}</p>
-                                    <p className="text-[9px] text-[var(--text-muted)] uppercase font-bold tracking-wide">{profile?.role || 'Agente'}</p>
-                                </div>
-                                <button onClick={handleLogout} className="text-[var(--text-muted)] hover:text-primary transition-all">
+                                <button
+                                    onClick={() => setActiveTab('profile')}
+                                    className={`flex items-center gap-3 flex-1 overflow-hidden text-left rounded-lg -m-1 p-1 transition-all hover:bg-white/5 ${activeTab === 'profile' ? 'ring-1 ring-primary/40' : ''}`}
+                                    title="Meu perfil"
+                                >
+                                    {profile?.avatar_url ? (
+                                        <img src={profile.avatar_url} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 border border-[var(--border)]" />
+                                    ) : (
+                                        <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center font-bold text-primary text-xs shrink-0">
+                                            {profile?.full_name?.charAt(0) || 'U'}
+                                        </div>
+                                    )}
+                                    <div className="flex-1 overflow-hidden">
+                                        <p className="text-[11px] font-bold truncate text-[var(--text-main)]">{profile?.full_name || 'Usuário'}</p>
+                                        <p className="text-[9px] text-[var(--text-muted)] uppercase font-bold tracking-wide">{profile?.role || 'Agente'}</p>
+                                    </div>
+                                </button>
+                                <button onClick={handleLogout} className="text-[var(--text-muted)] hover:text-primary transition-all shrink-0" title="Sair">
                                     <LogOut size={16} />
                                 </button>
                             </div>
@@ -1663,6 +1675,16 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {activeTab === 'widechat' && (
                     <div className="animate-fade-in">
                         <UserWidechatConfig />
+                    </div>
+                )}
+
+                {/* Meu Perfil — cada usuário edita os próprios dados */}
+                {activeTab === 'profile' && (
+                    <div className="animate-fade-in">
+                        <MyProfile
+                            profile={profile}
+                            onUpdated={() => { if (session?.user?.id) fetchProfile(session.user.id); }}
+                        />
                     </div>
                 )}
 
