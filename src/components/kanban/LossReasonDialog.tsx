@@ -47,14 +47,22 @@ export function LossReasonDialog({ isOpen, onOpenChange, onSuccess, leadId, lost
     // sem gate de auth: o RLS (is_staff) já garante a segurança. O gate anterior
     // (useAuth, que roda a checagem do zero em cada componente por não ser um contexto)
     // deixava o dropdown vazio enquanto a sessão não resolvia.
-    const { data: reasons, isLoading } = useQuery<LossReason[]>({
+    const { data: reasons, isLoading, isError, refetch } = useQuery<LossReason[]>({
         queryKey: ["motivos_perda"],
         queryFn: async () => {
-            const { data, error } = await supabase.from("motivos_perda").select("id, motivo").order("motivo")
+            // timeout: se a sessão do navegador expirou, o supabase-js pode segurar a
+            // request esperando um refresh de token que não vem — melhor falhar rápido
+            // e mostrar "tentar de novo" do que travar em "Carregando..." pra sempre.
+            const res = await Promise.race([
+                supabase.from("motivos_perda").select("id, motivo").order("motivo"),
+                new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), 12000)),
+            ])
+            const { data, error } = res as { data: LossReason[] | null; error: any }
             if (error) throw error
             return data || []
         },
         staleTime: 10 * 60_000,
+        retry: 1,
     })
 
     const form = useForm({
@@ -115,7 +123,14 @@ export function LossReasonDialog({ isOpen, onOpenChange, onSuccess, leadId, lost
                                             ))}
                                         </select>
                                     </FormControl>
-                                    {!isLoading && (!reasons || reasons.length === 0) && (
+                                    {isError && (
+                                        <p className="text-xs text-destructive">
+                                            Não consegui carregar os motivos.{' '}
+                                            <button type="button" className="underline" onClick={() => refetch()}>tentar de novo</button>
+                                            {' '}— se persistir, atualize a página (a sessão pode ter expirado).
+                                        </p>
+                                    )}
+                                    {!isLoading && !isError && (!reasons || reasons.length === 0) && (
                                         <p className="text-xs text-destructive">Nenhum motivo cadastrado. Peça pra um admin cadastrar em Motivos de Perda.</p>
                                     )}
                                     <FormMessage />

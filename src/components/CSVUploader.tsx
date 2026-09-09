@@ -47,34 +47,37 @@ export const CSVUploader: React.FC<CSVUploaderProps> = ({ onDataLoaded, uploader
                 uploadId = logData.id;
             }
 
-            // 2. Save messages to Supabase with the upload_id reference
-            const { error: dbError } = await supabase
-                .from('messages_logs')
-                .upsert(
-                    results.map(r => ({
-                        protocol: r.protocol,
-                        agent_name: r.agent,
-                        contact: r.contact,
-                        message_content: JSON.stringify(r.transcript),
-                        final_score: r.finalScore,
-                        empathy_score: r.empathyScore,
-                        clarity_score: r.clarityScore,
-                        depth_score: r.depthScore,
-                        commercial_score: r.commercialScore,
-                        agility_score: r.agilityScore,
-                        closing_attempt: r.closingAttempt,
-                        message_count: r.messageCount,
-                        is_commercial: r.isCommercial,
-                        overall_conclusion: r.overallConclusion,
-                        improvements: r.improvements,
-                        status: r.status, // 'approved' | 'invalidated' — senão o re-upload não corrige status errado
-                        timestamp: r.date,
-                        upload_id: uploadId // link to the log
-                    })),
-                    { onConflict: 'protocol' }
-                );
-
-            if (dbError) throw dbError;
+            // 2. Save messages — EM LOTES. Um upsert de 700+ conversas com os
+            // transcripts inteiros vira um corpo de vários MB e a Supabase derruba
+            // (a request falhava inteira e o histórico ficava sem os registros).
+            const payload = results.map(r => ({
+                protocol: r.protocol,
+                agent_name: r.agent,
+                contact: r.contact,
+                message_content: JSON.stringify(r.transcript),
+                final_score: r.finalScore,
+                empathy_score: r.empathyScore,
+                clarity_score: r.clarityScore,
+                depth_score: r.depthScore,
+                commercial_score: r.commercialScore,
+                agility_score: r.agilityScore,
+                closing_attempt: r.closingAttempt,
+                message_count: r.messageCount,
+                is_commercial: r.isCommercial,
+                overall_conclusion: r.overallConclusion,
+                improvements: r.improvements,
+                status: r.status, // 'approved' | 'invalidated' — senão o re-upload não corrige status errado
+                timestamp: r.date,
+                upload_id: uploadId,
+            }));
+            const BATCH = 150;
+            for (let i = 0; i < payload.length; i += BATCH) {
+                setProgress(`Salvando ${Math.min(i + BATCH, payload.length)}/${payload.length} conversas…`);
+                const { error: dbError } = await supabase
+                    .from('messages_logs')
+                    .upsert(payload.slice(i, i + BATCH), { onConflict: 'protocol' });
+                if (dbError) throw dbError;
+            }
 
             onDataLoaded(results);
             setStatus('success');
