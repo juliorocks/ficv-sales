@@ -119,7 +119,7 @@ export function LeadCard({ lead, users, leadSources, stages, courses, pending }:
                                         >
                                             <span className="absolute -inset-0.5 rounded-full bg-amber-500/60 animate-ping" />
                                             <MessageCircle className="relative h-3 w-3" />
-                                            <span className="relative">{pending > 99 ? '99+' : pending}</span>
+                                            <span className="relative">{pending > 9 ? '9+' : pending}</span>
                                         </button>
                                     </TooltipTrigger>
                                     <TooltipContent>
