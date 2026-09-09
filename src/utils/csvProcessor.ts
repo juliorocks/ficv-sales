@@ -117,27 +117,33 @@ const analyzeProtocol = async (protocol: string, messages: WhatsAppMessage[]): P
     const fullContact = contactId ? `${contactName} (${contactId})` : contactName;
     const date = parseBrazilianDate(messages[0]?.['Data da mensagem']);
 
-    // Find the human agent: the Widechat bot handles the conversation first, then
-    // transfers to a human. The human agent is the LAST distinct non-client Agente
-    // to appear — because the bot always shows up first in the handoff flow.
+    // Papéis: o export do WideChat traz a coluna `Origem` com "Agente" /
+    // "Contato" / "Atendimento automático". É o indicador confiável. (O export
+    // ANTIGO marcava `Agente = "Cliente"` nas linhas do cliente; o novo deixa
+    // `Agente` vazio e só a `Origem` diz quem falou — usar `Agente === 'Cliente'`
+    // fazia TODA conversa auto-invalidar e zerava os scores.)
+    const hasOrigem = messages.some(m => (m.Origem ?? '').trim());
+    const isAgentMsg = (m: WhatsAppMessage) =>
+        hasOrigem ? m.Origem === 'Agente' : (!!m.Agente && m.Agente !== 'Cliente' && m.Agente !== 'Atendimento automático');
+    const isClientMsg = (m: WhatsAppMessage) =>
+        hasOrigem ? m.Origem === 'Contato' : m.Agente === 'Cliente';
+
+    // Nome do agente humano: último `Agente` distinto entre as linhas de origem "Agente".
     const seenAgents: string[] = [];
     messages.forEach(m => {
-        if (m.Agente && m.Agente !== 'Cliente' && !seenAgents.includes(m.Agente)) {
-            seenAgents.push(m.Agente);
-        }
+        if (isAgentMsg(m) && m.Agente && !seenAgents.includes(m.Agente)) seenAgents.push(m.Agente);
     });
     const agentName = seenAgents[seenAgents.length - 1] || 'Desconhecido';
 
-    // Entry point: first message where the human agent appears.
-    // Everything before this is the Widechat bot flow and must not be scored.
-    const agentEntryIndex = messages.findIndex(m => m.Agente === agentName);
+    // Entry point: primeira mensagem do agente humano. Tudo antes é fluxo do bot.
+    const agentEntryIndex = messages.findIndex(isAgentMsg);
     const relevantMessages = agentEntryIndex >= 0 ? messages.slice(agentEntryIndex) : messages;
-    const agentMessages = relevantMessages.filter(m => m.Agente === agentName);
+    const agentMessages = relevantMessages.filter(isAgentMsg);
 
     // Build full transcript for display — shows full conversation including pre-agent bot flow
     const transcript = messages.map((m, index) => {
-        const isAgent = m.Agente === agentName;
-        const isLastAgentMsg = isAgent && !messages.slice(index + 1).some(next => next.Agente === agentName);
+        const isAgent = isAgentMsg(m);
+        const isLastAgentMsg = isAgent && !messages.slice(index + 1).some(isAgentMsg);
         return {
             role: isAgent ? 'agent' as const : 'client' as const,
             text: m.Mensagem,
@@ -150,7 +156,7 @@ const analyzeProtocol = async (protocol: string, messages: WhatsAppMessage[]): P
     // Pre-flight: count real client messages AFTER the agent entered
     // (client messages to the bot before handoff don't count)
     const realClientMessages = relevantMessages.filter(m =>
-        m.Agente === 'Cliente' && !isSystemMessageText(m.Mensagem)
+        isClientMsg(m) && (m.Mensagem ?? '').trim() && !isSystemMessageText(m.Mensagem)
     );
 
     // Auto-invalidate without calling AI: client never responded after agent joined
@@ -181,7 +187,7 @@ const analyzeProtocol = async (protocol: string, messages: WhatsAppMessage[]): P
     const aiMessages = relevantMessages
         .filter(m => !isSystemMessageText(m.Mensagem))
         .map(m => ({
-            role: m.Agente === agentName ? 'agent' : 'client',
+            role: isAgentMsg(m) ? 'agent' : 'client',
             text: m.Mensagem
         }));
 
@@ -262,7 +268,7 @@ const analyzeProtocol = async (protocol: string, messages: WhatsAppMessage[]): P
     const empathyScore = aiResult ? aiResult.globalScores.empathy : Math.max(0, Math.min(10, relevantMessages.filter(m => EMPATHY_KEYWORDS.some(k => m.Mensagem.toLowerCase().includes(k))).length * 2 + 5));
     const commercialScore = aiResult ? aiResult.globalScores.commercial : Math.max(0, Math.min(10, relevantMessages.filter(m => CLOSING_KEYWORDS.some(k => m.Mensagem.toLowerCase().includes(k))).length * 4 + 2));
     const clarityScore = aiResult ? aiResult.globalScores.clarity : Math.max(0, Math.min(10, relevantMessages.filter(m => m.Mensagem.length > 60).length * 2 + 5));
-    const depthScore = aiResult ? aiResult.globalScores.depth : Math.max(0, Math.min(10, relevantMessages.filter(m => m.Mensagem.includes('?') && m.Agente !== 'Cliente').length * 2 + 3));
+    const depthScore = aiResult ? aiResult.globalScores.depth : Math.max(0, Math.min(10, relevantMessages.filter(m => m.Mensagem.includes('?') && isAgentMsg(m)).length * 2 + 3));
     const agilityScore = aiResult ? aiResult.globalScores.agility : (relevantMessages.length > 5 ? 9 : 7);
 
     const scores = [empathyScore, clarityScore, depthScore, commercialScore, agilityScore];

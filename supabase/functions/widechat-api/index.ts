@@ -45,20 +45,55 @@ serve(async (req) => {
         if (!user) return jsonRes({ error: 'Sessão não identificada. Faça login de novo.' }, 401);
         const who = { id: user.id, email: user.email ?? '' };
 
-        const { data: integ } = await supabase
+        let integ = (await supabase
             .from('user_integrations')
             .select('*')
             .eq('user_id', who.id)
-            .maybeSingle();
+            .maybeSingle()).data;
 
+        // Nem todo agente cadastrou o login do WideChat (só Izabelly, hoje). Sem
+        // isso NINGUÉM da equipe conseguia operar pelo painel. Fallback: usa a
+        // credencial de OUTRO agente (não-admin) — as mensagens saem atribuídas a
+        // essa conta; o ideal é cada agente cadastrar a sua em Configurações.
+        let usingSharedCreds = false;
         if (!integ?.widechat_email || !integ?.widechat_password) {
-            return jsonRes({ error: 'Credenciais do WideChat não configuradas. Vá em Configurações > Integração WideChat.', code: 'NO_CREDENTIALS' }, 400);
+            const { data: rows } = await supabase.from('user_integrations')
+                .select('*')
+                .not('widechat_email', 'is', null).not('widechat_password', 'is', null)
+                .neq('user_id', who.id)
+                .order('updated_at', { ascending: false });
+            // 1ª passada: aproveita uma conta que já tem token em cache válido (sem re-login)
+            const cached = (rows ?? []).find((r) =>
+                r.widechat_session_token && r.widechat_token_expires_at && new Date(r.widechat_token_expires_at) > new Date());
+            if (cached) { integ = cached; usingSharedCreds = true; }
+            for (const row of (integ ? [] : (rows ?? []))) {
+                try {
+                    const lr = await fetch(`${WIDECHAT_BASE}/auth/login`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email: row.widechat_email, password: row.widechat_password }),
+                    });
+                    if (!lr.ok) continue;
+                    const lj = await lr.json();
+                    if (!lj?.token || lj?.user?.type === 'admin') continue; // admin não lê nem envia
+                    const shExp = new Date(Date.now() + 23 * 3600 * 1000).toISOString();
+                    integ = { ...row, widechat_session_token: lj.token, widechat_token_expires_at: shExp };
+                    usingSharedCreds = true;
+                    await supabase.from('user_integrations').update({
+                        widechat_session_token: lj.token, widechat_token_expires_at: shExp, updated_at: new Date().toISOString(),
+                    }).eq('user_id', row.user_id);
+                    break;
+                } catch { /* próximo */ }
+            }
+            if (!integ?.widechat_email) {
+                return jsonRes({ error: 'Nenhum agente tem o login do WideChat cadastrado. Vá em Configurações > Integração WideChat.', code: 'NO_CREDENTIALS' }, 400);
+            }
         }
 
         // ── token de sessão do WideChat (cache 23h) ─────────────────────────────
         let wcToken: string = integ.widechat_session_token;
         let wcAgentId: string | undefined;
         const exp = integ.widechat_token_expires_at ? new Date(integ.widechat_token_expires_at) : null;
+        const credOwner = integ.user_id;
 
         // login fresco (o WideChat só permite 1 sessão por conta — se alguém logou
         // do painel/outra aba, o token cacheado aqui foi revogado; por isso o wcCall
@@ -78,7 +113,7 @@ serve(async (req) => {
                 widechat_session_token: wcToken,
                 widechat_token_expires_at: newExp.toISOString(),
                 updated_at: new Date().toISOString(),
-            }).eq('user_id', who.id);
+            }).eq('user_id', credOwner);
             return true;
         }
 
@@ -87,6 +122,7 @@ serve(async (req) => {
                 return jsonRes({ error: 'Falha ao logar no WideChat. Revise a senha em Configurações > Integração WideChat.', code: 'LOGIN_FAILED' }, 400);
             }
         }
+        if (usingSharedCreds) console.log(`widechat-api: ${who.email} sem creds próprias -> usando conta compartilhada ${integ.widechat_email}`);
 
         const wcHeaders = () => ({ 'Content-Type': 'application/json', 'Authorization': `Bearer ${wcToken}` });
         const body = await req.json().catch(() => ({}));

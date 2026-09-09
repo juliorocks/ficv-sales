@@ -12,6 +12,8 @@ export const CSVUploader: React.FC<CSVUploaderProps> = ({ onDataLoaded, uploader
     const [isDragging, setIsDragging] = useState(false);
     const [loading, setLoading] = useState(false);
     const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
+    const [errorMsg, setErrorMsg] = useState<string>('');
+    const [progress, setProgress] = useState<string>('');
 
     const handleFile = async (file: File) => {
         if (!file.name.endsWith('.csv')) {
@@ -21,8 +23,12 @@ export const CSVUploader: React.FC<CSVUploaderProps> = ({ onDataLoaded, uploader
 
         setLoading(true);
         setStatus('idle');
+        setErrorMsg('');
+        setProgress('Lendo e analisando o CSV…');
         try {
             const results = await processCSV(file);
+            if (!results.length) throw new Error('Nenhuma conversa encontrada no CSV. Confira se é o export certo do WideChat.');
+            setProgress(`Salvando ${results.length} conversas…`);
 
             // 1. Create the upload log entry first to get an ID
             let uploadId = null;
@@ -58,8 +64,12 @@ export const CSVUploader: React.FC<CSVUploaderProps> = ({ onDataLoaded, uploader
                         agility_score: r.agilityScore,
                         closing_attempt: r.closingAttempt,
                         message_count: r.messageCount,
+                        is_commercial: r.isCommercial,
+                        overall_conclusion: r.overallConclusion,
+                        improvements: r.improvements,
+                        status: r.status, // 'approved' | 'invalidated' — senão o re-upload não corrige status errado
                         timestamp: r.date,
-                        upload_id: uploadId // NEW: link to the log
+                        upload_id: uploadId // link to the log
                     })),
                     { onConflict: 'protocol' }
                 );
@@ -68,11 +78,13 @@ export const CSVUploader: React.FC<CSVUploaderProps> = ({ onDataLoaded, uploader
 
             onDataLoaded(results);
             setStatus('success');
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error saving CSV data:', error);
+            setErrorMsg(error?.message || error?.error_description || JSON.stringify(error) || 'Falha desconhecida ao processar o CSV.');
             setStatus('error');
         } finally {
             setLoading(false);
+            setProgress('');
         }
     };
 
@@ -103,10 +115,14 @@ export const CSVUploader: React.FC<CSVUploaderProps> = ({ onDataLoaded, uploader
             </div>
 
             <h3 className="text-xl font-bold mb-2 text-[var(--text-main)]">
-                {status === 'success' ? 'Dados Processados!' : 'Upload de Conversas'}
+                {status === 'success' ? 'Dados Processados!' : status === 'error' ? 'Falha no upload' : 'Upload de Conversas'}
             </h3>
             <p className="text-[var(--text-muted)] text-xs mb-6 max-w-xs leading-relaxed">
-                Arraste o arquivo CSV exportado do Widechat ou clique para selecionar.
+                {loading && progress
+                    ? progress
+                    : status === 'error'
+                        ? <span className="text-danger break-words">{errorMsg}</span>
+                        : 'Arraste o arquivo CSV exportado do Widechat ou clique para selecionar.'}
             </p>
 
             <input
@@ -114,14 +130,15 @@ export const CSVUploader: React.FC<CSVUploaderProps> = ({ onDataLoaded, uploader
                 id="csv-upload"
                 className="hidden"
                 accept=".csv"
+                onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
                 onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
             />
             <label
                 htmlFor="csv-upload"
-                className="btn-primary cursor-pointer flex items-center gap-2 px-6 py-2.5"
+                className={`btn-primary flex items-center gap-2 px-6 py-2.5 ${loading ? 'opacity-50 pointer-events-none' : 'cursor-pointer'}`}
             >
                 <FileText size={16} />
-                Selecionar Arquivo
+                {status === 'error' ? 'Tentar de novo' : loading ? 'Processando…' : 'Selecionar Arquivo'}
             </label>
 
             {status === 'success' && (

@@ -115,6 +115,11 @@ serve(async (req) => {
         const CLIENT_PICKED_NON_COMM = /^\s*(igreja cidade viva|funda[çc][ãa]o cidade viva|livraria|sistema de ensino|cidade viva education)\b/i;
         const CLIENT_PICKED_FACULDADE = /\b(faculdade|ficv|gradua[çc][ãa]o|p[óo]s[- ]?gradua|vestibular)\b/i;
         const BOT_NON_COMM_AREA = /canal de atendimento da (igreja|funda[çc][ãa]o)|atendimento digital da (igreja|funda[çc][ãa]o)|encaminhando voc[êe] para a equipe respons[áa]vel por (conex|c[ée]lulas|redes)|bem-vindo\(a\) ao \*?cidade viva education/i;
+        // aluno ATUAL com demanda acadêmica/financeira/pedagógica — não é venda nova.
+        const CLIENT_IS_STUDENT = /\b(j[áa]\s+)?sou\s+(ex[- ]?)?aluno\b|^\s*aluno(\s+atual)?\s*$|portal do aluno|meus?\s+boletos?|minhas?\s+mensalidades?|inclus[ãa]o de disciplina|trancamento|rematr[íi]cula|falar com (o|a|meu|minha)?\s*(tutor|tutora|tutoria)|segunda chamada|revis[ãa]o de (prova|nota)|declara[çc][ãa]o de matr[íi]cula|hist[óo]rico escolar|acesso ao (portal|ava|moodle)/i;
+        const BOT_STUDENT_SUPPORT = /como aluno\(a\), sua demanda|solicita[çc][ãa]o acad[êe]mica|equipe pedag[óo]gica|encaminhar (sua|a) solicita[çc][ãa]o (sobre|de).{0,40}(pedag[óo]gic|acad[êe]mic|tutor)/i;
+        // sinal de que QUER matrícula nova (mesmo já sendo aluno) — não bloqueia
+        const CLIENT_WANTS_NEW = /\b(quero|gostaria|tenho interesse|pretendo)\b.{0,40}(matricul|ingressar|come[çc]ar|fazer)\s+(a |o |um |uma |outr|nov|mais)|nova?\s+(gradua|p[óo]s|forma[çc]|curso)|segundo curso|outra (gradua|p[óo]s|faculdade)/i;
         let botAreaNonComm = false;
         if (!agentLc && sessionId && !queueVal) {
             const { data: recent } = await db.from('widechat_raw_messages')
@@ -129,7 +134,12 @@ serve(async (req) => {
             const pickedFaculdade = rows.some(r => r.origin === 'channel' && CLIENT_PICKED_FACULDADE.test(r.message || ''));
             const pickedNonComm = rows.some(r => r.origin === 'channel' && CLIENT_PICKED_NON_COMM.test(r.message || ''))
                 || rows.some(r => r.origin !== 'channel' && BOT_NON_COMM_AREA.test(r.message || ''));
-            botAreaNonComm = pickedNonComm && !pickedFaculdade;
+            const wantsNew = rows.some(r => r.origin === 'channel' && CLIENT_WANTS_NEW.test(r.message || ''));
+            const studentSupport = !wantsNew && (
+                rows.some(r => r.origin === 'channel' && CLIENT_IS_STUDENT.test(r.message || ''))
+                || rows.some(r => r.origin !== 'channel' && BOT_STUDENT_SUPPORT.test(r.message || ''))
+            );
+            botAreaNonComm = (pickedNonComm && !pickedFaculdade) || studentSupport;
         }
 
         // roster da(s) equipe(s) que atendem lead (por padrão só Comercial — ver
@@ -173,7 +183,7 @@ serve(async (req) => {
             (!!agentLc && !agentInRoster);
 
         if (isNonCommercial && !alreadyBlocked && phoneSuffix.length >= 8) {
-            const motivo = queueVal || agentName || (botAreaNonComm ? 'menu-bot' : 'roster');
+            const motivo = queueVal || agentName || (botAreaNonComm ? 'menu-bot (área/aluno)' : 'roster');
             await db.from('widechat_blocklist_contacts')
                 .upsert({ telefone: phoneSuffix, motivo }, { onConflict: 'telefone' });
         }
@@ -247,7 +257,7 @@ serve(async (req) => {
 
         // ── setor não-comercial (RH/Secretaria/Escola/Fundação/Igreja/CV Education) ──
         if (isNonCommercial) {
-            const motivoTxt = queueVal || agentName || (botAreaNonComm ? 'área do menu do bot' : alreadyBlocked ? 'blocklist' : 'roster');
+            const motivoTxt = queueVal || agentName || (botAreaNonComm ? 'menu do bot (área/aluno atual)' : alreadyBlocked ? 'blocklist' : 'roster');
             // se um lead vazou pra esse contato e ninguém da comercial trabalhou nele, remove
             if (leadId) {
                 const { data: l } = await db.from('leads')
