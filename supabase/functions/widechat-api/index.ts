@@ -247,16 +247,48 @@ serve(async (req) => {
         // ── send_message: texto ou HSM ───────────────────────────────────────
         if (action === 'send_message') {
             let platformId = brDigits(body.platform_id);
-            // "telefone" salvo não parece número BR/int (ex: id interno "US.xxx") e temos
-            // session_id -> pega o platform_id/wa_id de verdade do atendimento.
-            if (body.session_id && !/^\d{10,15}$/.test(platformId)) {
-                try {
-                    const at = await wcCall('/user/agents/attendances_plus');
-                    const all = [...((at.data as any)?.attendance ?? []), ...((at.data as any)?.wait ?? [])];
-                    const m = all.find((a: any) => String(a.session_id ?? a.session ?? '') === String(body.session_id));
-                    if (m?.platform_id) platformId = String(m.platform_id);
-                    else if (m?.wa_id) platformId = brDigits(m.wa_id);
-                } catch { /* segue com o que tem */ }
+            let resolvedAttId = body.attendance_id as string | undefined;
+            // SÓ resolve via API quando o "telefone" salvo não parece um número de
+            // verdade (id interno "US.xxx" — número estrangeiro sem wa_id no cadastro).
+            // Não faz isso pra telefone OK: logar em outra conta do WideChat revoga a
+            // sessão do painel do agente (1 sessão por conta) — não vale o custo só
+            // pra pegar o attendance_id.
+            const needResolve = !!body.session_id && !/^\d{10,15}$/.test(platformId);
+            if (needResolve) {
+                const ownRow = (await supabase.from('user_integrations')
+                    .select('widechat_email, widechat_password').eq('user_id', who.id).maybeSingle()).data;
+                // conta 0 = a que vamos ENVIAR (integração). Se ela achar o atendimento,
+                // dá pra mandar com attendance_id. Contas seguintes só servem pra
+                // descobrir o wa_id real — NÃO manda attendance_id de conta alheia
+                // (o WideChat recusa "atendimento não é seu").
+                const accts = [
+                    { email: integ.widechat_email as string, password: integ.widechat_password as string, isSender: true },
+                    ...(ownRow?.widechat_email && ownRow.widechat_email !== integ.widechat_email
+                        ? [{ email: ownRow.widechat_email as string, password: ownRow.widechat_password as string, isSender: false }] : []),
+                ];
+                for (const acct of accts) {
+                    try {
+                        let tok = wcToken;
+                        if (!acct.isSender) {
+                            const lr = await fetch(`${WIDECHAT_BASE}/auth/login`, {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ email: acct.email, password: acct.password }),
+                            });
+                            const lj = await lr.json().catch(() => null);
+                            if (!lj?.token) continue;
+                            tok = lj.token;
+                        }
+                        const ar = await fetch(`${WIDECHAT_BASE}/user/agents/attendances_plus`, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tok}` } });
+                        const ad = await ar.json().catch(() => null);
+                        const all = [...((ad as any)?.attendance ?? []), ...((ad as any)?.wait ?? [])];
+                        const m = all.find((a: any) => String(a.session_id ?? a.session ?? '') === String(body.session_id));
+                        if (m) {
+                            if (m.wa_id && /^\d{10,15}$/.test(brDigits(m.wa_id))) platformId = brDigits(m.wa_id);
+                            if (acct.isSender && !resolvedAttId && (m._id || m.attendance_id)) resolvedAttId = String(m._id ?? m.attendance_id);
+                            if (platformId && (resolvedAttId || !acct.isSender)) break;
+                        }
+                    } catch { /* próxima conta */ }
+                }
             }
             const base: Record<string, unknown> = {
                 platform_id: platformId,
@@ -268,7 +300,7 @@ serve(async (req) => {
                 // "atendimento finalizado" e o card pulava direto pra coluna Finalizado.
                 close_session: '0',
             };
-            if (body.attendance_id) base.attendance_id = body.attendance_id;
+            if (resolvedAttId) base.attendance_id = resolvedAttId;
             if (body.contact_name) base.contact_name = body.contact_name;
             if (body.is_hsm) {
                 base.is_hsm = true;
@@ -283,7 +315,7 @@ serve(async (req) => {
             // ("attendance id é obrigatório quando agent está presente"). Numa conversa
             // nova (iniciada por template, sem atendimento) NÃO manda agent — a mensagem
             // já sai atribuída ao dono do token.
-            if (body.attendance_id) {
+            if (resolvedAttId) {
                 base.agent_id = await agentId();
                 base.agent = integ.widechat_email;
             }

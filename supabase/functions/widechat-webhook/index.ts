@@ -82,7 +82,18 @@ serve(async (req) => {
         };
         const messageText = msgData.message || msgData.interactive?.body?.text || msgData.text || hsmText() || "";
         let senderName = payload.vars?.name || data?.user?.name || data?.contact?.name || "";
-        const messagePhone = payload.vars?.number || data?.contact?.telephone || data?.content?.to || msgData.platform_id || "";
+        // wa_id é o NÚMERO real do WhatsApp (ex: "5583999..." ou "14075355949" p/ EUA);
+        // platform_id é um id INTERNO do WideChat ("US.21493...") que NÃO serve pra
+        // enviar mensagem. Prioriza sempre um número de verdade.
+        const looksLikePhone = (s: unknown) => /^\+?\d{10,15}$/.test(String(s ?? '').replace(/[^\d+]/g, ''));
+        const phoneCandidates = [
+            payload.vars?.number, data?.contact?.telephone, data?.content?.to,
+            msgData.wa_id, data?.content?.wa_id, data?.contact?.wa_id,
+            msgData.platform_id, data?.content?.platform_id,
+        ];
+        const messagePhone = phoneCandidates.find(looksLikePhone)
+            ?? phoneCandidates.find((v) => v)  // último recurso: qualquer coisa não-vazia
+            ?? "";
 
         if (!senderName && Array.isArray(msgData.placeholders)) {
             const n = msgData.placeholders.find((p: any) => typeof p === 'string' && p.length > 2 && p.includes(' ') && !p.includes(':'));

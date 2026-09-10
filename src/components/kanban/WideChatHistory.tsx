@@ -319,12 +319,11 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
             const isHsm = typeof variables !== 'string'
             queryClient.invalidateQueries({ queryKey: msgKey })
             markSeen()
-            if (!isHsm) { showSuccess('Mensagem enviada'); return }
-            // O /message/send só confirma que a Meta ACEITOU o pedido. A entrega pode
-            // falhar depois (ex: erro 131049 — a Meta limita quantos templates de
-            // marketing um número recebe). Confere o status real alguns segundos depois.
-            showSuccess('Template enviado — confirmando a entrega no WhatsApp…')
-            // a Meta demora alguns segundos pra confirmar entrega/falha — checa 2x.
+            // O /message/send só confirma que a Meta ACEITOU o pedido — a entrega pode
+            // falhar depois (número inválido; erro 131049 pra template de marketing;
+            // etc). Confere o status REAL alguns segundos depois — vale pra texto E
+            // template (o "deu sucesso mas não chegou" era isso).
+            showSuccess(isHsm ? 'Template enviado — confirmando a entrega…' : 'Enviado — confirmando a entrega…')
             const checkDelivery = async (tries: number) => {
                 try {
                     const { data } = await supabase.functions.invoke('widechat-api', {
@@ -336,11 +335,11 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                         const dica = last.error_code === 131049
                             ? ' A Meta limita quantos templates de MARKETING um número recebe por período. Use um template UTILITY, outro número, ou aguarde ~24h.'
                             : (last.error_message ? ` ${last.error_message}` : '')
-                        showError(`O WhatsApp NÃO entregou o template${cod}.${dica}`)
+                        showError(`O WhatsApp NÃO entregou a mensagem${cod}.${dica}`)
                         return
                     }
-                    if (last?.status === 'delivered' || last?.status === 'read') {
-                        showSuccess('Template entregue no WhatsApp ✔')
+                    if (last?.status === 'delivered' || last?.status === 'read' || last?.status === 'sent') {
+                        showSuccess('Entregue no WhatsApp ✔')
                         return
                     }
                     if (tries > 0) window.setTimeout(() => checkDelivery(tries - 1), 8000)
@@ -348,7 +347,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                     if (tries > 0) window.setTimeout(() => checkDelivery(tries - 1), 8000)
                 }
             }
-            window.setTimeout(() => checkDelivery(2), 6000)
+            window.setTimeout(() => checkDelivery(3), 6000)
         },
     })
 
