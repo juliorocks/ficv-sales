@@ -427,7 +427,11 @@ serve(async (req) => {
             const { ok, status, data } = await wcCall('/attendances/transfer', {
                 method: 'POST', body: JSON.stringify(payload),
             });
-            return jsonRes(ok ? { success: true, data } : { error: data }, ok ? 200 : status);
+            if (!ok) {
+                const d = typeof data === 'string' ? data : (data?.message || data?.error || JSON.stringify(data ?? {}));
+                return jsonRes({ error: `WideChat ${status}: ${d}` });
+            }
+            return jsonRes({ success: true, data });
         }
 
         return jsonRes({ error: `Ação não suportada: ${action}` }, 400);

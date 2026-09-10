@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabase"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
-import { AlertCircle, MessageSquare, Send, Loader2, FileText, Zap, Plus } from "lucide-react"
+import { AlertCircle, MessageSquare, Send, Loader2, FileText, Zap, Plus, Smile } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -111,11 +111,29 @@ interface WideChatMessage {
     sender_name?: string
 }
 
+// emojis mais usados no atendimento — sem dependência de lib
+const EMOJIS = "😀 😅 😊 🙂 😉 😍 🥰 🤩 😎 🤔 🙌 👏 👍 🙏 💪 ✅ ❌ ⚠️ ℹ️ 📌 📎 📄 📅 ⏰ 💰 💸 🎓 📚 ✏️ 📝 📞 📲 💬 ✨ 🎉 🔥 ❤️ 🧡 💛 💚 💙 💜 🤝 👋 😢 😔 🥳".split(" ")
+
 export function WideChatHistory({ widechatContactId, leadId, telefone, leadName }: WideChatHistoryProps) {
     const queryClient = useQueryClient()
     const { user } = useAuth()
     const scrollRef = useRef<HTMLDivElement>(null)
+    const textareaRef = useRef<HTMLTextAreaElement>(null)
+    const [emojiOpen, setEmojiOpen] = useState(false)
     const [newMessage, setNewMessage] = useState("")
+
+    // insere texto na posição do cursor do textarea
+    const insertAtCursor = (text: string) => {
+        const el = textareaRef.current
+        if (!el) { setNewMessage((p) => p + text); return }
+        const start = el.selectionStart ?? el.value.length
+        const end = el.selectionEnd ?? el.value.length
+        setNewMessage((p) => p.slice(0, start) + text + p.slice(end))
+        requestAnimationFrame(() => {
+            el.focus()
+            el.selectionStart = el.selectionEnd = start + text.length
+        })
+    }
 
     // id numérico do lead (a tela "Histórico WideChat" usa leadId="" — aí não marca nada)
     const numericLeadId = typeof leadId === 'number'
@@ -352,11 +370,25 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
         },
     })
 
-    const handleSend = (e: React.FormEvent) => {
-        e.preventDefault()
+    const doSend = () => {
         if (!newMessage.trim() || sendMessageMutation.isPending || !canSendText) return
         sendMessageMutation.mutate(newMessage)
         setNewMessage("")
+    }
+    const handleSend = (e: React.FormEvent) => { e.preventDefault(); doSend() }
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.key !== 'Enter') return
+        if (e.ctrlKey || e.metaKey) {
+            // Ctrl/Cmd+Enter → nova linha (o browser não faz isso sozinho num textarea)
+            e.preventDefault()
+            insertAtCursor('\n')
+            return
+        }
+        if (!e.shiftKey) {
+            // Enter → envia. Shift+Enter cai aqui e quebra linha (comportamento padrão)
+            e.preventDefault()
+            doSend()
+        }
     }
 
     // nome de quem está logado — pra sugerir o valor de {{AGENT}} nos templates
@@ -428,9 +460,10 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
         onError: (e: any) => showError(`Erro ao criar atalho: ${e.message}`),
     })
 
-    // Transferir a conversa pra outro agente ou fila/equipe — só faz sentido com um
-    // atendimento de fato ativo (é a "session" do WideChat que está sendo transferida).
-    const canTransfer = !!attendance && !!sessionId
+    // Transferir a conversa pra outro agente ou fila/equipe. Basta ter uma session
+    // (conversa real) — o widechat-api resolve o atendimento no servidor. Antes exigia
+    // `attendance` (que quase nunca vinha) e o botão nunca aparecia.
+    const canTransfer = !!sessionId && hasAnyConversation
     const { data: agentsForTransfer, refetch: loadAgents } = useQuery<any[]>({
         queryKey: ['widechat-agents'],
         queryFn: async () => {
@@ -607,38 +640,62 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
 
             <div className="p-3 border-t border-slate-200 bg-slate-50 space-y-2">
                 {canSendText ? (
-                    <form onSubmit={handleSend} className="flex gap-2 items-center">
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button type="button" variant="outline" size="icon" className="rounded-full shrink-0 text-slate-600" title="Mensagens rápidas">
-                                    <Zap className="h-4 w-4" />
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="start" className="w-72 max-h-80 overflow-y-auto">
-                                <DropdownMenuLabel>Mensagens rápidas</DropdownMenuLabel>
-                                <DropdownMenuSeparator />
-                                {(!quickReplies || quickReplies.length === 0) && <div className="px-2 py-3 text-xs text-muted-foreground">Nenhum atalho cadastrado ainda.</div>}
-                                {quickReplies?.map((q) => (
-                                    <DropdownMenuItem key={q.id} onClick={() => setNewMessage((prev) => prev ? `${prev} ${q.content}` : q.content)} className="flex flex-col items-start gap-0.5">
-                                        <span className="font-medium">{q.title}</span>
-                                        <span className="text-[11px] text-muted-foreground line-clamp-2">{q.content}</span>
+                    <form onSubmit={handleSend} className="flex gap-2 items-end">
+                        <div className="flex gap-1 shrink-0 pb-0.5">
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button type="button" variant="outline" size="icon" className="rounded-full h-9 w-9 text-slate-600" title="Mensagens rápidas">
+                                        <Zap className="h-4 w-4" />
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="start" className="w-72 max-h-80 overflow-y-auto">
+                                    <DropdownMenuLabel>Mensagens rápidas</DropdownMenuLabel>
+                                    <DropdownMenuSeparator />
+                                    {(!quickReplies || quickReplies.length === 0) && <div className="px-2 py-3 text-xs text-muted-foreground">Nenhum atalho cadastrado ainda.</div>}
+                                    {quickReplies?.map((q) => (
+                                        <DropdownMenuItem key={q.id} onClick={() => insertAtCursor((newMessage && !newMessage.endsWith(' ') ? ' ' : '') + q.content)} className="flex flex-col items-start gap-0.5">
+                                            <span className="font-medium">{q.title}</span>
+                                            <span className="text-[11px] text-muted-foreground line-clamp-2">{q.content}</span>
+                                        </DropdownMenuItem>
+                                    ))}
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem onClick={() => addQuickReplyMutation.mutate()} className="gap-2 text-primary">
+                                        <Plus className="h-3.5 w-3.5" /> Novo atalho
                                     </DropdownMenuItem>
-                                ))}
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem onClick={() => addQuickReplyMutation.mutate()} className="gap-2 text-primary">
-                                    <Plus className="h-3.5 w-3.5" /> Novo atalho
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-                        <Input
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                            <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
+                                <PopoverTrigger asChild>
+                                    <Button type="button" variant="outline" size="icon" className="rounded-full h-9 w-9 text-slate-600" title="Emojis">
+                                        <Smile className="h-4 w-4" />
+                                    </Button>
+                                </PopoverTrigger>
+                                <PopoverContent align="start" className="w-64 p-2">
+                                    <div className="grid grid-cols-8 gap-0.5">
+                                        {EMOJIS.map((em) => (
+                                            <button key={em} type="button" onClick={() => { insertAtCursor(em); setEmojiOpen(false) }}
+                                                className="h-7 w-7 rounded hover:bg-slate-100 text-lg leading-none">
+                                                {em}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </PopoverContent>
+                            </Popover>
+                        </div>
+                        <textarea
+                            ref={textareaRef}
                             value={newMessage}
                             onChange={(e) => setNewMessage(e.target.value)}
-                            placeholder="Digite sua mensagem via WhatsApp..."
-                            className="flex-1 bg-white text-slate-800 border-slate-200 placeholder:text-slate-400 focus-visible:ring-primary shadow-sm rounded-full px-4"
+                            onKeyDown={handleKeyDown}
+                            rows={1}
+                            placeholder="Mensagem…  (Enter envia · Shift/Ctrl+Enter quebra linha)"
+                            className="flex-1 resize-none bg-white text-slate-800 border border-slate-200 placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary shadow-sm rounded-2xl px-4 py-2 text-sm max-h-32 overflow-y-auto"
+                            style={{ height: 'auto', minHeight: '2.25rem' }}
+                            onInput={(e) => { const t = e.currentTarget; t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 128) + 'px' }}
                             disabled={sendMessageMutation.isPending}
                         />
                         <Button type="submit" size="icon"
-                            className="rounded-full shadow-md bg-primary hover:bg-primary/90 text-white w-10 h-10 shrink-0"
+                            className="rounded-full shadow-md bg-primary hover:bg-primary/90 text-white w-9 h-9 shrink-0"
                             disabled={!newMessage.trim() || sendMessageMutation.isPending}>
                             {sendMessageMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                         </Button>
