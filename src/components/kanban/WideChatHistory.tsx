@@ -236,39 +236,58 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
         scrollRef.current?.scrollIntoView({ behavior: 'smooth' })
     }, [messages])
 
-    // Atendimento ativo do lead no WideChat (dá channel_id, attendance_id e a
-    // data da última mensagem do cliente -> janela de 24h)
+    // Atendimento no WideChat — SÓ pra pegar channel_id/attendance_id (envio atribuído
+    // ao agente) e alimentar o botão Transferir. NÃO é mais o que decide se dá pra
+    // mandar texto: essa chamada depende do token do WideChat (que fica em disputa
+    // quando o agente tem o painel do WideChat aberto) e do match por wa_id — falhava
+    // direto e travava o painel inteiro ("ninguém consegue conversar por aqui").
     const { data: att } = useQuery<{ match: any; agent_id?: string } | null>({
-        queryKey: ['widechat-attendance', String(leadId), phoneDigits],
+        queryKey: ['widechat-attendance', String(leadId), phoneDigits, sessionId],
         queryFn: async () => {
-            if (phoneDigits.length < 8) return null
+            if (phoneDigits.length < 8 && !sessionId) return null
             const { data } = await supabase.functions.invoke('widechat-api', {
-                body: { action: 'attendances', telefone: phoneDigits },
+                body: { action: 'attendances', telefone: phoneDigits, session_id: sessionId || undefined },
             })
             return data?.error ? null : data
         },
-        enabled: phoneDigits.length >= 8,
+        enabled: phoneDigits.length >= 8 || !!sessionId,
         staleTime: 60_000,
+        retry: 1,
     })
     const attendance = att?.match ?? null
-    const within24h = attendance?.lastInteraction
-        ? (Date.now() - new Date(attendance.lastInteraction).getTime()) < 24 * 3600 * 1000
-        : false
-    const canSendText = !!attendance?.channel_id && within24h
-    // sem atendimento (ainda) ativo -> usa o canal padrão pra listar/enviar template e
-    // iniciar a conversa do zero, em vez de ficar travado esperando o cliente escrever primeiro.
+
+    // A JANELA DE 24H VEM DA NOSSA BASE: se o cliente mandou uma mensagem
+    // (origin='channel') nas últimas 24h, a Meta deixa mandar texto livre — não
+    // importa o que a API de atendimentos do WideChat responde.
+    const lastInboundAt = (() => {
+        let t = 0
+        for (const m of messages ?? []) {
+            if (m.origin === 'channel') {
+                const ts = new Date(m.created_at).getTime()
+                if (!isNaN(ts) && ts > t) t = ts
+            }
+        }
+        return t
+    })()
+    const windowOpen = lastInboundAt > 0 && (Date.now() - lastInboundAt) < 24 * 3600 * 1000
+    const hasAnyConversation = (messages?.length ?? 0) > 0
+    const canSendText = windowOpen
+    // sem atendimento identificado -> usa o canal padrão pra listar/enviar template.
     const effectiveChannelId = attendance?.channel_id || DEFAULT_CHANNEL_ID
 
     const sendMessageMutation = useMutation({
         mutationFn: async (arg: string | { hsm_template_name: string; hsm_placeholders: string[]; preview: string }) => {
             const isHsm = typeof arg !== 'string'
-            if (!isHsm && !attendance?.channel_id) throw new Error("Sem atendimento ativo no WideChat para este cliente.")
+            if (!isHsm && !windowOpen) throw new Error("Passaram 24h da última mensagem do cliente — só dá pra enviar um template aprovado.")
             const { data, error } = await supabase.functions.invoke('widechat-api', {
                 body: {
                     action: 'send_message',
-                    platform_id: phoneDigits,
+                    // digits normalmente; se o telefone salvo não parece número (ex: id
+                    // interno "US.xxx"), manda o valor cru pro widechat-api decidir.
+                    platform_id: phoneDigits.length >= 10 ? phoneDigits : (phoneRaw || phoneDigits),
                     channel_id: effectiveChannelId,
                     attendance_id: attendance?._id,
+                    session_id: sessionId || undefined,
                     contact_name: attendance?.contact_name ?? leadName,
                     lead_id: leadId,
                     ...(isHsm
@@ -520,23 +539,19 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                     </DropdownMenu>
                 </div>
             )}
-            {!attendance && (
+            {!hasAnyConversation && (
                 <Alert className="rounded-none border-x-0 border-t-0 bg-blue-50/50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800">
                     <AlertCircle className="h-4 w-4 text-blue-600" />
                     <AlertDescription className="text-xs text-blue-700 dark:text-blue-400">
-                        {messages && messages.length > 0 ? (
-                            <>Essa conversa já foi encerrada do lado do WideChat (sem sessão ativa agora). Pra continuar, é preciso <strong>iniciar de novo com um template aprovado</strong> — depois que o cliente responder, o texto livre volta a funcionar.</>
-                        ) : (
-                            <>Ainda não teve nenhuma conversa por aqui. Para texto livre é preciso o cliente escrever primeiro — mas dá pra <strong>iniciar a conversa agora com um template aprovado</strong>.</>
-                        )}
+                        Ainda não teve nenhuma conversa por aqui. Para texto livre é preciso o cliente escrever primeiro — mas dá pra <strong>iniciar a conversa agora com um template aprovado</strong>.
                     </AlertDescription>
                 </Alert>
             )}
-            {attendance && !within24h && (
+            {hasAnyConversation && !windowOpen && (
                 <Alert className="rounded-none border-x-0 border-t-0 bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800">
                     <AlertCircle className="h-4 w-4 text-amber-600" />
                     <AlertDescription className="text-xs text-amber-700 dark:text-amber-400">
-                        Passou de 24h da última mensagem do cliente. Só é possível enviar um <strong>template aprovado</strong>.
+                        Passou de 24h da última mensagem do cliente. Só é possível enviar um <strong>template aprovado</strong> — depois que ele responder, o texto livre volta.
                     </AlertDescription>
                 </Alert>
             )}

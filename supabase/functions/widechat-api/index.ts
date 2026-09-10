@@ -206,18 +206,25 @@ serve(async (req) => {
             return wcAgentId;
         }
 
-        // ── attendances: acha o atendimento do lead pelo telefone ──────────────
+        // ── attendances: acha o atendimento do lead ───────────────────────────
         if (action === 'attendances') {
             const { ok, status, data } = await wcCall('/user/agents/attendances_plus');
             if (!ok) return jsonRes({ error: data }, status);
             const digits = String(body.telefone ?? '').replace(/\D/g, '');
+            const sess = String(body.session_id ?? '').trim();
             const all = [...(data.attendance ?? []), ...(data.wait ?? [])];
-            // platform_id é um id interno do WideChat (ex: "BR.3020350278297153"), NÃO o telefone —
-            // o telefone de verdade vem em wa_id/phone. Comparar com platform_id nunca casava.
-            const match = digits
-                ? all.find((a: any) =>
-                    String(a.wa_id ?? a.phone ?? '').replace(/\D/g, '').endsWith(digits.slice(-8)))
-                : null;
+            // casa por session_id (mais confiável) OU pelo telefone real (wa_id/phone —
+            // platform_id é id interno "BR.xxx", nunca casava). Também aceita casar o
+            // platform_id contra os dígitos, pro caso de leads cujo "telefone" salvo É
+            // o id interno do WideChat (número estrangeiro sem wa_id no payload).
+            const suf = digits.length >= 8 ? digits.slice(-8) : '';
+            const match =
+                (sess && all.find((a: any) => String(a.session_id ?? a.session ?? '') === sess)) ||
+                (suf && all.find((a: any) => {
+                    const wa = String(a.wa_id ?? a.phone ?? '').replace(/\D/g, '');
+                    const pid = String(a.platform_id ?? '').replace(/\D/g, '');
+                    return wa.endsWith(suf) || (pid && pid.endsWith(suf));
+                })) || null;
             return jsonRes({ success: true, match: match ?? null, all, agent_email: integ.widechat_email });
         }
 
@@ -232,8 +239,20 @@ serve(async (req) => {
 
         // ── send_message: texto ou HSM ───────────────────────────────────────
         if (action === 'send_message') {
+            let platformId = brDigits(body.platform_id);
+            // "telefone" salvo não parece número BR/int (ex: id interno "US.xxx") e temos
+            // session_id -> pega o platform_id/wa_id de verdade do atendimento.
+            if (body.session_id && !/^\d{10,15}$/.test(platformId)) {
+                try {
+                    const at = await wcCall('/user/agents/attendances_plus');
+                    const all = [...((at.data as any)?.attendance ?? []), ...((at.data as any)?.wait ?? [])];
+                    const m = all.find((a: any) => String(a.session_id ?? a.session ?? '') === String(body.session_id));
+                    if (m?.platform_id) platformId = String(m.platform_id);
+                    else if (m?.wa_id) platformId = brDigits(m.wa_id);
+                } catch { /* segue com o que tem */ }
+            }
             const base: Record<string, unknown> = {
-                platform_id: brDigits(body.platform_id),
+                platform_id: platformId,
                 channel_id: body.channel_id,
                 type: 'text',
                 // '0' = a sessão continua ABERTA. Com '3' ("mantém o status atual"), numa
