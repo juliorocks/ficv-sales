@@ -246,25 +246,30 @@ serve(async (req) => {
 
         // ── send_message: texto ou HSM ───────────────────────────────────────
         if (action === 'send_message') {
-            let platformId = brDigits(body.platform_id);
+            // platform_id do WideChat: número BR = "5583..." (dá pra prepender 55);
+            // estrangeiro = id interno "US.21493..." — passa CRU, sem mexer (era o bug
+            // do "undeliverable": brDigits comia o "US." e a Meta não achava o número).
+            const rawPid = String(body.platform_id ?? '');
+            let platformId = /[^\d+]/.test(rawPid) ? rawPid : brDigits(rawPid);
             let resolvedAttId = body.attendance_id as string | undefined;
             let resolvedAgentId: string | undefined;
-            // token/email de quem vai ENVIAR — por padrão a conta de integração, mas
-            // pra TEXTO LIVRE numa conversa em andamento o envio TEM que sair pela
-            // conta que é DONA do atendimento no WideChat (senão a Meta recusa
-            // "undeliverable" / 131026). Achamos o atendimento e mandamos por ela.
+            // Pra TEXTO LIVRE numa conversa em andamento o envio TEM que sair pela conta
+            // DONA do atendimento (com attendance_id) — senão a Meta recusa "undeliverable"
+            // (131026). Acha o atendimento pelo session_id e manda por ela.
             let sendToken = wcToken;
             let sendEmail = integ.widechat_email as string;
 
             if (!body.is_hsm && body.session_id) {
-                const ownRow = (await supabase.from('user_integrations')
-                    .select('user_id, widechat_email, widechat_password')
-                    .eq('user_id', who.id).maybeSingle()).data;
-                const accts: Array<{ email: string; password: string; isInteg: boolean }> = [
+                // todas as contas de agente que temos credencial (a conversa pode estar
+                // com qualquer agente da comercial no WideChat).
+                const { data: rows } = await supabase.from('user_integrations')
+                    .select('widechat_email, widechat_password')
+                    .not('widechat_email', 'is', null).not('widechat_password', 'is', null);
+                const seen = new Set<string>();
+                const accts = [
                     { email: integ.widechat_email as string, password: integ.widechat_password as string, isInteg: true },
-                    ...(ownRow?.widechat_email && ownRow.widechat_email !== integ.widechat_email
-                        ? [{ email: ownRow.widechat_email as string, password: ownRow.widechat_password as string, isInteg: false }] : []),
-                ];
+                    ...(rows ?? []).map((r: any) => ({ email: r.widechat_email as string, password: r.widechat_password as string, isInteg: false })),
+                ].filter((a) => a.email && !seen.has(a.email) && seen.add(a.email));
                 for (const acct of accts) {
                     try {
                         let tok = wcToken, aid: string | undefined;
@@ -274,7 +279,7 @@ serve(async (req) => {
                                 body: JSON.stringify({ email: acct.email, password: acct.password }),
                             });
                             const lj = await lr.json().catch(() => null);
-                            if (!lj?.token) continue;
+                            if (!lj?.token || lj?.user?.type === 'admin') continue;
                             tok = lj.token; aid = lj.user?._id;
                         }
                         const ar = await fetch(`${WIDECHAT_BASE}/user/agents/attendances_plus`, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tok}` } });
@@ -282,11 +287,9 @@ serve(async (req) => {
                         const all = [...((ad as any)?.attendance ?? []), ...((ad as any)?.wait ?? [])];
                         const m = all.find((a: any) => String(a.session_id ?? a.session ?? '') === String(body.session_id));
                         if (m) {
-                            if (m.wa_id && /^\d{10,15}$/.test(brDigits(m.wa_id))) platformId = brDigits(m.wa_id);
+                            if (m.platform_id) platformId = String(m.platform_id);
                             resolvedAttId = String(m._id ?? m.attendance_id ?? resolvedAttId ?? '');
-                            // manda PELA conta dona do atendimento
-                            sendToken = tok;
-                            sendEmail = acct.email;
+                            sendToken = tok; sendEmail = acct.email;
                             resolvedAgentId = m.agent_id ?? m.agent?._id ?? aid;
                             break;
                         }
@@ -310,7 +313,6 @@ serve(async (req) => {
             } else {
                 base.message = body.message;
             }
-            // agent/agent_id só quando há attendance_id (regra do WideChat)
             if (resolvedAttId) {
                 base.agent_id = resolvedAgentId ?? await agentId();
                 base.agent = sendEmail;
@@ -379,9 +381,11 @@ serve(async (req) => {
         // confirma que a Meta ACEITOU o pedido; a entrega pode falhar depois, ex.
         // erro 131049 da Meta — limite de engajamento pra template de marketing) ──
         if (action === 'message_status') {
+            const rawPid = String(body.platform_id ?? '');
+            const pidForRead = /[^\d+]/.test(rawPid) ? rawPid : brDigits(rawPid);
             const { ok, status, data } = await wcCall('/message/read', {
                 method: 'POST',
-                body: JSON.stringify({ platform_id: brDigits(body.platform_id), channel_id: body.channel_id }),
+                body: JSON.stringify({ platform_id: pidForRead, channel_id: body.channel_id }),
             });
             if (!ok) return jsonRes({ error: data }, status);
             const msgs = Array.isArray(data) ? data : (data?.data ?? []);
@@ -393,8 +397,8 @@ serve(async (req) => {
                     message_id: last.message_id,
                     status: last.status ?? null,          // 'failed' | 'sent' | 'delivered' | 'read' | ...
                     created_at: last.created_at,
-                    error_code: last.details?.code ?? null,
-                    error_message: last.details?.error_data?.details ?? last.details?.message ?? null,
+                    error_code: last.details?.code ?? last.details?.error_data?.code ?? null,
+                    error_message: last.details?.error_data?.details ?? last.details?.message ?? last.details?.title ?? null,
                 },
             });
         }

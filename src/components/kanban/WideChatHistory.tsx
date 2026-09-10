@@ -282,9 +282,10 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
             const { data, error } = await supabase.functions.invoke('widechat-api', {
                 body: {
                     action: 'send_message',
-                    // digits normalmente; se o telefone salvo não parece número (ex: id
-                    // interno "US.xxx"), manda o valor cru pro widechat-api decidir.
-                    platform_id: phoneDigits.length >= 10 ? phoneDigits : (phoneRaw || phoneDigits),
+                    // manda o telefone CRU (leads.telefone) — pode ser "5583..." (BR) ou
+                    // um id interno do WideChat "US.21493..." (estrangeiro). O widechat-api
+                    // normaliza. NÃO mandar só os dígitos: comeria o prefixo "US.".
+                    platform_id: phoneRaw || phoneDigits,
                     channel_id: effectiveChannelId,
                     attendance_id: attendance?._id,
                     session_id: sessionId || undefined,
@@ -327,7 +328,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
             const checkDelivery = async (tries: number) => {
                 try {
                     const { data } = await supabase.functions.invoke('widechat-api', {
-                        body: { action: 'message_status', platform_id: phoneDigits, channel_id: effectiveChannelId },
+                        body: { action: 'message_status', platform_id: phoneRaw || phoneDigits, channel_id: effectiveChannelId },
                     })
                     const last = data?.last
                     if (last?.status === 'failed') {
