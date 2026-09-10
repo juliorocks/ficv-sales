@@ -247,54 +247,49 @@ serve(async (req) => {
         // ── send_message: texto ou HSM ───────────────────────────────────────
         if (action === 'send_message') {
             // platform_id do WideChat: número BR = "5583..." (dá pra prepender 55);
-            // estrangeiro = id interno "US.21493..." — passa CRU, sem mexer (era o bug
-            // do "undeliverable": brDigits comia o "US." e a Meta não achava o número).
+            // estrangeiro = id interno "US.21493..." — passa CRU (brDigits comia o "US."
+            // e a Meta recusava "undeliverable" 131026).
             const rawPid = String(body.platform_id ?? '');
-            let platformId = /[^\d+]/.test(rawPid) ? rawPid : brDigits(rawPid);
-            let resolvedAttId = body.attendance_id as string | undefined;
-            let resolvedAgentId: string | undefined;
-            // Pra TEXTO LIVRE numa conversa em andamento o envio TEM que sair pela conta
-            // DONA do atendimento (com attendance_id) — senão a Meta recusa "undeliverable"
-            // (131026). Acha o atendimento pelo session_id e manda por ela.
-            let sendToken = wcToken;
-            let sendEmail = integ.widechat_email as string;
+            const platformId = /[^\d+]/.test(rawPid) ? rawPid : brDigits(rawPid);
 
-            if (!body.is_hsm && body.session_id) {
-                // todas as contas de agente que temos credencial (a conversa pode estar
-                // com qualquer agente da comercial no WideChat).
-                const { data: rows } = await supabase.from('user_integrations')
-                    .select('widechat_email, widechat_password')
-                    .not('widechat_email', 'is', null).not('widechat_password', 'is', null);
-                const seen = new Set<string>();
-                const accts = [
-                    { email: integ.widechat_email as string, password: integ.widechat_password as string, isInteg: true },
-                    ...(rows ?? []).map((r: any) => ({ email: r.widechat_email as string, password: r.widechat_password as string, isInteg: false })),
-                ].filter((a) => a.email && !seen.has(a.email) && seen.add(a.email));
-                for (const acct of accts) {
-                    try {
-                        let tok = wcToken, aid: string | undefined;
-                        if (!acct.isInteg) {
-                            const lr = await fetch(`${WIDECHAT_BASE}/auth/login`, {
-                                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ email: acct.email, password: acct.password }),
-                            });
-                            const lj = await lr.json().catch(() => null);
-                            if (!lj?.token || lj?.user?.type === 'admin') continue;
-                            tok = lj.token; aid = lj.user?._id;
-                        }
-                        const ar = await fetch(`${WIDECHAT_BASE}/user/agents/attendances_plus`, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tok}` } });
-                        const ad = await ar.json().catch(() => null);
-                        const all = [...((ad as any)?.attendance ?? []), ...((ad as any)?.wait ?? [])];
-                        const m = all.find((a: any) => String(a.session_id ?? a.session ?? '') === String(body.session_id));
-                        if (m) {
-                            if (m.platform_id) platformId = String(m.platform_id);
-                            resolvedAttId = String(m._id ?? m.attendance_id ?? resolvedAttId ?? '');
-                            sendToken = tok; sendEmail = acct.email;
-                            resolvedAgentId = m.agent_id ?? m.agent?._id ?? aid;
-                            break;
-                        }
-                    } catch { /* próxima conta */ }
-                }
+            // ATRIBUIÇÃO: se o agente logado tem login PRÓPRIO no WideChat, a mensagem
+            // sai por ele (aparece com o nome dele no WhatsApp). Só cai na conta de
+            // integração quem não cadastrou o próprio login.
+            const ownRow = (await supabase.from('user_integrations')
+                .select('widechat_email, widechat_password').eq('user_id', who.id).maybeSingle()).data;
+            let sendEmail = integ.widechat_email as string;
+            let sendPwd = integ.widechat_password as string;
+            let sendToken = wcToken;
+            let sendAgentId = await agentId();
+            if (ownRow?.widechat_email && ownRow?.widechat_password && ownRow.widechat_email !== integ.widechat_email) {
+                try {
+                    const lr = await fetch(`${WIDECHAT_BASE}/auth/login`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email: ownRow.widechat_email, password: ownRow.widechat_password }),
+                    });
+                    const lj = await lr.json().catch(() => null);
+                    if (lj?.token && lj?.user?.type !== 'admin') {
+                        sendEmail = ownRow.widechat_email; sendPwd = ownRow.widechat_password;
+                        sendToken = lj.token; sendAgentId = lj.user?._id;
+                    }
+                } catch { /* fica com a conta de integração */ }
+            }
+
+            // attendance_id: procura o atendimento ABERTO desse contato NA CONTA que
+            // vai enviar (casa por platform_id — o objeto de attendance NÃO tem
+            // session_id). Com ele o WideChat aceita agent/agent_id e a msg fica
+            // amarrada na conversa certa.
+            let resolvedAttId = body.attendance_id as string | undefined;
+            let resolvedAgentId: string | undefined = sendAgentId;
+            if (!body.is_hsm) {
+                try {
+                    const ar = await fetch(`${WIDECHAT_BASE}/user/agents/attendances_plus`, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sendToken}` } });
+                    const ad = await ar.json().catch(() => null);
+                    const all = [...((ad as any)?.attendance ?? []), ...((ad as any)?.wait ?? [])];
+                    const m = all.find((a: any) => String(a.platform_id ?? '') === platformId
+                        || (a.wa_id && brDigits(String(a.wa_id)) === brDigits(platformId)));
+                    if (m?._id) { resolvedAttId = String(m._id); if (m.agent_id) resolvedAgentId = m.agent_id; }
+                } catch { /* segue sem attendance_id */ }
             }
 
             const base: Record<string, unknown> = {
@@ -313,11 +308,12 @@ serve(async (req) => {
             } else {
                 base.message = body.message;
             }
+            // agent/agent_id só quando há attendance_id (regra do WideChat)
             if (resolvedAttId) {
-                base.agent_id = resolvedAgentId ?? await agentId();
+                base.agent_id = resolvedAgentId;
                 base.agent = sendEmail;
             }
-            // envia pela conta certa (não pelo wcCall, que usa sempre a de integração)
+
             const doSend = async (tok: string) => {
                 const rr = await fetch(`${WIDECHAT_BASE}/message/send`, {
                     method: 'POST',
@@ -328,26 +324,22 @@ serve(async (req) => {
                 return { r: rr, data: dd, ok: rr.ok && !(dd && dd.status === false) };
             };
             let sent = await doSend(sendToken);
-            // token revogado (painel do WideChat aberto na mesma conta) -> re-login e tenta 1x
-            if (!sent.ok && (sent.r.status === 401 || sent.r.status === 403 || (sent.data && sent.data.status === false))) {
-                const pwd = sendEmail === integ.widechat_email ? integ.widechat_password
-                    : (await supabase.from('user_integrations').select('widechat_password').ilike('widechat_email', sendEmail).maybeSingle()).data?.widechat_password;
-                if (pwd) {
-                    try {
-                        const lr = await fetch(`${WIDECHAT_BASE}/auth/login`, {
-                            method: 'POST', headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ email: sendEmail, password: pwd }),
-                        });
-                        const lj = await lr.json().catch(() => null);
-                        if (lj?.token) sent = await doSend(lj.token);
-                    } catch { /* fica com o resultado anterior */ }
-                }
+            // token revogado (painel do WideChat aberto na mesma conta) -> re-login 1x
+            if (!sent.ok && (sent.r.status === 401 || sent.r.status === 403 || (sent.data && sent.data.status === false)) && sendPwd) {
+                try {
+                    const lr = await fetch(`${WIDECHAT_BASE}/auth/login`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email: sendEmail, password: sendPwd }),
+                    });
+                    const lj = await lr.json().catch(() => null);
+                    if (lj?.token) sent = await doSend(lj.token);
+                } catch { /* fica com o resultado anterior */ }
             }
             const { r, data } = sent;
             const status = r.status;
             const ok = sent.ok;
             const asAgent = sendEmail !== integ.widechat_email;
-            console.log(`send_message ok=${ok} status=${status} via=${sendEmail} pid=${base.platform_id} chan=${base.channel_id} att=${base.attendance_id ?? '-'} resp=${JSON.stringify(data).slice(0, 600)}`);
+            console.log(`send_message ok=${ok} status=${status} via=${sendEmail} pid=${platformId} chan=${body.channel_id} att=${base.attendance_id ?? '-'} resp=${JSON.stringify(data).slice(0, 600)}`);
 
             // registra a mensagem enviada no histórico com o TEXTO de verdade — o
             // webhook de `templateMessage` às vezes chega sem o corpo e grava só
