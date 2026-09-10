@@ -9,6 +9,7 @@ import { showError, showSuccess } from "@/utils/toast"
 import { KanbanSquare } from "lucide-react"
 import { AddStageForm } from "./AddStageForm"
 import { useAuth } from "@/hooks/use-auth"
+import { withTimeout } from "@/utils/withTimeout"
 
 export function KanbanBoard({ searchTerm }: { searchTerm: string }): JSX.Element {
     const queryClient = useQueryClient()
@@ -16,27 +17,32 @@ export function KanbanBoard({ searchTerm }: { searchTerm: string }): JSX.Element
     const [columns, setColumns] = useState<Record<string, Lead[]>>({})
     const [orderedStages, setOrderedStages] = useState<Stage[]>([])
 
-    const { data: stages, isLoading: isLoadingStages, error: stagesError } = useQuery<Stage[]>({
+    const { data: stages, isLoading: isLoadingStages, error: stagesError, refetch: refetchStages } = useQuery<Stage[]>({
         queryKey: ['stages'],
         queryFn: async () => {
-            const { data, error } = await supabase.from('stages').select('*').order('order')
+            const { data, error } = await withTimeout(supabase.from('stages').select('*').order('order'), 20000, "Carregar as etapas")
             if (error) throw error
             return data
         },
         enabled: !isAuthLoading && !!user,
         staleTime: 5 * 60 * 1000,
+        retry: 2,
     })
 
-    const { data: leads, isLoading: isLoadingLeads, error: leadsError } = useQuery<Lead[]>({
+    const { data: leads, isLoading: isLoadingLeads, error: leadsError, refetch: refetchLeads } = useQuery<Lead[]>({
         queryKey: ['leads'],
         queryFn: async () => {
-            const { data, error } = await supabase
-                .from('leads')
-                .select('*')
-                .order('data_entrada', { ascending: false })
-                .limit(500); // Cap: a coluna renderiza cada card com um EditLeadDialog
-                              // completo; acima disso o browser trava. Ver paginação
-                              // por coluna em KanbanColumn (visibleCount).
+            const { data, error } = await withTimeout(
+                supabase
+                    .from('leads')
+                    .select('*')
+                    .order('data_entrada', { ascending: false })
+                    .limit(500), // Cap: a coluna renderiza cada card com um EditLeadDialog
+                                  // completo; acima disso o browser trava. Ver paginação
+                                  // por coluna em KanbanColumn (visibleCount).
+                20000,
+                "Carregar os leads",
+            );
 
             if (error) throw error
             return data || []
@@ -97,13 +103,20 @@ export function KanbanBoard({ searchTerm }: { searchTerm: string }): JSX.Element
     const { data: pendingReplies } = useQuery<{ lead_id: number; pending_count: number }[]>({
         queryKey: ['lead_pending_replies'],
         queryFn: async () => {
-            const { data, error } = await supabase.from('lead_pending_replies').select('lead_id, pending_count')
+            const { data, error } = await withTimeout(
+                supabase.from('lead_pending_replies').select('lead_id, pending_count'),
+                20000,
+                "Carregar os alertas",
+            )
             if (error) throw error
             return data || []
         },
         enabled: !isAuthLoading && !!user,
-        staleTime: 30 * 1000,
-        refetchInterval: 45 * 1000,
+        staleTime: 60 * 1000,
+        // 90s: a subscription realtime de widechat_messages já invalida na hora que
+        // chega mensagem nova; o poll é só rede de segurança. Não roda com a aba oculta.
+        refetchInterval: 90 * 1000,
+        retry: 1,
     })
 
     const pendingByLead = useMemo(() => {
@@ -259,7 +272,32 @@ export function KanbanBoard({ searchTerm }: { searchTerm: string }): JSX.Element
     }
 
     if (stagesError || leadsError) {
-        return <div>Erro ao carregar dados.</div>
+        const msg = (leadsError as Error)?.message || (stagesError as Error)?.message || "";
+        return (
+            <div className="text-center py-16">
+                <KanbanSquare className="mx-auto h-12 w-12 text-muted-foreground" />
+                <h3 className="mt-4 text-lg font-semibold text-foreground">Não consegui carregar o funil</h3>
+                <p className="mt-1 text-sm text-muted-foreground max-w-md mx-auto">
+                    {/demorou demais|sess/i.test(msg)
+                        ? "A conexão com o servidor demorou demais (sessão pode ter expirado). Tente de novo ou recarregue a página."
+                        : "Houve um erro ao buscar os dados. Tente de novo."}
+                </p>
+                <div className="mt-4 flex gap-2 justify-center">
+                    <button
+                        onClick={() => { refetchStages(); refetchLeads(); }}
+                        className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90"
+                    >
+                        Tentar de novo
+                    </button>
+                    <button
+                        onClick={() => window.location.reload()}
+                        className="px-4 py-2 rounded-lg border border-border text-sm font-medium hover:bg-muted"
+                    >
+                        Recarregar a página
+                    </button>
+                </div>
+            </div>
+        );
     }
 
     if (!stages || stages.length === 0) {
