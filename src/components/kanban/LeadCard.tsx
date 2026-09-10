@@ -16,6 +16,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/hooks/use-auth"
 import { showError, showSuccess } from "@/utils/toast"
+import { withTimeout } from "@/utils/withTimeout"
 
 interface LeadCardProps {
     lead: Lead
@@ -44,10 +45,15 @@ export function LeadCard({ lead, users, leadSources, stages, courses, pending }:
     const moveStageMutation = useMutation({
         mutationFn: async (stageId: number) => {
             const now = new Date().toISOString();
-            const { data, error } = await supabase.from('leads')
-                .update({ stage_id: stageId, stage_entry_date: now, updated_at: now })
-                .eq('id', lead.id)
-                .select('id');
+            await withTimeout(supabase.auth.getSession(), 8000, "A sessão").catch(() => { });
+            const { data, error } = await withTimeout(
+                supabase.from('leads')
+                    .update({ stage_id: stageId, stage_entry_date: now, updated_at: now })
+                    .eq('id', lead.id)
+                    .select('id'),
+                15000,
+                "Mover o lead",
+            );
             if (error) throw error;
             if (!data || data.length === 0) {
                 await supabase.auth.getSession().catch(() => { });
@@ -69,12 +75,16 @@ export function LeadCard({ lead, users, leadSources, stages, courses, pending }:
     const atenderMutation = useMutation({
         mutationFn: async () => {
             if (!user?.id) throw new Error("Sessão não identificada. Recarregue a página.");
-            await supabase.auth.getSession().catch(() => { });
-            const { data, error } = await supabase
-                .from('leads')
-                .update({ assigned_to_id: user.id, updated_at: new Date().toISOString() })
-                .eq('id', lead.id)
-                .select('id');
+            await withTimeout(supabase.auth.getSession(), 8000, "A sessão").catch(() => { });
+            const { data, error } = await withTimeout(
+                supabase
+                    .from('leads')
+                    .update({ assigned_to_id: user.id, updated_at: new Date().toISOString() })
+                    .eq('id', lead.id)
+                    .select('id'),
+                15000,
+                "Atribuir o lead",
+            );
             if (error) throw error;
             if (!data || data.length === 0) {
                 await supabase.auth.getSession().catch(() => { });

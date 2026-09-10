@@ -22,6 +22,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabase"
 import { showError, showSuccess } from "@/utils/toast"
 import { useAuth } from "@/hooks/use-auth"
+import { withTimeout } from "@/utils/withTimeout"
 
 const formSchema = z.object({
     motivo_perda_id: z.coerce.number().min(1, "A seleção do motivo é obrigatória."),
@@ -83,15 +84,20 @@ export function LossReasonDialog({ isOpen, onOpenChange, onSuccess, leadId, lost
 
     const moveLeadMutation = useMutation({
         mutationFn: async (values: FormValues) => {
-            const { data, error } = await supabase
-                .from('leads')
-                .update({
-                    stage_id: lostStageId,
-                    stage_entry_date: new Date().toISOString(),
-                    motivo_perda_id: values.motivo_perda_id,
-                })
-                .eq('id', leadId)
-                .select('id');
+            await withTimeout(supabase.auth.getSession(), 8000, "A sessão").catch(() => { });
+            const { data, error } = await withTimeout(
+                supabase
+                    .from('leads')
+                    .update({
+                        stage_id: lostStageId,
+                        stage_entry_date: new Date().toISOString(),
+                        motivo_perda_id: values.motivo_perda_id,
+                    })
+                    .eq('id', leadId)
+                    .select('id'),
+                15000,
+                "Marcar a perda",
+            );
             if (error) throw error;
             if (!data || data.length === 0) {
                 await supabase.auth.getSession().catch(() => { });

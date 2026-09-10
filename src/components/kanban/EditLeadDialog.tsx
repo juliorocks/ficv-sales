@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { supabase } from "@/lib/supabase"
 import { showError, showSuccess } from "@/utils/toast"
+import { withTimeout } from "@/utils/withTimeout"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Lead, User, LeadSource, Stage, Course } from "@/types/database"
 import {
@@ -97,23 +98,28 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
         mutationFn: async (values: FormValues) => {
             // garante um token válido ANTES do UPDATE — se o access token expirou (aba
             // parada, máquina dormiu), getSession() faz o refresh e só então segue.
-            await supabase.auth.getSession().catch(() => { })
-            const { data: updated, error: updateError } = await supabase
-                .from('leads')
-                .update({
-                    nome_completo: values.nome_completo,
-                    email: values.email || null,
-                    telefone: values.telefone,
-                    valor_oportunidade: values.valor_oportunidade,
-                    observacoes: values.observacoes,
-                    temperatura: values.temperatura,
-                    assigned_to_id: values.assigned_to_id,
-                    source_id: values.source_id,
-                    curso_interesse: values.curso_interesse,
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', lead.id)
-                .select('id')
+            // com timeout: às vezes o refresh estola e o botão fica "Salvando..." pra sempre.
+            await withTimeout(supabase.auth.getSession(), 8000, "A sessão").catch(() => { })
+            const { data: updated, error: updateError } = await withTimeout(
+                supabase
+                    .from('leads')
+                    .update({
+                        nome_completo: values.nome_completo,
+                        email: values.email || null,
+                        telefone: values.telefone,
+                        valor_oportunidade: values.valor_oportunidade,
+                        observacoes: values.observacoes,
+                        temperatura: values.temperatura,
+                        assigned_to_id: values.assigned_to_id,
+                        source_id: values.source_id,
+                        curso_interesse: values.curso_interesse,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', lead.id)
+                    .select('id'),
+                15000,
+                "Salvar o lead",
+            )
 
             if (updateError) throw updateError
             // UPDATE que não devolve linha = RLS filtrou (sessão sem token válido no
@@ -161,15 +167,15 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
                 // funcionou. (O INSERT quebrava com a sessão em refresh e a agente via
                 // "Erro ao atualizar" mesmo com o lead salvo.)
                 try {
-                    const { error: auditErr } = await supabase.from('audit_logs').insert({
-                        user_id: user?.id,
-                        action: 'lead_updated',
-                        details: {
-                            lead_id: lead.id,
-                            lead_name: lead.nome_completo,
-                            changes
-                        }
-                    })
+                    const { error: auditErr } = await withTimeout(
+                        supabase.from('audit_logs').insert({
+                            user_id: user?.id,
+                            action: 'lead_updated',
+                            details: { lead_id: lead.id, lead_name: lead.nome_completo, changes }
+                        }),
+                        8000,
+                        "O log",
+                    )
                     if (auditErr) console.warn('audit_logs insert falhou (ignorado):', auditErr.message)
                 } catch (e) {
                     console.warn('audit_logs insert falhou (ignorado):', e)
@@ -224,11 +230,16 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
 
     const moveLeadMutation = useMutation({
         mutationFn: async (newStageId: number) => {
-            const { data, error } = await supabase
-                .from('leads')
-                .update({ stage_id: newStageId, stage_entry_date: new Date().toISOString() })
-                .eq('id', lead.id)
-                .select('id');
+            await withTimeout(supabase.auth.getSession(), 8000, "A sessão").catch(() => { });
+            const { data, error } = await withTimeout(
+                supabase
+                    .from('leads')
+                    .update({ stage_id: newStageId, stage_entry_date: new Date().toISOString() })
+                    .eq('id', lead.id)
+                    .select('id'),
+                15000,
+                "Mover o lead",
+            );
             if (error) throw error;
             if (!data || data.length === 0) {
                 await supabase.auth.getSession().catch(() => { });
@@ -255,7 +266,12 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
 
     const deleteLeadMutation = useMutation({
         mutationFn: async () => {
-            const { error } = await supabase.from('leads').delete().eq('id', lead.id);
+            await withTimeout(supabase.auth.getSession(), 8000, "A sessão").catch(() => { });
+            const { error } = await withTimeout(
+                supabase.from('leads').delete().eq('id', lead.id),
+                15000,
+                "Excluir o lead",
+            );
             if (error) throw error;
         },
         onSuccess: () => {
