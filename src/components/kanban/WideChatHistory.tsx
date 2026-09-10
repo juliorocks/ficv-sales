@@ -123,7 +123,10 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
         : (/^\d+$/.test(String(leadId)) ? Number(leadId) : null)
 
     // "conversa vista" (compartilhada): zera o badge de mensagem nova no card do
-    // Kanban. Marca ao abrir a aba Conversas e de novo depois de responder.
+    // Kanban. SÓ é chamado quando um agente RESPONDE (não ao abrir o card) — o
+    // usuário quer que o alerta persista até alguém de fato falar com o lead ou a
+    // conversa ser finalizada. O `origin='agent'` da resposta já zera pela view;
+    // esse upsert é só o feedback imediato antes do webhook gravar a msg.
     const markSeen = () => {
         if (numericLeadId == null) return
         supabase
@@ -131,10 +134,6 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
             .upsert({ lead_id: numericLeadId, seen_at: new Date().toISOString(), seen_by: user?.id ?? null }, { onConflict: 'lead_id' })
             .then(() => queryClient.invalidateQueries({ queryKey: ['lead_pending_replies'] }))
     }
-    useEffect(() => {
-        markSeen()
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [numericLeadId, user?.id])
     const [hsmOpen, setHsmOpen] = useState(false)
     // template escolhido aguardando o preenchimento das variáveis
     const [tplForm, setTplForm] = useState<{ t: any; slots: TplSlot[]; values: string[] } | null>(null)
