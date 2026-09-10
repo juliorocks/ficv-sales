@@ -112,9 +112,9 @@ serve(async (req) => {
         // falar" a pessoa escolhe Igreja / Faculdade / Fundação / Livraria / Sistema de
         // Ensino. Só Faculdade interessa. Se escolheu outra área e NÃO há sinal de
         // Faculdade na conversa, não vira lead.
-        const CLIENT_PICKED_NON_COMM = /^\s*(igreja cidade viva|funda[çc][ãa]o cidade viva|livraria|sistema de ensino|cidade viva education)\b/i;
+        const CLIENT_PICKED_NON_COMM = /^\s*(igreja cidade viva|funda[çc][ãa]o cidade viva|livraria cidade viva|livraria sementes|sistema de ensino|cidade viva education|escola b[íi]blica|conex[ãa]o (feminina|masculina|de casais)|voluntariado\/minist|casamento\/batismo|eventos e loca[çc])/i;
         const CLIENT_PICKED_FACULDADE = /\b(faculdade|ficv|gradua[çc][ãa]o|p[óo]s[- ]?gradua|vestibular)\b/i;
-        const BOT_NON_COMM_AREA = /canal de atendimento da (igreja|funda[çc][ãa]o)|atendimento digital da (igreja|funda[çc][ãa]o)|encaminhando voc[êe] para a equipe respons[áa]vel por (conex|c[ée]lulas|redes)|bem-vindo\(a\) ao \*?cidade viva education/i;
+        const BOT_NON_COMM_AREA = /canal de atendimento da (igreja|funda[çc][ãa]o)|atendimento digital da (igreja|funda[çc][ãa]o)|conosco na igreja cidade viva|bem-?vindo.{0,15}(livraria sementes|igreja cidade viva|funda[çc][ãa]o cidade viva)|encaminhando voc[êe] para a equipe respons[áa]vel por (conex|c[ée]lulas|redes)|n[úu]cleo de cuidado comunit[áa]rio|bem-vindo\(a\)? ao \*?cidade viva education/i;
         // aluno ATUAL com demanda acadêmica/financeira/pedagógica — não é venda nova.
         const CLIENT_IS_STUDENT = /\b(j[áa]\s+)?sou\s+(ex[- ]?)?aluno\b|^\s*aluno(\s+atual)?\s*$|portal do aluno|meus?\s+boletos?|minhas?\s+mensalidades?|inclus[ãa]o de disciplina|trancamento|rematr[íi]cula|falar com (o|a|meu|minha)?\s*(tutor|tutora|tutoria)|segunda chamada|revis[ãa]o de (prova|nota)|declara[çc][ãa]o de matr[íi]cula|hist[óo]rico escolar|acesso ao (portal|ava|moodle)/i;
         const BOT_STUDENT_SUPPORT = /como aluno\(a\), sua demanda|solicita[çc][ãa]o acad[êe]mica|equipe pedag[óo]gica|encaminhar (sua|a) solicita[çc][ãa]o (sobre|de).{0,40}(pedag[óo]gic|acad[êe]mic|tutor)/i;
@@ -258,18 +258,38 @@ serve(async (req) => {
         // ── setor não-comercial (RH/Secretaria/Escola/Fundação/Igreja/CV Education) ──
         if (isNonCommercial) {
             const motivoTxt = queueVal || agentName || (botAreaNonComm ? 'menu do bot (área/aluno atual)' : alreadyBlocked ? 'blocklist' : 'roster');
-            // se um lead vazou pra esse contato e ninguém da comercial trabalhou nele, remove
+            // lead vazou pra esse contato e ninguém da comercial trabalhou nele:
+            //  - nunca teve nota humana → apaga (é lixo mesmo)
+            //  - tem nota (ex: "📋 Novo formulário", "🔁 Reentrada", "✅ Confirmado
+            //    contato") → move pra Perdido / "Transferido de Setor" (id 7),
+            //    reversível, em vez de sumir. (O guard `!notes` antigo deixava esses
+            //    presos no funil pra sempre — foi o caso do "Samuel / Livraria".)
             if (leadId) {
                 const { data: l } = await db.from('leads')
                     .select('id, assigned_to_id, stage_id').eq('id', leadId).maybeSingle();
-                const { count: notes } = await db.from('lead_notes')
-                    .select('id', { count: 'exact', head: true }).eq('lead_id', leadId);
-                if (l && !l.assigned_to_id && l.stage_id === firstStageId && !notes) {
-                    await db.from('widechat_messages').delete().eq('lead_id', leadId);
-                    await db.from('widechat_atendimentos').delete().eq('lead_id', leadId);
-                    await db.from('leads').delete().eq('id', leadId);
-                    await mirror(`DELETE leads:⟨${leadId}⟩; DELETE widechat_messages WHERE lead_id = leads:⟨${leadId}⟩;`);
-                    return j({ success: true, ignored: true, reason: `setor não-comercial (${motivoTxt}) — lead ${leadId} removido` });
+                if (l && !l.assigned_to_id && l.stage_id === firstStageId) {
+                    const { data: humanNote } = await db.from('lead_notes')
+                        .select('note').eq('lead_id', leadId).limit(50);
+                    const AUTO_NOTE = /^\s*(📋|🔁|✅|🔀|Origem API|SendPulse)/;
+                    const onlyAuto = (humanNote ?? []).every((n: any) => AUTO_NOTE.test(String(n.note || '')));
+                    if (onlyAuto) {
+                        await db.from('widechat_messages').delete().eq('lead_id', leadId);
+                        await db.from('widechat_atendimentos').delete().eq('lead_id', leadId);
+                        await db.from('leads').delete().eq('id', leadId);
+                        await mirror(`DELETE leads:⟨${leadId}⟩; DELETE widechat_messages WHERE lead_id = leads:⟨${leadId}⟩;`);
+                        return j({ success: true, ignored: true, reason: `setor não-comercial (${motivoTxt}) — lead ${leadId} removido` });
+                    }
+                    // tem nota humana → não apaga, move pra Perdido / Transferido de Setor
+                    const { data: lostStage } = await db.from('stages').select('id').ilike('name', '%perdid%').limit(1).maybeSingle();
+                    const { data: transfMotivo } = await db.from('motivos_perda').select('id').ilike('motivo', '%transferid%setor%').limit(1).maybeSingle();
+                    if (lostStage?.id) {
+                        const now2 = new Date().toISOString();
+                        await db.from('leads').update({ stage_id: lostStage.id, stage_entry_date: now2, motivo_perda_id: transfMotivo?.id ?? null, updated_at: now2 }).eq('id', leadId);
+                        await db.from('lead_notes').insert({ lead_id: leadId, note: `🔀 Movido para Perdido / Transferido de Setor: ${motivoTxt}.`, created_at: now2 });
+                        const setMotivo = transfMotivo?.id ? `, motivo_perda_id = motivos_perda:⟨${transfMotivo.id}⟩` : '';
+                        await mirror(`UPDATE leads SET stage_id = stages:⟨${lostStage.id}⟩, stage_entry_date = ${sv(now2)}${setMotivo} WHERE id = leads:⟨${leadId}⟩;`);
+                        return j({ success: true, ignored: true, reason: `setor não-comercial (${motivoTxt}) — lead ${leadId} → Perdido` });
+                    }
                 }
             }
             return j({ success: true, ignored: true, reason: `setor não-comercial (${motivoTxt})` });
