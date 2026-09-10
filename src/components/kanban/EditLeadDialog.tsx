@@ -95,7 +95,10 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
 
     const updateLeadMutation = useMutation({
         mutationFn: async (values: FormValues) => {
-            const { error: updateError } = await supabase
+            // garante um token válido ANTES do UPDATE — se o access token expirou (aba
+            // parada, máquina dormiu), getSession() faz o refresh e só então segue.
+            await supabase.auth.getSession().catch(() => { })
+            const { data: updated, error: updateError } = await supabase
                 .from('leads')
                 .update({
                     nome_completo: values.nome_completo,
@@ -110,8 +113,17 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
                     updated_at: new Date().toISOString()
                 })
                 .eq('id', lead.id)
+                .select('id')
 
             if (updateError) throw updateError
+            // UPDATE que não devolve linha = RLS filtrou (sessão sem token válido no
+            // momento — geralmente refresh de token em curso). Antes isso passava como
+            // "sucesso" e só o INSERT no audit_logs quebrava, mostrando "Erro ao
+            // atualizar" num save que na verdade nem rodou.
+            if (!updated || updated.length === 0) {
+                await supabase.auth.getSession().catch(() => { })
+                throw new Error("Não foi possível salvar (sua sessão pode ter expirado). Recarregue a página e tente de novo.")
+            }
 
             const changes = Object.entries(values)
                 .filter(([key, value]) => {
@@ -145,15 +157,23 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
                 }))
 
             if (changes.length > 0) {
-                await supabase.from('audit_logs').insert({
-                    user_id: user?.id,
-                    action: 'lead_updated',
-                    details: {
-                        lead_id: lead.id,
-                        lead_name: lead.nome_completo,
-                        changes
-                    }
-                })
+                // best-effort: o log de auditoria NUNCA pode derrubar um save que já
+                // funcionou. (O INSERT quebrava com a sessão em refresh e a agente via
+                // "Erro ao atualizar" mesmo com o lead salvo.)
+                try {
+                    const { error: auditErr } = await supabase.from('audit_logs').insert({
+                        user_id: user?.id,
+                        action: 'lead_updated',
+                        details: {
+                            lead_id: lead.id,
+                            lead_name: lead.nome_completo,
+                            changes
+                        }
+                    })
+                    if (auditErr) console.warn('audit_logs insert falhou (ignorado):', auditErr.message)
+                } catch (e) {
+                    console.warn('audit_logs insert falhou (ignorado):', e)
+                }
             }
         },
         onSuccess: () => {
@@ -204,11 +224,16 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
 
     const moveLeadMutation = useMutation({
         mutationFn: async (newStageId: number) => {
-            const { error } = await supabase
+            const { data, error } = await supabase
                 .from('leads')
                 .update({ stage_id: newStageId, stage_entry_date: new Date().toISOString() })
-                .eq('id', lead.id);
+                .eq('id', lead.id)
+                .select('id');
             if (error) throw error;
+            if (!data || data.length === 0) {
+                await supabase.auth.getSession().catch(() => { });
+                throw new Error("Não foi possível salvar (sessão expirada). Recarregue a página.");
+            }
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['leads', 'lead_history'] });

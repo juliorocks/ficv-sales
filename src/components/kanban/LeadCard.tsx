@@ -44,10 +44,15 @@ export function LeadCard({ lead, users, leadSources, stages, courses, pending }:
     const moveStageMutation = useMutation({
         mutationFn: async (stageId: number) => {
             const now = new Date().toISOString();
-            const { error } = await supabase.from('leads')
+            const { data, error } = await supabase.from('leads')
                 .update({ stage_id: stageId, stage_entry_date: now, updated_at: now })
-                .eq('id', lead.id);
+                .eq('id', lead.id)
+                .select('id');
             if (error) throw error;
+            if (!data || data.length === 0) {
+                await supabase.auth.getSession().catch(() => { });
+                throw new Error("Não foi possível mover (sessão expirada). Recarregue a página.");
+            }
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['leads'] });
@@ -64,11 +69,17 @@ export function LeadCard({ lead, users, leadSources, stages, courses, pending }:
     const atenderMutation = useMutation({
         mutationFn: async () => {
             if (!user?.id) throw new Error("Sessão não identificada. Recarregue a página.");
-            const { error } = await supabase
+            await supabase.auth.getSession().catch(() => { });
+            const { data, error } = await supabase
                 .from('leads')
                 .update({ assigned_to_id: user.id, updated_at: new Date().toISOString() })
-                .eq('id', lead.id);
+                .eq('id', lead.id)
+                .select('id');
             if (error) throw error;
+            if (!data || data.length === 0) {
+                await supabase.auth.getSession().catch(() => { });
+                throw new Error("Não foi possível atribuir (sessão expirada). Recarregue a página.");
+            }
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['leads'] });

@@ -83,15 +83,20 @@ export function LossReasonDialog({ isOpen, onOpenChange, onSuccess, leadId, lost
 
     const moveLeadMutation = useMutation({
         mutationFn: async (values: FormValues) => {
-            const { error } = await supabase
+            const { data, error } = await supabase
                 .from('leads')
                 .update({
                     stage_id: lostStageId,
                     stage_entry_date: new Date().toISOString(),
                     motivo_perda_id: values.motivo_perda_id,
                 })
-                .eq('id', leadId);
+                .eq('id', leadId)
+                .select('id');
             if (error) throw error;
+            if (!data || data.length === 0) {
+                await supabase.auth.getSession().catch(() => { });
+                throw new Error("Não foi possível salvar (sessão expirada). Recarregue a página.");
+            }
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['leads'] });
