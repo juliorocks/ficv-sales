@@ -44,17 +44,24 @@ serve(async (req) => {
         const { data: { user } } = await supabase.auth.getUser(jwt);
         if (!user) return jsonRes({ error: 'Sessão não identificada. Faça login de novo.' }, 401);
         const who = { id: user.id, email: user.email ?? '' };
+        // nome do agente que está de fato operando — pra atribuir a msg no NOSSO
+        // histórico mesmo quando o envio sai pela conta de integração.
+        const callerName = (await supabase.from('profiles').select('full_name').eq('id', who.id).maybeSingle())
+            .data?.full_name || who.email.split('@')[0] || 'Agente';
 
-        let integ = (await supabase
-            .from('user_integrations')
-            .select('*')
-            .eq('user_id', who.id)
-            .maybeSingle()).data;
+        // ── CONTA DEDICADA DE INTEGRAÇÃO ─────────────────────────────────────
+        // Secret WIDECHAT_INTEGRATION_EMAIL: quando setado, TODA sessão do WideChat
+        // usa essa conta (não o login pessoal do agente). Assim o token daqui nunca
+        // briga com o painel do WideChat que o agente abre com a conta DELE.
+        // (O WideChat só permite 1 sessão por conta.)
+        const INTEG_EMAIL = (Deno.env.get('WIDECHAT_INTEGRATION_EMAIL') ?? '').trim().toLowerCase();
+        let integ = INTEG_EMAIL
+            ? (await supabase.from('user_integrations').select('*').ilike('widechat_email', INTEG_EMAIL).maybeSingle()).data
+            : (await supabase.from('user_integrations').select('*').eq('user_id', who.id).maybeSingle()).data;
 
-        // Nem todo agente cadastrou o login do WideChat (só Izabelly, hoje). Sem
-        // isso NINGUÉM da equipe conseguia operar pelo painel. Fallback: usa a
-        // credencial de OUTRO agente (não-admin) — as mensagens saem atribuídas a
-        // essa conta; o ideal é cada agente cadastrar a sua em Configurações.
+        // Nem todo agente cadastrou o login do WideChat. Sem isso NINGUÉM da equipe
+        // conseguia operar pelo painel. Fallback: usa a credencial de OUTRO agente
+        // (não-admin) — as mensagens saem atribuídas a essa conta.
         let usingSharedCreds = false;
         if (!integ?.widechat_email || !integ?.widechat_password) {
             const { data: rows } = await supabase.from('user_integrations')
@@ -297,7 +304,7 @@ serve(async (req) => {
                         type: body.is_hsm ? 'template' : 'text',
                         message: String(base.message),
                         origin: 'agent',
-                        sender_name: integ.widechat_email,
+                        sender_name: callerName, // quem operou de fato (não a conta de integração)
                         created_at: new Date().toISOString(),
                     });
                 } catch { /* histórico é best-effort */ }
