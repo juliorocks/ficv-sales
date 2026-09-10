@@ -287,9 +287,10 @@ serve(async (req) => {
                 base.agent_id = await agentId();
                 base.agent = integ.widechat_email;
             }
-            const { ok, status, data } = await wcCall('/message/send', {
+            const { ok, status, data, asAgent } = await wcCall('/message/send', {
                 method: 'POST', body: JSON.stringify(base),
             });
+            console.log(`send_message ok=${ok} status=${status} asAgent=${asAgent} pid=${base.platform_id} chan=${base.channel_id} att=${base.attendance_id ?? '-'} resp=${JSON.stringify(data).slice(0, 500)}`);
 
             // registra a mensagem enviada no histórico com o TEXTO de verdade — o
             // webhook de `templateMessage` às vezes chega sem o corpo e grava só
@@ -309,7 +310,14 @@ serve(async (req) => {
                     });
                 } catch { /* histórico é best-effort */ }
             }
-            return jsonRes(ok ? { success: true, data, message_id: wcMsgId } : { error: data }, ok ? 200 : status);
+            // SEMPRE 200: assim o front lê o erro REAL do WideChat (com 4xx/5xx o
+            // supabase-js engole o corpo e só diz "non-2xx status code").
+            if (!ok) {
+                const detail = typeof data === 'string' ? data
+                    : (data?.message || data?.error || data?.errors || JSON.stringify(data ?? {}));
+                return jsonRes({ error: `WideChat ${status}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`, wc_status: status, wc_body: data });
+            }
+            return jsonRes({ success: true, data, message_id: wcMsgId });
         }
 
         // ── message_status: confere se a mensagem foi ENTREGUE (o /message/send só
