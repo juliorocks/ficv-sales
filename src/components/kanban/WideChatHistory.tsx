@@ -264,7 +264,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
         queryFn: async () => {
             if (phoneDigits.length < 8 && !sessionId) return null
             const { data } = await supabase.functions.invoke('widechat-api', {
-                body: { action: 'attendances', telefone: phoneDigits, session_id: sessionId || undefined },
+                body: { action: 'attendances', telefone: phoneRaw || phoneDigits, session_id: sessionId || undefined },
             })
             return data?.error ? null : data
         },

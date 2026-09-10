@@ -217,16 +217,17 @@ serve(async (req) => {
         if (action === 'attendances') {
             const { ok, status, data } = await wcCall('/user/agents/attendances_plus');
             if (!ok) return jsonRes({ error: data }, status);
-            const digits = String(body.telefone ?? '').replace(/\D/g, '');
+            const rawTel = String(body.telefone ?? '');
+            const digits = rawTel.replace(/\D/g, '');
             const sess = String(body.session_id ?? '').trim();
             const all = [...(data.attendance ?? []), ...(data.wait ?? [])];
-            // casa por session_id (mais confiável) OU pelo telefone real (wa_id/phone —
-            // platform_id é id interno "BR.xxx", nunca casava). Também aceita casar o
-            // platform_id contra os dígitos, pro caso de leads cujo "telefone" salvo É
-            // o id interno do WideChat (número estrangeiro sem wa_id no payload).
+            // o `_id` da attendance É o session_id do lead. Casa por ele, ou pelo
+            // platform_id (= leads.telefone, ex "US.xxx" ou "5583..."), ou pelos
+            // últimos 8 dígitos do wa_id/telefone.
             const suf = digits.length >= 8 ? digits.slice(-8) : '';
             const match =
-                (sess && all.find((a: any) => String(a.session_id ?? a.session ?? '') === sess)) ||
+                (sess && all.find((a: any) => String(a._id ?? '') === sess)) ||
+                (rawTel && all.find((a: any) => String(a.platform_id ?? '') === rawTel)) ||
                 (suf && all.find((a: any) => {
                     const wa = String(a.wa_id ?? a.phone ?? '').replace(/\D/g, '');
                     const pid = String(a.platform_id ?? '').replace(/\D/g, '');
@@ -286,7 +287,10 @@ serve(async (req) => {
                     const ar = await fetch(`${WIDECHAT_BASE}/user/agents/attendances_plus`, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sendToken}` } });
                     const ad = await ar.json().catch(() => null);
                     const all = [...((ad as any)?.attendance ?? []), ...((ad as any)?.wait ?? [])];
-                    const m = all.find((a: any) => String(a.platform_id ?? '') === platformId
+                    // o `_id` da attendance É o session_id (= leads.widechat_session_id)
+                    const m = all.find((a: any) =>
+                        (body.session_id && String(a._id ?? '') === String(body.session_id))
+                        || String(a.platform_id ?? '') === platformId
                         || (a.wa_id && brDigits(String(a.wa_id)) === brDigits(platformId)));
                     if (m?._id) { resolvedAttId = String(m._id); if (m.agent_id) resolvedAgentId = m.agent_id; }
                 } catch { /* segue sem attendance_id */ }
@@ -341,6 +345,51 @@ serve(async (req) => {
             const asAgent = sendEmail !== integ.widechat_email;
             console.log(`send_message ok=${ok} status=${status} via=${sendEmail} pid=${platformId} chan=${body.channel_id} att=${base.attendance_id ?? '-'} resp=${JSON.stringify(data).slice(0, 600)}`);
 
+            // ── TEMPLATE = conversa iniciada pela GENTE. Sem isso, quando o cliente
+            // responde ele cai no BOT (LGPD, menu "com qual área...") em vez de falar
+            // com o agente. Acha a attendance recém-criada e transfere pro agente que
+            // mandou (ou pra fila Comercial). O painel do WideChat já faz isso sozinho.
+            const hsmRouting: any = {};
+            if (ok && body.is_hsm) {
+                const COMERCIAL_Q = Deno.env.get('WIDECHAT_COMERCIAL_QUEUE_ID') ?? '690caf35d66ff3152c0917e8';
+                const findAtt = async (): Promise<any> => {
+                    for (const url of [
+                        `${WIDECHAT_BASE}/user/agents/attendances_plus`,
+                        `${WIDECHAT_BASE}/attendances?limit=80`,
+                    ]) {
+                        try {
+                            const rr = await fetch(url, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sendToken}` } });
+                            const dd = await rr.json().catch(() => null);
+                            const arr = Array.isArray(dd) ? dd
+                                : [...((dd as any)?.attendance ?? []), ...((dd as any)?.wait ?? []), ...((dd as any)?.data ?? [])];
+                            const hit = arr.find((a: any) => String(a.platform_id ?? '') === platformId
+                                || (a.wa_id && brDigits(String(a.wa_id)) === brDigits(platformId)));
+                            if (hit) return hit;
+                        } catch { /* próxima url */ }
+                    }
+                    return null;
+                };
+                try {
+                    let m: any = null;
+                    for (let i = 0; i < 2 && !m; i++) {
+                        await new Promise((res) => setTimeout(res, i === 0 ? 1500 : 2200));
+                        m = await findAtt();
+                    }
+                    hsmRouting.attendance = m ? { _id: m._id, phase: m.phase, campaign_id: m.campaign_id } : null;
+                    if (m?._id && m.phase !== 'human') {
+                        const xfer = (asAgent && sendAgentId)
+                            ? { session_id: String(m._id), type: 'agent', agent_id: sendAgentId, transfer_wait: false }
+                            : { session_id: String(m._id), type: 'attendance', attendance_id: COMERCIAL_Q, transfer_wait: true };
+                        const xr = await fetch(`${WIDECHAT_BASE}/attendances/transfer`, {
+                            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sendToken}` },
+                            body: JSON.stringify(xfer),
+                        });
+                        hsmRouting.transfer = { to: (asAgent && sendAgentId) ? 'agent' : 'comercial', http: xr.status, body: await xr.text().catch(() => '') };
+                    }
+                    console.log('hsm routing:', JSON.stringify(hsmRouting).slice(0, 500));
+                } catch (e) { hsmRouting.error = String(e); }
+            }
+
             // registra a mensagem enviada no histórico com o TEXTO de verdade — o
             // webhook de `templateMessage` às vezes chega sem o corpo e grava só
             // "[Mídia]"; aqui a gente já tem o texto renderizado (base.message).
@@ -366,7 +415,7 @@ serve(async (req) => {
                     : (data?.message || data?.error || data?.errors || JSON.stringify(data ?? {}));
                 return jsonRes({ error: `WideChat ${status}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`, wc_status: status, wc_body: data });
             }
-            return jsonRes({ success: true, data, message_id: wcMsgId });
+            return jsonRes({ success: true, data, message_id: wcMsgId, ...(body.is_hsm ? { hsm_routing: hsmRouting } : {}) });
         }
 
         // ── message_status: confere se a mensagem foi ENTREGUE (o /message/send só
