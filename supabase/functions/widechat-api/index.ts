@@ -300,7 +300,16 @@ serve(async (req) => {
                 platform_id: platformId,
                 channel_id: body.channel_id,
                 type: 'text',
-                close_session: '0', // sessão continua aberta
+                // Template pra contato NOVO (sem attendance encontrado) -> '2' (fecha pra
+                // fila de espera) em vez de '0' (mantém aberto). Era '0' sempre; isso
+                // deixava a conversa numa fase de BOT invisível pra API (nem
+                // attendances_plus nem /attendances mostram fase "bot"), que travava o
+                // contato ("já está em atendimento") e fazia o cliente cair no fluxo do
+                // robô em vez de cair com um humano. '2' joga pra fila humana (Comercial)
+                // direto. NÃO usa '3' aqui — numa conversa nova isso finaliza na hora
+                // (bug já corrigido antes). Free-text / template numa conversa já
+                // existente (resolvedAttId presente) continua '0'.
+                close_session: (body.is_hsm && !resolvedAttId) ? '2' : '0',
             };
             if (resolvedAttId) base.attendance_id = resolvedAttId;
             if (body.contact_name) base.contact_name = body.contact_name;
