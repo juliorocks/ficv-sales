@@ -11,7 +11,7 @@ import { AddStageForm } from "./AddStageForm"
 import { useAuth } from "@/hooks/use-auth"
 import { withTimeout } from "@/utils/withTimeout"
 
-export function KanbanBoard({ searchTerm }: { searchTerm: string }): JSX.Element {
+export function KanbanBoard({ searchTerm, assigneeFilter = 'all' }: { searchTerm: string; assigneeFilter?: string }): JSX.Element {
     const queryClient = useQueryClient()
     const { user, isLoading: isAuthLoading } = useAuth()
     const [columns, setColumns] = useState<Record<string, Lead[]>>({})
@@ -127,16 +127,26 @@ export function KanbanBoard({ searchTerm }: { searchTerm: string }): JSX.Element
 
     const filteredLeads = useMemo(() => {
         if (!leads) return [];
-        if (!searchTerm.trim()) return leads;
+        let out = leads;
+
+        // filtro de atendente — vale pro funil inteiro, em todas as colunas de uma vez
+        if (assigneeFilter === 'unassigned') {
+            out = out.filter(lead => !lead.assigned_to_id);
+        } else if (assigneeFilter && assigneeFilter !== 'all') {
+            out = out.filter(lead => lead.assigned_to_id === assigneeFilter);
+        }
 
         const term = searchTerm.toLowerCase().trim();
-        return leads.filter(lead => {
-            const inName = lead.nome_completo.toLowerCase().includes(term);
-            const inEmail = (lead.email || '').toLowerCase().includes(term);
-            const inPhone = (lead.telefone || '').toLowerCase().includes(term);
-            return inName || inEmail || inPhone;
-        });
-    }, [leads, searchTerm]);
+        if (term) {
+            out = out.filter(lead => {
+                const inName = lead.nome_completo.toLowerCase().includes(term);
+                const inEmail = (lead.email || '').toLowerCase().includes(term);
+                const inPhone = (lead.telefone || '').toLowerCase().includes(term);
+                return inName || inEmail || inPhone;
+            });
+        }
+        return out;
+    }, [leads, searchTerm, assigneeFilter]);
 
     useEffect(() => {
         if (stages) {

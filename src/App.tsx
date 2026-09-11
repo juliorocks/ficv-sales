@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
     LayoutDashboard,
     Users,
@@ -34,6 +34,7 @@ import { Button } from '@/components/ui/button';
 import { reprocessAllAnalyses } from './services/reprocessor';
 import { CSVUploader } from './components/CSVUploader';
 import { TeamFilter } from './components/TeamFilter';
+import { AutoWidthSelect } from './utils/dashboardFilters';
 import { GoalDashboard } from './components/GoalDashboard';
 import { AgentProfile } from './components/AgentProfile';
 import { Login } from './components/Login';
@@ -148,6 +149,8 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [refreshProgress, setRefreshProgress] = useState({ current: 0, total: 0 });
     const [kanbanSearch, setKanbanSearch] = useState("");
+    const [kanbanAssignee, setKanbanAssignee] = useState("all"); // 'all' | 'unassigned' | profile.id — filtra o Kanban por atendente, em todas as colunas
+    const kanbanAssigneeInit = useRef(false); // só aplica o default (perfil logado) uma vez — não sobrescreve se o agente trocar o filtro depois
 
     // Persist activeTab in localStorage
     useEffect(() => {
@@ -192,6 +195,15 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
         if (!session?.user?.id) return;
         fetchProfile(session.user.id);
     }, [session?.user?.id]);
+
+    // Kanban nasce filtrado no PRÓPRIO agente logado (cada um vê só os leads dele
+    // por padrão; admin vê o funil inteiro). Só uma vez — não atropela se o agente
+    // trocar o filtro manualmente depois (ex: pra dar uma olhada geral).
+    useEffect(() => {
+        if (kanbanAssigneeInit.current || !profile) return;
+        kanbanAssigneeInit.current = true;
+        if (profile.role === 'agent') setKanbanAssignee(profile.id);
+    }, [profile]);
 
     const fetchData = async (currentProfile?: any) => {
         let allLogs: any[] = [];
@@ -494,6 +506,16 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 if (name && row.team_id && !(map[name] ?? []).includes(row.team_id)) (map[name] ??= []).push(row.team_id);
             });
             setAgentTeamMap(map);
+        })();
+    }, []);
+
+    // Lista de agentes/admins pro filtro "Atendente" do Kanban (leads.assigned_to_id
+    // -> profiles.id, diferente do agentTeamMap acima que é sobre agent_profiles/nome).
+    const [kanbanAgentsList, setKanbanAgentsList] = useState<{ id: string; full_name: string }[]>([]);
+    useEffect(() => {
+        (async () => {
+            const { data } = await supabase.from('profiles').select('id, full_name').in('role', ['admin', 'agent']).order('full_name');
+            setKanbanAgentsList((data ?? []).filter((p: any) => p.full_name));
         })();
     }, []);
 
@@ -984,6 +1006,17 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                         className="h-10 w-64 pl-10 pr-4 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] text-sm text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm"
                                     />
                                 </div>
+                                {/* Filtra o funil inteiro (todas as colunas) por atendente responsável */}
+                                <AutoWidthSelect
+                                    label=""
+                                    value={kanbanAssignee}
+                                    onChange={setKanbanAssignee}
+                                    placeholder="Todos os Atendentes"
+                                    options={[
+                                        { value: 'unassigned', label: 'Sem atendente' },
+                                        ...kanbanAgentsList.map(a => ({ value: a.id, label: a.full_name })),
+                                    ]}
+                                />
                             </div>
                         )}
 
@@ -1722,7 +1755,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                     só as colunas do KanbanBoard rolam na horizontal. */}
                 {activeTab === 'kanban' && (
                     <div className="animate-fade-in min-w-0">
-                        <KanbanBoard searchTerm={kanbanSearch} />
+                        <KanbanBoard searchTerm={kanbanSearch} assigneeFilter={kanbanAssignee} />
                     </div>
                 )}
 
