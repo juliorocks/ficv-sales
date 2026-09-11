@@ -232,8 +232,12 @@ export function LeadCard({ lead, users, leadSources, stages, courses, pending }:
                             {timeInStage}
                         </div>
                     )}
-                    <div className="text-xs text-muted-foreground" title="Data/Hora de Entrada">
-                        {new Date(lead.data_entrada).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} {new Date(lead.data_entrada).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                    {/* Mostra a mesma data que ordena a coluna por padrão (stage_entry_date) —
+                        antes mostrava data_entrada (entrada no FUNIL, não na etapa atual),
+                        que pra um lead que já mudou de etapa fica bem diferente da posição
+                        real dele na lista e parecia "fora de ordem"/misturado. */}
+                    <div className="text-xs text-muted-foreground" title="Data/Hora nesta etapa">
+                        {new Date(lead.stage_entry_date || lead.data_entrada).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} {new Date(lead.stage_entry_date || lead.data_entrada).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                     </div>
                 </CardFooter>
                 {!lead.assigned_to_id && user && (
