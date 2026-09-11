@@ -129,11 +129,14 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all' }: { searchTerm
         if (!leads) return [];
         let out = leads;
 
-        // filtro de atendente — vale pro funil inteiro, em todas as colunas de uma vez
+        // filtro de atendente — vale pro funil inteiro, em todas as colunas de uma vez.
+        // Filtrando por UM agente específico, os leads SEM atendente continuam
+        // aparecendo — é a fila compartilhada de Entrada, qualquer agente precisa ver
+        // pra poder "Atender"; escondê-los junto faria leads novos sumirem da tela.
         if (assigneeFilter === 'unassigned') {
             out = out.filter(lead => !lead.assigned_to_id);
         } else if (assigneeFilter && assigneeFilter !== 'all') {
-            out = out.filter(lead => lead.assigned_to_id === assigneeFilter);
+            out = out.filter(lead => lead.assigned_to_id === assigneeFilter || !lead.assigned_to_id);
         }
 
         const term = searchTerm.toLowerCase().trim();
