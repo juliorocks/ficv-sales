@@ -543,9 +543,12 @@ serve(async (req) => {
                 if (prof?.id) updates.assigned_to_id = prof.id;
             }
 
-            // agente respondeu e o lead ainda está em "Entrada" (ninguém tinha atendido) →
+            // a LEAD respondeu (interagiu na conversa) e ainda está em "Entrada" →
             // avança pra "Em Contato" sozinho, sem precisar o agente mexer no Kanban.
-            if (origin === 'agent' && cur?.stage_id === firstStageId) {
+            // Mensagem do agente sozinha (lead ainda não respondeu) NÃO avança — pedido
+            // explícito do usuário 2026-09-16: "Atender" já abre a conversa, mas só sai de
+            // Entrada quando a lead de fato interagir; se ela não falar nada, fica em Entrada.
+            if (origin === 'channel' && cur?.stage_id === firstStageId) {
                 const { data: emContato } = await db.from('stages').select('id')
                     .ilike('name', '%contato%').order('order', { ascending: true }).limit(1).maybeSingle();
                 if (emContato?.id) {

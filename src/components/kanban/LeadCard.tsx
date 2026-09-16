@@ -94,6 +94,7 @@ export function LeadCard({ lead, users, leadSources, stages, courses, pending }:
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['leads'] });
             showSuccess(`Lead atribuído a você.`);
+            openEdit('chat');
         },
         onError: (e: any) => showError(`Não foi possível atender: ${e.message}`),
     });
