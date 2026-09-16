@@ -565,7 +565,20 @@ serve(async (req) => {
             if (!ok) {
                 const detail = typeof data === 'string' ? data
                     : (data?.message || data?.error || data?.errors || JSON.stringify(data ?? {}));
-                return jsonRes({ error: `WideChat ${status}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`, wc_status: status, wc_body: data });
+                // DEBUG TEMP 2026-09-16: 422 "não faz parte desta equipe" persistindo pra
+                // Thayanne mesmo depois de 2 tentativas de fix (propagação, prioridade de
+                // telefone no match) — em vez de adivinhar de novo, expõe as variáveis de
+                // decisão direto na mensagem de erro (aparece no toast do front) pra
+                // diagnosticar com o dado real da PRÓXIMA tentativa. Remover depois.
+                const diag = {
+                    sendEmail, sendAgentId: resolvedAgentId, attId: resolvedAttId,
+                    justAccepted, foundAtt: foundAttendance ? {
+                        _id: foundAttendance._id, isAttendance: foundAttendance.isAttendance,
+                        campaign_id: foundAttendance.campaign_id, phase: foundAttendance.phase,
+                        agent_id: foundAttendance.agent_id, platform_id: foundAttendance.platform_id,
+                    } : null,
+                };
+                return jsonRes({ error: `WideChat ${status}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)} | DIAG ${JSON.stringify(diag)}`, wc_status: status, wc_body: data });
             }
             return jsonRes({ success: true, data, message_id: wcMsgId, ...(body.is_hsm ? { hsm_routing: hsmRouting } : {}), ...(Object.keys(claimWait).length ? { claim_wait: claimWait } : {}) });
         }
