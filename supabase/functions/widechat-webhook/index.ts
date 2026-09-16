@@ -126,16 +126,16 @@ serve(async (req) => {
         // sinal de que QUER matrícula nova (mesmo já sendo aluno) — não bloqueia
         const CLIENT_WANTS_NEW = /\b(quero|gostaria|tenho interesse|pretendo)\b.{0,40}(matricul|ingressar|come[çc]ar|fazer)\s+(a |o |um |uma |outr|nov|mais)|nova?\s+(gradua|p[óo]s|forma[çc]|curso)|segundo curso|outra (gradua|p[óo]s|faculdade)/i;
         // origem da mensagem ATUAL deste webhook — o WideChat manda um webhook pra CADA
-        // mensagem, inclusive as do próprio bot (origin=auto). Usado abaixo (e não só lá
-        // embaixo no insert do transcript/CRM) porque o bug real (2026-09-16, lead "Iza")
-        // era hardcode `origin:'channel'` tratando toda mensagem ATUAL como se fosse do
-        // cliente — quando o bot mandava "...acesso ao portal..." (texto genérico do
-        // menu, sem nada a ver com aluno) isso batia com CLIENT_IS_STUDENT como se o
-        // CLIENTE tivesse dito, virava studentSupport→botAreaNonComm→isNonCommercial e
-        // APAGAVA o lead (branch de "onlyAuto") no meio de um atendimento ativo.
-        let curOrigin = "auto";
-        if (eventName === "messageContact" || msgData.origin === "contact" || msgData.origin === "channel") curOrigin = "channel";
-        if (msgData.origin === "user" || msgData.origin === "agent" || webhookEvent === "agent_message" || msgData.user?.name) curOrigin = "agent";
+        // mensagem, inclusive as do próprio bot (origin=auto). Calculada UMA VEZ aqui e
+        // reutilizada em tudo que segue (checagem de setor, transcript, CRM/reabertura).
+        // Havia 3 cópias quase iguais desse cálculo espalhadas pela função — bug real
+        // 2026-09-16: a cópia usada mais abaixo pro transcript/CRM não reconhecia
+        // `msgData.origin === "channel"` nem `msgData.user?.name` (só tinha sido corrigido
+        // nesta cópia, pro caso da checagem de setor/lead "Iza"), então uma mensagem do
+        // cliente podia cair como "auto" ali e não reabrir um lead Finalizado.
+        let origin = "auto";
+        if (eventName === "messageContact" || msgData.origin === "contact" || msgData.origin === "channel") origin = "channel";
+        if (msgData.origin === "user" || msgData.origin === "agent" || webhookEvent === "agent_message" || msgData.user?.name) origin = "agent";
 
         let botAreaNonComm = false;
         if (!agentLc && sessionId && !queueVal) {
@@ -143,7 +143,7 @@ serve(async (req) => {
                 .select('message, origin').eq('session_id', sessionId)
                 .order('created_at', { ascending: false }).limit(15);
             const rows: { message: string; origin: string }[] = [
-                { message: messageText, origin: curOrigin },
+                { message: messageText, origin },
                 ...((recent ?? []) as { message: string; origin: string }[]),
             ];
             // sinal de Faculdade só vale vindo do CLIENTE — o bot lista TODAS as áreas
@@ -201,11 +201,21 @@ serve(async (req) => {
         // jeito de sair. Bug real 2026-09-16: Matheus Marcelino/Tyago (agentes ativos,
         // 900+/400 msgs em 10 dias) ficaram meses fora do roster Comercial -> 128
         // telefones bloqueados, dezenas de leads deles nunca finalizavam.
+        // Checa por TELEFONE sempre, além da sessão — o WideChat abre uma sessão NOVA
+        // quando o cliente escreve de novo após o atendimento ter sido Finalizado, então
+        // olhar só pra `widechat_session_id` (sessão antiga, ainda gravada no lead) não
+        // achava o lead assumido nessa sessão nova e a trava não protegia. Bug real
+        // 2026-09-16, lead "jcs.sjc" (teste): telefone tinha entrado no blocklist antes
+        // (teste com agente fora do roster), o lead reabriu com sessão nova, e como só a
+        // sessão antiga era checada a trava não pegou — mensagem ignorada, Finalizado
+        // nunca reabriu.
         let protectedAssignedLead = false;
         if (sessionId || phoneSuffix.length >= 8) {
-            let q = db.from('leads').select('assigned_to_id');
-            q = sessionId ? q.eq('widechat_session_id', sessionId) : q.ilike('telefone', `%${phoneSuffix}%`);
-            const { data: pl } = await q.limit(1).maybeSingle();
+            const orParts: string[] = [];
+            if (sessionId) orParts.push(`widechat_session_id.eq.${sessionId}`);
+            if (phoneSuffix.length >= 8) orParts.push(`telefone.ilike.%${phoneSuffix}%`);
+            const { data: pl } = await db.from('leads').select('assigned_to_id')
+                .or(orParts.join(',')).limit(1).maybeSingle();
             protectedAssignedLead = !!pl?.assigned_to_id;
         }
 
@@ -240,9 +250,6 @@ serve(async (req) => {
 
         // ── raw transcript ────────────────────────────────────────────────────
         if (isMessage && sessionId && messageText && !isSystemMessage(messageText)) {
-            let origin = "auto";
-            if (eventName === "messageContact" || msgData.origin === "contact" || msgData.origin === "channel") origin = "channel";
-            if (msgData.origin === "user" || msgData.origin === "agent" || webhookEvent === "agent_message" || msgData.user?.name) origin = "agent";
             const raw = {
                 session_id: sessionId, origin,
                 sender_name: msgData.user?.name || senderName || "",
@@ -456,11 +463,6 @@ serve(async (req) => {
                 await mirror(`INSERT INTO lead_notes [{ lead_id: leads:⟨${leadId}⟩, note: ${sv(nota)}, created_at: d${sv(now)} }] RETURN NONE;`);
             }
         }
-
-        // ── mensagem ─────────────────────────────────────────────────────────
-        let origin = "auto";
-        if (eventName === "messageContact" || msgData.origin === "contact") origin = "channel";
-        if (msgData.origin === "user" || msgData.origin === "agent" || webhookEvent === "agent_message") origin = "agent";
 
         if (leadId) {
             const msg = {
