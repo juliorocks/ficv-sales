@@ -110,9 +110,15 @@ serve(async (req) => {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email: integ.widechat_email, password: integ.widechat_password }),
             });
-            if (!loginRes.ok) return false;
+            if (!loginRes.ok) {
+                console.log(`widechat freshLogin DEBUG: conta=${integ.widechat_email} status=${loginRes.status} body=${(await loginRes.text().catch(() => '')).slice(0, 300)}`);
+                return false;
+            }
             const login = await loginRes.json();
-            if (!login?.token) return false;
+            if (!login?.token) {
+                console.log(`widechat freshLogin DEBUG: conta=${integ.widechat_email} sem token body=${JSON.stringify(login).slice(0, 300)}`);
+                return false;
+            }
             wcToken = login.token;
             wcAgentId = login.user?._id;
             const newExp = new Date(); newExp.setHours(newExp.getHours() + 23);
@@ -269,6 +275,10 @@ serve(async (req) => {
             // attendance com o token velho voltava vazia mesmo a conversa existindo).
             let sendAgentId = await agentId();
             let sendToken = wcToken;
+            // DEBUG TEMP 2026-09-16: diagnosticar por que o envio cai na conta de
+            // integração mesmo quando o agente tem login próprio cadastrado. Nunca loga
+            // a senha. Remover depois de confirmar a causa.
+            console.log(`widechat send_message DEBUG: who=${who.email} ownRow=${ownRow ? 'existe' : 'ausente'} ownEmail=${ownRow?.widechat_email ?? '-'} integEmail=${integ.widechat_email} iguais=${ownRow?.widechat_email === integ.widechat_email}`);
             if (ownRow?.widechat_email && ownRow?.widechat_password && ownRow.widechat_email !== integ.widechat_email) {
                 try {
                     const lr = await fetch(`${WIDECHAT_BASE}/auth/login`, {
@@ -276,11 +286,12 @@ serve(async (req) => {
                         body: JSON.stringify({ email: ownRow.widechat_email, password: ownRow.widechat_password }),
                     });
                     const lj = await lr.json().catch(() => null);
+                    console.log(`widechat send_message DEBUG: login próprio status=${lr.status} emailUsado=${ownRow.widechat_email} pwdLen=${ownRow.widechat_password.length} body=${JSON.stringify(lj).slice(0, 400)}`);
                     if (lj?.token && lj?.user?.type !== 'admin') {
                         sendEmail = ownRow.widechat_email; sendPwd = ownRow.widechat_password;
                         sendToken = lj.token; sendAgentId = lj.user?._id;
                     }
-                } catch { /* fica com a conta de integração */ }
+                } catch (e) { console.log(`widechat send_message DEBUG: login próprio EXCEPTION ${e}`); /* fica com a conta de integração */ }
             }
 
             // attendance_id: procura o atendimento ABERTO desse contato NA CONTA que
@@ -343,6 +354,32 @@ serve(async (req) => {
                     error: `Não encontrei o atendimento ativo desse contato na conta usada pra enviar (${sendEmail}). Isso costuma acontecer quando o agente ainda não tem login próprio do WideChat cadastrado. Peça pra cadastrar em Configurações > Integração WideChat — enviar assim criaria uma conversa duplicada no WideChat.`,
                     code: 'ATTENDANCE_NOT_VISIBLE',
                 });
+            }
+
+            // ── reivindica attendance ainda em "wait" — ANTES de mandar, não depois ──
+            // Bug real, 2026-09-16, lead "jcs.sjc": a ordem antiga era mandar a mensagem
+            // PRIMEIRO (sem attendance_id/agent, porque o WideChat recusa esses campos
+            // pra item ainda em "wait") e só aceitar DEPOIS do envio (ver claim mais
+            // abaixo). O aceite chegava e era confirmado pela própria WideChat
+            // (accept_attendance, protocolo certo, sessão certa) — mas o /message/send
+            // que já tinha saído segundos antes SEM attendance vinculada bagunçava o
+            // roteamento: a PRÓXIMA mensagem do cliente caía numa sessão NOVA e
+            // paralela, onde o bot tratava como conversa do zero. No painel nativo da
+            // WideChat isso nunca acontece porque o agente sempre aceita a fila antes
+            // de poder digitar. Aceitando aqui ANTES de montar `base`, o send já sai
+            // com attendance_id/agent corretos desde a primeira tentativa.
+            if (!body.is_hsm && foundAttendance?._id && foundAttendance.isAttendance === false && resolvedAgentId) {
+                try {
+                    const xr = await fetch(`${WIDECHAT_BASE}/attendances/accept`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sendToken}` },
+                        body: JSON.stringify({ session_id: String(foundAttendance._id), agent_id: resolvedAgentId }),
+                    });
+                    const xj = await xr.json().catch(() => null);
+                    if (xr.ok && !(xj && xj.status === false)) {
+                        foundAttendance.isAttendance = true;
+                        resolvedAttId = String(foundAttendance._id);
+                    }
+                } catch { /* segue sem accept — send vai sem attendance_id, mesmo comportamento de antes */ }
             }
 
             const base: Record<string, unknown> = {
@@ -454,18 +491,13 @@ serve(async (req) => {
                 } catch (e) { hsmRouting.error = String(e); }
             }
 
-            // ── reivindica attendance ainda em "wait" ────────────────────────────
-            // Mesmo problema do HSM acima, mas pra texto normal: um agente responde um
-            // lead cuja attendance ainda está em "wait" (bot transferiu pra fila mas
-            // NINGUÉM aceitou — isAttendance:false, agent_id:null). O fix de hoje (não
-            // mandar agent/agent_id nesse caso) resolveu o 422 no ENVIO, mas deixou a
-            // conversa sem dono do lado do WideChat — o bot continua achando que é dele
-            // e reabre o menu/LGPD quando o cliente responde de novo (bug real, reproduzido
-            // ao vivo 2026-09-16 no atendimento de teste — session 6aaa8275ab68aa3eec09484c,
-            // isAttendance:false mesmo com agente respondendo pelo painel). Sem poll (a
-            // attendance já existe, achada em foundAttendance acima). `/attendances/accept`
-            // (não /transfer — ver comentário no hsmRouting acima) confirmado ao vivo:
-            // devolve isAttendance:true/phase:human.
+            // ── reivindica attendance ainda em "wait" — fallback ─────────────────
+            // O aceite principal agora acontece ANTES do envio (ver bloco acima, perto
+            // do guard ATTENDANCE_NOT_VISIBLE) — isso aqui só dispara se aquele aceite
+            // falhou (ex: erro de rede) e o send ainda assim saiu sem attendance_id.
+            // Mantido como segunda tentativa; `/attendances/accept` (não /transfer — ver
+            // comentário no hsmRouting acima) confirmado ao vivo: devolve
+            // isAttendance:true/phase:human.
             const claimWait: any = {};
             if (ok && !body.is_hsm && foundAttendance?._id && foundAttendance.isAttendance === false && resolvedAgentId) {
                 try {
