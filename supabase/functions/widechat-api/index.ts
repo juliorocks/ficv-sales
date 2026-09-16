@@ -317,12 +317,23 @@ serve(async (req) => {
                     const ad = await ar.json().catch(() => null);
                     const all = [...((ad as any)?.attendance ?? []), ...((ad as any)?.wait ?? [])];
                     attendanceLookupOk = ar.ok && ad != null;
-                    // o `_id` da attendance É o session_id (= leads.widechat_session_id)
-                    const m = all.find((a: any) =>
-                        (body.session_id && String(a._id ?? '') === String(body.session_id))
-                        || (body.attendance_id && String(a._id ?? '') === String(body.attendance_id))
-                        || String(a.platform_id ?? '') === platformId
-                        || (a.wa_id && brDigits(String(a.wa_id)) === brDigits(platformId)));
+                    // o `_id` da attendance É o session_id (= leads.widechat_session_id).
+                    // TELEFONE primeiro, sempre — platform_id/wa_id são estáveis (o número
+                    // não muda), enquanto session_id/attendance_id vêm do FRONT e podem estar
+                    // até 5min desatualizados (query sem staleTime curto, sem realtime, sem
+                    // refetch antes de enviar — ver WideChatHistory.tsx). Bug real, 2026-09-16,
+                    // lead "jcs.sjc"/agente Thayanne: a sessão desse contato mudou várias vezes
+                    // no mesmo dia; o `body.session_id` velho ainda batia com uma attendance
+                    // ANTIGA que a WideChat listava em attendances_plus, e como o `.find()`
+                    // testava session_id ANTES de platform_id, ganhava essa attendance errada —
+                    // cujo contexto de fila/equipe não incluía a agente, gerando 422 "não faz
+                    // parte desta equipe" mesmo com a conta dela 100% correta (confirmado: o
+                    // mesmo envio funcionou normalmente direto no painel nativo da WideChat).
+                    const m = all.find((a: any) => String(a.platform_id ?? '') === platformId)
+                        ?? all.find((a: any) => a.wa_id && brDigits(String(a.wa_id)) === brDigits(platformId))
+                        ?? all.find((a: any) => body.session_id && String(a._id ?? '') === String(body.session_id))
+                        ?? all.find((a: any) => body.attendance_id && String(a._id ?? '') === String(body.attendance_id))
+                        ?? null;
                     foundAttendance = m ?? null;
                     // só usa attendance_id (e por consequência agent/agent_id, exigidos junto)
                     // quando é uma attendance DE VERDADE, já aceita por alguém (`isAttendance:
