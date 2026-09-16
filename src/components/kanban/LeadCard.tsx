@@ -101,7 +101,7 @@ export function LeadCard({ lead, users, leadSources, stages, courses, pending }:
 
     return (
         <>
-            <Card className="transition-shadow hover:shadow-md mb-4">
+            <Card className="transition-shadow hover:shadow-md mb-4 flex flex-col min-h-[180px]">
                 <CardHeader className="p-4 pb-2 flex flex-row justify-between items-start">
                     <div className="flex items-center gap-2 flex-1 overflow-hidden">
                         <AssignedUser userId={lead.assigned_to_id} users={users} />
@@ -220,7 +220,7 @@ export function LeadCard({ lead, users, leadSources, stages, courses, pending }:
                         </div>
                     </div>
                 </CardContent>
-                <CardFooter className="p-4 pt-0 flex justify-between items-center">
+                <CardFooter className="p-4 pt-0 mt-auto flex justify-between items-center">
                     <div className="flex items-center gap-3">
                         <span className="text-sm font-semibold text-green-600 dark:text-green-400">
                             {lead.valor_oportunidade.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
@@ -245,7 +245,7 @@ export function LeadCard({ lead, users, leadSources, stages, courses, pending }:
                     <div className="px-4 pb-4">
                         <Button
                             size="sm"
-                            className="w-full bg-primary/90 hover:bg-primary"
+                            className="w-full bg-[#25D366] hover:bg-[#1ebe5a] text-white"
                             disabled={atenderMutation.isPending}
                             onClick={() => atenderMutation.mutate()}
                         >
