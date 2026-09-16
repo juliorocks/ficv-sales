@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { DragDropContext, DropResult, Droppable } from "@hello-pangea/dnd"
 import { supabase } from "@/lib/supabase"
@@ -167,8 +167,22 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all' }: { searchTerm
     }, [stages, filteredLeads])
 
     // Realtime subscription for Leads
+    const invalidateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     useEffect(() => {
         if (isAuthLoading || !user) return;
+
+        // debounce: uma migration/job em lote (ex. o cron horário que finaliza leads
+        // parados 24h) pode disparar centenas/milhares de eventos realtime em segundos.
+        // Sem isso, cada evento chamava invalidateQueries na hora — a rajada de
+        // refetches derrubava a aba e o board ficava mostrando 0 em tudo (visto ao
+        // vivo: 3 migrations mexendo ~2000 leads seguidas zeraram o board de um agente).
+        const scheduleInvalidate = () => {
+            if (invalidateTimer.current) clearTimeout(invalidateTimer.current);
+            invalidateTimer.current = setTimeout(() => {
+                queryClient.invalidateQueries({ queryKey: ['leads'] });
+                queryClient.invalidateQueries({ queryKey: ['lead_pending_replies'] });
+            }, 800);
+        };
 
         const channel = supabase
             .channel('public:leads-changes')
@@ -180,9 +194,7 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all' }: { searchTerm
                     table: 'leads'
                 },
                 (payload) => {
-                    console.log('Realtime change detected in leads:', payload);
-                    queryClient.invalidateQueries({ queryKey: ['leads'] });
-                    queryClient.invalidateQueries({ queryKey: ['lead_pending_replies'] });
+                    scheduleInvalidate();
 
                     // Show a subtle notification if a new lead enters
                     if (payload.eventType === 'INSERT') {
@@ -195,13 +207,12 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all' }: { searchTerm
             .on(
                 'postgres_changes',
                 { event: 'INSERT', schema: 'public', table: 'widechat_messages' },
-                () => queryClient.invalidateQueries({ queryKey: ['lead_pending_replies'] }),
+                () => scheduleInvalidate(),
             )
-            .subscribe((status) => {
-                console.log('Realtime subscription status:', status);
-            });
+            .subscribe();
 
         return () => {
+            if (invalidateTimer.current) clearTimeout(invalidateTimer.current);
             supabase.removeChannel(channel);
         }
     }, [user, isAuthLoading, queryClient])
