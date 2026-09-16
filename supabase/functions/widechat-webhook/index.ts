@@ -180,12 +180,29 @@ serve(async (req) => {
             alreadyBlocked = false;
         }
 
-        const isNonCommercial = alreadyBlocked ||
+        // trava de segurança: um lead já ASSUMIDO por um agente (assigned_to_id) nunca
+        // pode ser bloqueado/ignorado por essas heurísticas de setor — elas são ruído
+        // (nome de agente esquecido no roster do Comercial, nome do próprio contato
+        // vazando pro campo de agente em algum formato de payload, etc.) e, uma vez que
+        // bloqueiam o telefone, TODO webhook seguinte daquele contato é ignorado pra
+        // sempre — inclusive o evento de "atendimento finalizado", travando o lead sem
+        // jeito de sair. Bug real 2026-09-16: Matheus Marcelino/Tyago (agentes ativos,
+        // 900+/400 msgs em 10 dias) ficaram meses fora do roster Comercial -> 128
+        // telefones bloqueados, dezenas de leads deles nunca finalizavam.
+        let protectedAssignedLead = false;
+        if (sessionId || phoneSuffix.length >= 8) {
+            let q = db.from('leads').select('assigned_to_id');
+            q = sessionId ? q.eq('widechat_session_id', sessionId) : q.ilike('telefone', `%${phoneSuffix}%`);
+            const { data: pl } = await q.limit(1).maybeSingle();
+            protectedAssignedLead = !!pl?.assigned_to_id;
+        }
+
+        const isNonCommercial = !protectedAssignedLead && (alreadyBlocked ||
             botAreaNonComm ||
             (queueVal && !/comercial/i.test(queueVal) && NON_COMMERCIAL.test(queueVal)) ||
             NON_COMMERCIAL.test(agentName) ||
             NON_COMMERCIAL.test(String(msgData.prefix ?? "")) ||
-            (!!agentLc && !agentInRoster);
+            (!!agentLc && !agentInRoster));
 
         if (isNonCommercial && !alreadyBlocked && phoneSuffix.length >= 8) {
             const motivo = queueVal || agentName || (botAreaNonComm ? 'menu-bot (área/aluno)' : 'roster');
