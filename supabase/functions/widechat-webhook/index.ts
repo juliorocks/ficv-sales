@@ -442,6 +442,26 @@ serve(async (req) => {
             const updates: Record<string, unknown> = {};
             const stillFresh = cur?.stage_id === firstStageId; // ninguém trabalhou o lead ainda
 
+            // ── reabertura automática ──────────────────────────────────────────
+            // cliente escreveu de novo depois que a conversa foi marcada Finalizado (o
+            // "conversation end" acima fecha sozinho via evento/texto do WideChat, mas
+            // nada reabria) — o lead ficava enterrado numa coluna fechada mesmo com
+            // atendimento novo rolando. Bumpa stage_entry_date junto (é o que ordena E
+            // o que o card mostra desde 2468c23, senão o lead reaberto "some" no fim da lista).
+            let reopenedFromFinalizado = false;
+            if (origin === 'channel' && cur?.stage_id) {
+                const { data: curStage } = await db.from('stages').select('name').eq('id', cur.stage_id).maybeSingle();
+                if (curStage?.name && /finaliz|encerr|conclu/i.test(curStage.name)) {
+                    const { data: emContatoReopen } = await db.from('stages').select('id')
+                        .ilike('name', '%contato%').order('order', { ascending: true }).limit(1).maybeSingle();
+                    if (emContatoReopen?.id) {
+                        updates.stage_id = emContatoReopen.id;
+                        updates.stage_entry_date = now;
+                        reopenedFromFinalizado = true;
+                    }
+                }
+            }
+
             // ── origem SITE: "já preenchi meus dados na página X" ──────────────
             const cameFromSite = SITE_ORIGIN_RE.test(messageText);
             const pagePhrase = (messageText.match(/p[áa]gina\s+(.+?)(?:\s+e\s+(?:quero|gostaria|preciso|tenho)\b|[.!?\n]|$)/i) ?? [])[1]?.trim() ?? '';
@@ -511,6 +531,12 @@ serve(async (req) => {
                     : k === 'source_id' ? `source_id = lead_sources:⟨${v}⟩`
                     : `${k} = ${sv(v)}`).join(', ');
                 await mirror(`UPDATE leads SET ${sets} WHERE id = leads:⟨${leadId}⟩;`);
+            }
+
+            if (reopenedFromFinalizado) {
+                const nota = `🔁 Reaberto para Em Contato — cliente voltou a escrever após o atendimento ter sido finalizado.`;
+                await db.from('lead_notes').insert({ lead_id: leadId, note: nota, created_at: now });
+                await mirror(`INSERT INTO lead_notes [{ lead_id: leads:⟨${leadId}⟩, note: ${sv(nota)}, created_at: d${sv(now)} }] RETURN NONE;`);
             }
         }
 
