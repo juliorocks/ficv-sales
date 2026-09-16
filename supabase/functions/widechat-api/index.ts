@@ -202,14 +202,16 @@ serve(async (req) => {
             return jsonRes({ crm_profile: who, widechat_email: integ.widechat_email, profile_status: r.status, profile: await r.json().catch(() => null) });
         }
 
-        // agent_id (só usado no send_message; opcional). Busca o profile se não veio do login.
+        // agent_id (usado no send_message pra atribuir/reivindicar attendance). Só vem
+        // preenchido quando freshLogin() rodou nessa request (token expirado/ausente);
+        // com token em CACHE (caso comum) fica undefined. `/agents/profile` NÃO serve de
+        // fallback — devolve 404 "Agente não encontrado" pra conta de integração
+        // (confirmado ao vivo, 2026-09-16). Único jeito confiável de obter o id é o
+        // `user._id` da resposta de login — por isso refaz login (freshLogin já grava o
+        // token novo em cache, sem custo extra real).
         async function agentId(): Promise<string | undefined> {
             if (wcAgentId) return wcAgentId;
-            try {
-                const r = await fetch(`${WIDECHAT_BASE}/agents/profile`, { headers: wcHeaders() });
-                const p = await r.json();
-                wcAgentId = p?._id ?? p?.user?._id ?? p?.agent?._id;
-            } catch { /* opcional */ }
+            await freshLogin();
             return wcAgentId;
         }
 
@@ -260,8 +262,13 @@ serve(async (req) => {
                 .select('widechat_email, widechat_password').eq('user_id', who.id).maybeSingle()).data;
             let sendEmail = integ.widechat_email as string;
             let sendPwd = integ.widechat_password as string;
-            let sendToken = wcToken;
+            // agentId() pode chamar freshLogin() e reatribuir o wcToken do módulo (quando
+            // o token em cache não tinha o id do agente ainda) — por isso sendToken só
+            // pode ser lido DEPOIS, senão fica com um token velho enquanto o resto da
+            // função já está usando o novo (bug real, pego ao vivo 2026-09-16: a busca de
+            // attendance com o token velho voltava vazia mesmo a conversa existindo).
             let sendAgentId = await agentId();
+            let sendToken = wcToken;
             if (ownRow?.widechat_email && ownRow?.widechat_password && ownRow.widechat_email !== integ.widechat_email) {
                 try {
                     const lr = await fetch(`${WIDECHAT_BASE}/auth/login`, {
@@ -289,6 +296,9 @@ serve(async (req) => {
             // nunca de outra fonte — agent_id e agent (email) têm que ser sempre o MESMO
             // login, senão o WideChat recusa.
             const resolvedAgentId: string | undefined = sendAgentId;
+            // guarda a attendance encontrada (mesmo se ainda em "wait") — usada depois do
+            // envio pra reivindicar a conversa pro agente (ver claimWaitAttendance abaixo).
+            let foundAttendance: any = null;
             if (!body.is_hsm) {
                 try {
                     const ar = await fetch(`${WIDECHAT_BASE}/user/agents/attendances_plus`, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sendToken}` } });
@@ -300,6 +310,7 @@ serve(async (req) => {
                         || (body.attendance_id && String(a._id ?? '') === String(body.attendance_id))
                         || String(a.platform_id ?? '') === platformId
                         || (a.wa_id && brDigits(String(a.wa_id)) === brDigits(platformId)));
+                    foundAttendance = m ?? null;
                     // só usa attendance_id (e por consequência agent/agent_id, exigidos junto)
                     // quando é uma attendance DE VERDADE, já aceita por alguém (`isAttendance:
                     // true`). Um item ainda na fila (`wait`, isAttendance:false, agent_id:null —
@@ -399,17 +410,52 @@ serve(async (req) => {
                     }
                     hsmRouting.attendance = m ? { _id: m._id, phase: m.phase, campaign_id: m.campaign_id } : null;
                     if (m?._id && m.phase !== 'human') {
-                        const xfer = (asAgent && sendAgentId)
-                            ? { session_id: String(m._id), type: 'agent', agent_id: sendAgentId, transfer_wait: false }
-                            : { session_id: String(m._id), type: 'attendance', attendance_id: COMERCIAL_Q, transfer_wait: true };
-                        const xr = await fetch(`${WIDECHAT_BASE}/attendances/transfer`, {
-                            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sendToken}` },
-                            body: JSON.stringify(xfer),
-                        });
-                        hsmRouting.transfer = { to: (asAgent && sendAgentId) ? 'agent' : 'comercial', http: xr.status, body: await xr.text().catch(() => '') };
+                        // `/attendances/transfer` com type:'agent' devolve 412 "Sessão não está em
+                        // atendimento" pra item ainda em "wait" (confirmado ao vivo, 2026-09-16) —
+                        // transfer só move entre attendances JÁ aceitas. A rota certa pra reivindicar
+                        // um item de fila é `/attendances/accept` (achada por tentativa, mesma data;
+                        // devolve "Contato aceito!" e vira isAttendance:true/phase:human).
+                        if (asAgent && sendAgentId) {
+                            const xr = await fetch(`${WIDECHAT_BASE}/attendances/accept`, {
+                                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sendToken}` },
+                                body: JSON.stringify({ session_id: String(m._id), agent_id: sendAgentId }),
+                            });
+                            hsmRouting.transfer = { to: 'agent', http: xr.status, body: await xr.text().catch(() => '') };
+                        } else {
+                            const xr = await fetch(`${WIDECHAT_BASE}/attendances/transfer`, {
+                                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sendToken}` },
+                                body: JSON.stringify({ session_id: String(m._id), type: 'attendance', attendance_id: COMERCIAL_Q, transfer_wait: true }),
+                            });
+                            hsmRouting.transfer = { to: 'comercial', http: xr.status, body: await xr.text().catch(() => '') };
+                        }
                     }
                     console.log('hsm routing:', JSON.stringify(hsmRouting).slice(0, 500));
                 } catch (e) { hsmRouting.error = String(e); }
+            }
+
+            // ── reivindica attendance ainda em "wait" ────────────────────────────
+            // Mesmo problema do HSM acima, mas pra texto normal: um agente responde um
+            // lead cuja attendance ainda está em "wait" (bot transferiu pra fila mas
+            // NINGUÉM aceitou — isAttendance:false, agent_id:null). O fix de hoje (não
+            // mandar agent/agent_id nesse caso) resolveu o 422 no ENVIO, mas deixou a
+            // conversa sem dono do lado do WideChat — o bot continua achando que é dele
+            // e reabre o menu/LGPD quando o cliente responde de novo (bug real, reproduzido
+            // ao vivo 2026-09-16 no atendimento de teste — session 6aaa8275ab68aa3eec09484c,
+            // isAttendance:false mesmo com agente respondendo pelo painel). Sem poll (a
+            // attendance já existe, achada em foundAttendance acima). `/attendances/accept`
+            // (não /transfer — ver comentário no hsmRouting acima) confirmado ao vivo:
+            // devolve isAttendance:true/phase:human.
+            const claimWait: any = {};
+            if (ok && !body.is_hsm && foundAttendance?._id && foundAttendance.isAttendance === false && resolvedAgentId) {
+                try {
+                    const xr = await fetch(`${WIDECHAT_BASE}/attendances/accept`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sendToken}` },
+                        body: JSON.stringify({ session_id: String(foundAttendance._id), agent_id: resolvedAgentId }),
+                    });
+                    claimWait.http = xr.status;
+                    claimWait.body = await xr.text().catch(() => '');
+                    console.log('claim wait attendance:', JSON.stringify(claimWait).slice(0, 400));
+                } catch (e) { claimWait.error = String(e); }
             }
 
             // registra a mensagem enviada no histórico com o TEXTO de verdade — o
@@ -437,7 +483,7 @@ serve(async (req) => {
                     : (data?.message || data?.error || data?.errors || JSON.stringify(data ?? {}));
                 return jsonRes({ error: `WideChat ${status}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`, wc_status: status, wc_body: data });
             }
-            return jsonRes({ success: true, data, message_id: wcMsgId, ...(body.is_hsm ? { hsm_routing: hsmRouting } : {}) });
+            return jsonRes({ success: true, data, message_id: wcMsgId, ...(body.is_hsm ? { hsm_routing: hsmRouting } : {}), ...(Object.keys(claimWait).length ? { claim_wait: claimWait } : {}) });
         }
 
         // ── message_status: confere se a mensagem foi ENTREGUE (o /message/send só
