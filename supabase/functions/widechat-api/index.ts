@@ -572,10 +572,12 @@ serve(async (req) => {
                 // diagnosticar com o dado real da PRÓXIMA tentativa. Remover depois.
                 const diag = {
                     sendEmail, sendAgentId: resolvedAgentId, attId: resolvedAttId,
-                    justAccepted, foundAtt: foundAttendance ? {
+                    justAccepted, sentChannelId: body.channel_id, sentPlatformId: platformId,
+                    foundAtt: foundAttendance ? {
                         _id: foundAttendance._id, isAttendance: foundAttendance.isAttendance,
                         campaign_id: foundAttendance.campaign_id, phase: foundAttendance.phase,
                         agent_id: foundAttendance.agent_id, platform_id: foundAttendance.platform_id,
+                        channel_id: foundAttendance.channel_id,
                     } : null,
                 };
                 return jsonRes({ error: `WideChat ${status}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)} | DIAG ${JSON.stringify(diag)}`, wc_status: status, wc_body: data });
