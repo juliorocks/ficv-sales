@@ -368,6 +368,7 @@ serve(async (req) => {
             // WideChat isso nunca acontece porque o agente sempre aceita a fila antes
             // de poder digitar. Aceitando aqui ANTES de montar `base`, o send já sai
             // com attendance_id/agent corretos desde a primeira tentativa.
+            let justAccepted = false;
             if (!body.is_hsm && foundAttendance?._id && foundAttendance.isAttendance === false && resolvedAgentId) {
                 try {
                     const xr = await fetch(`${WIDECHAT_BASE}/attendances/accept`, {
@@ -378,6 +379,15 @@ serve(async (req) => {
                     if (xr.ok && !(xj && xj.status === false)) {
                         foundAttendance.isAttendance = true;
                         resolvedAttId = String(foundAttendance._id);
+                        justAccepted = true;
+                        // o accept confirma na hora ("Contato aceito!"), mas o vínculo
+                        // agente↔equipe usado pelo /message/send pra validar `agent_id` leva
+                        // um instante pra propagar do lado da WideChat — mandar o send na
+                        // sequência, sem pausa, corre pra trás dessa propagação e volta 422
+                        // "o agente X não faz parte desta equipe" mesmo com o accept já ok
+                        // (bug real, 2026-09-16, lead "jcs.sjc"/Thayanne — accept confirmado,
+                        // sessão certa, sem sessão duplicada, e o send ainda assim recusou).
+                        await new Promise((res) => setTimeout(res, 1200));
                     }
                 } catch { /* segue sem accept — send vai sem attendance_id, mesmo comportamento de antes */ }
             }
@@ -429,6 +439,16 @@ serve(async (req) => {
                     const lj = await lr.json().catch(() => null);
                     if (lj?.token) sent = await doSend(lj.token);
                 } catch { /* fica com o resultado anterior */ }
+            }
+            // ainda 422 "não faz parte desta equipe" logo depois de um accept que
+            // acabou de confirmar sucesso — é a mesma janela de propagação do comentário
+            // acima, só que a pausa de 1.2s não foi suficiente. Espera mais um pouco e
+            // tenta mandar de novo, 1x só (não é problema de credencial, retry de login
+            // não ajudaria).
+            if (justAccepted && !sent.ok && sent.r.status === 422 &&
+                /n[ãa]o faz parte (desta|da) equipe/i.test(JSON.stringify(sent.data ?? ''))) {
+                await new Promise((res) => setTimeout(res, 2000));
+                sent = await doSend(sendToken);
             }
             const { r, data } = sent;
             const status = r.status;
