@@ -125,13 +125,25 @@ serve(async (req) => {
         const BOT_STUDENT_SUPPORT = /como aluno\(a\), sua demanda|solicita[çc][ãa]o acad[êe]mica|equipe pedag[óo]gica|encaminhar (sua|a) solicita[çc][ãa]o (sobre|de).{0,40}(pedag[óo]gic|acad[êe]mic|tutor)/i;
         // sinal de que QUER matrícula nova (mesmo já sendo aluno) — não bloqueia
         const CLIENT_WANTS_NEW = /\b(quero|gostaria|tenho interesse|pretendo)\b.{0,40}(matricul|ingressar|come[çc]ar|fazer)\s+(a |o |um |uma |outr|nov|mais)|nova?\s+(gradua|p[óo]s|forma[çc]|curso)|segundo curso|outra (gradua|p[óo]s|faculdade)/i;
+        // origem da mensagem ATUAL deste webhook — o WideChat manda um webhook pra CADA
+        // mensagem, inclusive as do próprio bot (origin=auto). Usado abaixo (e não só lá
+        // embaixo no insert do transcript/CRM) porque o bug real (2026-09-16, lead "Iza")
+        // era hardcode `origin:'channel'` tratando toda mensagem ATUAL como se fosse do
+        // cliente — quando o bot mandava "...acesso ao portal..." (texto genérico do
+        // menu, sem nada a ver com aluno) isso batia com CLIENT_IS_STUDENT como se o
+        // CLIENTE tivesse dito, virava studentSupport→botAreaNonComm→isNonCommercial e
+        // APAGAVA o lead (branch de "onlyAuto") no meio de um atendimento ativo.
+        let curOrigin = "auto";
+        if (eventName === "messageContact" || msgData.origin === "contact" || msgData.origin === "channel") curOrigin = "channel";
+        if (msgData.origin === "user" || msgData.origin === "agent" || webhookEvent === "agent_message" || msgData.user?.name) curOrigin = "agent";
+
         let botAreaNonComm = false;
         if (!agentLc && sessionId && !queueVal) {
             const { data: recent } = await db.from('widechat_raw_messages')
                 .select('message, origin').eq('session_id', sessionId)
                 .order('created_at', { ascending: false }).limit(15);
             const rows: { message: string; origin: string }[] = [
-                { message: messageText, origin: 'channel' },
+                { message: messageText, origin: curOrigin },
                 ...((recent ?? []) as { message: string; origin: string }[]),
             ];
             // sinal de Faculdade só vale vindo do CLIENTE — o bot lista TODAS as áreas
