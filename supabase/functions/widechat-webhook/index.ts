@@ -144,7 +144,10 @@ serve(async (req) => {
         // ponto — mensagem do CLIENTE sozinha (mesmo escolhendo "Faculdade" no menu, ou
         // um "oi" reabrindo a conversa) não basta, porque ainda pode ser só interação
         // com o bot, sem intenção comercial confirmada nem fila humana de fato aberta.
-        const BOT_HANDOFF_TEXT = /em alguns instantes um dos nossos consultores falar[áa] contigo|vou direcionar voc[êe] para um atendente/i;
+        // frase varia por fluxo/campanha do bot ("direcionar"/"encaminhar"/"transferir",
+        // com ou sem o "você" explícito) — cobrir as variações do MESMO padrão em vez
+        // de travar num texto exato só porque o bot troca o verbo.
+        const BOT_HANDOFF_TEXT = /em alguns instantes um dos nossos consultores falar[áa] contigo|vou (te )?(direcionar|encaminhar|transferir) (voc[êe] )?para um atendente/i;
         const isBotHandoff = origin === 'auto' && BOT_HANDOFF_TEXT.test(messageText);
 
         let botAreaNonComm = false;
