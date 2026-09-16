@@ -299,11 +299,13 @@ serve(async (req) => {
             // guarda a attendance encontrada (mesmo se ainda em "wait") — usada depois do
             // envio pra reivindicar a conversa pro agente (ver claimWaitAttendance abaixo).
             let foundAttendance: any = null;
+            let attendanceLookupOk = false;
             if (!body.is_hsm) {
                 try {
                     const ar = await fetch(`${WIDECHAT_BASE}/user/agents/attendances_plus`, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sendToken}` } });
                     const ad = await ar.json().catch(() => null);
                     const all = [...((ad as any)?.attendance ?? []), ...((ad as any)?.wait ?? [])];
+                    attendanceLookupOk = ar.ok && ad != null;
                     // o `_id` da attendance É o session_id (= leads.widechat_session_id)
                     const m = all.find((a: any) =>
                         (body.session_id && String(a._id ?? '') === String(body.session_id))
@@ -322,6 +324,25 @@ serve(async (req) => {
                     // só setava resolvedAttId, nunca limpava o que já tinha vindo pronto).
                     if (m?._id) resolvedAttId = m.isAttendance ? String(m._id) : undefined;
                 } catch { /* segue com o que veio do body */ }
+            }
+
+            // Sem attendance nenhuma (nem em "wait") pra esse contato NA CONTA que vai
+            // enviar: o botão de texto livre só aparece com conversa recente aberta
+            // (windowOpen em WideChatHistory.tsx), então isso quase sempre quer dizer
+            // que a conta que está mandando (conta compartilhada de fallback, quando o
+            // agente não tem login próprio) não enxerga a conversa — não que ela não
+            // existe. Mandar mesmo assim faz o WideChat abrir uma sessão NOVA e
+            // paralela (reinicia o bot do zero pro cliente) em vez de continuar a
+            // conversa real. Bug real, 2026-09-16: duplicou a conversa da "Iza" e saiu
+            // atribuído a "Julio César" (nome da conta de integração no WideChat) em
+            // vez da agente que respondeu de verdade. Só bloqueia quando a busca
+            // realmente RODOU e voltou vazia — erro de rede na busca não deve travar
+            // o envio (mesma filosofia do catch acima).
+            if (!body.is_hsm && attendanceLookupOk && !foundAttendance) {
+                return jsonRes({
+                    error: `Não encontrei o atendimento ativo desse contato na conta usada pra enviar (${sendEmail}). Isso costuma acontecer quando o agente ainda não tem login próprio do WideChat cadastrado. Peça pra cadastrar em Configurações > Integração WideChat — enviar assim criaria uma conversa duplicada no WideChat.`,
+                    code: 'ATTENDANCE_NOT_VISIBLE',
+                });
             }
 
             const base: Record<string, unknown> = {
