@@ -403,8 +403,20 @@ serve(async (req) => {
                 } catch { /* segue sem accept — send vai sem attendance_id, mesmo comportamento de antes */ }
             }
 
+            // platform_id de VERDADE é o que já está gravado na própria attendance
+            // encontrada, quando existe — a suposição antiga "BR sempre bate com o
+            // telefone puro" (comentário acima) não vale pra todo canal: essa attendance
+            // tinha `platform_id:"BR.1804740536986870"` (id interno da WideChat) enquanto
+            // calculávamos "5512996836409" a partir do telefone puro. Mandar o platform_id
+            // errado faz o /message/send não reconhecer o vínculo com a campanha/equipe —
+            // mesmo com agent_id/attendance_id/channel_id todos certos (bug real,
+            // 2026-09-16, lead "jcs.sjc"/Thayanne — só apareceu depois do DIAG mostrar
+            // tudo certo, exceto isso). Sem attendance encontrada (ex: HSM cold-start pra
+            // contato novo), cai no valor calculado do telefone — não tem outra fonte.
+            const sendPlatformId = foundAttendance?.platform_id ? String(foundAttendance.platform_id) : platformId;
+
             const base: Record<string, unknown> = {
-                platform_id: platformId,
+                platform_id: sendPlatformId,
                 channel_id: body.channel_id,
                 type: 'text',
                 // REVERTIDO (testado ao vivo, 2026-09-11): '2' devolve 422 "attendance_id
@@ -572,7 +584,7 @@ serve(async (req) => {
                 // diagnosticar com o dado real da PRÓXIMA tentativa. Remover depois.
                 const diag = {
                     sendEmail, sendAgentId: resolvedAgentId, attId: resolvedAttId,
-                    justAccepted, sentChannelId: body.channel_id, sentPlatformId: platformId,
+                    justAccepted, sentChannelId: body.channel_id, sentPlatformId: sendPlatformId,
                     foundAtt: foundAttendance ? {
                         _id: foundAttendance._id, isAttendance: foundAttendance.isAttendance,
                         campaign_id: foundAttendance.campaign_id, phase: foundAttendance.phase,
