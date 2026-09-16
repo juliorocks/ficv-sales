@@ -280,6 +280,10 @@ serve(async (req) => {
             // vai enviar (casa por platform_id — o objeto de attendance NÃO tem
             // session_id). Com ele o WideChat aceita agent/agent_id e a msg fica
             // amarrada na conversa certa.
+            // body.attendance_id às vezes já vem pronto do front (WideChatHistory.tsx chama
+            // action=attendances antes e manda o `_id` do match) — mas aquele endpoint devolve
+            // tanto attendance de verdade quanto item ainda em fila ("wait"), sem distinguir.
+            // NÃO dá pra confiar nele cru: precisa confirmar `isAttendance` fresco abaixo.
             let resolvedAttId = body.attendance_id as string | undefined;
             // SEMPRE o agent_id de quem está de fato autenticando o envio (sendAgentId),
             // nunca de outra fonte — agent_id e agent (email) têm que ser sempre o MESMO
@@ -293,6 +297,7 @@ serve(async (req) => {
                     // o `_id` da attendance É o session_id (= leads.widechat_session_id)
                     const m = all.find((a: any) =>
                         (body.session_id && String(a._id ?? '') === String(body.session_id))
+                        || (body.attendance_id && String(a._id ?? '') === String(body.attendance_id))
                         || String(a.platform_id ?? '') === platformId
                         || (a.wa_id && brDigits(String(a.wa_id)) === brDigits(platformId)));
                     // só usa attendance_id (e por consequência agent/agent_id, exigidos junto)
@@ -300,13 +305,12 @@ serve(async (req) => {
                     // true`). Um item ainda na fila (`wait`, isAttendance:false, agent_id:null —
                     // "Em alguns instantes um consultor falará contigo") não pertence a nenhum
                     // agente ainda; mandar agent/agent_id nele faz o WideChat recusar 422 "o
-                    // agente X não faz parte desta equipe", mesmo com X sendo um agente válido —
-                    // reproduzido ao vivo (curl, 2026-09-16): send sem isAttendance deu 422,
-                    // exatamente o erro que a Thayanne bateu tentando responder um lead ainda
-                    // na fila. Pra esses casos manda como mensagem nova (sem attendance_id/agent),
-                    // igual uma conversa recém-iniciada.
-                    if (m?._id && m.isAttendance) resolvedAttId = String(m._id);
-                } catch { /* segue sem attendance_id */ }
+                    // agente X não faz parte desta equipe", mesmo com X sendo um agente válido.
+                    // SEMPRE decide pelo resultado fresco daqui — mesmo que body.attendance_id já
+                    // tivesse vindo preenchido do front (1ª tentativa de fix não pegou esse caso:
+                    // só setava resolvedAttId, nunca limpava o que já tinha vindo pronto).
+                    if (m?._id) resolvedAttId = m.isAttendance ? String(m._id) : undefined;
+                } catch { /* segue com o que veio do body */ }
             }
 
             const base: Record<string, unknown> = {
