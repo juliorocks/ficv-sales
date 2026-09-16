@@ -281,7 +281,10 @@ serve(async (req) => {
             // session_id). Com ele o WideChat aceita agent/agent_id e a msg fica
             // amarrada na conversa certa.
             let resolvedAttId = body.attendance_id as string | undefined;
-            let resolvedAgentId: string | undefined = sendAgentId;
+            // SEMPRE o agent_id de quem está de fato autenticando o envio (sendAgentId),
+            // nunca de outra fonte — agent_id e agent (email) têm que ser sempre o MESMO
+            // login, senão o WideChat recusa.
+            const resolvedAgentId: string | undefined = sendAgentId;
             if (!body.is_hsm) {
                 try {
                     const ar = await fetch(`${WIDECHAT_BASE}/user/agents/attendances_plus`, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sendToken}` } });
@@ -292,7 +295,17 @@ serve(async (req) => {
                         (body.session_id && String(a._id ?? '') === String(body.session_id))
                         || String(a.platform_id ?? '') === platformId
                         || (a.wa_id && brDigits(String(a.wa_id)) === brDigits(platformId)));
-                    if (m?._id) { resolvedAttId = String(m._id); if (m.agent_id) resolvedAgentId = m.agent_id; }
+                    // só usa attendance_id (e por consequência agent/agent_id, exigidos junto)
+                    // quando é uma attendance DE VERDADE, já aceita por alguém (`isAttendance:
+                    // true`). Um item ainda na fila (`wait`, isAttendance:false, agent_id:null —
+                    // "Em alguns instantes um consultor falará contigo") não pertence a nenhum
+                    // agente ainda; mandar agent/agent_id nele faz o WideChat recusar 422 "o
+                    // agente X não faz parte desta equipe", mesmo com X sendo um agente válido —
+                    // reproduzido ao vivo (curl, 2026-09-16): send sem isAttendance deu 422,
+                    // exatamente o erro que a Thayanne bateu tentando responder um lead ainda
+                    // na fila. Pra esses casos manda como mensagem nova (sem attendance_id/agent),
+                    // igual uma conversa recém-iniciada.
+                    if (m?._id && m.isAttendance) resolvedAttId = String(m._id);
                 } catch { /* segue sem attendance_id */ }
             }
 
