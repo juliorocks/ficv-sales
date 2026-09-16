@@ -150,6 +150,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     const [refreshProgress, setRefreshProgress] = useState({ current: 0, total: 0 });
     const [kanbanSearch, setKanbanSearch] = useState("");
     const [kanbanAssignee, setKanbanAssignee] = useState("all"); // 'all' | 'unassigned' | profile.id — filtra o Kanban por atendente, em todas as colunas
+    const [historyAgentFilter, setHistoryAgentFilter] = useState<string | null>(null); // agente clicado em "Performance do Período" — pré-filtra Relatórios (Admin)
     const kanbanAssigneeInit = useRef(false); // só aplica o default (perfil logado) uma vez — não sobrescreve se o agente trocar o filtro depois
 
     // Persist activeTab in localStorage
@@ -918,7 +919,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                     <NavItem icon={Users} label="Equipes" active={activeTab === 'teams'} onClick={() => setActiveTab('teams')} />
                                     <NavItem icon={Users} label="Usuários" active={activeTab === 'users'} onClick={() => setActiveTab('users')} />
                                     <NavItem icon={Settings} label="Configurações" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
-                                    <NavItem icon={History} label="Relatórios (Admin)" active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
+                                    <NavItem icon={History} label="Relatórios (Admin)" active={activeTab === 'history'} onClick={() => { setHistoryAgentFilter(null); setActiveTab('history'); }} />
                                 </nav>
                             </>
                         )}
@@ -1361,18 +1362,29 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                                         const color = COLORS[i % COLORS.length];
                                                         const onTarget = d.value >= TARGET;
                                                         const shortName = d.name?.split(' ')[0] ?? '';
+                                                        const isAdmin = profile?.role === 'admin';
                                                         return (
-                                                            <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                                                            <button
+                                                                key={i}
+                                                                type="button"
+                                                                disabled={!isAdmin}
+                                                                onClick={() => {
+                                                                    setHistoryAgentFilter(d.name);
+                                                                    setActiveTab('history');
+                                                                }}
+                                                                title={isAdmin ? `Ver atendimentos de ${d.name}` : undefined}
+                                                                className={`flex-1 flex flex-col items-center gap-1 bg-transparent border-0 p-0 ${isAdmin ? 'cursor-pointer group' : 'cursor-default'}`}
+                                                            >
                                                                 {/* Photo above bar */}
                                                                 <AgentAvatar
                                                                     name={d.name}
                                                                     photoUrl={agentPhotoMap[d.name]}
                                                                     size={32}
-                                                                    className={`ring-2 ${onTarget ? 'ring-[#00D4AA]' : 'ring-[#FFB347]'}`}
+                                                                    className={`ring-2 ${onTarget ? 'ring-[#00D4AA]' : 'ring-[#FFB347]'} ${isAdmin ? 'transition-transform group-hover:scale-110' : ''}`}
                                                                 />
                                                                 {/* Bar */}
                                                                 <div
-                                                                    className="w-full rounded-t-lg relative flex items-center justify-center transition-all duration-700"
+                                                                    className={`w-full rounded-t-lg relative flex items-center justify-center transition-all duration-700 ${isAdmin ? 'group-hover:brightness-110' : ''}`}
                                                                     style={{
                                                                         height: `${heightPct}%`,
                                                                         background: onTarget
@@ -1384,8 +1396,8 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                                                     <span className="text-[var(--text-main)] font-black text-xs drop-shadow">{d.value.toFixed(1)}</span>
                                                                 </div>
                                                                 {/* Name */}
-                                                                <span className="text-[9px] text-[var(--text-muted)] truncate w-full text-center">{shortName}</span>
-                                                            </div>
+                                                                <span className={`text-[9px] text-[var(--text-muted)] truncate w-full text-center ${isAdmin ? 'group-hover:text-primary' : ''}`}>{shortName}</span>
+                                                            </button>
                                                         );
                                                     })}
                                                 </div>
@@ -1740,6 +1752,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                             data={dateFilteredData}
                             onSelect={(analysis) => setSelectedAnalysis(analysis)}
                             onRefresh={fetchData}
+                            initialAgent={historyAgentFilter}
                         />
                     </div>
                 )}

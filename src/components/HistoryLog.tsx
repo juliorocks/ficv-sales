@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     Search,
     Filter,
@@ -21,11 +21,17 @@ interface HistoryLogProps {
     data: ConversationAnalysis[];
     onSelect: (analysis: ConversationAnalysis) => void;
     onRefresh?: () => Promise<void>;
+    initialAgent?: string | null;
 }
 
-export const HistoryLog: React.FC<HistoryLogProps> = ({ data, onSelect, onRefresh }) => {
+export const HistoryLog: React.FC<HistoryLogProps> = ({ data, onSelect, onRefresh, initialAgent }) => {
     const [searchTerm, setSearchTerm] = useState('');
-    const [selectedAgent, setSelectedAgent] = useState('all');
+    const [selectedAgent, setSelectedAgent] = useState(initialAgent || 'all');
+
+    // Vindo de um drill-down (ex: clique num agente em "Performance do Período") — aplica o filtro
+    useEffect(() => {
+        if (initialAgent) setSelectedAgent(initialAgent);
+    }, [initialAgent]);
     const [statusFilter, setStatusFilter] = useState<'all' | 'approved' | 'invalidated'>('all');
     const [minScore, setMinScore] = useState(0);
     const [maxScore, setMaxScore] = useState(10);
