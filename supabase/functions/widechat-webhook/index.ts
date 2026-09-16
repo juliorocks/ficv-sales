@@ -137,6 +137,16 @@ serve(async (req) => {
         if (eventName === "messageContact" || msgData.origin === "contact" || msgData.origin === "channel") origin = "channel";
         if (msgData.origin === "user" || msgData.origin === "agent" || webhookEvent === "agent_message" || msgData.user?.name) origin = "agent";
 
+        // o BOT avisando que vai passar pro atendente humano — único sinal confiável de
+        // que a conversa saiu da fase de bot/menu e está de fato esperando um agente.
+        // Pedido explícito do usuário 2026-09-16: um lead (novo OU reaberto de
+        // Finalizado) só deve aparecer/virar "atendível" no nosso Kanban a partir desse
+        // ponto — mensagem do CLIENTE sozinha (mesmo escolhendo "Faculdade" no menu, ou
+        // um "oi" reabrindo a conversa) não basta, porque ainda pode ser só interação
+        // com o bot, sem intenção comercial confirmada nem fila humana de fato aberta.
+        const BOT_HANDOFF_TEXT = /em alguns instantes um dos nossos consultores falar[áa] contigo|vou direcionar voc[êe] para um atendente/i;
+        const isBotHandoff = origin === 'auto' && BOT_HANDOFF_TEXT.test(messageText);
+
         let botAreaNonComm = false;
         if (!agentLc && sessionId && !queueVal) {
             const { data: recent } = await db.from('widechat_raw_messages')
@@ -401,6 +411,11 @@ serve(async (req) => {
             const belongsToTargetQueue = !queueName || queueName === TARGET_QUEUE;
             if (!belongsToTargetQueue || (!hasPhone && !hasName))
                 return j({ success: true, ignored: true, reason: "Lead admission denied" });
+            // só cria o lead quando o BOT já anunciou a transferência pro atendente —
+            // antes disso é interação de bot (LGPD, menu, seleção de área) e não deve
+            // virar card no Kanban ainda.
+            if (!isBotHandoff)
+                return j({ success: true, ignored: true, reason: "ainda em fase de bot — aguardando handoff pro atendente" });
         } else if (channelId && !LEAD_CHANNELS.includes(channelId)) {
             // lead já existe mas veio por canal errado — não mexe nele
             return j({ success: true, ignored: true, reason: `channel ${channelId} não é da Faculdade (lead existente intacto)` });
@@ -498,8 +513,12 @@ serve(async (req) => {
             // explícito do usuário 2026-09-16: um lead que finalizou e voltou a escrever é
             // tratado como novo contato, disponível pra QUALQUER agente pegar, não preso
             // a quem atendeu da última vez.
+            // Gatilho é `isBotHandoff` (não `origin === 'channel'`) — pedido explícito do
+            // usuário, mesmo dia: reabrir/mostrar o card no Kanban só quando o BOT já
+            // anunciou a transferência pro atendente, não em qualquer "oi"/mensagem do
+            // cliente que ainda está só reiniciando o fluxo de bot/menu.
             let reopenedFromFinalizado = false;
-            if (origin === 'channel' && cur?.stage_id) {
+            if (isBotHandoff && cur?.stage_id) {
                 const { data: curStage } = await db.from('stages').select('name').eq('id', cur.stage_id).maybeSingle();
                 if (curStage?.name && /finaliz|encerr|conclu/i.test(curStage.name)) {
                     updates.stage_id = firstStageId;
