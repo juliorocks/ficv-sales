@@ -333,6 +333,20 @@ serve(async (req) => {
         // ── conversation end ──────────────────────────────────────────────────
         if (isConversationEnd) {
             if (leadId) {
+                // sessão que está de fato encerrando bate com a sessão ATUAL do lead? Se
+                // não bater, é uma sessão velha/órfã do MESMO contato (ex: uma sessão
+                // duplicada, criada por outro bug — ver [[project_widechat_bot_reentry]] —
+                // que ficou abandonada e expirou sozinha por timeout do bot) terminando
+                // MUITO depois de o lead já ter uma sessão nova/ativa. Sem essa checagem,
+                // esse timeout tardio finaliza o card mesmo com atendimento humano rolando
+                // de verdade na sessão certa. Bug real, 2026-09-16, lead "Iza": reaberto
+                // pra Em Contato às 13:11, agente respondendo às 13:16, e às 13:35 a sessão
+                // fantasma (criada às 13:16 pelo bug do ATTENDANCE_NOT_VISIBLE, corrigido
+                // horas depois) expirou e finalizou o lead do nada.
+                const { data: leadRow } = await db.from('leads').select('widechat_session_id').eq('id', leadId).maybeSingle();
+                if (sessionId && leadRow?.widechat_session_id && String(leadRow.widechat_session_id) !== String(sessionId)) {
+                    return j({ success: true, lead_id: leadId, action: "conversation_ended_ignored_session_mismatch" });
+                }
                 // só manda pra "Finalizado" se o cliente de fato participou da conversa.
                 // Sem nenhuma mensagem do cliente (origin=channel) é uma conversa que a
                 // gente iniciou por template e que o WideChat encerrou sozinho (sessão
@@ -466,17 +480,18 @@ serve(async (req) => {
             // nada reabria) — o lead ficava enterrado numa coluna fechada mesmo com
             // atendimento novo rolando. Bumpa stage_entry_date junto (é o que ordena E
             // o que o card mostra desde 2468c23, senão o lead reaberto "some" no fim da lista).
+            // Volta pra Entrada (não Em Contato) e DESATRIBUI o agente anterior — pedido
+            // explícito do usuário 2026-09-16: um lead que finalizou e voltou a escrever é
+            // tratado como novo contato, disponível pra QUALQUER agente pegar, não preso
+            // a quem atendeu da última vez.
             let reopenedFromFinalizado = false;
             if (origin === 'channel' && cur?.stage_id) {
                 const { data: curStage } = await db.from('stages').select('name').eq('id', cur.stage_id).maybeSingle();
                 if (curStage?.name && /finaliz|encerr|conclu/i.test(curStage.name)) {
-                    const { data: emContatoReopen } = await db.from('stages').select('id')
-                        .ilike('name', '%contato%').order('order', { ascending: true }).limit(1).maybeSingle();
-                    if (emContatoReopen?.id) {
-                        updates.stage_id = emContatoReopen.id;
-                        updates.stage_entry_date = now;
-                        reopenedFromFinalizado = true;
-                    }
+                    updates.stage_id = firstStageId;
+                    updates.stage_entry_date = now;
+                    updates.assigned_to_id = null;
+                    reopenedFromFinalizado = true;
                 }
             }
 
@@ -543,7 +558,7 @@ serve(async (req) => {
             if (Object.keys(updates).length) {
                 await db.from('leads').update(updates).eq('id', leadId);
                 const sets = Object.entries(updates).map(([k, v]) =>
-                    k === 'assigned_to_id' ? `assigned_to_id = profiles:⟨${v}⟩`
+                    k === 'assigned_to_id' ? `assigned_to_id = ${v == null ? 'NONE' : `profiles:⟨${v}⟩`}`
                     : k === 'curso_interesse' ? `curso_interesse = courses:⟨${v}⟩`
                     : k === 'stage_id' ? `stage_id = stages:⟨${v}⟩`
                     : k === 'source_id' ? `source_id = lead_sources:⟨${v}⟩`
@@ -552,7 +567,7 @@ serve(async (req) => {
             }
 
             if (reopenedFromFinalizado) {
-                const nota = `🔁 Reaberto para Em Contato — cliente voltou a escrever após o atendimento ter sido finalizado.`;
+                const nota = `🔁 Reaberto para Entrada (sem agente atribuído) — cliente voltou a escrever após o atendimento ter sido finalizado.`;
                 await db.from('lead_notes').insert({ lead_id: leadId, note: nota, created_at: now });
                 await mirror(`INSERT INTO lead_notes [{ lead_id: leads:⟨${leadId}⟩, note: ${sv(nota)}, created_at: d${sv(now)} }] RETURN NONE;`);
             }
