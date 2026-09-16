@@ -238,6 +238,8 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
     const [agentAttribution, setAgentAttribution] = useState<MatriculasPorAgenteResult>({ porAgente: [], detalhes: [], semAtribuicao: 0, jaExistente: 0 });
     const [porAgenteLoading, setPorAgenteLoading] = useState(true);
     const [selectedAgentDrillDown, setSelectedAgentDrillDown] = useState<string | null>(null);
+    const [selectedCursoDrillDown, setSelectedCursoDrillDown] = useState<string | null>(null);
+    const [selectedMonthDrillDown, setSelectedMonthDrillDown] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
     const [lastSync, setLastSync] = useState<string | null>(null);
@@ -326,6 +328,12 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
             setPorAgenteLoading(false);
         }
     }, [matriculas, messagesLogs, messagesLogsReady, dateStart, dateEnd, selectedCursos, selectedTurma, selectedSituacao]);
+
+    // Fecha os drill-downs de curso/mês quando os filtros mudam (o conjunto filtrado muda de baixo)
+    useEffect(() => {
+        setSelectedCursoDrillDown(null);
+        setSelectedMonthDrillDown(null);
+    }, [dateStart, dateEnd, selectedCursos, selectedTurma, selectedSituacao, search]);
 
     // ─── Drill-down: matrículas do agente selecionado, agrupadas por curso ────
     const drillDownByCurso = useMemo(() => {
@@ -461,8 +469,21 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
         return Object.entries(counts)
             .sort((a, b) => b[1] - a[1])
             .slice(0, 10)
-            .map(([name, value]) => ({ name: name.length > 30 ? name.slice(0, 28) + '…' : name, value }));
+            .map(([name, value]) => ({
+                name: name.length > 30 ? name.slice(0, 28) + '…' : name,
+                fullName: name,
+                value,
+            }));
     }, [filtered]);
+
+    // ─── Drill-down: matrículas do curso selecionado ──────────────────────────
+    const drillDownCursoAlunos = useMemo(() => {
+        if (!selectedCursoDrillDown) return [];
+        return filtered
+            .filter(m => (m.nome_curso?.split('(')[0]?.trim() || 'Sem curso') === selectedCursoDrillDown)
+            .slice()
+            .sort((a, b) => b.data_matricula.localeCompare(a.data_matricula));
+    }, [filtered, selectedCursoDrillDown]);
 
     // ─── Chart: matrículas por mês / dia ─────────────────────────────────────
     const chartByMonth = useMemo(() => {
@@ -490,7 +511,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                     const label = period === 'week'
                         ? d.toLocaleDateString('pt-BR', { weekday: 'short', day: 'numeric' })
                         : String(d.getDate());
-                    return { name: label, value };
+                    return { name: label, value, key };
                 });
         }
 
@@ -510,8 +531,34 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
         });
         return Object.entries(counts)
             .sort(([a], [b]) => a.localeCompare(b))
-            .map(([, { label, value }]) => ({ name: label, value }));
+            .map(([key, { label, value }]) => ({ name: label, value, key }));
     }, [filtered, period, dateStart, dateEnd]);
+
+    // ─── Drill-down: matrículas do mês/dia selecionado, agrupadas por curso ──
+    const drillDownMonthAlunos = useMemo(() => {
+        if (!selectedMonthDrillDown) return [];
+        const byDay = period === 'month' || period === 'week';
+        return filtered.filter(m => {
+            if (!m.data_matricula) return false;
+            if (byDay) return m.data_matricula.split('T')[0] === selectedMonthDrillDown;
+            const d = new Date(m.data_matricula + 'T12:00:00');
+            const sortKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            return sortKey === selectedMonthDrillDown;
+        });
+    }, [filtered, selectedMonthDrillDown, period]);
+
+    const drillDownMonthByCurso = useMemo(() => {
+        if (!selectedMonthDrillDown) return [];
+        const grupos = new Map<string, SponteMatricula[]>();
+        drillDownMonthAlunos.forEach(m => {
+            const cursoKey = m.nome_curso?.split('(')[0]?.trim() || 'Sem curso';
+            if (!grupos.has(cursoKey)) grupos.set(cursoKey, []);
+            grupos.get(cursoKey)!.push(m);
+        });
+        return Array.from(grupos.entries())
+            .map(([curso, alunos]) => ({ curso, alunos: alunos.slice().sort((a, b) => a.aluno.localeCompare(b.aluno)) }))
+            .sort((a, b) => b.alunos.length - a.alunos.length);
+    }, [drillDownMonthAlunos, selectedMonthDrillDown]);
 
     return (
         <div className="space-y-8 animate-fade-in">
@@ -819,16 +866,50 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                                             <Tooltip
                                                 contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }}
                                                 itemStyle={{ color: 'var(--text-main)' }}
-                                                formatter={(v: any) => [`${v} matrículas`, '']}
+                                                formatter={(v: any) => [`${v} matrícula${v !== 1 ? 's' : ''}`, 'Clique pra ver detalhes']}
                                             />
-                                            <Bar dataKey="value" radius={[0, 6, 6, 0]}>
-                                                {chartByCurso.map((_, i) => (
-                                                    <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                                            <Bar
+                                                dataKey="value"
+                                                radius={[0, 6, 6, 0]}
+                                                cursor="pointer"
+                                                onClick={(d: any) => setSelectedCursoDrillDown(prev => prev === d.fullName ? null : d.fullName)}
+                                            >
+                                                {chartByCurso.map((c, i) => (
+                                                    <Cell
+                                                        key={i}
+                                                        fill={CHART_COLORS[i % CHART_COLORS.length]}
+                                                        opacity={selectedCursoDrillDown && selectedCursoDrillDown !== c.fullName ? 0.35 : 1}
+                                                    />
                                                 ))}
                                             </Bar>
                                         </BarChart>
                                     </ResponsiveContainer>
                                 </div>
+
+                                {/* Drill-down: alunos do curso selecionado */}
+                                {selectedCursoDrillDown && (
+                                    <div className="mt-6 pt-6 border-t border-[var(--border)]">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <h4 className="text-xs font-bold text-[var(--text-main)] truncate pr-2">
+                                                {selectedCursoDrillDown} — {drillDownCursoAlunos.length} matrícula{drillDownCursoAlunos.length !== 1 ? 's' : ''}
+                                            </h4>
+                                            <button
+                                                onClick={() => setSelectedCursoDrillDown(null)}
+                                                className="text-[10px] text-[var(--text-muted)] hover:text-primary transition-colors shrink-0"
+                                            >
+                                                Fechar
+                                            </button>
+                                        </div>
+                                        <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 max-h-64 overflow-y-auto pr-1">
+                                            {drillDownCursoAlunos.map(m => (
+                                                <li key={m.contrato_id} className="text-xs text-[var(--text-main)] flex justify-between gap-2">
+                                                    <span className="truncate">{m.aluno || '—'}</span>
+                                                    <span className="text-[var(--text-muted)] shrink-0">{fmtDate(m.data_matricula)}</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
                         </div>
 
                         {/* By month */}
@@ -844,12 +925,59 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                                         <YAxis axisLine={false} tickLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 10 }} />
                                         <Tooltip
                                             contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }}
-                                            formatter={(v: any) => [`${v} matrículas`, '']}
+                                            formatter={(v: any) => [`${v} matrícula${v !== 1 ? 's' : ''}`, 'Clique pra ver detalhes']}
                                         />
-                                        <Bar dataKey="value" fill="#5551FF" radius={[6, 6, 0, 0]} />
+                                        <Bar
+                                            dataKey="value"
+                                            radius={[6, 6, 0, 0]}
+                                            cursor="pointer"
+                                            onClick={(d: any) => setSelectedMonthDrillDown(prev => prev === d.key ? null : d.key)}
+                                        >
+                                            {chartByMonth.map((c, i) => (
+                                                <Cell
+                                                    key={i}
+                                                    fill="#5551FF"
+                                                    opacity={selectedMonthDrillDown && selectedMonthDrillDown !== c.key ? 0.35 : 1}
+                                                />
+                                            ))}
+                                        </Bar>
                                     </BarChart>
                                 </ResponsiveContainer>
                             </div>
+
+                            {/* Drill-down: alunos do mês/dia selecionado, por curso */}
+                            {selectedMonthDrillDown && (
+                                <div className="mt-6 pt-6 border-t border-[var(--border)]">
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h4 className="text-xs font-bold text-[var(--text-main)] truncate pr-2">
+                                            {chartByMonth.find(c => c.key === selectedMonthDrillDown)?.name} — {drillDownMonthAlunos.length} matrícula{drillDownMonthAlunos.length !== 1 ? 's' : ''}
+                                        </h4>
+                                        <button
+                                            onClick={() => setSelectedMonthDrillDown(null)}
+                                            className="text-[10px] text-[var(--text-muted)] hover:text-primary transition-colors shrink-0"
+                                        >
+                                            Fechar
+                                        </button>
+                                    </div>
+                                    <div className="space-y-4 max-h-64 overflow-y-auto pr-1">
+                                        {drillDownMonthByCurso.map(grupo => (
+                                            <div key={grupo.curso}>
+                                                <p className="text-[10px] font-bold text-primary uppercase tracking-wider mb-2">
+                                                    {grupo.curso} <span className="text-[var(--text-muted)]">({grupo.alunos.length})</span>
+                                                </p>
+                                                <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
+                                                    {grupo.alunos.map(m => (
+                                                        <li key={m.contrato_id} className="text-xs text-[var(--text-main)] flex justify-between gap-2">
+                                                            <span className="truncate">{m.aluno || '—'}</span>
+                                                            <span className="text-[var(--text-muted)] shrink-0">{fmtDate(m.data_matricula)}</span>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
 
