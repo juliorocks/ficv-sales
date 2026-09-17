@@ -80,7 +80,12 @@ serve(async (req) => {
             const ph = raw.map((p: any) => typeof p === "string" ? p : String(p?.value ?? p?.text ?? ""));
             return body.replace(/\{\{(\d+)\}\}/g, (_m: string, i: string) => ph[Number(i) - 1] ?? `{{${i}}}`);
         };
-        const messageText = msgData.message || msgData.interactive?.body?.text || msgData.text || hsmText() || "";
+        // mídia (imagem/áudio/documento/vídeo): o corpo vem vazio, a legenda/nome do
+        // arquivo ficam em `content.legend`/`content.filename` (schema confirmado nos
+        // payloads reais — mesmo formato usado pelo widechat-api pra ENVIAR mídia).
+        // Sem isso, toda mensagem de mídia (recebida OU o eco da que a gente manda)
+        // virava "[Mídia]" genérico no histórico.
+        const messageText = msgData.message || msgData.interactive?.body?.text || msgData.text || hsmText() || msgData.legend || msgData.filename || "";
         let senderName = payload.vars?.name || data?.user?.name || data?.contact?.name || "";
         // `platform_id` é o id que o WideChat usa pra ENVIAR (`/message/send`) — pra
         // número BR é o próprio telefone ("5583..."), pra estrangeiro é um id interno
