@@ -100,6 +100,17 @@ const fmtHora = (iso: string) => {
     })
 }
 
+// nome legível pro card de anexo — nosso path de upload é "{leadId}/{timestamp}-{nome}";
+// tira o timestamp e decodifica %20 etc. Se não achar padrão nenhum (ex: link do
+// WideChat, que é só um id de storage), cai num rótulo genérico.
+const fileNameFromUrl = (url?: string | null): string | null => {
+    if (!url) return null
+    try {
+        const last = decodeURIComponent(url.split('/').pop() || '')
+        return last.replace(/^\d{10,}-/, '') || null
+    } catch { return null }
+}
+
 interface WideChatMessage {
     id: string
     lead_id: number | string
@@ -710,17 +721,27 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                                             const hasText = !!msg.message && msg.message !== '[Mídia]'
                                             const mediaLabel = msg.type === 'images' ? 'imagem' : msg.type === 'sounds' ? 'áudio' : msg.type === 'videos' ? 'vídeo' : 'arquivo'
                                             if (isMedia) {
+                                                const fname = fileNameFromUrl(msg.media_url)
                                                 return (
-                                                    <div className="space-y-1">
-                                                        {msg.media_url ? (
-                                                            <a href={msg.media_url} target="_blank" rel="noopener noreferrer"
-                                                                className={`flex items-center gap-1.5 text-xs font-medium underline underline-offset-2 ${isUser ? 'text-slate-700' : 'text-white/90'}`}>
-                                                                <Paperclip className="h-3.5 w-3.5 shrink-0" /> Abrir {mediaLabel}
-                                                            </a>
-                                                        ) : (
+                                                    <div className="space-y-1.5">
+                                                        {!msg.media_url ? (
                                                             <span className="flex items-center gap-1.5 text-xs opacity-70">
                                                                 <Paperclip className="h-3.5 w-3.5 shrink-0" /> Anexo ({mediaLabel}) — link indisponível
                                                             </span>
+                                                        ) : msg.type === 'images' ? (
+                                                            <a href={msg.media_url} target="_blank" rel="noopener noreferrer">
+                                                                <img src={msg.media_url} alt={fname ?? 'imagem'} className="rounded-lg max-w-full max-h-64 object-cover" />
+                                                            </a>
+                                                        ) : msg.type === 'videos' ? (
+                                                            <video src={msg.media_url} controls className="rounded-lg max-w-full max-h-64" />
+                                                        ) : msg.type === 'sounds' ? (
+                                                            <audio src={msg.media_url} controls className="max-w-full h-10" />
+                                                        ) : (
+                                                            <a href={msg.media_url} target="_blank" rel="noopener noreferrer"
+                                                                className={`flex items-center gap-2 rounded-lg px-2.5 py-2 ${isUser ? 'bg-slate-100' : 'bg-white/10'}`}>
+                                                                <FileText className="h-6 w-6 shrink-0" />
+                                                                <span className="text-xs font-medium underline underline-offset-2 truncate">{fname || 'Abrir arquivo'}</span>
+                                                            </a>
                                                         )}
                                                         {hasText && <p className="whitespace-pre-wrap leading-relaxed">{msg.message}</p>}
                                                     </div>
