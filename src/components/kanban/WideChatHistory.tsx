@@ -705,11 +705,13 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                                             : "bg-[#2563eb] text-white rounded-2xl rounded-tr-md"}`}>
                                         {(() => {
                                             const isTpl = msg.type === 'template' || msg.type === 'hsm'
+                                            const isMedia = ['images', 'sounds', 'files', 'videos'].includes(msg.type)
                                             const hasText = !!msg.message && msg.message !== '[Mídia]'
-                                            if (msg.type === 'text' || (isTpl && hasText)) {
+                                            if (msg.type === 'text' || ((isTpl || isMedia) && hasText)) {
                                                 return (
                                                     <p className="whitespace-pre-wrap leading-relaxed">
                                                         {isTpl && <span className="block text-[10px] font-semibold uppercase tracking-wide opacity-70 mb-0.5">Template</span>}
+                                                        {isMedia && <span className="block text-[10px] font-semibold uppercase tracking-wide opacity-70 mb-0.5">📎 Anexo ({msg.type === 'images' ? 'imagem' : msg.type === 'sounds' ? 'áudio' : msg.type === 'videos' ? 'vídeo' : 'arquivo'})</span>}
                                                         {msg.message}
                                                     </p>
                                                 )
