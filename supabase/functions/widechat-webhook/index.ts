@@ -29,7 +29,7 @@ async function claimAttendanceForAgent(db: any, sessionId: string, assignedProfi
             body: JSON.stringify({ email: agentRow.widechat_email, password: agentRow.widechat_password }),
         });
         const lj = await lr.json().catch(() => null);
-        if (!lj?.token || !lj?.user?._id) return;
+        if (!lj?.token || !lj?.user?._id || lj.user?.type === 'admin') return; // conta admin não opera attendance
         await fetch(`${WIDECHAT_BASE}/attendances/accept`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${lj.token}` },
             body: JSON.stringify({ session_id: sessionId, agent_id: lj.user._id }),

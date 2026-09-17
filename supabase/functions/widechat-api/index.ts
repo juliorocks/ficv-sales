@@ -310,7 +310,15 @@ serve(async (req) => {
             // envio pra reivindicar a conversa pro agente (ver claimWaitAttendance abaixo).
             let foundAttendance: any = null;
             let attendanceLookupOk = false;
-            if (!body.is_hsm) {
+            {
+                // Rodava só pra texto/mídia (`!body.is_hsm`) — bug real, 2026-09-17: isso
+                // deixava TODO template sem a validação de platform_id "de verdade" (ver
+                // sendPlatformId abaixo) e sem a chance de reivindicar um atendimento já
+                // existente em "wait" ANTES de enviar (só sobrava o hsmRouting, que roda
+                // DEPOIS do send). Rodar sempre (mesmo pra HSM) só ENRIQUECE os dados —
+                // não bloqueia nada sozinho (quem bloqueia é o guard ATTENDANCE_NOT_VISIBLE
+                // logo abaixo, esse sim continua exclusivo de texto/mídia, pra não quebrar
+                // o cold-start de template pra contato novo).
                 try {
                     const ar = await fetch(`${WIDECHAT_BASE}/user/agents/attendances_plus`, { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sendToken}` } });
                     const ad = await ar.json().catch(() => null);
@@ -378,8 +386,15 @@ serve(async (req) => {
             // WideChat isso nunca acontece porque o agente sempre aceita a fila antes
             // de poder digitar. Aceitando aqui ANTES de montar `base`, o send já sai
             // com attendance_id/agent corretos desde a primeira tentativa.
+            //
+            // Também roda pra HSM agora (não excluído mais por `!body.is_hsm`) — achado
+            // na varredura de 2026-09-17: template mandado pra um contato com atendimento
+            // já em "wait" (visível, diferente do cold-start que nasce em fase "bot" —
+            // ver [[project_widechat_bot_reentry]]) não reivindicava antes de enviar,
+            // dependendo só do `hsmRouting` pós-envio pra consertar depois. Reivindicar
+            // aqui elimina essa janela por completo pra quem já tem attendance visível.
             let justAccepted = false;
-            if (!body.is_hsm && foundAttendance?._id && foundAttendance.isAttendance === false && resolvedAgentId) {
+            if (foundAttendance?._id && foundAttendance.isAttendance === false && resolvedAgentId) {
                 try {
                     const xr = await fetch(`${WIDECHAT_BASE}/attendances/accept`, {
                         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sendToken}` },
