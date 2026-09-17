@@ -481,12 +481,19 @@ serve(async (req) => {
             const asAgent = sendEmail !== integ.widechat_email;
             console.log(`send_message ok=${ok} status=${status} via=${sendEmail} pid=${platformId} chan=${body.channel_id} att=${base.attendance_id ?? '-'} resp=${JSON.stringify(data).slice(0, 600)}`);
 
-            // ── TEMPLATE = conversa iniciada pela GENTE. Sem isso, quando o cliente
-            // responde ele cai no BOT (LGPD, menu "com qual área...") em vez de falar
-            // com o agente. Acha a attendance recém-criada e transfere pro agente que
-            // mandou (ou pra fila Comercial). O painel do WideChat já faz isso sozinho.
+            // ── TEMPLATE OU MÍDIA = risco de cair no BOT. Sem isso, quando o cliente
+            // responde (a um template OU a uma mídia mandada por aqui) ele cai no BOT
+            // (LGPD, menu "com qual área...") em vez de falar com o agente — mesmo numa
+            // attendance que já estava 'human' ANTES do envio (bug real, 2026-09-17:
+            // áudio mandado numa conversa já ativa e aceita, cliente respondeu o áudio,
+            // bot reentrou do mesmo jeito que reentrava com template). Reafirma/reclama
+            // a attendance certa logo após o envio. O painel do WideChat já faz isso
+            // sozinho pra template; pra mídia parece ser o mesmo comportamento interno
+            // do lado deles (não documentado, mas a mitigação é a mesma e é barata —
+            // não HÁ efeito colateral quando a attendance já está 'human': o `if
+            // (m.phase !== 'human')` abaixo simplesmente não faz nada).
             const hsmRouting: any = {};
-            if (ok && body.is_hsm) {
+            if (ok && (body.is_hsm || mediaUrl)) {
                 const COMERCIAL_Q = Deno.env.get('WIDECHAT_COMERCIAL_QUEUE_ID') ?? '690caf35d66ff3152c0917e8';
                 const findAtt = async (): Promise<any> => {
                     for (const url of [
@@ -597,7 +604,7 @@ serve(async (req) => {
                 };
                 return jsonRes({ error: `WideChat ${status}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)} | DIAG ${JSON.stringify(diag)}`, wc_status: status, wc_body: data });
             }
-            return jsonRes({ success: true, data, message_id: wcMsgId, ...(body.is_hsm ? { hsm_routing: hsmRouting } : {}), ...(Object.keys(claimWait).length ? { claim_wait: claimWait } : {}) });
+            return jsonRes({ success: true, data, message_id: wcMsgId, ...((body.is_hsm || mediaUrl) ? { hsm_routing: hsmRouting } : {}), ...(Object.keys(claimWait).length ? { claim_wait: claimWait } : {}) });
         }
 
         // ── message_status: confere se a mensagem foi ENTREGUE (o /message/send só
