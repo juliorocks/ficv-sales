@@ -14,6 +14,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 //   list_agents  -> GET /user/agents/online              (agentes p/ transferir)
 //   list_teams   -> GET /campaigns                       (filas/equipes p/ transferir)
 //   transfer     -> POST /attendances/transfer           (transfere a conversa)
+//   finish_attendance -> POST /attendances/finish        (encerra o atendimento)
 // ============================================================================
 
 const corsHeaders = {
@@ -663,6 +664,25 @@ serve(async (req) => {
             if (body.type === 'agent') payload.agent_id = body.agent_id;
             if (body.type === 'attendance') payload.attendance_id = body.team_id;
             const { ok, status, data } = await wcCall('/attendances/transfer', {
+                method: 'POST', body: JSON.stringify(payload),
+            });
+            if (!ok) {
+                const d = typeof data === 'string' ? data : (data?.message || data?.error || JSON.stringify(data ?? {}));
+                return jsonRes({ error: `WideChat ${status}: ${d}` });
+            }
+            return jsonRes({ success: true, data });
+        }
+
+        // ── finish: encerra o atendimento NO WideChat (não só localmente) ────────
+        // Doc oficial (/docs/pt-br/attendances/finish): POST /attendances/finish
+        // {session_id, tabulation_id?}. O webhook já escuta o evento de finalização
+        // que a WideChat dispara depois disso e move o lead pra Finalizado sozinho
+        // (mesma lógica que já existe pra finalização vinda do painel nativo deles).
+        if (action === 'finish_attendance') {
+            if (!body.session_id) return jsonRes({ error: 'session_id é obrigatório (widechat_session_id do lead).' }, 400);
+            const payload: Record<string, unknown> = { session_id: body.session_id };
+            if (body.tabulation_id) payload.tabulation_id = body.tabulation_id;
+            const { ok, status, data } = await wcCall('/attendances/finish', {
                 method: 'POST', body: JSON.stringify(payload),
             });
             if (!ok) {

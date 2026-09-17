@@ -639,6 +639,25 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
         onError: (e: any) => showError(`Erro ao transferir: ${e.message}`),
     })
 
+    // Finaliza o atendimento NO WideChat (não só localmente) — POST /attendances/finish.
+    // Útil pra tirar a conversa de um estado travado (ex: bot preso num menu) e pra
+    // encerrar de verdade quando o atendimento acabou, sem precisar abrir o painel
+    // nativo do WideChat pra isso.
+    const finishMutation = useMutation({
+        mutationFn: async () => {
+            const { data, error } = await supabase.functions.invoke('widechat-api', {
+                body: { action: 'finish_attendance', session_id: sessionId },
+            })
+            if (error) throw error
+            if (data?.error) throw new Error(typeof data.error === 'string' ? data.error : JSON.stringify(data.error))
+        },
+        onSuccess: () => {
+            showSuccess('Atendimento finalizado no WideChat.')
+            queryClient.invalidateQueries({ queryKey: msgKey })
+        },
+        onError: (e: any) => showError(`Erro ao finalizar: ${e.message}`),
+    })
+
     // escolheu um template: se tem variável, abre o formulário pra preencher;
     // se não tem, envia direto.
     const openTemplate = (t: any) => {
@@ -684,7 +703,13 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
     return (
         <div className="flex flex-col rounded-xl overflow-hidden bg-[var(--bg-card)] shadow-[var(--card-shadow)]">
             {canTransfer && (
-                <div className="flex justify-end px-3 pt-2 bg-[var(--bg-card)]">
+                <div className="flex justify-end gap-1 px-3 pt-2 bg-[var(--bg-card)]">
+                    <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-red-600"
+                        disabled={finishMutation.isPending}
+                        onClick={() => { if (window.confirm('Finalizar esse atendimento no WideChat? Isso encerra a conversa lá (não só aqui).')) finishMutation.mutate() }}>
+                        {finishMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+                        Finalizar
+                    </Button>
                     <DropdownMenu onOpenChange={(open) => { if (open) { loadAgents(); loadTeams() } }}>
                         <DropdownMenuTrigger asChild>
                             <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 text-xs text-muted-foreground" disabled={transferMutation.isPending}>
