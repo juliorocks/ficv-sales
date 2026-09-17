@@ -568,6 +568,7 @@ serve(async (req) => {
                         message_id: wcMsgId,
                         type: mediaUrl ? String(body.media.type || 'files') : (body.is_hsm ? 'template' : 'text'),
                         message: mediaUrl ? String(body.media.legend || body.media.filename || '[Mídia]') : String(base.message),
+                        ...(mediaUrl ? { media_url: mediaUrl } : {}),
                         origin: 'agent',
                         sender_name: callerName, // quem operou de fato (não a conta de integração)
                         created_at: new Date().toISOString(),

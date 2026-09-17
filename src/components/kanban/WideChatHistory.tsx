@@ -109,6 +109,7 @@ interface WideChatMessage {
     origin: string // 'channel' (user), 'agent' (human), 'auto' (bot)
     type: string
     sender_name?: string
+    media_url?: string | null
 }
 
 // emojis mais usados no atendimento — sem dependência de lib
@@ -707,11 +708,28 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                                             const isTpl = msg.type === 'template' || msg.type === 'hsm'
                                             const isMedia = ['images', 'sounds', 'files', 'videos'].includes(msg.type)
                                             const hasText = !!msg.message && msg.message !== '[Mídia]'
-                                            if (msg.type === 'text' || ((isTpl || isMedia) && hasText)) {
+                                            const mediaLabel = msg.type === 'images' ? 'imagem' : msg.type === 'sounds' ? 'áudio' : msg.type === 'videos' ? 'vídeo' : 'arquivo'
+                                            if (isMedia) {
+                                                return (
+                                                    <div className="space-y-1">
+                                                        {msg.media_url ? (
+                                                            <a href={msg.media_url} target="_blank" rel="noopener noreferrer"
+                                                                className={`flex items-center gap-1.5 text-xs font-medium underline underline-offset-2 ${isUser ? 'text-slate-700' : 'text-white/90'}`}>
+                                                                <Paperclip className="h-3.5 w-3.5 shrink-0" /> Abrir {mediaLabel}
+                                                            </a>
+                                                        ) : (
+                                                            <span className="flex items-center gap-1.5 text-xs opacity-70">
+                                                                <Paperclip className="h-3.5 w-3.5 shrink-0" /> Anexo ({mediaLabel}) — link indisponível
+                                                            </span>
+                                                        )}
+                                                        {hasText && <p className="whitespace-pre-wrap leading-relaxed">{msg.message}</p>}
+                                                    </div>
+                                                )
+                                            }
+                                            if (msg.type === 'text' || (isTpl && hasText)) {
                                                 return (
                                                     <p className="whitespace-pre-wrap leading-relaxed">
                                                         {isTpl && <span className="block text-[10px] font-semibold uppercase tracking-wide opacity-70 mb-0.5">Template</span>}
-                                                        {isMedia && <span className="block text-[10px] font-semibold uppercase tracking-wide opacity-70 mb-0.5">📎 Anexo ({msg.type === 'images' ? 'imagem' : msg.type === 'sounds' ? 'áudio' : msg.type === 'videos' ? 'vídeo' : 'arquivo'})</span>}
                                                         {msg.message}
                                                     </p>
                                                 )

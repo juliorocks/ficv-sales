@@ -86,6 +86,13 @@ serve(async (req) => {
         // Sem isso, toda mensagem de mídia (recebida OU o eco da que a gente manda)
         // virava "[Mídia]" genérico no histórico.
         const messageText = msgData.message || msgData.interactive?.body?.text || msgData.text || hsmText() || msgData.legend || msgData.filename || "";
+        // link pra abrir/conferir o arquivo depois — achado nos payloads reais (backup
+        // antigo do SurrealDB): mídia recebida traz `content.storage_id`, que vira URL
+        // via `{origem}/config/storage/view/{storage_id}` (rota confirmada, é a mesma
+        // que o WideChat usa pro link que aparece pro agente no painel nativo deles).
+        const mediaUrl: string | undefined = msgData.storage_id
+            ? `https://igrejabatista.widechat.com.br/config/storage/view/${msgData.storage_id}`
+            : undefined;
         let senderName = payload.vars?.name || data?.user?.name || data?.contact?.name || "";
         // `platform_id` é o id que o WideChat usa pra ENVIAR (`/message/send`) — pra
         // número BR é o próprio telefone ("5583..."), pra estrangeiro é um id interno
@@ -492,6 +499,7 @@ serve(async (req) => {
                 lead_id: leadId, session_id: sessionId || "unknown", message_id: msgData.message_id ?? null,
                 type: msgData.type || "text", message: messageText || "[Mídia]", origin,
                 sender_name: senderName || "Desconhecido", created_at: wcToISO(msgData.created_at),
+                ...(mediaUrl ? { media_url: mediaUrl } : {}),
             };
             // a widechat-api já grava a mensagem enviada (com o texto renderizado) na
             // hora do envio; se essa mesma msg já está no histórico, não duplica.
