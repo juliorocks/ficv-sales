@@ -110,7 +110,7 @@ export function LeadCard({ lead, users, leadSources, stages, courses, pending }:
                         <AssignedUser userId={lead.assigned_to_id} users={users} />
                         <CardTitle className="text-base font-semibold flex flex-col min-w-0" title={lead.nome_completo}>
                             <span className="truncate">{lead.nome_completo}</span>
-                            <span className="flex flex-wrap gap-1 mt-0.5">
+                            <span className="flex flex-wrap gap-1 mt-0.5 min-h-[18px]">
                                 {lead.perfil === 'aluno' && (
                                     <span className="text-[10px] font-semibold bg-blue-500/15 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded w-fit">
                                         Aluno{course ? ` · ${course.name}` : ''}
@@ -205,18 +205,17 @@ export function LeadCard({ lead, users, leadSources, stages, courses, pending }:
                     </div>
                 </CardHeader>
                 <CardContent className="p-4 pt-0 pb-2 space-y-2">
-                    {lead.telefone && (
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <Phone className="h-3 w-3 flex-shrink-0" />
-                            <span>{lead.telefone}</span>
-                        </div>
-                    )}
-                    {lead.email && (
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground truncate" title={lead.email}>
-                            <Mail className="h-3 w-3 flex-shrink-0" />
-                            <span className="truncate">{lead.email}</span>
-                        </div>
-                    )}
+                    {/* Telefone/email sempre ocupam a linha, mesmo vazios — senão o card
+                        de quem não tem e-mail cadastrado fica ~24px mais baixo que os
+                        outros e a coluna parece toda desalinhada. */}
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Phone className="h-3 w-3 flex-shrink-0" />
+                        <span className="truncate">{lead.telefone || '—'}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground truncate" title={lead.email || undefined}>
+                        <Mail className="h-3 w-3 flex-shrink-0" />
+                        <span className="truncate">{lead.email || '—'}</span>
+                    </div>
                     <div className="flex justify-between items-center pt-1">
                         <div className="flex flex-wrap gap-1">
                             {/* Tags removed */}
