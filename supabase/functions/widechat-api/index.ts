@@ -583,6 +583,33 @@ serve(async (req) => {
                     });
                 } catch { /* histórico é best-effort */ }
             }
+
+            // avança Entrada -> Em Contato e atribui o agente, direto aqui (não
+            // depende de eco de webhook). O `widechat-webhook` já faz isso quando
+            // recebe uma mensagem com origin='agent' — mas isso só existe se o
+            // WideChat de fato reenviar via webhook uma mensagem que a gente mandou
+            // pela API (nunca confirmado — só visto acontecer pro painel NATIVO
+            // deles, num registro de meses atrás). Bug real, 2026-09-17: lead
+            // "jcs.sjc" ficou preso em Entrada apesar de vários envios da Thayanne
+            // pelo nosso painel. Fazendo aqui, não depende dessa suposição.
+            if (ok && body.lead_id) {
+                try {
+                    const { data: leadRow } = await supabase.from('leads')
+                        .select('stage_id, assigned_to_id').eq('id', body.lead_id).maybeSingle();
+                    if (leadRow) {
+                        const upd: Record<string, unknown> = {};
+                        const { data: stg0 } = await supabase.from('stages').select('id')
+                            .order('order', { ascending: true }).limit(1).maybeSingle();
+                        if (stg0?.id && leadRow.stage_id === stg0.id) {
+                            const { data: emContato } = await supabase.from('stages').select('id')
+                                .ilike('name', '%contato%').order('order', { ascending: true }).limit(1).maybeSingle();
+                            if (emContato?.id) { upd.stage_id = emContato.id; upd.stage_entry_date = new Date().toISOString(); }
+                        }
+                        if (!leadRow.assigned_to_id) upd.assigned_to_id = who.id;
+                        if (Object.keys(upd).length) await supabase.from('leads').update(upd).eq('id', body.lead_id);
+                    }
+                } catch { /* best-effort, não trava o envio */ }
+            }
             // SEMPRE 200: assim o front lê o erro REAL do WideChat (com 4xx/5xx o
             // supabase-js engole o corpo e só diz "non-2xx status code").
             if (!ok) {
