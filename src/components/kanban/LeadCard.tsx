@@ -225,15 +225,19 @@ export function LeadCard({ lead, users, leadSources, stages, courses, pending }:
                         </div>
                     </div>
                 </CardContent>
-                <CardFooter className="p-4 pt-0 mt-auto flex justify-between items-center">
-                    <div className="flex items-center gap-3">
+                {/* whitespace-nowrap em tudo aqui: sem isso, sob aperto horizontal (valor +
+                    temperatura + tempo no estágio + data disputando espaço), o texto da data
+                    quebrava no meio ("17/09" numa linha, "09:52" na outra) e esse card ficava
+                    mais alto que os vizinhos — a variação mais sutil de todas. */}
+                <CardFooter className="p-4 pt-0 mt-auto flex justify-between items-center gap-2 overflow-hidden">
+                    <div className="flex items-center gap-3 flex-shrink-0 whitespace-nowrap">
                         <span className="text-sm font-semibold text-green-600 dark:text-green-400">
                             {lead.valor_oportunidade.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                         </span>
                         <LeadTemperature temperatura={lead.temperatura} />
                     </div>
                     {timeInStage && (
-                        <div className="flex items-center gap-1 text-xs text-muted-foreground" title="Tempo no estágio">
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground whitespace-nowrap flex-shrink-0" title="Tempo no estágio">
                             <Clock className="h-3 w-3" />
                             {timeInStage}
                         </div>
@@ -242,7 +246,7 @@ export function LeadCard({ lead, users, leadSources, stages, courses, pending }:
                         antes mostrava data_entrada (entrada no FUNIL, não na etapa atual),
                         que pra um lead que já mudou de etapa fica bem diferente da posição
                         real dele na lista e parecia "fora de ordem"/misturado. */}
-                    <div className="text-xs text-muted-foreground" title="Data/Hora nesta etapa">
+                    <div className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0" title="Data/Hora nesta etapa">
                         {new Date(lead.stage_entry_date || lead.data_entrada).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} {new Date(lead.stage_entry_date || lead.data_entrada).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                     </div>
                 </CardFooter>
