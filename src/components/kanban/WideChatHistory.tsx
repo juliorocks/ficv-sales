@@ -447,9 +447,14 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
             mr.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
             mr.onstop = () => {
                 stream.getTracks().forEach((t) => t.stop())
-                const blob = new Blob(audioChunksRef.current, { type: mimeType })
-                const ext = mimeType.includes('ogg') ? 'ogg' : 'webm'
-                const file = new File([blob], `audio-${Date.now()}.${ext}`, { type: mimeType })
+                // grava com o mimeType completo (com codec — o MediaRecorder exige pra
+                // funcionar direito), mas o ARQUIVO final declara só "audio/webm" — o
+                // WideChat rejeita ";codecs=opus" no Content-Type com 422 genérico
+                // ("O campo file deve conter um arquivo"), confirmado ao vivo 2026-09-17.
+                const cleanType = mimeType.split(';')[0]
+                const ext = cleanType.includes('ogg') ? 'ogg' : 'webm'
+                const blob = new Blob(audioChunksRef.current, { type: cleanType })
+                const file = new File([blob], `audio-${Date.now()}.${ext}`, { type: cleanType })
                 sendMessageMutation.mutate({ media: file, caption: '' })
             }
             mr.start(200)
