@@ -6,6 +6,37 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+const WIDECHAT_BASE = 'https://igrejabatista.widechat.com.br/api/v4';
+
+// Reivindica a attendance pro agente já responsável pelo lead — chamado quando o
+// BOT anuncia o handoff pro atendente (isBotHandoff). Sem isso, template
+// cold-start (attendance nasce em fase "bot", invisível em attendances_plus/GET
+// /attendances — não dá pra reivindicar logo após o envio, só depois que o
+// PRÓPRIO bot decide passar a bola) deixa a conversa sem dono do lado do
+// WideChat mesmo com um agente já engajado aqui — o cliente responde e o bot
+// roda o fluxo de boas-vindas inteiro de novo (bug real, 2026-09-17, leads
+// "Talmay"/"Maria Régia": `hsm routing: {"attendance":null}` nos dois — a busca
+// de attendance logo após o send nunca acha nada nesse cenário). Best-effort:
+// se o agente não tem login próprio ou a chamada falhar, não trava o resto do
+// webhook — fica exatamente como já ficava antes desse fix.
+async function claimAttendanceForAgent(db: any, sessionId: string, assignedProfileId: string): Promise<void> {
+    try {
+        const { data: agentRow } = await db.from('user_integrations')
+            .select('widechat_email, widechat_password').eq('user_id', assignedProfileId).maybeSingle();
+        if (!agentRow?.widechat_email || !agentRow?.widechat_password) return;
+        const lr = await fetch(`${WIDECHAT_BASE}/auth/login`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: agentRow.widechat_email, password: agentRow.widechat_password }),
+        });
+        const lj = await lr.json().catch(() => null);
+        if (!lj?.token || !lj?.user?._id) return;
+        await fetch(`${WIDECHAT_BASE}/attendances/accept`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${lj.token}` },
+            body: JSON.stringify({ session_id: sessionId, agent_id: lj.user._id }),
+        });
+    } catch { /* best-effort */ }
+}
+
 const SYSTEM_PATTERNS = [
     'sessão irá expirar', 'sessão expirou', 'sua sessão',
     'atendimento encerrado', 'atendimento finalizado', 'atendimento transferido',
@@ -518,6 +549,13 @@ serve(async (req) => {
             const { data: cur } = await db.from('leads').select('assigned_to_id, curso_interesse, valor_oportunidade, perfil, stage_id, fonte_lead, source_id').eq('id', leadId).maybeSingle();
             const updates: Record<string, unknown> = {};
             const stillFresh = cur?.stage_id === firstStageId; // ninguém trabalhou o lead ainda
+
+            // bot anunciou handoff pro atendente numa conversa que já tinha agente
+            // (template cold-start/reengajamento) — reivindica a attendance pra ela
+            // agora que a fase já deveria ter saído de "bot" (ver claimAttendanceForAgent).
+            if (isBotHandoff && cur?.assigned_to_id && sessionId) {
+                await claimAttendanceForAgent(db, sessionId, cur.assigned_to_id);
+            }
 
             // ── reabertura automática ──────────────────────────────────────────
             // cliente escreveu de novo depois que a conversa foi marcada Finalizado (o
