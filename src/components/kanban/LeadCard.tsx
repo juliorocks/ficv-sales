@@ -110,19 +110,22 @@ export function LeadCard({ lead, users, leadSources, stages, courses, pending }:
                         <AssignedUser userId={lead.assigned_to_id} users={users} />
                         <CardTitle className="text-base font-semibold flex flex-col min-w-0" title={lead.nome_completo}>
                             <span className="truncate">{lead.nome_completo}</span>
-                            <span className="flex flex-wrap gap-1 mt-0.5 min-h-[18px]">
+                            {/* nowrap + truncate em cada badge: nome de curso longo ("História do
+                                Cristianismo", "Teologia Bíblica e Exegética...") quebrava em 2 linhas
+                                dentro da tag e esticava só aquele card. */}
+                            <span className="flex flex-nowrap items-center gap-1 mt-0.5 min-h-[18px] overflow-hidden">
                                 {lead.perfil === 'aluno' && (
-                                    <span className="text-[10px] font-semibold bg-blue-500/15 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded w-fit">
+                                    <span className="text-[10px] font-semibold bg-blue-500/15 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded truncate min-w-0">
                                         Aluno{course ? ` · ${course.name}` : ''}
                                     </span>
                                 )}
                                 {lead.perfil !== 'aluno' && (course || lead.observacoes?.includes('[O]')) && (
-                                    <span className="text-[10px] font-normal text-muted-foreground bg-muted px-1.5 py-0.5 rounded w-fit">
+                                    <span className="text-[10px] font-normal text-muted-foreground bg-muted px-1.5 py-0.5 rounded truncate min-w-0">
                                         {course ? course.name : lead.observacoes?.match(/\[O\]\s*([^:\n]+)/)?.[1] || 'SendPulse'}
                                     </span>
                                 )}
                                 {lead.status_wide && (
-                                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded w-fit ${lead.status_wide === 'ok_wide'
+                                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0 ${lead.status_wide === 'ok_wide'
                                         ? 'bg-green-500/15 text-green-600 dark:text-green-400'
                                         : 'bg-red-500/15 text-red-600 dark:text-red-400'}`}>
                                         {lead.status_wide === 'ok_wide' ? 'OK WIDE' : 'ERRO'}
