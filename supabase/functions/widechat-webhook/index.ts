@@ -516,18 +516,53 @@ serve(async (req) => {
             // explícito do usuário 2026-09-16: um lead que finalizou e voltou a escrever é
             // tratado como novo contato, disponível pra QUALQUER agente pegar, não preso
             // a quem atendeu da última vez.
-            // Gatilho é `isBotHandoff` (não `origin === 'channel'`) — pedido explícito do
-            // usuário, mesmo dia: reabrir/mostrar o card no Kanban só quando o BOT já
-            // anunciou a transferência pro atendente, não em qualquer "oi"/mensagem do
-            // cliente que ainda está só reiniciando o fluxo de bot/menu.
+            // Gatilho principal é `isBotHandoff` (não `origin === 'channel'`) — pedido
+            // explícito do usuário, mesmo dia: reabrir/mostrar o card no Kanban só quando
+            // o BOT já anunciou a transferência pro atendente, não em qualquer "oi"/
+            // mensagem do cliente que ainda está só reiniciando o fluxo de bot/menu.
+            //
+            // MAS isso sozinho perde um caso real: cliente CONTINUANDO uma conversa que
+            // já é direto com um humano (responde a agente sem o bot entrar no meio) —
+            // não tem frase de handoff nenhuma pra bater, então nunca reabria. Bug real,
+            // 2026-09-17: leads "Gleice Santos"/"Viviane Araújo" (Thayanne) com
+            // atendimento ATIVO — cliente perguntando preço/curso horas depois — presos
+            // em Finalizado porque a última msg antes da dele já era de um AGENTE (não
+            // do bot). 2º gatilho: `origin==='channel'` + a mensagem imediatamente
+            // ANTERIOR desse lead (antes da que acabou de ser inserida acima) é
+            // `origin==='agent'` — só dispara quando é claramente retomada de conversa
+            // humana, não interação nova com o bot.
+            //
+            // Os dois gatilhos têm intenção DIFERENTE, então o destino também é: handoff
+            // do bot = contato "novo" pro funil, ninguém trabalhou ainda → Entrada, sem
+            // dono, qualquer agente pega. Retomada de conversa humana = a MESMA agente
+            // já estava no meio disso → fica com ela, não faz sentido tirar o lead das
+            // mãos dela enquanto ela está respondendo ao vivo → Em Contato, mantém
+            // assigned_to_id como está (não mexe).
             let reopenedFromFinalizado = false;
-            if (isBotHandoff && cur?.stage_id) {
+            let reopenedViaHumanResume = false;
+            if (cur?.stage_id) {
                 const { data: curStage } = await db.from('stages').select('name').eq('id', cur.stage_id).maybeSingle();
                 if (curStage?.name && /finaliz|encerr|conclu/i.test(curStage.name)) {
-                    updates.stage_id = firstStageId;
-                    updates.stage_entry_date = now;
-                    updates.assigned_to_id = null;
-                    reopenedFromFinalizado = true;
+                    let resumingHumanChat = false;
+                    if (!isBotHandoff && origin === 'channel') {
+                        const { data: lastTwo } = await db.from('widechat_messages')
+                            .select('origin').eq('lead_id', leadId)
+                            .order('created_at', { ascending: false }).limit(2);
+                        if ((lastTwo ?? [])[1]?.origin === 'agent') resumingHumanChat = true;
+                    }
+                    if (isBotHandoff) {
+                        updates.stage_id = firstStageId;
+                        updates.stage_entry_date = now;
+                        updates.assigned_to_id = null;
+                        reopenedFromFinalizado = true;
+                    } else if (resumingHumanChat) {
+                        const { data: emContatoResume } = await db.from('stages').select('id')
+                            .ilike('name', '%contato%').order('order', { ascending: true }).limit(1).maybeSingle();
+                        updates.stage_id = emContatoResume?.id ?? firstStageId;
+                        updates.stage_entry_date = now;
+                        reopenedFromFinalizado = true;
+                        reopenedViaHumanResume = true;
+                    }
                 }
             }
 
@@ -603,7 +638,9 @@ serve(async (req) => {
             }
 
             if (reopenedFromFinalizado) {
-                const nota = `🔁 Reaberto para Entrada (sem agente atribuído) — cliente voltou a escrever após o atendimento ter sido finalizado.`;
+                const nota = reopenedViaHumanResume
+                    ? `🔁 Reaberto para Em Contato (agente mantido) — cliente retomou a conversa direto com quem já estava atendendo, após o atendimento ter sido finalizado.`
+                    : `🔁 Reaberto para Entrada (sem agente atribuído) — cliente voltou a escrever após o atendimento ter sido finalizado.`;
                 await db.from('lead_notes').insert({ lead_id: leadId, note: nota, created_at: now });
                 await mirror(`INSERT INTO lead_notes [{ lead_id: leads:⟨${leadId}⟩, note: ${sv(nota)}, created_at: d${sv(now)} }] RETURN NONE;`);
             }
