@@ -111,6 +111,33 @@ const fileNameFromUrl = (url?: string | null): string | null => {
     } catch { return null }
 }
 
+// O navegador só grava áudio em webm/opus (Chrome/Edge/Firefox) — formato que o
+// WhatsApp/Meta NÃO aceita pra nota de voz (só AAC, MP3, AMR ou OGG/Opus; confirmado
+// ao vivo 2026-09-17: WideChat recusa webm com 422 "O campo file deve conter um
+// arquivo", mesmo com a URL 100% válida/servível). Converte pra MP3 no navegador via
+// ffmpeg.wasm antes de enviar. Import dinâmico: o pacote (~30MB de core wasm) só
+// carrega quando alguém de fato grava um áudio, nunca no carregamento normal da tela.
+async function transcodeToMp3(blob: Blob): Promise<Blob> {
+    const [{ FFmpeg }, { fetchFile, toBlobURL }] = await Promise.all([
+        import('@ffmpeg/ffmpeg'),
+        import('@ffmpeg/util'),
+    ])
+    const ffmpeg = new FFmpeg()
+    const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm'
+    await ffmpeg.load({
+        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+    })
+    await ffmpeg.writeFile('input.webm', await fetchFile(blob))
+    await ffmpeg.exec(['-i', 'input.webm', 'output.mp3'])
+    const data = await ffmpeg.readFile('output.mp3') as Uint8Array
+    // TS 5.7+: Uint8Array.buffer é tipado como ArrayBufferLike (inclui
+    // SharedArrayBuffer), que BlobPart não aceita — copia pra um ArrayBuffer normal.
+    const buf = new ArrayBuffer(data.byteLength)
+    new Uint8Array(buf).set(data)
+    return new Blob([buf], { type: 'audio/mpeg' })
+}
+
 interface WideChatMessage {
     id: string
     lead_id: number | string
@@ -142,6 +169,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
     const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
     const [recording, setRecording] = useState(false)
     const [recordingSeconds, setRecordingSeconds] = useState(0)
+    const [convertingAudio, setConvertingAudio] = useState(false)
 
     // insere texto na posição do cursor do textarea
     const insertAtCursor = (text: string) => {
@@ -445,17 +473,23 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
             const mr = new MediaRecorder(stream, { mimeType })
             audioChunksRef.current = []
             mr.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
-            mr.onstop = () => {
+            mr.onstop = async () => {
                 stream.getTracks().forEach((t) => t.stop())
-                // grava com o mimeType completo (com codec — o MediaRecorder exige pra
-                // funcionar direito), mas o ARQUIVO final declara só "audio/webm" — o
-                // WideChat rejeita ";codecs=opus" no Content-Type com 422 genérico
-                // ("O campo file deve conter um arquivo"), confirmado ao vivo 2026-09-17.
                 const cleanType = mimeType.split(';')[0]
-                const ext = cleanType.includes('ogg') ? 'ogg' : 'webm'
-                const blob = new Blob(audioChunksRef.current, { type: cleanType })
-                const file = new File([blob], `audio-${Date.now()}.${ext}`, { type: cleanType })
-                sendMessageMutation.mutate({ media: file, caption: '' })
+                const rawBlob = new Blob(audioChunksRef.current, { type: cleanType })
+                // webm (único formato que o navegador grava) não é aceito pelo
+                // WhatsApp/Meta pra nota de voz — converte pra MP3 antes de enviar (ver
+                // transcodeToMp3 acima).
+                try {
+                    setConvertingAudio(true)
+                    const mp3Blob = await transcodeToMp3(rawBlob)
+                    const file = new File([mp3Blob], `audio-${Date.now()}.mp3`, { type: 'audio/mpeg' })
+                    sendMessageMutation.mutate({ media: file, caption: '' })
+                } catch {
+                    showError('Não foi possível converter o áudio gravado. Tente de novo.')
+                } finally {
+                    setConvertingAudio(false)
+                }
             }
             mr.start(200)
             mediaRecorderRef.current = mr
@@ -799,11 +833,17 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                                 <button type="button" onClick={cancelRecording} className="text-red-500 hover:text-red-800 text-xs font-medium">Cancelar</button>
                             </div>
                         )}
+                        {convertingAudio && (
+                            <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-600">
+                                <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                                <span>Convertendo áudio…</span>
+                            </div>
+                        )}
                         <div className="flex gap-2 items-end">
                         <div className="flex gap-1 shrink-0 pb-0.5">
                             <input ref={fileInputRef} type="file" className="hidden" onChange={handleFilePicked} />
                             <Button type="button" variant="outline" size="icon" className="rounded-full h-9 w-9 text-slate-600" title="Anexar arquivo"
-                                disabled={sendMessageMutation.isPending || recording} onClick={() => fileInputRef.current?.click()}>
+                                disabled={sendMessageMutation.isPending || recording || convertingAudio} onClick={() => fileInputRef.current?.click()}>
                                 <Paperclip className="h-4 w-4" />
                             </Button>
                             <DropdownMenu>
@@ -856,7 +896,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                             className="flex-1 resize-none bg-white text-slate-800 border border-slate-200 placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary shadow-sm rounded-2xl px-4 py-2 text-sm max-h-32 overflow-y-auto"
                             style={{ height: 'auto', minHeight: '2.25rem' }}
                             onInput={(e) => { const t = e.currentTarget; t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 128) + 'px' }}
-                            disabled={sendMessageMutation.isPending || recording}
+                            disabled={sendMessageMutation.isPending || recording || convertingAudio}
                         />
                         {newMessage.trim() || pendingFile ? (
                             <Button type="submit" size="icon"
@@ -867,10 +907,10 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                         ) : (
                             <Button type="button" size="icon"
                                 className={`rounded-full shadow-md w-9 h-9 shrink-0 text-white ${recording ? 'bg-red-600 hover:bg-red-700' : 'bg-primary hover:bg-primary/90'}`}
-                                disabled={sendMessageMutation.isPending}
+                                disabled={sendMessageMutation.isPending || convertingAudio}
                                 title={recording ? 'Parar e enviar áudio' : 'Gravar áudio'}
                                 onClick={recording ? stopRecording : startRecording}>
-                                {recording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                                {convertingAudio ? <Loader2 className="h-4 w-4 animate-spin" /> : recording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
                             </Button>
                         )}
                         </div>
