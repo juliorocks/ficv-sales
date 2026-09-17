@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabase"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
-import { AlertCircle, MessageSquare, Send, Loader2, FileText, Zap, Plus, Smile } from "lucide-react"
+import { AlertCircle, MessageSquare, Send, Loader2, FileText, Zap, Plus, Smile, Paperclip, Mic, Square, X, Image as ImageIcon, FileAudio } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -121,6 +121,15 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
     const textareaRef = useRef<HTMLTextAreaElement>(null)
     const [emojiOpen, setEmojiOpen] = useState(false)
     const [newMessage, setNewMessage] = useState("")
+    // anexo (arquivo escolhido, aguardando confirmação/legenda antes de enviar)
+    const fileInputRef = useRef<HTMLInputElement>(null)
+    const [pendingFile, setPendingFile] = useState<File | null>(null)
+    // gravação de áudio — mesma técnica do módulo de Tickets (MediaRecorder)
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+    const audioChunksRef = useRef<Blob[]>([])
+    const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+    const [recording, setRecording] = useState(false)
+    const [recordingSeconds, setRecordingSeconds] = useState(0)
 
     // insere texto na posição do cursor do textarea
     const insertAtCursor = (text: string) => {
@@ -294,9 +303,24 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
     const effectiveChannelId = attendance?.channel_id || DEFAULT_CHANNEL_ID
 
     const sendMessageMutation = useMutation({
-        mutationFn: async (arg: string | { hsm_template_name: string; hsm_placeholders: string[]; preview: string }) => {
-            const isHsm = typeof arg !== 'string'
-            if (!isHsm && !windowOpen) throw new Error("Passaram 24h da última mensagem do cliente — só dá pra enviar um template aprovado.")
+        mutationFn: async (arg: string | { hsm_template_name: string; hsm_placeholders: string[]; preview: string } | { media: File; caption: string }) => {
+            const isHsm = typeof arg === 'object' && 'hsm_template_name' in arg
+            const isMedia = typeof arg === 'object' && 'media' in arg
+            if (!isHsm && !isMedia && !windowOpen) throw new Error("Passaram 24h da última mensagem do cliente — só dá pra enviar um template aprovado.")
+
+            let mediaField: Record<string, unknown> | undefined
+            if (isMedia) {
+                const file = arg.media
+                const mime = file.type || 'application/octet-stream'
+                // schema confirmado nos payloads REAIS de mídia recebida do WideChat
+                const mediaType = mime.startsWith('image/') ? 'images' : mime.startsWith('audio/') ? 'sounds' : mime.startsWith('video/') ? 'videos' : 'files'
+                const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+                const path = `${leadId}/${Date.now()}-${safeName}`
+                const { error: upErr } = await supabase.storage.from('widechat-attachments').upload(path, file, { contentType: mime, cacheControl: '3600' })
+                if (upErr) throw new Error(`Erro ao subir arquivo: ${upErr.message}`)
+                mediaField = { storage_path: path, filename: file.name, mime_type: mime, type: mediaType, legend: arg.caption || undefined }
+            }
+
             const { data, error } = await supabase.functions.invoke('widechat-api', {
                 body: {
                     action: 'send_message',
@@ -311,7 +335,9 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                     lead_id: leadId,
                     ...(isHsm
                         ? { is_hsm: true, hsm_template_name: arg.hsm_template_name, hsm_placeholders: arg.hsm_placeholders, message: arg.preview }
-                        : { message: arg }),
+                        : isMedia
+                            ? { media: mediaField }
+                            : { message: arg }),
                 },
             })
             if (error) throw error
@@ -322,7 +348,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
             await queryClient.cancelQueries({ queryKey: msgKey })
             const previous = queryClient.getQueryData(msgKey)
             const tempId = crypto.randomUUID()
-            const text = typeof arg === 'string' ? arg : arg.preview
+            const text = typeof arg === 'string' ? arg : ('hsm_template_name' in arg ? arg.preview : `📎 ${arg.media.name}`)
             queryClient.setQueryData(msgKey, (old: any) => [...(old || []), {
                 id: tempId, lead_id: leadId, message_id: tempId, message: text,
                 created_at: new Date().toISOString(), origin: 'agent', type: 'text',
@@ -335,7 +361,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
             showError(`Erro ao enviar: ${e.message}`)
         },
         onSuccess: (_data, variables) => {
-            const isHsm = typeof variables !== 'string'
+            const isHsm = typeof variables === 'object' && 'hsm_template_name' in variables
             queryClient.invalidateQueries({ queryKey: msgKey })
             markSeen()
             // O /message/send só confirma que a Meta ACEITOU o pedido — a entrega pode
@@ -371,11 +397,73 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
     })
 
     const doSend = () => {
-        if (!newMessage.trim() || sendMessageMutation.isPending || !canSendText) return
+        if (sendMessageMutation.isPending || !canSendText) return
+        if (pendingFile) {
+            sendMessageMutation.mutate({ media: pendingFile, caption: newMessage.trim() })
+            setPendingFile(null)
+            setNewMessage("")
+            return
+        }
+        if (!newMessage.trim()) return
         sendMessageMutation.mutate(newMessage)
         setNewMessage("")
     }
     const handleSend = (e: React.FormEvent) => { e.preventDefault(); doSend() }
+
+    const MAX_ATTACHMENT_MB = 25
+    const handleFilePicked = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (fileInputRef.current) fileInputRef.current.value = ''
+        if (!file) return
+        if (file.size > MAX_ATTACHMENT_MB * 1024 * 1024) {
+            showError(`Arquivo muito grande (máx. ${MAX_ATTACHMENT_MB}MB).`)
+            return
+        }
+        setPendingFile(file)
+    }
+
+    async function startRecording() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+            const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm'
+            const mr = new MediaRecorder(stream, { mimeType })
+            audioChunksRef.current = []
+            mr.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
+            mr.onstop = () => {
+                stream.getTracks().forEach((t) => t.stop())
+                const blob = new Blob(audioChunksRef.current, { type: mimeType })
+                const ext = mimeType.includes('ogg') ? 'ogg' : 'webm'
+                const file = new File([blob], `audio-${Date.now()}.${ext}`, { type: mimeType })
+                sendMessageMutation.mutate({ media: file, caption: '' })
+            }
+            mr.start(200)
+            mediaRecorderRef.current = mr
+            setRecording(true)
+            setRecordingSeconds(0)
+            recordingTimerRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000)
+        } catch {
+            showError('Não foi possível acessar o microfone. Verifique as permissões do navegador.')
+        }
+    }
+    function stopRecording() {
+        if (mediaRecorderRef.current && recording) {
+            mediaRecorderRef.current.stop()
+            setRecording(false)
+            if (recordingTimerRef.current) clearInterval(recordingTimerRef.current)
+            setRecordingSeconds(0)
+        }
+    }
+    function cancelRecording() {
+        if (mediaRecorderRef.current && recording) {
+            mediaRecorderRef.current.ondataavailable = null
+            mediaRecorderRef.current.onstop = null
+            mediaRecorderRef.current.stop()
+            mediaRecorderRef.current.stream?.getTracks().forEach((t) => t.stop())
+            setRecording(false)
+            if (recordingTimerRef.current) clearInterval(recordingTimerRef.current)
+            setRecordingSeconds(0)
+        }
+    }
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key !== 'Enter') return
         if (e.ctrlKey || e.metaKey) {
@@ -640,8 +728,34 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
 
             <div className="p-3 border-t border-slate-200 bg-slate-50 space-y-2">
                 {canSendText ? (
-                    <form onSubmit={handleSend} className="flex gap-2 items-end">
+                    <form onSubmit={handleSend} className="flex flex-col gap-2">
+                        {pendingFile && (
+                            <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm">
+                                {pendingFile.type.startsWith('image/')
+                                    ? <ImageIcon className="h-4 w-4 text-slate-500 shrink-0" />
+                                    : pendingFile.type.startsWith('audio/')
+                                        ? <FileAudio className="h-4 w-4 text-slate-500 shrink-0" />
+                                        : <Paperclip className="h-4 w-4 text-slate-500 shrink-0" />}
+                                <span className="truncate flex-1 text-slate-700">{pendingFile.name}</span>
+                                <button type="button" onClick={() => setPendingFile(null)} className="text-slate-400 hover:text-slate-700 shrink-0" title="Remover anexo">
+                                    <X className="h-4 w-4" />
+                                </button>
+                            </div>
+                        )}
+                        {recording && (
+                            <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-sm text-red-700">
+                                <span className="h-2 w-2 rounded-full bg-red-600 animate-pulse shrink-0" />
+                                <span className="flex-1">Gravando áudio… {String(Math.floor(recordingSeconds / 60)).padStart(2, '0')}:{String(recordingSeconds % 60).padStart(2, '0')}</span>
+                                <button type="button" onClick={cancelRecording} className="text-red-500 hover:text-red-800 text-xs font-medium">Cancelar</button>
+                            </div>
+                        )}
+                        <div className="flex gap-2 items-end">
                         <div className="flex gap-1 shrink-0 pb-0.5">
+                            <input ref={fileInputRef} type="file" className="hidden" onChange={handleFilePicked} />
+                            <Button type="button" variant="outline" size="icon" className="rounded-full h-9 w-9 text-slate-600" title="Anexar arquivo"
+                                disabled={sendMessageMutation.isPending || recording} onClick={() => fileInputRef.current?.click()}>
+                                <Paperclip className="h-4 w-4" />
+                            </Button>
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                     <Button type="button" variant="outline" size="icon" className="rounded-full h-9 w-9 text-slate-600" title="Mensagens rápidas">
@@ -688,17 +802,28 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                             onChange={(e) => setNewMessage(e.target.value)}
                             onKeyDown={handleKeyDown}
                             rows={1}
-                            placeholder="Mensagem…  (Enter envia · Shift/Ctrl+Enter quebra linha)"
+                            placeholder={pendingFile ? "Legenda (opcional)…" : "Mensagem…  (Enter envia · Shift/Ctrl+Enter quebra linha)"}
                             className="flex-1 resize-none bg-white text-slate-800 border border-slate-200 placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary shadow-sm rounded-2xl px-4 py-2 text-sm max-h-32 overflow-y-auto"
                             style={{ height: 'auto', minHeight: '2.25rem' }}
                             onInput={(e) => { const t = e.currentTarget; t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 128) + 'px' }}
-                            disabled={sendMessageMutation.isPending}
+                            disabled={sendMessageMutation.isPending || recording}
                         />
-                        <Button type="submit" size="icon"
-                            className="rounded-full shadow-md bg-primary hover:bg-primary/90 text-white w-9 h-9 shrink-0"
-                            disabled={!newMessage.trim() || sendMessageMutation.isPending}>
-                            {sendMessageMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                        </Button>
+                        {newMessage.trim() || pendingFile ? (
+                            <Button type="submit" size="icon"
+                                className="rounded-full shadow-md bg-primary hover:bg-primary/90 text-white w-9 h-9 shrink-0"
+                                disabled={sendMessageMutation.isPending}>
+                                {sendMessageMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                            </Button>
+                        ) : (
+                            <Button type="button" size="icon"
+                                className={`rounded-full shadow-md w-9 h-9 shrink-0 text-white ${recording ? 'bg-red-600 hover:bg-red-700' : 'bg-primary hover:bg-primary/90'}`}
+                                disabled={sendMessageMutation.isPending}
+                                title={recording ? 'Parar e enviar áudio' : 'Gravar áudio'}
+                                onClick={recording ? stopRecording : startRecording}>
+                                {recording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                            </Button>
+                        )}
+                        </div>
                     </form>
                 ) : (
                     <Popover open={hsmOpen} onOpenChange={setHsmOpen}>
