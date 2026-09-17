@@ -22,49 +22,11 @@ const corsHeaders = {
 };
 
 const WIDECHAT_BASE = 'https://igrejabatista.widechat.com.br/api/v4';
-// Raiz do domínio (fora do /api/v4) — achado num backup antigo do SurrealDB: as
-// mensagens de mídia RECEBIDAS trazem `content.file` apontando pra
-// `{WIDECHAT_ORIGIN}/config/storage/view/{storage_id}`. É o único endpoint de
-// storage confirmado (leitura); o de escrita (upload) é candidato, ver
-// `uploadMediaToWidechat` abaixo.
-const WIDECHAT_ORIGIN = 'https://igrejabatista.widechat.com.br';
 
 function jsonRes(body: unknown, status = 200) {
     return new Response(JSON.stringify(body), {
         status, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
-}
-
-// Upload de mídia pro WideChat, pra virar um `storage_id` que o `/message/send`
-// aceita (formato confirmado no payload de mensagens de mídia RECEBIDAS — ver
-// WIDECHAT_ORIGIN acima). NENHUMA doc (nem no repo, nem pública) documenta o
-// endpoint de ESCRITA — só achamos por acaso o de leitura. Tenta os candidatos
-// mais plausíveis (mesma técnica "testado ao vivo" usada em todo esse arquivo,
-// ex: `/attendances/accept` foi achado assim) e devolve o diagnóstico de todos
-// se nenhum funcionar, pra ajustar na próxima rodada sem precisar adivinhar de
-// novo do zero.
-async function uploadMediaToWidechat(token: string, blob: Blob, filename: string): Promise<{ storageId?: string; tried: any[] }> {
-    const candidates = [
-        `${WIDECHAT_ORIGIN}/config/storage/upload`,
-        `${WIDECHAT_BASE}/storage/upload`,
-        `${WIDECHAT_BASE}/storage`,
-        `${WIDECHAT_BASE}/message/upload`,
-    ];
-    const tried: any[] = [];
-    for (const url of candidates) {
-        try {
-            const fd = new FormData();
-            fd.append('file', blob, filename);
-            const rr = await fetch(url, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: fd });
-            const text = await rr.text();
-            let json: any = null;
-            try { json = JSON.parse(text); } catch { /* resposta não é JSON */ }
-            tried.push({ url, status: rr.status, body: text.slice(0, 300) });
-            const storageId = json?._id ?? json?.id ?? json?.storage_id ?? json?.data?._id ?? json?.file?._id;
-            if (rr.ok && storageId) return { storageId: String(storageId), tried };
-        } catch (e) { tried.push({ url, error: String(e) }); }
-    }
-    return { tried };
 }
 
 serve(async (req) => {
@@ -321,28 +283,14 @@ serve(async (req) => {
                 } catch { /* fica com a conta de integração */ }
             }
 
-            // ── mídia (arquivo/áudio): baixa do NOSSO Storage e sobe pro WideChat ──
-            // `body.media` = { storage_path, filename, mime_type, type } — type já vem
-            // do front como 'images'|'sounds'|'files'|'videos' (schema confirmado no
-            // payload de mídia RECEBIDA, ver WIDECHAT_ORIGIN acima). Roda ANTES da busca
-            // de attendance (não depende dela) mas DEPOIS do sendToken resolvido (o
-            // upload é autenticado pela mesma conta que vai enviar a mensagem).
-            let mediaStorageId: string | undefined;
-            if (!body.is_hsm && body.media?.storage_path) {
-                const dl = await supabase.storage.from('widechat-attachments').download(body.media.storage_path);
-                if (dl.error || !dl.data) {
-                    return jsonRes({ error: `Não consegui ler o arquivo do Storage: ${dl.error?.message ?? 'arquivo não encontrado'}` });
-                }
-                const upl = await uploadMediaToWidechat(sendToken, dl.data, body.media.filename ?? 'arquivo');
-                console.log(`widechat upload media: tried=${JSON.stringify(upl.tried).slice(0, 900)}`);
-                if (!upl.storageId) {
-                    return jsonRes({
-                        error: `Não consegui subir o arquivo pro WideChat — endpoint de upload ainda não confirmado. Avise o Julio pra checar o log.`,
-                        code: 'MEDIA_UPLOAD_FAILED', diag: upl.tried,
-                    });
-                }
-                mediaStorageId = upl.storageId;
-            }
+            // ── mídia (arquivo/áudio) ──────────────────────────────────────────
+            // Doc oficial (SZ.chat/Fortics, plataforma por trás do WideChat — achada
+            // via /docs/pt-br/messages/send_message do próprio tenant): `/message/send`
+            // aceita `type:"media"` + `file:"<url pública>"` + `legend` opcional. NÃO
+            // precisa de upload/storage_id — a mídia é só uma URL acessível de fora.
+            // `body.media.public_url` já vem pronto do front (getPublicUrl do bucket
+            // widechat-attachments, que é público).
+            const mediaUrl: string | undefined = !body.is_hsm ? body.media?.public_url : undefined;
 
             // attendance_id: procura o atendimento ABERTO desse contato NA CONTA que
             // vai enviar (casa por platform_id — o objeto de attendance NÃO tem
@@ -483,10 +431,9 @@ serve(async (req) => {
                 base.hsm_template_name = body.hsm_template_name;
                 base.hsm_placeholders = body.hsm_placeholders ?? [];
                 base.message = body.message ?? '';
-            } else if (mediaStorageId) {
-                base.type = body.media.type;
-                base.storage_id = mediaStorageId;
-                base.filename = body.media.filename;
+            } else if (mediaUrl) {
+                base.type = 'media';
+                base.file = mediaUrl;
                 if (body.media.legend) base.legend = body.media.legend;
             } else {
                 base.message = body.message;
@@ -613,14 +560,14 @@ serve(async (req) => {
             // webhook de `templateMessage` às vezes chega sem o corpo e grava só
             // "[Mídia]"; aqui a gente já tem o texto renderizado (base.message).
             const wcMsgId = (data as any)?.messages?.message_id ?? null;
-            if (ok && body.lead_id && (base.message || mediaStorageId)) {
+            if (ok && body.lead_id && (base.message || mediaUrl)) {
                 try {
                     await supabase.from('widechat_messages').insert({
                         lead_id: body.lead_id,
                         session_id: body.attendance_id ?? 'api',
                         message_id: wcMsgId,
-                        type: mediaStorageId ? String(body.media.type) : (body.is_hsm ? 'template' : 'text'),
-                        message: mediaStorageId ? String(body.media.legend || body.media.filename || '[Mídia]') : String(base.message),
+                        type: mediaUrl ? String(body.media.type || 'files') : (body.is_hsm ? 'template' : 'text'),
+                        message: mediaUrl ? String(body.media.legend || body.media.filename || '[Mídia]') : String(base.message),
                         origin: 'agent',
                         sender_name: callerName, // quem operou de fato (não a conta de integração)
                         created_at: new Date().toISOString(),

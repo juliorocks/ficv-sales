@@ -318,7 +318,11 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                 const path = `${leadId}/${Date.now()}-${safeName}`
                 const { error: upErr } = await supabase.storage.from('widechat-attachments').upload(path, file, { contentType: mime, cacheControl: '3600' })
                 if (upErr) throw new Error(`Erro ao subir arquivo: ${upErr.message}`)
-                mediaField = { storage_path: path, filename: file.name, mime_type: mime, type: mediaType, legend: arg.caption || undefined }
+                // WideChat manda mídia por URL pública, não upload/storage_id (doc oficial
+                // da plataforma por trás, SZ.chat/Fortics — /message/send com type:"media"
+                // + file:"<url>"). Nosso bucket já é público.
+                const { data: pub } = supabase.storage.from('widechat-attachments').getPublicUrl(path)
+                mediaField = { public_url: pub.publicUrl, filename: file.name, mime_type: mime, type: mediaType, legend: arg.caption || undefined }
             }
 
             const { data, error } = await supabase.functions.invoke('widechat-api', {
