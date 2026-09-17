@@ -41,6 +41,9 @@ export function LeadCard({ lead, users, leadSources, stages, courses, pending }:
     const course = lead.curso_interesse ? courses.find(c => c.id === lead.curso_interesse) : null;
     const orderedStages = [...stages].sort((a, b) => a.order - b.order);
     const lostStage = stages.find(s => s.name.toLowerCase().includes('perdido'));
+    // "Atender" só faz sentido na fila de Entrada — nas outras colunas o lead já foi
+    // trabalhado e ficar sem atendente ali é sinal de atendimento encerrado, não fila nova.
+    const isEntradaStage = stages.find(s => s.id === lead.stage_id)?.name.toLowerCase().includes('entrada') ?? false;
 
     const moveStageMutation = useMutation({
         mutationFn: async (stageId: number) => {
@@ -105,8 +108,8 @@ export function LeadCard({ lead, users, leadSources, stages, courses, pending }:
                 <CardHeader className="p-4 pb-2 flex flex-row justify-between items-start">
                     <div className="flex items-center gap-2 flex-1 overflow-hidden">
                         <AssignedUser userId={lead.assigned_to_id} users={users} />
-                        <CardTitle className="text-base font-semibold truncate flex flex-col" title={lead.nome_completo}>
-                            <span>{lead.nome_completo}</span>
+                        <CardTitle className="text-base font-semibold flex flex-col min-w-0" title={lead.nome_completo}>
+                            <span className="truncate">{lead.nome_completo}</span>
                             <span className="flex flex-wrap gap-1 mt-0.5">
                                 {lead.perfil === 'aluno' && (
                                     <span className="text-[10px] font-semibold bg-blue-500/15 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded w-fit">
@@ -241,7 +244,7 @@ export function LeadCard({ lead, users, leadSources, stages, courses, pending }:
                         {new Date(lead.stage_entry_date || lead.data_entrada).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} {new Date(lead.stage_entry_date || lead.data_entrada).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                     </div>
                 </CardFooter>
-                {!lead.assigned_to_id && user && (
+                {isEntradaStage && !lead.assigned_to_id && user && (
                     <div className="px-4 pb-4">
                         <Button
                             size="sm"

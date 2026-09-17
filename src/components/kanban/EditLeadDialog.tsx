@@ -263,6 +263,37 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
     const currentStage = stages.find(s => s.id === lead.stage_id);
     const isFinalStage = currentStage?.name.toLowerCase().includes('matriculado') || currentStage?.name.toLowerCase().includes('perdido');
     const isAdmin = user?.role === 'admin';
+    // fora da Entrada, lead sem atendente = atendimento que foi encerrado (não fila nova);
+    // o botão de assumir de novo mora aqui no card, não como "Atender" solto no Kanban.
+    const isEntradaStage = currentStage?.name.toLowerCase().includes('entrada') ?? false;
+    const canReopen = !lead.assigned_to_id && !isEntradaStage;
+
+    const reabrirAtendimentoMutation = useMutation({
+        mutationFn: async () => {
+            if (!user?.id) throw new Error("Sessão não identificada. Recarregue a página.");
+            await withTimeout(supabase.auth.getSession(), 8000, "A sessão").catch(() => { });
+            const { data, error } = await withTimeout(
+                supabase
+                    .from('leads')
+                    .update({ assigned_to_id: user.id, updated_at: new Date().toISOString() })
+                    .eq('id', lead.id)
+                    .select('id'),
+                15000,
+                "Reabrir o atendimento",
+            );
+            if (error) throw error;
+            if (!data || data.length === 0) {
+                await supabase.auth.getSession().catch(() => { });
+                throw new Error("Não foi possível reabrir (sessão expirada). Recarregue a página.");
+            }
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['leads'] });
+            showSuccess("Atendimento reaberto — lead atribuído a você.");
+            onOpenChange(false);
+        },
+        onError: (error: any) => showError(`Não foi possível reabrir: ${error.message}`)
+    });
 
     const deleteLeadMutation = useMutation({
         mutationFn: async () => {
@@ -386,6 +417,11 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
                                                 Excluir
                                             </Button>
                                             <div className="flex gap-2">
+                                                {canReopen && (
+                                                    <Button type="button" className="bg-[#25D366] hover:bg-[#1ebe5a] text-white" onClick={() => reabrirAtendimentoMutation.mutate()} disabled={reabrirAtendimentoMutation.isPending}>
+                                                        {reabrirAtendimentoMutation.isPending ? "Reabrindo..." : "Reabrir Atendimento"}
+                                                    </Button>
+                                                )}
                                                 {!isFinalStage && (
                                                     <>
                                                         {lostStage && <Button type="button" variant="secondary" onClick={() => setIsLossReasonOpen(true)}>Marcar como Perda</Button>}
