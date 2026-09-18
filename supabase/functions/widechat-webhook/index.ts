@@ -432,13 +432,36 @@ serve(async (req) => {
                 if (!inbound) {
                     return j({ success: true, lead_id: leadId, action: "conversation_ended_ignored_no_client_reply" });
                 }
-                const { data: st } = await db.from('stages').select('id, name')
-                    .or('name.ilike.%finaliz%,name.ilike.%encerr%,name.ilike.%conclu%')
-                    .order('order', { ascending: false }).limit(1).maybeSingle();
-                if (st?.id) {
+                // "autoFinish" é o WideChat encerrando a attendance SOZINHO por timeout (o
+                // cliente não respondeu dentro da janela e ninguém do time clicou em
+                // finalizar de verdade) — diferente de "humanFinish"/demais eventos, que são
+                // encerramento real. Pedido explícito do usuário 2026-09-18: esse fechamento
+                // por timeout não é uma finalização de verdade, o atendimento continua em
+                // aberto do lado do negócio (ex: lead "Tatiana Barbosa da Silva", estágio
+                // Finalizado enquanto ainda esperava resposta sobre documentação). Em vez de
+                // Finalizado, volta pra Entrada com o MESMO agente, pra ele retomar quando o
+                // cliente responder — ver [[project_widechat_finalize_24h_stale]].
+                const isAutoTimeout = eventName === 'autoFinish';
+                const { data: curLead } = await db.from('leads').select('stage_id').eq('id', leadId).maybeSingle();
+                if (curLead && ![6, 7].includes(curLead.stage_id)) {
                     const now = new Date().toISOString();
-                    await db.from('leads').update({ stage_id: st.id, stage_entry_date: now }).eq('id', leadId);
-                    await mirror(`UPDATE leads SET stage_id = stages:⟨${st.id}⟩, stage_entry_date = ${sv(now)} WHERE id = leads:⟨${leadId}⟩;`);
+                    if (isAutoTimeout) {
+                        await db.from('leads').update({ stage_id: firstStageId, stage_entry_date: now }).eq('id', leadId);
+                        await db.from('lead_notes').insert({
+                            lead_id: leadId,
+                            note: '🔁 Passaram 24h sem resposta do cliente e o WideChat encerrou a conversa sozinho (timeout). Reaberto para Entrada, mantendo o agente responsável, pra continuar o atendimento assim que o cliente responder.',
+                            created_at: now,
+                        });
+                        await mirror(`UPDATE leads SET stage_id = stages:⟨${firstStageId}⟩, stage_entry_date = ${sv(now)} WHERE id = leads:⟨${leadId}⟩;`);
+                    } else {
+                        const { data: st } = await db.from('stages').select('id')
+                            .or('name.ilike.%finaliz%,name.ilike.%encerr%,name.ilike.%conclu%')
+                            .order('order', { ascending: false }).limit(1).maybeSingle();
+                        if (st?.id) {
+                            await db.from('leads').update({ stage_id: st.id, stage_entry_date: now }).eq('id', leadId);
+                            await mirror(`UPDATE leads SET stage_id = stages:⟨${st.id}⟩, stage_entry_date = ${sv(now)} WHERE id = leads:⟨${leadId}⟩;`);
+                        }
+                    }
                 }
             }
             return j({ success: true, lead_id: leadId, action: "conversation_ended" });
