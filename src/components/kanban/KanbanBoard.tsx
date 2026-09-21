@@ -32,20 +32,33 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all' }: { searchTerm
     const { data: leads, isLoading: isLoadingLeads, error: leadsError, refetch: refetchLeads } = useQuery<Lead[]>({
         queryKey: ['leads'],
         queryFn: async () => {
-            const { data, error } = await withTimeout(
-                supabase
-                    .from('leads')
-                    .select('*')
-                    .order('data_entrada', { ascending: false })
-                    .limit(500), // Cap: a coluna renderiza cada card com um EditLeadDialog
-                                  // completo; acima disso o browser trava. Ver paginação
-                                  // por coluna em KanbanColumn (visibleCount).
-                20000,
-                "Carregar os leads",
+            // Janela POR ETAPA (não 500 globais por data_entrada): com o teto global, um lead
+            // que entrou no funil há alguns dias mas está em atendimento HOJE caía fora da
+            // janela e sumia de "Em Contato" (2026-09-21: o quadro mostrava 2 nessa etapa,
+            // o banco tinha 94 — as 5 colunas somavam exatamente 500). Cada etapa traz os
+            // leads que entraram nela mais recentemente (mesmo critério da ordenação padrão
+            // da coluna); etapas ativas com folga, encerradas com teto menor. A renderização
+            // segue paginada em KanbanColumn (visibleCount).
+            const { data: stgs, error: stErr } = await withTimeout(
+                supabase.from('stages').select('id, name'), 20000, "Carregar as etapas",
             );
-
-            if (error) throw error
-            return data || []
+            if (stErr) throw stErr
+            const closedStage = (name: string) => /finaliz|encerr|conclu|perdid|matricul/i.test(name)
+            const parts = await Promise.all((stgs ?? []).map(async (s: { id: number; name: string }) => {
+                const { data, error } = await withTimeout(
+                    supabase
+                        .from('leads')
+                        .select('*')
+                        .eq('stage_id', s.id)
+                        .order('stage_entry_date', { ascending: false, nullsFirst: false })
+                        .limit(closedStage(s.name) ? 300 : 1000),
+                    20000,
+                    `Carregar os leads (${s.name})`,
+                );
+                if (error) throw error
+                return data || []
+            }))
+            return parts.flat() as Lead[]
         },
         enabled: !isAuthLoading && !!user,
         // No polling: the realtime subscription below already invalidates on any
