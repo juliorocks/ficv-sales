@@ -53,6 +53,15 @@ interface BudgetInfo {
     googleBalance: number | null;
 }
 
+interface MonthlyRow {
+    label: string;
+    spend: number;
+    leads: number;
+    matriculas: number;
+    /** R$ pagos em parcelas de matrícula no mês (mesma regra de financial_goals.monthly_achieved) */
+    receita: number;
+}
+
 const fmt = (v: number) =>
     v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 2 });
 const fmtInt = (v: number) => v.toLocaleString('pt-BR');
@@ -161,7 +170,7 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
     const [demographics, setDemographics] = useState<MetaDemographic[]>([]);
     const [campaignsList, setCampaignsList] = useState<MetaCampaignOption[]>([]);
     const [matriculasCount, setMatriculasCount] = useState<number | null>(null);
-    const [monthly, setMonthly] = useState<{ label: string; spend: number; leads: number; matriculas: number }[]>([]);
+    const [monthly, setMonthly] = useState<MonthlyRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState<'meta' | 'google' | null>(null);
     const [lastSync, setLastSync] = useState<string | null>(null);
@@ -317,7 +326,7 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
         const endStr = end.toISOString().split('T')[0];
 
         try {
-            const [insightRows, matriculaRows] = await Promise.all([
+            const [insightRows, matriculaRows, parcelaRows] = await Promise.all([
                 paginateAll<{ date: string; spend: number; leads_count: number }>((from, to) =>
                     supabase.from('meta_campaign_insights_daily').select('date,spend,leads_count')
                         .gte('date', startStr).lte('date', endStr).range(from, to)
@@ -326,23 +335,34 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                     supabase.from('sponte_matriculas').select('data_matricula')
                         .gte('data_matricula', startStr).lte('data_matricula', endStr).range(from, to)
                 ),
+                // Valor recebido de matrícula: parcelas quitadas da categoria "Matrícula …", por data de pagamento
+                paginateAll<{ data_pagamento: string; valor_pago: number }>((from, to) =>
+                    supabase.from('sponte_parcelas').select('data_pagamento,valor_pago')
+                        .eq('situacao_parcela', 'Quitada').ilike('categoria', '%matr%')
+                        .gte('data_pagamento', startStr).lte('data_pagamento', endStr).range(from, to)
+                ),
             ]);
 
-            const byMonth: Record<string, { label: string; spend: number; leads: number; matriculas: number }> = {};
+            const byMonth: Record<string, MonthlyRow> = {};
+            const bucketOf = (date: string) => {
+                const d = new Date(date + 'T12:00:00');
+                const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                if (!byMonth[key]) byMonth[key] = { label: d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }), spend: 0, leads: 0, matriculas: 0, receita: 0 };
+                return byMonth[key];
+            };
             insightRows.forEach(r => {
                 if (!r.date) return;
-                const d = new Date(r.date + 'T12:00:00');
-                const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-                if (!byMonth[key]) byMonth[key] = { label: d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }), spend: 0, leads: 0, matriculas: 0 };
-                byMonth[key].spend += Number(r.spend) || 0;
-                byMonth[key].leads += Number(r.leads_count) || 0;
+                const b = bucketOf(r.date);
+                b.spend += Number(r.spend) || 0;
+                b.leads += Number(r.leads_count) || 0;
             });
             matriculaRows.forEach(r => {
                 if (!r.data_matricula) return;
-                const d = new Date(r.data_matricula + 'T12:00:00');
-                const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-                if (!byMonth[key]) byMonth[key] = { label: d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }), spend: 0, leads: 0, matriculas: 0 };
-                byMonth[key].matriculas += 1;
+                bucketOf(r.data_matricula).matriculas += 1;
+            });
+            parcelaRows.forEach(r => {
+                if (!r.data_pagamento) return;
+                bucketOf(r.data_pagamento).receita += Number(r.valor_pago) || 0;
             });
 
             setMonthly(Object.entries(byMonth).sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v));
@@ -897,10 +917,7 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                                     <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
                                     <YAxis axisLine={false} tickLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 10 }} domain={[0, monthlyMax * 1.15]} />
-                                    <Tooltip
-                                        contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }}
-                                        formatter={(v: any, name: string) => [name === 'spend' ? fmt(v) : fmtInt(v), name === 'spend' ? 'Investimento' : name === 'leads' ? 'Leads' : 'Matrículas']}
-                                    />
+                                    <Tooltip content={<MonthlyTooltip />} />
                                     <Legend
                                         formatter={(value: string) => value === 'spend' ? 'Investimento' : value === 'leads' ? 'Leads' : 'Matrículas'}
                                         wrapperStyle={{ fontSize: '11px' }}
@@ -912,7 +929,20 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                                         <LabelList dataKey="leads" position="top" fill="var(--text-main)" fontSize={9} />
                                     </Bar>
                                     <Bar dataKey="matriculas" fill="#00D4AA" radius={[4, 4, 0, 0]}>
-                                        <LabelList dataKey="matriculas" position="top" fill="var(--text-main)" fontSize={9} />
+                                        <LabelList
+                                            dataKey="matriculas"
+                                            content={({ x, y, width, index }: any) => {
+                                                const row = monthly[index];
+                                                if (!row) return null;
+                                                const cx = Number(x) + Number(width) / 2;
+                                                return (
+                                                    <text x={cx} textAnchor="middle" fontSize={9} fill="var(--text-main)">
+                                                        <tspan x={cx} y={Number(y) - 15}>{fmtInt(row.matriculas)}</tspan>
+                                                        <tspan x={cx} y={Number(y) - 4}>{fmt(row.receita)}</tspan>
+                                                    </text>
+                                                );
+                                            }}
+                                        />
                                     </Bar>
                                 </BarChart>
                             </ResponsiveContainer>
@@ -920,6 +950,37 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                     </div>
                 </>
             )}
+        </div>
+    );
+};
+
+// ─── Tooltip do gráfico mensal (inclui ROAS = valor de matrículas ÷ investimento) ─
+const TipRow: React.FC<{ color: string; label: string; value: string }> = ({ color, label, value }) => (
+    <div className="flex items-center justify-between gap-6">
+        <span className="flex items-center gap-1.5 text-[var(--text-muted)]">
+            <span className="w-2 h-2 rounded-sm" style={{ background: color }} />{label}
+        </span>
+        <span className="font-semibold text-[var(--text-main)]">{value}</span>
+    </div>
+);
+
+const MonthlyTooltip: React.FC<{ active?: boolean; payload?: any[] }> = ({ active, payload }) => {
+    const row: MonthlyRow | undefined = payload?.[0]?.payload;
+    if (!active || !row) return null;
+    const roas = row.spend > 0 ? row.receita / row.spend : null;
+    return (
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] px-3.5 py-3 text-xs space-y-1.5 shadow-lg">
+            <p className="font-bold text-[var(--text-main)] capitalize">{row.label}</p>
+            <TipRow color="#0D1B4C" label="Investimento" value={fmt(row.spend)} />
+            <TipRow color="#7B5CF0" label="Leads" value={fmtInt(row.leads)} />
+            <TipRow color="#00D4AA" label="Matrículas" value={fmtInt(row.matriculas)} />
+            <TipRow color="#00D4AA" label="Valor das matrículas" value={fmt(row.receita)} />
+            <div className="flex items-center justify-between gap-6 pt-1.5 mt-1 border-t border-[var(--border)]">
+                <span className="font-bold text-[var(--text-muted)] uppercase tracking-wider">ROAS</span>
+                <span className="text-sm font-bold" style={{ color: '#00D4AA' }}>
+                    {roas !== null ? `${roas.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}x` : '—'}
+                </span>
+            </div>
         </div>
     );
 };
