@@ -124,17 +124,26 @@ const AgentCard: React.FC<{
 
     const save = async () => {
         setSaving(true);
+        // `team_id` = equipe do SETOR (o dashboard filtra por ela); `agent_team` = roster do webhook,
+        // pode ter mais gente. Só mexe nos dois se o admin mudou as equipes: salvar foto/e-mail não
+        // pode recolocar ninguém no setor, nem tirar o agente do roster no meio (o webhook bloqueia o telefone).
+        const currentTeamIds = (agent.teams ?? []).map(t => t.id);
+        const teamsChanged = form.team_ids.length !== currentTeamIds.length
+            || form.team_ids.some(id => !currentTeamIds.includes(id));
+        const keepPrimary = !!agent.team_id && form.team_ids.includes(agent.team_id);
         await supabase.from('agent_profiles').update({
             photo_url: form.photo_url || null,
             score_target: parseFloat(form.score_target) || 8.0,
             email: form.email || null,
             phone: form.phone || null,
             notes: form.notes || null,
-            team_id: form.team_ids[0] || null, // mantém compat com telas antigas (1ª equipe)
+            ...(teamsChanged ? { team_id: keepPrimary ? agent.team_id : (form.team_ids[0] || null) } : {}),
         }).eq('id', agent.id);
-        await supabase.from('agent_team').delete().eq('agent_id', agent.id);
-        if (form.team_ids.length) {
-            await supabase.from('agent_team').insert(form.team_ids.map(team_id => ({ agent_id: agent.id, team_id })));
+        if (teamsChanged) {
+            await supabase.from('agent_team').delete().eq('agent_id', agent.id);
+            if (form.team_ids.length) {
+                await supabase.from('agent_team').insert(form.team_ids.map(team_id => ({ agent_id: agent.id, team_id })));
+            }
         }
         setSaving(false);
         setEditing(false);

@@ -484,28 +484,18 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
         });
     };
 
-    // Mapa nome-do-agente -> equipes. A equipe fica em `agent_profiles.team_id` e/ou
-    // na tabela de junção `agent_team` (um agente pode estar em várias). O nome que casa
-    // com `messages_logs.agent_name` é o `agent_profiles.name`. (A query antiga lia
-    // `profiles.team_id`, coluna que não existe mais — o filtro por equipe zerava tudo.)
-    const [agentTeamMap, setAgentTeamMap] = useState<Record<string, string[]>>({});
+    // Mapa nome-do-agente -> equipe do SETOR, só de `agent_profiles.team_id` (equipe principal).
+    // NÃO usa `agent_team`: aquela tabela é o roster do webhook do WideChat e inclui gente que
+    // atende o número comercial mas não é do setor (Matheus, Tyago, Julio) — lendo dela, esses
+    // agentes apareciam no gráfico da Comercial com 4–16 conversas contra milhares dos outros.
+    // AgentAdmin/TeamsAdmin mantêm `team_id` coerente. O nome que casa com
+    // `messages_logs.agent_name` é o `agent_profiles.name`.
+    const [agentTeamMap, setAgentTeamMap] = useState<Record<string, string>>({});
     useEffect(() => {
         (async () => {
-            const [{ data: aps }, { data: at }] = await Promise.all([
-                supabase.from('agent_profiles').select('id, name, team_id'),
-                supabase.from('agent_team').select('agent_id, team_id'),
-            ]);
-            const map: Record<string, string[]> = {};
-            const nameById = new Map<string, string>();
-            (aps ?? []).forEach((a: any) => {
-                if (!a.name) return;
-                nameById.set(a.id, a.name);
-                if (a.team_id) (map[a.name] ??= []).push(a.team_id);
-            });
-            (at ?? []).forEach((row: any) => {
-                const name = nameById.get(row.agent_id);
-                if (name && row.team_id && !(map[name] ?? []).includes(row.team_id)) (map[name] ??= []).push(row.team_id);
-            });
+            const { data } = await supabase.from('agent_profiles').select('name, team_id');
+            const map: Record<string, string> = {};
+            (data ?? []).forEach((a: any) => { if (a.name && a.team_id) map[a.name] = a.team_id; });
             setAgentTeamMap(map);
         })();
     }, []);
@@ -543,7 +533,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
             // Team filter: check if agent belongs to selected team
             let matchesTeam = true;
             if (selectedTeamId) {
-                matchesTeam = (agentTeamMap[d.agent] ?? []).includes(selectedTeamId);
+                matchesTeam = agentTeamMap[d.agent] === selectedTeamId;
             }
 
             return matchesAgent && matchesDate && matchesTeam;
@@ -570,7 +560,12 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     }, [analysisData, dateRange]);
 
 
-    const agentsList = useMemo(() => Array.from(new Set(analysisData.map(d => d.agent))), [analysisData]);
+    // Dropdown "Todos Agentes": só quem é da equipe selecionada (antes listava todo mundo dos logs,
+    // inclusive de outros setores, mesmo com a Comercial ativa).
+    const agentsList = useMemo(() => {
+        const names = Array.from(new Set(analysisData.map(d => d.agent)));
+        return selectedTeamId ? names.filter(n => agentTeamMap[n] === selectedTeamId) : names;
+    }, [analysisData, selectedTeamId, agentTeamMap]);
 
     // Real data calculations
     const agentStats = useMemo(() => {

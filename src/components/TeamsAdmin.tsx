@@ -31,12 +31,18 @@ const TeamMembers: React.FC<{ teamId: string; isAdmin: boolean }> = ({ teamId, i
     const addMember = async () => {
         if (!pick) return;
         await supabase.from('agent_team').insert({ agent_id: pick, team_id: teamId });
+        // `agent_profiles.team_id` é a equipe do setor (o dashboard filtra por ela): quem ainda
+        // não tem uma passa a ter esta, senão o agente novo some dos relatórios.
+        await supabase.from('agent_profiles').update({ team_id: teamId }).eq('id', pick).is('team_id', null);
         setPick('');
         setAdding(false);
         load();
     };
     const removeMember = async (agentId: string) => {
         await supabase.from('agent_team').delete().eq('agent_id', agentId).eq('team_id', teamId);
+        // se essa era a equipe do setor, cai pra outra que sobrou (ou null) — só mexe se bater com teamId.
+        const { data: rest } = await supabase.from('agent_team').select('team_id').eq('agent_id', agentId).limit(1);
+        await supabase.from('agent_profiles').update({ team_id: rest?.[0]?.team_id ?? null }).eq('id', agentId).eq('team_id', teamId);
         load();
     };
 
