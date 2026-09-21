@@ -91,6 +91,33 @@ export interface MonthGoal {
     monthly_achieved: number;
 }
 
+// Atingido do mês = parcelas de matrícula quitadas, pagas no mês, somadas AO VIVO de sponte_parcelas —
+// a mesma regra do `sponte-read` (tela Matrículas), então as telas nunca divergem. NÃO ler
+// financial_goals.monthly_achieved: era uma cópia gravada pelo sync, e o cron horário só busca os
+// últimos 3 dias — sobrescrevia o total do mês com a soma dessa janela (setembro mostrava 1.669 em vez de 13.483).
+const fetchAchievedByMonth = async (year: number): Promise<Record<number, number>> => {
+    const totals: Record<number, number> = {};
+    const PAGE = 1000; // teto de linhas por request do PostgREST
+    for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+            .from('sponte_parcelas')
+            .select('data_pagamento, valor_pago')
+            .eq('situacao_parcela', 'Quitada')
+            .ilike('categoria', '%matr%')
+            .gte('data_pagamento', `${year}-01-01`)
+            .lte('data_pagamento', `${year}-12-31`)
+            .order('id')
+            .range(from, from + PAGE - 1);
+        if (error) throw error;
+        for (const r of data ?? []) {
+            const m = Number(String(r.data_pagamento).slice(5, 7));
+            totals[m] = (totals[m] ?? 0) + (Number(r.valor_pago) || 0);
+        }
+        if (!data || data.length < PAGE) break;
+    }
+    return totals;
+};
+
 export const useFinancialGoals = (year: number) => {
     const [goals, setGoals] = useState<MonthGoal[]>([]);
     const [loading, setLoading] = useState(true);
@@ -99,20 +126,26 @@ export const useFinancialGoals = (year: number) => {
 
     const fetch = useCallback(async () => {
         setLoading(true);
-        const { data } = await supabase
-            .from('financial_goals')
-            .select('month, monthly_target, monthly_achieved')
-            .eq('year', year)
-            .order('month');
+        const [{ data }, achievedByMonth] = await Promise.all([
+            supabase
+                .from('financial_goals')
+                .select('month, monthly_target')
+                .eq('year', year)
+                .order('month'),
+            fetchAchievedByMonth(year).catch((e: any) => {
+                showError('Não foi possível carregar os valores atingidos: ' + (e?.message ?? e));
+                return {} as Record<number, number>;
+            }),
+        ]);
 
-        const map: Record<number, MonthGoal> = {};
+        const map: Record<number, { monthly_target: number }> = {};
         (data ?? []).forEach((r: any) => { map[r.month] = r; });
 
         // Fill all 12 months, defaulting to 0
         const filled = Array.from({ length: 12 }, (_, i) => ({
             month: i + 1,
             monthly_target: map[i + 1]?.monthly_target ?? 0,
-            monthly_achieved: map[i + 1]?.monthly_achieved ?? 0,
+            monthly_achieved: achievedByMonth[i + 1] ?? 0,
         }));
         setGoals(filled);
         setLoading(false);
@@ -178,12 +211,11 @@ export const GoalsPage: React.FC<GoalsPageProps> = ({ isAdmin }) => {
 
     const saveAll = async () => {
         setSaving(true);
-        // Only save monthly_target — monthly_achieved comes from Sponte sync
+        // Só a meta: o atingido é calculado ao vivo de sponte_parcelas, não se grava
         const rows = Array.from({ length: 12 }, (_, i) => {
             const m = i + 1;
             const tgt = parseFloat(getVal(m, 'monthly_target').replace(',', '.') || '0') || 0;
-            const ach = goals.find(g => g.month === m)?.monthly_achieved ?? 0;
-            return { year, month: m, monthly_target: tgt, monthly_achieved: ach };
+            return { year, month: m, monthly_target: tgt };
         });
 
         await supabase.from('financial_goals').upsert(rows, { onConflict: 'year,month' });

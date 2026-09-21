@@ -193,7 +193,6 @@ async function syncParcelas(token) {
     }
 
     let totalSynced = 0;
-    const allRows = [];
 
     for (const chunk of chunks) {
         const xml = await soapCall('GetParcelas',
@@ -238,31 +237,14 @@ async function syncParcelas(token) {
             await surrealSQL(token, stmts);
             totalSynced += batch.length;
         }
-        allRows.push(...rows);
         await pgTry(`sponte_parcelas (+${rows.length})`, () => pgUpsert('sponte_parcelas', rows, 'conta_receber_id,numero_parcela'));
         process.stdout.write(`\r  ${totalSynced} parcelas processadas...`);
     }
     console.log(`\n  ✓ ${totalSynced} parcelas sincronizadas`);
 
-    // Recalcula financial_goals
-    console.log('  Recalculando metas financeiras...');
-    const cur = new Date(startDate + 'T12:00:00');
-    const endMonth = new Date(endDate + 'T12:00:00');
-    while (cur <= endMonth) {
-        const ym = cur.toISOString().slice(0, 7);
-        const [y, m] = ym.split('-').map(Number);
-        const pad = String(m).padStart(2, '0');
-        const lastDay = new Date(y, m, 0).getDate();
-        const achieved = allRows
-            .filter(r => r.situacao_parcela === 'Quitada' && r.categoria?.toLowerCase().includes('matr') &&
-                r.data_pagamento >= `${y}-${pad}-01` && r.data_pagamento <= `${y}-${pad}-${lastDay}`)
-            .reduce((s, r) => s + (r.valor_pago || 0), 0);
-        await surrealSQL(token,
-            `UPSERT ${sid('financial_goals', `${y}_${m}`)} MERGE {year:${y},month:${m},monthly_achieved:${achieved}};`);
-        await pgTry(`financial_goals ${y}-${m}`, () => pgUpsert('financial_goals', [{ year: y, month: m, monthly_achieved: achieved }], 'year,month'));
-        cur.setMonth(cur.getMonth() + 1);
-    }
-    console.log('  ✓ Metas atualizadas');
+    // Não recalcula financial_goals.monthly_achieved aqui: o cron horário só busca os últimos 3 dias,
+    // e somar só essas parcelas sobrescrevia o total do mês (setembro ficou em 1.669 em vez de 13.483).
+    // O atingido é calculado ao vivo de sponte_parcelas no frontend (GoalGauge.tsx).
     return totalSynced;
 }
 
