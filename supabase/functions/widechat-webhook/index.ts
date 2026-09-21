@@ -89,6 +89,14 @@ const j = (body: unknown, status = 200) =>
 serve(async (req) => {
     if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
+    // Modo REPLAY (backfill a partir de widechat_raw_messages): só liga com a chave de
+    // serviço no header — pula efeitos EXTERNOS/duplicados que não fazem sentido ao
+    // reprocessar mensagem antiga: o insert de novo no log cru (já existe) e o
+    // claimAttendanceForAgent (faria login real na WideChat como o agente, o que derruba
+    // a sessão dele no painel — a WideChat só permite 1 sessão por conta).
+    const svcKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const isReplay = !!svcKey && req.headers.get('x-replay-key') === svcKey;
+
     try {
         let payload: any;
         try { payload = JSON.parse(await req.text()); } catch { return j({ error: "Invalid JSON" }, 400); }
@@ -190,7 +198,11 @@ serve(async (req) => {
         // frase varia por fluxo/campanha do bot ("direcionar"/"encaminhar"/"transferir",
         // com ou sem o "você" explícito) — cobrir as variações do MESMO padrão em vez
         // de travar num texto exato só porque o bot troca o verbo.
-        const BOT_HANDOFF_TEXT = /em alguns instantes um dos nossos consultores falar[áa] contigo|vou (te )?(direcionar|encaminhar|transferir) (voc[êe] )?para um atendente/i;
+        // Variações reais já vistas (2026-09-21, levantamento das conversas sem lead): "Estou
+        // direcionando você para atendimento. Por favor, aguarde um momento.", "Por favor
+        // aguarde, em breve uma das nossas Consultoras lhe passará...", "Estamos localizando
+        // um atendente para falar com você."
+        const BOT_HANDOFF_TEXT = /em alguns instantes um dos nossos consultores falar[áa] contigo|vou (te )?(direcionar|encaminhar|transferir) (voc[êe] )?para um atendente|estou direcionando voc[êe] para (o )?atendimento|em breve uma das nossas consultoras|estamos localizando um atendente/i;
         const isBotHandoff = origin === 'auto' && BOT_HANDOFF_TEXT.test(messageText);
 
         let botAreaNonComm = false;
@@ -305,7 +317,7 @@ serve(async (req) => {
         );
 
         // ── raw transcript ────────────────────────────────────────────────────
-        if (isMessage && sessionId && messageText && !isSystemMessage(messageText)) {
+        if (!isReplay && isMessage && sessionId && messageText && !isSystemMessage(messageText)) {
             const raw = {
                 session_id: sessionId, origin,
                 sender_name: msgData.user?.name || senderName || "",
@@ -482,8 +494,24 @@ serve(async (req) => {
                 return j({ success: true, ignored: true, reason: "Lead admission denied" });
             // só cria o lead quando o BOT já anunciou a transferência pro atendente —
             // antes disso é interação de bot (LGPD, menu, seleção de área) e não deve
-            // virar card no Kanban ainda.
-            if (!isBotHandoff)
+            // virar card no Kanban ainda. UM AGENTE HUMANO já falando (origin==='agent')
+            // é prova de handoff tão boa quanto a frase do bot — e mais robusta: este
+            // ponto só é alcançado depois do filtro de setor/roster (isNonCommercial
+            // acima já barrou agente fora do Comercial). Bug real, 2026-09-21: 90 de 157
+            // conversas atendidas por agentes do Comercial desde 16/09 nunca viraram lead
+            // porque o bot usa mais de uma frase de transferência e o regex só conhecia
+            // algumas — o agente estava atendendo e o Kanban mostrava "2 em Em Contato".
+            // Exige que o CLIENTE já tenha falado na sessão — senão disparo de template
+            // (agente mandando pra uma lista, ninguém respondeu) viraria lead pra cada
+            // destinatário.
+            let humanAgentTalking = false;
+            if (origin === 'agent' && !isBotHandoff && sessionId) {
+                const { count: custMsgs } = await db.from('widechat_raw_messages')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('session_id', sessionId).eq('origin', 'channel');
+                humanAgentTalking = (custMsgs ?? 0) > 0;
+            }
+            if (!isBotHandoff && !humanAgentTalking)
                 return j({ success: true, ignored: true, reason: "ainda em fase de bot — aguardando handoff pro atendente" });
         } else if (channelId && !LEAD_CHANNELS.includes(channelId)) {
             // lead já existe mas veio por canal errado — não mexe nele
@@ -576,7 +604,7 @@ serve(async (req) => {
             // bot anunciou handoff pro atendente numa conversa que já tinha agente
             // (template cold-start/reengajamento) — reivindica a attendance pra ela
             // agora que a fase já deveria ter saído de "bot" (ver claimAttendanceForAgent).
-            if (isBotHandoff && cur?.assigned_to_id && sessionId) {
+            if (isBotHandoff && cur?.assigned_to_id && sessionId && !isReplay) {
                 await claimAttendanceForAgent(db, sessionId, cur.assigned_to_id);
             }
 
