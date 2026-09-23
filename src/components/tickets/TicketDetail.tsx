@@ -412,7 +412,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('tickets')
-        .select('*, atendente:profiles!tickets_atendente_profile_fkey(full_name), curso:courses(name, type)')
+        .select('*, atendente:profiles!tickets_atendente_id_fkey(full_name), curso:courses(name, type)')
         .eq('id', ticket.id)
         .single()
       if (error) throw error

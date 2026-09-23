@@ -174,7 +174,7 @@ export function TicketDashboard() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('tickets')
-        .select('*, atendente:profiles!tickets_atendente_profile_fkey(full_name), curso:courses(name, type)')
+        .select('*, atendente:profiles!tickets_atendente_id_fkey(full_name), curso:courses(name, type)')
         .order('created_at', { ascending: false })
       if (error) throw error
       return data

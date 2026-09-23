@@ -57,7 +57,7 @@ export function AlunoHistorico({ alunoId, alunoNome, alunoEmail, onClose }: Prop
     queryFn: async () => {
       const { data, error } = await supabase
         .from('tickets')
-        .select('*, atendente:profiles!tickets_atendente_profile_fkey(full_name), curso:courses(name, type)')
+        .select('*, atendente:profiles!tickets_atendente_id_fkey(full_name), curso:courses(name, type)')
         .eq('aluno_id', alunoId)
         .order('created_at', { ascending: false })
       if (error) throw error
