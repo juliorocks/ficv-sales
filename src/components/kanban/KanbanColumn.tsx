@@ -57,6 +57,9 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
     const [visibleCount, setVisibleCount] = useState(50);
     const [courseFilter, setCourseFilter] = useState<number | null>(null);
     const [unattendedOnly, setUnattendedOnly] = useState(false);
+    // Leva os "Atender" (sem assigned_to_id) pro topo, sem esconder o resto — ligado
+    // por padrão pra quem chega na coluna já ver primeiro quem ninguém pegou ainda.
+    const [unattendedFirst, setUnattendedFirst] = useState(true);
     const [sortBy, setSortBy] = useState<SortOption>({
         key: 'stage_entry_date',
         label: 'Data no Estágio',
@@ -88,6 +91,12 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
         const tempOrder: { [key: string]: number } = { 'quente': 3, 'morno': 2, 'frio': 1 };
 
         const sorted = [...locallyFilteredLeads].sort((a, b) => {
+            if (unattendedFirst) {
+                const aUnattended = !a.assigned_to_id;
+                const bUnattended = !b.assigned_to_id;
+                if (aUnattended !== bUnattended) return aUnattended ? -1 : 1;
+            }
+
             const key = sortBy.key as keyof Lead;
             let aValue: any;
             let bValue: any;
@@ -117,7 +126,7 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
         });
 
         return sorted;
-    }, [locallyFilteredLeads, sortBy]);
+    }, [locallyFilteredLeads, sortBy, unattendedFirst]);
 
     // Renderiza a coluna em blocos: cada LeadCard monta hooks pesados, então
     // pintar centenas de uma vez trava o browser. "Mostrar mais" expande.
@@ -198,7 +207,14 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
                                         className="pl-10 h-10 bg-background text-foreground border-border focus:ring-primary"
                                     />
                                 </div>
-                                <KanbanSort sortBy={sortBy} onSortChange={setSortBy} unattendedOnly={unattendedOnly} onUnattendedOnlyChange={setUnattendedOnly} />
+                                <KanbanSort
+                                    sortBy={sortBy}
+                                    onSortChange={setSortBy}
+                                    unattendedOnly={unattendedOnly}
+                                    onUnattendedOnlyChange={setUnattendedOnly}
+                                    unattendedFirst={unattendedFirst}
+                                    onUnattendedFirstChange={setUnattendedFirst}
+                                />
                             </div>
 
                             {columnCourses.length > 1 && (

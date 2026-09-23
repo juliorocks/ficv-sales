@@ -21,11 +21,15 @@ export function KanbanSort({
     onSortChange,
     unattendedOnly,
     onUnattendedOnlyChange,
+    unattendedFirst,
+    onUnattendedFirstChange,
 }: {
     sortBy: SortOption
     onSortChange: (option: SortOption) => void
     unattendedOnly: boolean
     onUnattendedOnlyChange: (value: boolean) => void
+    unattendedFirst: boolean
+    onUnattendedFirstChange: (value: boolean) => void
 }) {
     const options: Omit<SortOption, 'direction'>[] = [
         { key: 'stage_entry_date', label: 'Data no Estágio' },
@@ -47,7 +51,12 @@ export function KanbanSort({
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <Button variant={unattendedOnly ? "default" : "outline"} size="icon" className="flex-shrink-0" title={unattendedOnly ? "Filtro: só não atendidos" : undefined}>
+                <Button
+                    variant={unattendedOnly ? "default" : "outline"}
+                    size="icon"
+                    className="flex-shrink-0"
+                    title={unattendedOnly ? "Filtro: só não atendidos" : undefined}
+                >
                     <ListFilter className="h-4 w-4" />
                     <span className="sr-only">Ordenar e filtrar</span>
                 </Button>
@@ -73,6 +82,13 @@ export function KanbanSort({
                 ))}
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel>Filtrar</DropdownMenuLabel>
+                <DropdownMenuCheckboxItem
+                    checked={unattendedFirst}
+                    onCheckedChange={onUnattendedFirstChange}
+                    onSelect={(e) => e.preventDefault()}
+                >
+                    Não atendidos primeiro
+                </DropdownMenuCheckboxItem>
                 <DropdownMenuCheckboxItem
                     checked={unattendedOnly}
                     onCheckedChange={onUnattendedOnlyChange}
