@@ -413,15 +413,28 @@ export const AgentAdmin: React.FC<AgentAdminProps> = ({ isAdmin, analysisData, s
         return list;
     }, [profiles, selectedAgents, selectedTeamId]);
 
-    // Compute per-agent stats from analysisData
+    // Compute per-agent stats from analysisData. `total` = todas as conversas (mesma
+    // contagem do card "Total Atendimentos" no topo); `score` = média só das aprovadas
+    // com nota real (mesmo critério de `validData` em App.tsx). Antes o Score IA usava
+    // a mesma soma bruta do total, incluindo invalidadas/sem análise (final_score 0),
+    // o que puxava a média pra baixo e divergia dos outros gráficos (ex: 5.8 aqui vs.
+    // 7.7 na Evolução Mensal, pro mesmo agente/período).
     const agentStats = React.useMemo(() => {
         const map: Record<string, { score: number; total: number }> = {};
+        const validSum: Record<string, { sum: number; count: number }> = {};
         analysisData.forEach(d => {
             if (!map[d.agent]) map[d.agent] = { score: 0, total: 0 };
-            map[d.agent].score += d.finalScore;
             map[d.agent].total++;
+            if (d.status === 'approved' && d.finalScore > 0) {
+                if (!validSum[d.agent]) validSum[d.agent] = { sum: 0, count: 0 };
+                validSum[d.agent].sum += d.finalScore;
+                validSum[d.agent].count++;
+            }
         });
-        Object.keys(map).forEach(k => { map[k].score = map[k].score / map[k].total; });
+        Object.keys(map).forEach(k => {
+            const v = validSum[k];
+            map[k].score = v && v.count > 0 ? v.sum / v.count : 0;
+        });
         return map;
     }, [analysisData]);
 
