@@ -1552,7 +1552,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {/* Agent Admin View (Admin) */}
                 {activeTab === 'agents' && profile?.role === 'admin' && (
                     <div className="animate-fade-in">
-                        <AgentAdmin isAdmin={profile?.role === 'admin'} analysisData={filteredData} />
+                        <AgentAdmin isAdmin={profile?.role === 'admin'} analysisData={filteredData} selectedAgents={selectedAgents} selectedTeamId={selectedTeamId} />
                     </div>
                 )}
 

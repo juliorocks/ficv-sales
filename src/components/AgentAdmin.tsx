@@ -393,9 +393,12 @@ interface AgentAdminProps {
     isAdmin: boolean;
     analysisData: any[];
     selectedAgents?: string[];
+    // equipe do SETOR (agent_profiles.team_id) selecionada no filtro "Comercial" do topo —
+    // sem isso os cards mostravam todo mundo mesmo com uma equipe escolhida.
+    selectedTeamId?: string | null;
 }
 
-export const AgentAdmin: React.FC<AgentAdminProps> = ({ isAdmin, analysisData, selectedAgents }) => {
+export const AgentAdmin: React.FC<AgentAdminProps> = ({ isAdmin, analysisData, selectedAgents, selectedTeamId }) => {
     const { profiles, loading, refresh } = useAgentProfiles();
     const [reportTarget, setReportTarget] = useState<AgentProfileData | null>(null);
     const [addingName, setAddingName] = useState('');
@@ -403,10 +406,12 @@ export const AgentAdmin: React.FC<AgentAdminProps> = ({ isAdmin, analysisData, s
     const [adding, setAdding] = useState(false);
 
     const displayedProfiles = React.useMemo(() => {
+        let list = profiles;
+        if (selectedTeamId) list = list.filter(p => p.team_id === selectedTeamId);
         const showAll = !selectedAgents || selectedAgents.length === 0 || selectedAgents.includes('all');
-        if (showAll) return profiles;
-        return profiles.filter(p => selectedAgents.includes(p.name));
-    }, [profiles, selectedAgents]);
+        if (!showAll) list = list.filter(p => selectedAgents.includes(p.name));
+        return list;
+    }, [profiles, selectedAgents, selectedTeamId]);
 
     // Compute per-agent stats from analysisData
     const agentStats = React.useMemo(() => {
