@@ -43,7 +43,11 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all' }: { searchTerm
                 supabase.from('stages').select('id, name'), 20000, "Carregar as etapas",
             );
             if (stErr) throw stErr
-            const closedStage = (name: string) => /finaliz|encerr|conclu|perdid|matricul/i.test(name)
+            // Matriculado NÃO é "teto baixo" — 2026-09-23: sync automático (Sponte) passou a
+            // mover ~370 leads pra lá de uma vez, e é exatamente a etapa que o usuário quer
+            // ver completa (métrica de vendas ganhas). Só Finalizado/Perdido/Encerrado (lixo
+            // arquivado, cresce sem parar) ficam com teto menor.
+            const closedStage = (name: string) => /finaliz|encerr|conclu|perdid/i.test(name)
             const parts = await Promise.all((stgs ?? []).map(async (s: { id: number; name: string }) => {
                 const { data, error } = await withTimeout(
                     supabase
