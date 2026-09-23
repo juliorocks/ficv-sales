@@ -56,6 +56,7 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
     const debouncedLocalSearchTerm = useDebounce(localSearchTerm, 300);
     const [visibleCount, setVisibleCount] = useState(50);
     const [courseFilter, setCourseFilter] = useState<number | null>(null);
+    const [unattendedOnly, setUnattendedOnly] = useState(false);
     const [sortBy, setSortBy] = useState<SortOption>({
         key: 'stage_entry_date',
         label: 'Data no Estágio',
@@ -71,6 +72,7 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
     const locallyFilteredLeads = useMemo(() => {
         let r = leads;
         if (courseFilter != null) r = r.filter(l => l.curso_interesse === courseFilter);
+        if (unattendedOnly) r = r.filter(l => !l.assigned_to_id);
         const term = debouncedLocalSearchTerm.trim().toLowerCase();
         if (term) {
             r = r.filter(lead =>
@@ -80,7 +82,7 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
             );
         }
         return r;
-    }, [leads, debouncedLocalSearchTerm, courseFilter]);
+    }, [leads, debouncedLocalSearchTerm, courseFilter, unattendedOnly]);
 
     const sortedLeads = useMemo(() => {
         const tempOrder: { [key: string]: number } = { 'quente': 3, 'morno': 2, 'frio': 1 };
@@ -196,7 +198,7 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
                                         className="pl-10 h-10 bg-background text-foreground border-border focus:ring-primary"
                                     />
                                 </div>
-                                <KanbanSort sortBy={sortBy} onSortChange={setSortBy} />
+                                <KanbanSort sortBy={sortBy} onSortChange={setSortBy} unattendedOnly={unattendedOnly} onUnattendedOnlyChange={setUnattendedOnly} />
                             </div>
 
                             {columnCourses.length > 1 && (
