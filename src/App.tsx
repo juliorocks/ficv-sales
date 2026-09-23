@@ -1566,7 +1566,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {/* Agent Performance View (Agent) */}
                 {activeTab === 'performance' && profile?.role === 'agent' && (
                     <div className="animate-fade-in max-w-6xl mx-auto py-6">
-                        <AgentProfile name={profile.full_name} data={analysisData} />
+                        <AgentProfile name={profile.full_name} data={analysisData} photoUrl={agentProfilesList.find(p => p.name === profile.full_name)?.photo_url} />
                     </div>
                 )}
 

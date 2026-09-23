@@ -5,22 +5,37 @@ import { ConversationAnalysis } from '../utils/csvProcessor';
 interface AgentProfileProps {
     name: string;
     data: ConversationAnalysis[];
+    photoUrl?: string | null;
 }
 
-export const AgentProfile: React.FC<AgentProfileProps> = ({ name, data }) => {
+export const AgentProfile: React.FC<AgentProfileProps> = ({ name, data, photoUrl }) => {
+    // `agentData` (todas as conversas) só alimenta o badge "Atendimentos" — mesma
+    // definição usada no resto do dashboard. Score e tentativas de fechamento usam só
+    // `validData` (aprovadas com nota real); antes a média somava também as invalidadas/
+    // nunca analisadas (final_score 0), puxando o Score pra baixo e divergindo de
+    // Evolução Mensal e da aba Agentes (ver [[project_score_ia_valid_only]]).
     const agentData = data.filter(d => d.agent === name);
-    const avgScore = agentData.length > 0
-        ? (agentData.reduce((sum, d) => sum + d.finalScore, 0) / agentData.length).toFixed(1)
+    const validData = agentData.filter(d => d.status === 'approved' && d.finalScore > 0);
+    const avgScore = validData.length > 0
+        ? (validData.reduce((sum, d) => sum + d.finalScore, 0) / validData.length).toFixed(1)
         : '0.0';
 
-    const closingAttempts = agentData.filter(d => d.closingAttempt).length;
+    const closingAttempts = validData.filter(d => d.closingAttempt).length;
 
     return (
         <div className="space-y-8 animate-fade-in">
             <div className="flex items-center gap-6 glass-card p-8">
-                <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-primary to-accent flex items-center justify-center text-3xl font-bold shadow-lg shadow-primary/20">
-                    {name.charAt(0)}
-                </div>
+                {photoUrl ? (
+                    <img
+                        src={photoUrl}
+                        alt={name}
+                        className="w-24 h-24 rounded-2xl object-cover shadow-lg shadow-primary/20"
+                    />
+                ) : (
+                    <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-primary to-accent flex items-center justify-center text-3xl font-bold shadow-lg shadow-primary/20">
+                        {name.charAt(0)}
+                    </div>
+                )}
                 <div>
                     <h2 className="text-4xl font-bold font-display text-[var(--text-main)]">{name}</h2>
                     <div className="flex gap-4 mt-2">
@@ -41,7 +56,7 @@ export const AgentProfile: React.FC<AgentProfileProps> = ({ name, data }) => {
                         <span className="text-sm font-medium">Tentativas de Fechamento</span>
                     </div>
                     <p className="text-3xl font-bold font-display text-[var(--text-main)]">{closingAttempts}</p>
-                    <p className="text-xs text-[var(--text-muted)] mt-1">Taxa: {agentData.length > 0 ? ((closingAttempts / agentData.length) * 100).toFixed(1) : 0}%</p>
+                    <p className="text-xs text-[var(--text-muted)] mt-1">Taxa: {validData.length > 0 ? ((closingAttempts / validData.length) * 100).toFixed(1) : 0}%</p>
                 </div>
 
                 <div className="glass-card p-6">
