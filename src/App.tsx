@@ -1566,7 +1566,12 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {/* Agent Performance View (Agent) */}
                 {activeTab === 'performance' && profile?.role === 'agent' && (
                     <div className="animate-fade-in max-w-6xl mx-auto py-6">
-                        <AgentProfile name={profile.full_name} data={analysisData} photoUrl={agentProfilesList.find(p => p.name === profile.full_name)?.photo_url} />
+                        {/* profile.avatar_url é a foto que a própria agente subiu em "Meu Perfil" (self-service,
+                            projeto Supabase atual) — é a mesma que já aparece no avatar da sidebar. O fallback pra
+                            agent_profiles.photo_url só entra se ela nunca fez upload; esse campo é uma curadoria
+                            antiga feita por admin e, pra pelo menos Thayanne, ainda aponta pro Supabase de ANTES
+                            da migração (domínio znypfroagfwohqeyxyqv, não jsswkmybkgoxpncnxgdd). */}
+                        <AgentProfile name={profile.full_name} data={analysisData} photoUrl={profile.avatar_url ?? agentProfilesList.find(p => p.name === profile.full_name)?.photo_url} />
                     </div>
                 )}
 
