@@ -15,21 +15,31 @@ type SortOption = {
     direction: 'asc' | 'desc'
 }
 
+// Rótulos do filtro de prioridade variam por coluna — ver comentário em
+// KanbanColumn.tsx sobre por que "sem atendente" só faz sentido na Entrada.
+const PRIORITY_LABELS = {
+    unattended: { first: 'Não atendidos primeiro', only: 'Somente não atendidos', title: 'Filtro: só não atendidos' },
+    waitingReply: { first: 'Esperando Resposta primeiro', only: 'Somente Esperando Resposta', title: 'Filtro: só esperando resposta' },
+} as const;
+
 export function KanbanSort({
     sortBy,
     onSortChange,
-    waitingReplyOnly,
-    onWaitingReplyOnlyChange,
-    waitingReplyFirst,
-    onWaitingReplyFirstChange,
+    mode,
+    priorityOnly,
+    onPriorityOnlyChange,
+    priorityFirst,
+    onPriorityFirstChange,
 }: {
     sortBy: SortOption
     onSortChange: (option: SortOption) => void
-    waitingReplyOnly: boolean
-    onWaitingReplyOnlyChange: (value: boolean) => void
-    waitingReplyFirst: boolean
-    onWaitingReplyFirstChange: (value: boolean) => void
+    mode: keyof typeof PRIORITY_LABELS
+    priorityOnly: boolean
+    onPriorityOnlyChange: (value: boolean) => void
+    priorityFirst: boolean
+    onPriorityFirstChange: (value: boolean) => void
 }) {
+    const labels = PRIORITY_LABELS[mode];
     const options: Omit<SortOption, 'direction'>[] = [
         { key: 'updated_at', label: 'Última Atividade' },
         { key: 'stage_entry_date', label: 'Data no Estágio' },
@@ -52,10 +62,10 @@ export function KanbanSort({
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
                 <Button
-                    variant={waitingReplyOnly ? "default" : "outline"}
+                    variant={priorityOnly ? "default" : "outline"}
                     size="icon"
                     className="flex-shrink-0"
-                    title={waitingReplyOnly ? "Filtro: só esperando resposta" : undefined}
+                    title={priorityOnly ? labels.title : undefined}
                 >
                     <ListFilter className="h-4 w-4" />
                     <span className="sr-only">Ordenar e filtrar</span>
@@ -90,19 +100,19 @@ export function KanbanSort({
                     funcionam. */}
                 <DropdownMenuItem
                     onSelect={(e) => e.preventDefault()}
-                    onClick={() => onWaitingReplyFirstChange(!waitingReplyFirst)}
+                    onClick={() => onPriorityFirstChange(!priorityFirst)}
                     className="flex justify-between items-center cursor-pointer"
                 >
-                    <span>Esperando Resposta primeiro</span>
-                    {waitingReplyFirst && <Check className="ml-2 h-4 w-4" />}
+                    <span>{labels.first}</span>
+                    {priorityFirst && <Check className="ml-2 h-4 w-4" />}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                     onSelect={(e) => e.preventDefault()}
-                    onClick={() => onWaitingReplyOnlyChange(!waitingReplyOnly)}
+                    onClick={() => onPriorityOnlyChange(!priorityOnly)}
                     className="flex justify-between items-center cursor-pointer"
                 >
-                    <span>Somente Esperando Resposta</span>
-                    {waitingReplyOnly && <Check className="ml-2 h-4 w-4" />}
+                    <span>{labels.only}</span>
+                    {priorityOnly && <Check className="ml-2 h-4 w-4" />}
                 </DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>

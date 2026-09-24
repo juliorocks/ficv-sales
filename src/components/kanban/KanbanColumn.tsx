@@ -56,13 +56,18 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
     const debouncedLocalSearchTerm = useDebounce(localSearchTerm, 300);
     const [visibleCount, setVisibleCount] = useState(50);
     const [courseFilter, setCourseFilter] = useState<number | null>(null);
-    // "Esperando Resposta" = mensagem do cliente sem resposta nossa ainda (mesmo dado
-    // do badge piscante do card, via pendingByLead/lead_pending_replies) — não
-    // "sem atendente", que não faz sentido em colunas como Em Contato (todo lead ali
-    // já foi atendido ao menos uma vez; renomeado 2026-09-24, pedido do usuário).
+    // O filtro de prioridade da coluna tem duas variantes, mutuamente exclusivas por
+    // coluna (2026-09-24: a tentativa de unificar as duas numa só quebrou a Entrada):
+    // - Entrada: "sem atendente" (assigned_to_id nulo) — é onde o botão "Atender"
+    //   existe (ver LeadCard.tsx); nas outras colunas todo lead já foi atendido ao
+    //   menos uma vez, então "sem atendente" ali não sinaliza nada de útil.
+    // - Demais colunas (ex. Em Contato): "esperando resposta" — mensagem do cliente
+    //   sem resposta nossa ainda (mesmo dado do badge piscante do card, via
+    //   pendingByLead/lead_pending_replies).
+    const isEntradaStage = stage.name.toLowerCase().includes('entrada');
+    const [unattendedOnly, setUnattendedOnly] = useState(false);
+    const [unattendedFirst, setUnattendedFirst] = useState(true);
     const [waitingReplyOnly, setWaitingReplyOnly] = useState(false);
-    // Leva quem está esperando resposta pro topo, sem esconder o resto — ligado por
-    // padrão pra quem chega na coluna já ver primeiro quem precisa de atenção agora.
     const [waitingReplyFirst, setWaitingReplyFirst] = useState(true);
     // Última atividade (bumpa a cada mensagem, nossa ou do cliente — ver
     // widechat-webhook) — não "Data no Estágio": um lead que só ficou parado na
@@ -82,11 +87,14 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
     }, [leads, courses]);
 
     const isWaitingReply = (leadId: number) => (pendingByLead?.get(leadId) ?? 0) > 0;
+    const isPriorityLead = (lead: Lead) => isEntradaStage ? !lead.assigned_to_id : isWaitingReply(lead.id);
+    const priorityOnly = isEntradaStage ? unattendedOnly : waitingReplyOnly;
+    const priorityFirst = isEntradaStage ? unattendedFirst : waitingReplyFirst;
 
     const locallyFilteredLeads = useMemo(() => {
         let r = leads;
         if (courseFilter != null) r = r.filter(l => l.curso_interesse === courseFilter);
-        if (waitingReplyOnly) r = r.filter(l => isWaitingReply(l.id));
+        if (priorityOnly) r = r.filter(isPriorityLead);
         const term = debouncedLocalSearchTerm.trim().toLowerCase();
         if (term) {
             r = r.filter(lead =>
@@ -96,16 +104,16 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
             );
         }
         return r;
-    }, [leads, debouncedLocalSearchTerm, courseFilter, waitingReplyOnly, pendingByLead]);
+    }, [leads, debouncedLocalSearchTerm, courseFilter, priorityOnly, isEntradaStage, pendingByLead]);
 
     const sortedLeads = useMemo(() => {
         const tempOrder: { [key: string]: number } = { 'quente': 3, 'morno': 2, 'frio': 1 };
 
         const sorted = [...locallyFilteredLeads].sort((a, b) => {
-            if (waitingReplyFirst) {
-                const aWaiting = isWaitingReply(a.id);
-                const bWaiting = isWaitingReply(b.id);
-                if (aWaiting !== bWaiting) return aWaiting ? -1 : 1;
+            if (priorityFirst) {
+                const aPriority = isPriorityLead(a);
+                const bPriority = isPriorityLead(b);
+                if (aPriority !== bPriority) return aPriority ? -1 : 1;
             }
 
             const key = sortBy.key as keyof Lead;
@@ -137,7 +145,7 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
         });
 
         return sorted;
-    }, [locallyFilteredLeads, sortBy, waitingReplyFirst, pendingByLead]);
+    }, [locallyFilteredLeads, sortBy, priorityFirst, isEntradaStage, pendingByLead]);
 
     // Renderiza a coluna em blocos: cada LeadCard monta hooks pesados, então
     // pintar centenas de uma vez trava o browser. "Mostrar mais" expande.
@@ -221,10 +229,11 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
                                 <KanbanSort
                                     sortBy={sortBy}
                                     onSortChange={setSortBy}
-                                    waitingReplyOnly={waitingReplyOnly}
-                                    onWaitingReplyOnlyChange={setWaitingReplyOnly}
-                                    waitingReplyFirst={waitingReplyFirst}
-                                    onWaitingReplyFirstChange={setWaitingReplyFirst}
+                                    mode={isEntradaStage ? 'unattended' : 'waitingReply'}
+                                    priorityOnly={priorityOnly}
+                                    onPriorityOnlyChange={isEntradaStage ? setUnattendedOnly : setWaitingReplyOnly}
+                                    priorityFirst={priorityFirst}
+                                    onPriorityFirstChange={isEntradaStage ? setUnattendedFirst : setWaitingReplyFirst}
                                 />
                             </div>
 
