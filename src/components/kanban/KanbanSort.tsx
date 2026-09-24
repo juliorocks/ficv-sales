@@ -1,10 +1,9 @@
 import { Button } from "@/components/ui/button"
-import { ArrowDown, ArrowUp, ListFilter } from "lucide-react"
+import { ArrowDown, ArrowUp, Check, ListFilter } from "lucide-react"
 import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
-    DropdownMenuCheckboxItem,
     DropdownMenuTrigger,
     DropdownMenuLabel,
     DropdownMenuSeparator,
@@ -82,20 +81,28 @@ export function KanbanSort({
                 ))}
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel>Filtrar</DropdownMenuLabel>
-                <DropdownMenuCheckboxItem
-                    checked={unattendedFirst}
-                    onCheckedChange={onUnattendedFirstChange}
+                {/* DropdownMenuItem comum + onClick, não DropdownMenuCheckboxItem — o
+                    mecanismo checked/onCheckedChange do Radix não estava reagindo ao
+                    clique de forma confiável junto com onSelect preventDefault (usado
+                    pra manter o menu aberto ao marcar/desmarcar). onClick é o mesmo
+                    padrão já usado nos outros itens deste menu (Editar/Excluir), que
+                    funcionam. */}
+                <DropdownMenuItem
                     onSelect={(e) => e.preventDefault()}
+                    onClick={() => onUnattendedFirstChange(!unattendedFirst)}
+                    className="flex justify-between items-center cursor-pointer"
                 >
-                    Não atendidos primeiro
-                </DropdownMenuCheckboxItem>
-                <DropdownMenuCheckboxItem
-                    checked={unattendedOnly}
-                    onCheckedChange={onUnattendedOnlyChange}
+                    <span>Não atendidos primeiro</span>
+                    {unattendedFirst && <Check className="ml-2 h-4 w-4" />}
+                </DropdownMenuItem>
+                <DropdownMenuItem
                     onSelect={(e) => e.preventDefault()}
+                    onClick={() => onUnattendedOnlyChange(!unattendedOnly)}
+                    className="flex justify-between items-center cursor-pointer"
                 >
-                    Somente não atendidos
-                </DropdownMenuCheckboxItem>
+                    <span>Somente não atendidos</span>
+                    {unattendedOnly && <Check className="ml-2 h-4 w-4" />}
+                </DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>
     )
