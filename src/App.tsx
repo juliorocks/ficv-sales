@@ -508,13 +508,26 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
 
     // Lista de agentes/admins pro filtro "Atendente" do Kanban (leads.assigned_to_id
     // -> profiles.id, diferente do agentTeamMap acima que é sobre agent_profiles/nome).
-    const [kanbanAgentsList, setKanbanAgentsList] = useState<{ id: string; full_name: string }[]>([]);
+    // team_id é uma coluna PRÓPRIA de `profiles` (migration 20260924190000), desacoplada
+    // de `agent_team` (roster do webhook) e de `agent_profiles.team_id` (métricas de
+    // outra identidade de agente, sem FK pra profiles) — só serve pra este filtro.
+    const [kanbanAgentsList, setKanbanAgentsList] = useState<{ id: string; full_name: string; team_id: string | null }[]>([]);
     useEffect(() => {
         (async () => {
-            const { data } = await supabase.from('profiles').select('id, full_name').in('role', ['admin', 'agent']).order('full_name');
+            const { data } = await supabase.from('profiles').select('id, full_name, team_id').in('role', ['admin', 'agent']).order('full_name');
             setKanbanAgentsList((data ?? []).filter((p: any) => p.full_name));
         })();
     }, []);
+    // Filtro de Departamento do Kanban — narrows a lista de Atendentes pra só quem é
+    // daquele departamento (pedido explícito do usuário 2026-09-24: "quero filtrar por
+    // departamentos e que fiquem apenas os atendentes ligados ao departamento
+    // selecionado"). Trocar de departamento limpa o atendente selecionado, pra não
+    // ficar um filtro de agente de outro departamento escondido/inválido.
+    const [kanbanTeamId, setKanbanTeamId] = useState<string | null>(null);
+    const kanbanAgentsInTeam = useMemo(
+        () => kanbanTeamId ? kanbanAgentsList.filter(a => a.team_id === kanbanTeamId) : kanbanAgentsList,
+        [kanbanAgentsList, kanbanTeamId]
+    );
 
     // Filter results
     const filteredData = useMemo(() => {
@@ -1008,6 +1021,13 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                         className="h-10 w-64 pl-10 pr-4 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] text-sm text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm"
                                     />
                                 </div>
+                                {/* Filtra a lista de Atendentes (e, sem atendente específico
+                                    escolhido, o funil inteiro) por departamento */}
+                                <TeamFilter
+                                    selectedTeamId={kanbanTeamId}
+                                    onTeamChange={(teamId) => { setKanbanTeamId(teamId); setKanbanAssignee('all') }}
+                                    label="Departamento"
+                                />
                                 {/* Filtra o funil inteiro (todas as colunas) por atendente responsável */}
                                 <AutoWidthSelect
                                     label=""
@@ -1016,7 +1036,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                     placeholder="Todos os Atendentes"
                                     options={[
                                         { value: 'unassigned', label: 'Sem atendente' },
-                                        ...kanbanAgentsList.map(a => ({ value: a.id, label: a.full_name })),
+                                        ...kanbanAgentsInTeam.map(a => ({ value: a.id, label: a.full_name })),
                                     ]}
                                 />
                                 {/* Filtra o funil por período de entrada no funil (data_entrada) */}
@@ -1781,7 +1801,12 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                     só as colunas do KanbanBoard rolam na horizontal. */}
                 {activeTab === 'kanban' && (
                     <div className="animate-fade-in min-w-0">
-                        <KanbanBoard searchTerm={kanbanSearch} assigneeFilter={kanbanAssignee} dateRange={kanbanDateRange} />
+                        <KanbanBoard
+                            searchTerm={kanbanSearch}
+                            assigneeFilter={kanbanAssignee}
+                            dateRange={kanbanDateRange}
+                            teamAgentIds={kanbanTeamId ? kanbanAgentsInTeam.map(a => a.id) : undefined}
+                        />
                     </div>
                 )}
 

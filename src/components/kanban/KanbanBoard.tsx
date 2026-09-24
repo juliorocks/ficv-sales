@@ -11,7 +11,7 @@ import { AddStageForm } from "./AddStageForm"
 import { useAuth } from "@/hooks/use-auth"
 import { withTimeout } from "@/utils/withTimeout"
 
-export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange }: { searchTerm: string; assigneeFilter?: string; dateRange?: { start: string; end: string } }): JSX.Element {
+export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, teamAgentIds }: { searchTerm: string; assigneeFilter?: string; dateRange?: { start: string; end: string }; teamAgentIds?: string[] }): JSX.Element {
     const queryClient = useQueryClient()
     const { user, isLoading: isAuthLoading } = useAuth()
     const [columns, setColumns] = useState<Record<string, Lead[]>>({})
@@ -165,6 +165,11 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange }: {
             out = out.filter(lead => !lead.assigned_to_id);
         } else if (assigneeFilter && assigneeFilter !== 'all') {
             out = out.filter(lead => lead.assigned_to_id === assigneeFilter || !lead.assigned_to_id);
+        } else if (teamAgentIds && teamAgentIds.length > 0) {
+            // Departamento selecionado, sem atendente específico — mesma filosofia do
+            // filtro de atendente acima: mantém os SEM atendente visíveis (fila
+            // compartilhada de Entrada), só esconde quem já está com outro departamento.
+            out = out.filter(lead => !lead.assigned_to_id || teamAgentIds.includes(lead.assigned_to_id));
         }
 
         const term = searchTerm.toLowerCase().trim();
@@ -177,7 +182,7 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange }: {
             });
         }
         return out;
-    }, [leads, searchTerm, assigneeFilter]);
+    }, [leads, searchTerm, assigneeFilter, teamAgentIds]);
 
     useEffect(() => {
         if (stages) {
