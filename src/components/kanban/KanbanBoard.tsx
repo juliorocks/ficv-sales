@@ -165,10 +165,16 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
             out = out.filter(lead => !lead.assigned_to_id);
         } else if (assigneeFilter && assigneeFilter !== 'all') {
             out = out.filter(lead => lead.assigned_to_id === assigneeFilter || !lead.assigned_to_id);
-        } else if (teamAgentIds && teamAgentIds.length > 0) {
+        } else if (teamAgentIds !== undefined) {
             // Departamento selecionado, sem atendente específico — mesma filosofia do
             // filtro de atendente acima: mantém os SEM atendente visíveis (fila
             // compartilhada de Entrada), só esconde quem já está com outro departamento.
+            // `teamAgentIds.length > 0` (versão anterior) tratava "departamento sem
+            // NENHUM atendente vinculado" (ex: Financeiro/Suporte Técnico/Tutoria/"Sem
+            // equipe" — nenhum profile tem esse team_id ainda) como "nenhum filtro",
+            // mostrando TUDO sem filtrar (bug real, 2026-09-24, reportado com print:
+            // esses departamentos devolviam os mesmos números de "sem filtro nenhum").
+            // Array vazio É um filtro válido — só sobra quem não tem atendente.
             out = out.filter(lead => !lead.assigned_to_id || teamAgentIds.includes(lead.assigned_to_id));
         }
 
