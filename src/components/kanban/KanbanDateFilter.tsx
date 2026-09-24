@@ -87,7 +87,7 @@ export function KanbanDateFilter({ value, onChange, isDarkMode }: KanbanDateFilt
             {isOpen && (
                 <>
                     <div className="fixed inset-0 z-[99]" onClick={() => setIsOpen(false)} />
-                    <div className="absolute top-full mt-2 left-0 w-72 bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl z-[100] overflow-hidden animate-fade-in">
+                    <div className="absolute top-full mt-2 right-0 w-72 bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl z-[100] overflow-hidden animate-fade-in">
                         <div className="p-2 border-b border-[var(--border)] grid grid-cols-3 gap-1">
                             {['today', 'week', 'month', 'year'].map(p => (
                                 <button
