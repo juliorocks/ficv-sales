@@ -18,6 +18,7 @@ export interface Lead {
     stage_id: number
     data_entrada: string
     stage_entry_date?: string | null;
+    updated_at?: string | null;
     observacoes?: string
     attachments?: string[]
     source_id?: number | null

@@ -60,7 +60,12 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange }: {
                 if (dateRange?.end) q = q.lte('data_entrada', `${dateRange.end}T23:59:59`)
                 const { data, error } = await withTimeout(
                     q
-                        .order('stage_entry_date', { ascending: false, nullsFirst: false })
+                        // updated_at (última atividade, bumpa a cada mensagem — ver
+                        // widechat-webhook) em vez de stage_entry_date: quando a etapa
+                        // excede o teto, tem que ser a mais recentemente ATIVA que
+                        // entra na janela, não a que só entrou na etapa há mais tempo
+                        // mas está parada (pedido do usuário 2026-09-24).
+                        .order('updated_at', { ascending: false, nullsFirst: false })
                         .limit(closedStage(s.name) ? 300 : 1000),
                     20000,
                     `Carregar os leads (${s.name})`,

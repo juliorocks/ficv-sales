@@ -18,19 +18,20 @@ type SortOption = {
 export function KanbanSort({
     sortBy,
     onSortChange,
-    unattendedOnly,
-    onUnattendedOnlyChange,
-    unattendedFirst,
-    onUnattendedFirstChange,
+    waitingReplyOnly,
+    onWaitingReplyOnlyChange,
+    waitingReplyFirst,
+    onWaitingReplyFirstChange,
 }: {
     sortBy: SortOption
     onSortChange: (option: SortOption) => void
-    unattendedOnly: boolean
-    onUnattendedOnlyChange: (value: boolean) => void
-    unattendedFirst: boolean
-    onUnattendedFirstChange: (value: boolean) => void
+    waitingReplyOnly: boolean
+    onWaitingReplyOnlyChange: (value: boolean) => void
+    waitingReplyFirst: boolean
+    onWaitingReplyFirstChange: (value: boolean) => void
 }) {
     const options: Omit<SortOption, 'direction'>[] = [
+        { key: 'updated_at', label: 'Última Atividade' },
         { key: 'stage_entry_date', label: 'Data no Estágio' },
         { key: 'data_entrada', label: 'Data de Entrada' },
         { key: 'nome_completo', label: 'Nome' },
@@ -51,10 +52,10 @@ export function KanbanSort({
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
                 <Button
-                    variant={unattendedOnly ? "default" : "outline"}
+                    variant={waitingReplyOnly ? "default" : "outline"}
                     size="icon"
                     className="flex-shrink-0"
-                    title={unattendedOnly ? "Filtro: só não atendidos" : undefined}
+                    title={waitingReplyOnly ? "Filtro: só esperando resposta" : undefined}
                 >
                     <ListFilter className="h-4 w-4" />
                     <span className="sr-only">Ordenar e filtrar</span>
@@ -89,19 +90,19 @@ export function KanbanSort({
                     funcionam. */}
                 <DropdownMenuItem
                     onSelect={(e) => e.preventDefault()}
-                    onClick={() => onUnattendedFirstChange(!unattendedFirst)}
+                    onClick={() => onWaitingReplyFirstChange(!waitingReplyFirst)}
                     className="flex justify-between items-center cursor-pointer"
                 >
-                    <span>Não atendidos primeiro</span>
-                    {unattendedFirst && <Check className="ml-2 h-4 w-4" />}
+                    <span>Esperando Resposta primeiro</span>
+                    {waitingReplyFirst && <Check className="ml-2 h-4 w-4" />}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                     onSelect={(e) => e.preventDefault()}
-                    onClick={() => onUnattendedOnlyChange(!unattendedOnly)}
+                    onClick={() => onWaitingReplyOnlyChange(!waitingReplyOnly)}
                     className="flex justify-between items-center cursor-pointer"
                 >
-                    <span>Somente não atendidos</span>
-                    {unattendedOnly && <Check className="ml-2 h-4 w-4" />}
+                    <span>Somente Esperando Resposta</span>
+                    {waitingReplyOnly && <Check className="ml-2 h-4 w-4" />}
                 </DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>
