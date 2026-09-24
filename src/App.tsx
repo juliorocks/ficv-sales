@@ -59,6 +59,7 @@ import confetti from 'canvas-confetti';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 import { KanbanBoard } from './components/kanban/KanbanBoard';
+import { KanbanDateFilter } from './components/kanban/KanbanDateFilter';
 import { CreateLeadFab } from './components/kanban/CreateLeadFab';
 import { CourseManagement } from './components/admin/CourseManagement';
 import { LeadSourceManagement } from './components/admin/LeadSourceManagement';
@@ -150,6 +151,11 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     const [refreshProgress, setRefreshProgress] = useState({ current: 0, total: 0 });
     const [kanbanSearch, setKanbanSearch] = useState("");
     const [kanbanAssignee, setKanbanAssignee] = useState("all"); // 'all' | 'unassigned' | profile.id — filtra o Kanban por atendente, em todas as colunas
+    // Filtro de período PRÓPRIO do Kanban (data_entrada) — pedido explícito do usuário
+    // 2026-09-24: a barra de Data lá em cima (dateRange/setDateRange) pertence à Visão
+    // Geral (filtra análises de atendimento por outra data) e nunca filtrou leads, mesmo
+    // aparecendo em cima do funil por acidente de layout.
+    const [kanbanDateRange, setKanbanDateRange] = useState<{ start: string; end: string }>({ start: '', end: '' });
     const [historyAgentFilter, setHistoryAgentFilter] = useState<string | null>(null); // agente clicado em "Performance do Período" — pré-filtra Relatórios (Admin)
     const kanbanAssigneeInit = useRef(false); // só aplica o default (perfil logado) uma vez — não sobrescreve se o agente trocar o filtro depois
 
@@ -1013,10 +1019,17 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                         ...kanbanAgentsList.map(a => ({ value: a.id, label: a.full_name })),
                                     ]}
                                 />
+                                {/* Filtra o funil por período de entrada no funil (data_entrada) */}
+                                <KanbanDateFilter value={kanbanDateRange} onChange={setKanbanDateRange} isDarkMode={isDarkMode} />
                             </div>
                         )}
 
-                        {!isTvMode && (
+                        {/* Barra de Agentes/Equipe/Cursos/Data — pertence à Visão Geral (filtra
+                            análises de atendimento), nunca teve relação com leads. Escondida no
+                            Kanban (2026-09-24) pra não parecer que filtra o funil sem filtrar de
+                            verdade — o Kanban tem seus próprios filtros (Atendentes, Data, curso
+                            por coluna) acima e dentro de cada coluna. */}
+                        {!isTvMode && activeTab !== 'kanban' && (
                             <div className="flex gap-3 items-center mt-2 filter-container relative">
                                 {/* Agent Multiselect */}
                                 <div className="relative">
@@ -1768,7 +1781,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                     só as colunas do KanbanBoard rolam na horizontal. */}
                 {activeTab === 'kanban' && (
                     <div className="animate-fade-in min-w-0">
-                        <KanbanBoard searchTerm={kanbanSearch} assigneeFilter={kanbanAssignee} />
+                        <KanbanBoard searchTerm={kanbanSearch} assigneeFilter={kanbanAssignee} dateRange={kanbanDateRange} />
                     </div>
                 )}
 

@@ -11,7 +11,7 @@ import { AddStageForm } from "./AddStageForm"
 import { useAuth } from "@/hooks/use-auth"
 import { withTimeout } from "@/utils/withTimeout"
 
-export function KanbanBoard({ searchTerm, assigneeFilter = 'all' }: { searchTerm: string; assigneeFilter?: string }): JSX.Element {
+export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange }: { searchTerm: string; assigneeFilter?: string; dateRange?: { start: string; end: string } }): JSX.Element {
     const queryClient = useQueryClient()
     const { user, isLoading: isAuthLoading } = useAuth()
     const [columns, setColumns] = useState<Record<string, Lead[]>>({})
@@ -29,8 +29,11 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all' }: { searchTerm
         retry: 2,
     })
 
+    // Filtro de período do próprio Kanban (por data de ENTRADA no funil, data_entrada —
+    // não confundir com o filtro de Data da Visão Geral, que filtra análises de
+    // atendimento por outra data e nunca teve relação com leads).
     const { data: leads, isLoading: isLoadingLeads, error: leadsError, refetch: refetchLeads } = useQuery<Lead[]>({
-        queryKey: ['leads'],
+        queryKey: ['leads', dateRange?.start ?? '', dateRange?.end ?? ''],
         queryFn: async () => {
             // Janela POR ETAPA (não 500 globais por data_entrada): com o teto global, um lead
             // que entrou no funil há alguns dias mas está em atendimento HOJE caía fora da
@@ -49,11 +52,14 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all' }: { searchTerm
             // arquivado, cresce sem parar) ficam com teto menor.
             const closedStage = (name: string) => /finaliz|encerr|conclu|perdid/i.test(name)
             const parts = await Promise.all((stgs ?? []).map(async (s: { id: number; name: string }) => {
+                let q = supabase
+                    .from('leads')
+                    .select('*')
+                    .eq('stage_id', s.id)
+                if (dateRange?.start) q = q.gte('data_entrada', dateRange.start)
+                if (dateRange?.end) q = q.lte('data_entrada', `${dateRange.end}T23:59:59`)
                 const { data, error } = await withTimeout(
-                    supabase
-                        .from('leads')
-                        .select('*')
-                        .eq('stage_id', s.id)
+                    q
                         .order('stage_entry_date', { ascending: false, nullsFirst: false })
                         .limit(closedStage(s.name) ? 300 : 1000),
                     20000,
