@@ -126,7 +126,9 @@ export function IntegrationsSettings({ onNavigate }: { onNavigate?: (tab: string
                                 <div key={f.key} className="space-y-1.5">
                                     <div className="flex items-center justify-between gap-2">
                                         <Label className={fieldLabel}>{f.label}{f.optional ? "" : " *"}</Label>
-                                        <SourceBadge f={f} />
+                                        {drafts[f.key] !== undefined && drafts[f.key].trim() !== (f.plain ? (f.value ?? "") : "")
+                                            ? <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-500">Não salvo — clique em Salvar</span>
+                                            : <SourceBadge f={f} />}
                                     </div>
                                     <div className="flex gap-2">
                                         <Input
