@@ -83,6 +83,7 @@ interface WideChatHistoryProps {
     leadId: number | string
     telefone?: string | null // usado p/ achar conversas ligadas a outro registro do mesmo lead
     leadName?: string // p/ preencher {{NOME}} nos templates
+    scrollClassName?: string // altura da área de mensagens (a visão Atendimentos usa a tela toda)
 }
 
 // O WideChat mandava a hora em horário de Brasília SEM fuso e o webhook gravava
@@ -155,7 +156,7 @@ interface WideChatMessage {
 // emojis mais usados no atendimento — sem dependência de lib
 const EMOJIS = "😀 😅 😊 🙂 😉 😍 🥰 🤩 😎 🤔 🙌 👏 👍 🙏 💪 ✅ ❌ ⚠️ ℹ️ 📌 📎 📄 📅 ⏰ 💰 💸 🎓 📚 ✏️ 📝 📞 📲 💬 ✨ 🎉 🔥 ❤️ 🧡 💛 💚 💙 💜 🤝 👋 😢 😔 🥳".split(" ")
 
-export function WideChatHistory({ widechatContactId, leadId, telefone, leadName }: WideChatHistoryProps) {
+export function WideChatHistory({ widechatContactId, leadId, telefone, leadName, scrollClassName }: WideChatHistoryProps) {
     const queryClient = useQueryClient()
     const { user } = useAuth()
     const scrollRef = useRef<HTMLDivElement>(null)
@@ -938,7 +939,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                 </Alert>
             )}
             {/* área de conversa sempre em tema claro — legibilidade acima de tudo */}
-            <ScrollArea className="h-[400px] sm:h-[58vh] w-full p-4 bg-[#eef1f5]">
+            <ScrollArea className={`${scrollClassName ?? "h-[400px] sm:h-[58vh]"} w-full p-4 bg-[#eef1f5]`}>
                 {!messages || messages.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-slate-400">
                         <MessageSquare className="h-8 w-8 mb-2" />

@@ -75,6 +75,7 @@ import { AiAgentSettings } from './components/admin/AiAgentSettings';
 import { VivaConnectSettings } from './components/admin/VivaConnectSettings';
 import { IntegrationsSettings } from './components/admin/IntegrationsSettings';
 import { SecretariaBoard } from './components/tickets/SecretariaBoard';
+import { AtendimentosView } from './components/kanban/AtendimentosView';
 import { TicketQueuesSettings } from './components/admin/TicketQueuesSettings';
 import { TutorVirtualSettings } from './components/admin/TutorVirtualSettings';
 import { UserWidechatConfig } from './components/admin/UserWidechatConfig';
@@ -160,6 +161,11 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [refreshProgress, setRefreshProgress] = useState({ current: 0, total: 0 });
     const [kanbanSearch, setKanbanSearch] = useState("");
+    // Funil de Leads: quadro (Kanban) ou caixa de entrada estilo WhatsApp (Atendimentos)
+    const [kanbanView, setKanbanView] = useState<'quadro' | 'atendimentos'>(() => {
+        try { return localStorage.getItem('ficv_kanban_view') === 'atendimentos' ? 'atendimentos' : 'quadro' } catch { return 'quadro' }
+    });
+    const pickKanbanView = (v: 'quadro' | 'atendimentos') => { setKanbanView(v); try { localStorage.setItem('ficv_kanban_view', v) } catch { /* sem storage */ } };
     const [kanbanAssignee, setKanbanAssignee] = useState("all"); // 'all' | 'unassigned' | profile.id — filtra o Kanban por atendente, em todas as colunas
     // Filtro de período PRÓPRIO do Kanban (data_entrada) — pedido explícito do usuário
     // 2026-09-24: a barra de Data lá em cima (dateRange/setDateRange) pertence à Visão
@@ -1063,6 +1069,14 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                         className="h-10 w-64 pl-10 pr-4 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] text-sm text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm"
                                     />
                                 </div>
+                                <div className="flex h-10 rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-1 shadow-sm">
+                                    {(['quadro', 'atendimentos'] as const).map(v => (
+                                        <button key={v} onClick={() => pickKanbanView(v)}
+                                            className={`px-3 rounded-lg text-xs font-semibold transition-colors ${kanbanView === v ? 'bg-primary text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}>
+                                            {v === 'quadro' ? 'Quadro' : 'Atendimentos'}
+                                        </button>
+                                    ))}
+                                </div>
                                 {/* Filtra a lista de Atendentes (e, sem atendente específico
                                     escolhido, o funil inteiro) por departamento */}
                                 <TeamFilter
@@ -1876,7 +1890,12 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                     só as colunas do KanbanBoard rolam na horizontal. */}
                 {activeTab === 'kanban' && (
                     <div className="animate-fade-in min-w-0">
-                        {kanbanTeamId && kanbanTeamId === secretariaTeamId ? <SecretariaBoard /> : (
+                        {kanbanTeamId && kanbanTeamId === secretariaTeamId ? <SecretariaBoard /> : kanbanView === 'atendimentos' ? (
+                            <AtendimentosView
+                                assigneeFilter={kanbanAssignee}
+                                teamAgentIds={kanbanTeamId ? [...kanbanAgentsInTeam.map(a => a.id), ...(kanbanIsNoTeam ? ['__unassigned__'] : [])] : undefined}
+                            />
+                        ) : (
                         <KanbanBoard
                             searchTerm={kanbanSearch}
                             assigneeFilter={kanbanAssignee}
