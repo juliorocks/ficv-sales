@@ -8,6 +8,7 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../hooks/use-auth'
 import type { Ticket, TicketCategoria, TicketStatus, TicketEvaluation } from '../../types/database'
 import { TicketDetail } from './TicketDetail'
+import { TicketKanban } from './TicketKanban'
 import { AlunoHistorico } from './AlunoHistorico'
 import { Input } from '../ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
@@ -162,6 +163,10 @@ export function TicketDashboard() {
   const isAdmin = user?.role === 'admin'
 
   const [selected, setSelected] = useState<Ticket | null>(null)
+  const [view, setView] = useState<'painel' | 'kanban'>(() => {
+    try { return localStorage.getItem('ficv_tickets_view') === 'kanban' ? 'kanban' : 'painel' } catch { return 'painel' }
+  })
+  const pickView = (v: 'painel' | 'kanban') => { setView(v); try { localStorage.setItem('ficv_tickets_view', v) } catch { /* sem storage */ } }
   const [selectedAluno, setSelectedAluno] = useState<{ id: string; nome: string; email: string } | null>(null)
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState<TicketStatus | 'todos'>('todos')
@@ -246,13 +251,27 @@ export function TicketDashboard() {
           <h1 className="text-2xl font-bold text-[var(--text-main)]">Tickets de Atendimento</h1>
           <p className="text-sm text-[var(--text-muted)] mt-1">Gerencie e acompanhe todos os atendimentos</p>
         </div>
-        <button
-          onClick={() => refetch()}
-          className={`flex items-center gap-2 text-sm text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors ${isFetching ? 'animate-spin' : ''}`}
-        >
-          <RefreshCw className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-3">
+          <div className="flex rounded-lg border border-[var(--border)] p-0.5 bg-[var(--bg-card)]">
+            {(['painel', 'kanban'] as const).map(v => (
+              <button key={v} onClick={() => pickView(v)}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${view === v ? 'bg-[var(--primary)] text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}>
+                {v === 'painel' ? 'Painel' : 'Kanban'}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => refetch()}
+            className={`flex items-center gap-2 text-sm text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors ${isFetching ? 'animate-spin' : ''}`}
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
+        </div>
       </div>
+
+      {view === 'kanban' && <TicketKanban tickets={tickets} onOpen={setSelected} />}
+
+      {view === 'painel' && <>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
@@ -515,6 +534,8 @@ export function TicketDashboard() {
           </div>
         </div>
       )}
+
+      </>}
 
       {selected && <TicketDetail ticket={selected} onClose={() => setSelected(null)} />}
 
