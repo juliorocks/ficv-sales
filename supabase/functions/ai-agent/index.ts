@@ -13,6 +13,7 @@
 // Quem chama em produção (futuro vivaconnect-webhook) usa a service role key.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { chatJSON, corsHeaders, embed, identify, isAdmin, isStaff, jsonRes, toVector } from "../_shared/ai.ts";
+import { mirror, sv } from "../_shared/db.ts";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -133,6 +134,16 @@ Quando handoff=true, a "reply" deve avisar com naturalidade que um consultor vai
                     ? { status: "handed_off", handoff_reason: reason, handoff_summary: json.summary ?? null, handed_off_at: now }
                     : { status: "active" }),
             });
+            // handoff → o consultor precisa SABER: nota no lead com motivo + resumo, e o lead
+            // sobe no Kanban (updated_at). O badge de "mensagem nova" acende sozinho, porque
+            // a view lead_pending_replies ignora leads com IA ativa.
+            if (handoff) {
+                const note = `🤖 IA passou para consultor — ${reason ?? "sem motivo informado"}` +
+                    (json.summary ? `\n\nResumo: ${json.summary}` : "");
+                await db.from("lead_notes").insert({ lead_id: leadId, note, created_at: now });
+                await db.from("leads").update({ updated_at: now }).eq("id", leadId);
+                await mirror(`INSERT INTO lead_notes [{ lead_id: leads:⟨${leadId}⟩, note: ${sv(note)}, created_at: d${sv(now)} }] RETURN NONE;`);
+            }
         }
 
         return jsonRes({
