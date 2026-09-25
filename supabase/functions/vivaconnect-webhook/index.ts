@@ -51,6 +51,8 @@ Deno.serve(async (req) => {
 
         const m = parseWebhook(payload);
         if (!m) return await done("ignored:sem mensagem reconhecível");
+        if (m.event && m.event !== "message") return await done(`ignored:evento ${m.event}`);
+        if (m.ignorable) return await done("ignored:reação/edição/sistema");
         if (m.isGroup) return await done("ignored:grupo");
         if (!m.number) return await done("ignored:sem número");
         if (m.whatsappId && !ch.zpro_whatsapp_id) {
@@ -116,10 +118,11 @@ Deno.serve(async (req) => {
                 sender_name: m.fromMe ? null : m.contactName, raw_data: payload,
             });
 
-            // agente humano falou → IA sai de vez desse lead
-            if (m.fromMe) {
+            // agente humano falou (ou pegou o ticket no painel do Z-PRO) → IA sai de vez desse lead
+            const { data: sess } = await db.from("ai_lead_sessions").select("status").eq("lead_id", lead.id).maybeSingle();
+            if ((m.fromMe || m.agentUserId) && sess?.status !== "handed_off") {
                 await db.from("ai_lead_sessions").upsert({
-                    lead_id: lead.id, status: "handed_off", handoff_reason: "Agente respondeu pelo VivaConnect",
+                    lead_id: lead.id, status: "handed_off", handoff_reason: m.fromMe ? "Agente respondeu pelo VivaConnect" : "Agente assumiu o ticket no VivaConnect",
                     handed_off_at: new Date().toISOString(), updated_at: new Date().toISOString(),
                 });
             }
@@ -143,7 +146,7 @@ Deno.serve(async (req) => {
         }
 
         // ── canal oficial: não-aluno → IA ───────────────────────────────────
-        if (ch.purpose === "official" && lead && settings.ai_on_official) {
+        if (ch.purpose === "official" && lead && settings.ai_on_official && !m.agentUserId) {
             const outcome = await aiReply(db, lead.id, ch.id, m.number);
             return await done(`stored:${outcome}`, lead.id);
         }

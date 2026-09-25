@@ -99,15 +99,75 @@ export type ParsedMsg = {
     contactName: string | null; ticketId: string | null; contactId: string | null;
     mediaType: string | null; mediaUrl: string | null; isGroup: boolean; whatsappId: string | null;
     event: string | null;
+    /** ticket.userId do Z-PRO: preenchido = um agente humano pegou o atendimento lá */
+    agentUserId: string | null;
+    ticketStatus: string | null;
+    /** reação, edição, "apagou a mensagem"… — não é fala do cliente */
+    ignorable: boolean;
 };
 
+// tipos de mensagem do Baileys → mesmo vocabulário do widechat_messages
+const BAILEYS_TYPES: Record<string, string> = {
+    conversation: "text", extendedTextMessage: "text",
+    imageMessage: "images", stickerMessage: "images",
+    audioMessage: "sounds", pttMessage: "sounds",
+    videoMessage: "videos", ptvMessage: "videos",
+    documentMessage: "files", documentWithCaptionMessage: "files",
+    locationMessage: "location", liveLocationMessage: "location",
+    contactMessage: "contact", contactsArrayMessage: "contact",
+    buttonsResponseMessage: "text", listResponseMessage: "text", templateButtonReplyMessage: "text",
+    interactiveResponseMessage: "text",
+};
+const IGNORABLE = ["reactionMessage", "protocolMessage", "editedMessage", "pollUpdateMessage", "senderKeyDistributionMessage"];
+
+/** Tira caracteres invisíveis (o Z-PRO manda nomes com U+200E na frente). */
+export const cleanName = (v: unknown) =>
+    String(v ?? "").replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/g, "").trim() || null;
+
+/**
+ * Formato real do Z-PRO (Baileys), visto em 25/09/2026:
+ *   { method: "message",
+ *     msg:    { key: { id, fromMe, remoteJid: "...@lid", remoteJidAlt: "55...@s.whatsapp.net" },
+ *               message: { conversation | extendedTextMessage.text | imageMessage.caption | ... },
+ *               pushName, messageTimestamp },
+ *     ticket: { id, status, userId, whatsappId, contact: { id, number, name, pushname, isGroup } } }
+ * Outros formatos (WABA/Instagram ainda não vistos) caem na busca tolerante.
+ */
 export function parseWebhook(p: any): ParsedMsg | null {
+    if (p?.msg?.key && p?.ticket) {
+        const inner = p.msg.message ?? {};
+        const kind = Object.keys(inner).find((k) => k !== "messageContextInfo") ?? "";
+        const content = inner[kind] ?? {};
+        const body = typeof content === "string" ? content
+            : content.text ?? content.caption ?? content.selectedDisplayText ?? content.title
+            ?? content.message?.documentMessage?.caption ?? content.fileName ?? "";
+        const t = p.ticket, c = t.contact ?? {};
+        const jidAlt = String(p.msg.key.remoteJidAlt ?? "");
+        return {
+            messageId: p.msg.key.id ? String(p.msg.key.id) : null,
+            body: String(body ?? ""),
+            fromMe: p.msg.key.fromMe === true,
+            number: onlyDigits(c.number) || onlyDigits(jidAlt.split("@")[0]) || null,
+            contactName: cleanName(c.name ?? c.pushname ?? p.msg.pushName),
+            ticketId: t.id != null ? String(t.id) : null,
+            contactId: c.id != null ? String(c.id) : null,
+            mediaType: BAILEYS_TYPES[kind] ?? (kind || "text"),
+            mediaUrl: null, // Baileys não manda URL no webhook (fica no Z-PRO)
+            isGroup: !!(t.isGroup || c.isGroup) || String(p.msg.key.remoteJid ?? "").endsWith("@g.us"),
+            whatsappId: t.whatsappId != null ? String(t.whatsappId) : null,
+            event: p.method ?? null,
+            agentUserId: t.userId != null ? String(t.userId) : null,
+            ticketStatus: t.status ?? null,
+            ignorable: IGNORABLE.includes(kind) || (!kind && !body),
+        };
+    }
+
     const msg = findKey(p, ["msg", "message", "mensagem"]) ?? p;
     const m = typeof msg === "object" ? msg : p;
     const body = findKey(m, ["body", "text", "conversation", "caption"]) ?? findKey(p, ["body", "text"]);
     const ticket = findKey(p, ["ticket"]);
     const contact = findKey(p, ["contact", "contato"]);
-    const rawNum = (contact && (contact.number ?? contact.phone)) ?? findKey(p, ["number", "remoteJid", "from", "phone"]);
+    const rawNum = (contact && (contact.number ?? contact.phone)) ?? findKey(p, ["number", "remoteJidAlt", "from", "phone"]);
     const numStr = String(rawNum ?? "");
     const isGroup = !!findKey(p, ["isGroup"]) || numStr.includes("@g.us") || /-\d+$/.test(numStr);
     const messageId = findKey(m, ["messageId", "id"]);
@@ -118,14 +178,17 @@ export function parseWebhook(p: any): ParsedMsg | null {
         body: typeof body === "string" ? body : (body != null ? JSON.stringify(body) : ""),
         fromMe: fromMe === true || fromMe === "true" || fromMe === 1,
         number: numStr ? onlyDigits(numStr.split("@")[0]) || null : null,
-        contactName: (contact && (contact.name ?? contact.pushname)) ?? findKey(p, ["pushName", "pushname", "notifyName"]) ?? null,
-        ticketId: (ticket && ticket.id != null ? String(ticket.id) : null) ?? (findKey(p, ["ticketId"]) != null ? String(findKey(p, ["ticketId"])) : null),
-        contactId: (contact && contact.id != null ? String(contact.id) : null) ?? (findKey(p, ["contactId"]) != null ? String(findKey(p, ["contactId"])) : null),
-        mediaType: findKey(m, ["mediaType", "type"]) ?? null,
+        contactName: cleanName((contact && (contact.name ?? contact.pushname)) ?? findKey(p, ["pushName", "pushname", "notifyName"])),
+        ticketId: ticket?.id != null ? String(ticket.id) : (findKey(p, ["ticketId"]) != null ? String(findKey(p, ["ticketId"])) : null),
+        contactId: contact?.id != null ? String(contact.id) : (findKey(p, ["contactId"]) != null ? String(findKey(p, ["contactId"])) : null),
+        mediaType: findKey(m, ["mediaType"]) ?? null,
         mediaUrl: findKey(m, ["mediaUrl", "mediaURL", "media_url"]) ?? null,
         isGroup,
         whatsappId: findKey(p, ["whatsappId"]) != null ? String(findKey(p, ["whatsappId"])) : null,
-        event: findKey(p, ["event", "type", "action"]) ?? null,
+        event: findKey(p, ["method", "event", "action"]) ?? null,
+        agentUserId: ticket?.userId != null ? String(ticket.userId) : null,
+        ticketStatus: ticket?.status ?? null,
+        ignorable: false,
     };
 }
 
