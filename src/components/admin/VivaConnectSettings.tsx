@@ -26,7 +26,6 @@ interface VcSettings {
     min_interval_seconds: number
     student_reply_enabled: boolean
     student_reply_template: string
-    ai_on_official: boolean
 }
 
 interface ChannelHealth {
@@ -46,6 +45,7 @@ interface ChannelHealth {
     failed_24h: number
     leads_fixed: number
     has_token: boolean
+    ai_enabled: boolean
 }
 
 const fieldLabel = "text-xs font-bold uppercase tracking-widest text-muted-foreground"
@@ -153,7 +153,6 @@ export function VivaConnectSettings() {
             min_interval_seconds: Number(form.min_interval_seconds),
             student_reply_enabled: form.student_reply_enabled,
             student_reply_template: form.student_reply_template,
-            ai_on_official: form.ai_on_official,
             updated_at: new Date().toISOString(),
             updated_by: user?.id ?? null,
         }).eq("id", 1).select("id")
@@ -203,7 +202,7 @@ export function VivaConnectSettings() {
         showSuccess("Canal cadastrado. Copie a URL do webhook dele e cole na API do Z-PRO.")
     }
 
-    const updateChannel = async (id: number, patch: Partial<{ active: boolean; daily_limit: number }>) => {
+    const updateChannel = async (id: number, patch: Partial<{ active: boolean; daily_limit: number; ai_enabled: boolean }>) => {
         const { data, error } = await supabase.from("vivaconnect_channels").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id).select("id")
         if (error || !data?.length) return showError(`Não foi possível atualizar: ${error?.message ?? "sessão expirada."}`)
         refetchChannels()
@@ -291,8 +290,9 @@ export function VivaConnectSettings() {
                             hint="Telefone com matrícula ativa no Sponte recebe o texto abaixo (1x a cada 24h) e não vira lead." />
                         <textarea className={textareaCls} value={form.student_reply_template} onChange={(e) => set("student_reply_template", e.target.value)} />
 
-                        <Toggle checked={form.ai_on_official} onChange={(v) => set("ai_on_official", v)} label="IA responde não-alunos no oficial"
-                            hint="Também depende da IA estar ligada em 'IA de Atendimento' (e da chave da OpenAI)." />
+                        <p className="text-xs text-muted-foreground rounded-xl border border-dashed border-[var(--border)] p-3">
+                            🤖 <b>IA</b>: marque <b>“IA responde”</b> em cada número (ao lado) para a IA atender automaticamente quem escrever nele. Também precisa estar ligada em <b>IA de Atendimento</b>.
+                        </p>
 
                         <Button onClick={save} disabled={saving} className="w-full">
                             {saving ? <Loader2 className="animate-spin" size={16} /> : "Salvar configurações"}
@@ -378,6 +378,9 @@ export function VivaConnectSettings() {
                                         <p className="text-xs text-muted-foreground font-mono">{c.phone ?? "sem número"} · API {c.api_id}</p>
                                     </div>
                                     <div className="flex items-center gap-1">
+                                        <label className="flex items-center gap-1 text-xs cursor-pointer mr-2" title="A IA responde automaticamente quem escrever neste número (não-alunos)">
+                                            <input type="checkbox" checked={c.ai_enabled} onChange={(e) => updateChannel(c.id, { ai_enabled: e.target.checked })} className="accent-[var(--primary)]" /> 🤖 IA responde
+                                        </label>
                                         <label className="flex items-center gap-1 text-xs cursor-pointer mr-2">
                                             <input type="checkbox" checked={c.active} onChange={(e) => updateChannel(c.id, { active: e.target.checked })} className="accent-[var(--primary)]" /> ativo
                                         </label>

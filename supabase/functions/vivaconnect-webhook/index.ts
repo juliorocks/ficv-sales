@@ -11,7 +11,7 @@
 //    - mensagem do NOSSO lado que não saiu da fila (agente digitou no painel do
 //      Z-PRO) → trava a IA daquele lead (IA nunca reentra);
 //    - canal oficial + aluno (Sponte) → resposta com link do portal (fila);
-//    - canal oficial + não-aluno + ai_on_official → IA responde (fila).
+//    - não-aluno num canal com "IA responde" marcado (vivaconnect_channels.ai_enabled) → IA responde (fila).
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { mirror, sv } from "../_shared/db.ts";
 import { fillTemplate, findLeadByPhone, firstName, loadSettings, parseWebhook, toZproNumber, zpro, zproErr } from "../_shared/vivaconnect.ts";
@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
 
     const reqChannel = Number(url.searchParams.get("channel")) || null;
     const { data: ch } = reqChannel
-        ? await db.from("vivaconnect_channels").select("id, name, purpose, zpro_whatsapp_id").eq("id", reqChannel).maybeSingle()
+        ? await db.from("vivaconnect_channels").select("id, name, purpose, zpro_whatsapp_id, ai_enabled").eq("id", reqChannel).maybeSingle()
         : { data: null };
     const raw = await req.text();
     let payload: any;
@@ -193,8 +193,10 @@ Deno.serve(async (req) => {
             return await done("stored:aluno → link do portal enfileirado", lead?.id ?? null);
         }
 
-        // ── canal oficial: não-aluno → IA ───────────────────────────────────
-        if (ch.purpose === "official" && lead && settings.ai_on_official && !m.agentUserId) {
+        // ── canal com "IA responde" marcado: não-aluno → IA ─────────────────
+        // (aluno no oficial já saiu acima com o link do portal; a trava de handoff
+        //  e a chave geral da IA ficam no ai-agent)
+        if (ch.ai_enabled && lead && lead.perfil !== "aluno" && !aluno && !m.agentUserId) {
             const outcome = await aiReply(db, lead.id, ch.id, m.number);
             return await done(`stored:${outcome}`, lead.id);
         }
@@ -227,5 +229,12 @@ async function aiReply(db: any, leadId: number, channelId: number, number: strin
     await db.from("vivaconnect_outbox").insert({
         lead_id: leadId, channel_id: channelId, kind: "ai_reply", number: toZproNumber(number) ?? number, body: out.reply,
     });
+    // dispara o worker agora (senão a resposta só sai no próximo ciclo do cron, até 1 min)
+    await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/vivaconnect-api`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` },
+        body: JSON.stringify({ action: "process_outbox" }),
+        signal: AbortSignal.timeout(30000),
+    }).catch((e) => console.error("vivaconnect-webhook: process_outbox:", e.message));
     return out.handoff ? "ia:respondeu + handoff" : "ia:respondeu";
 }
