@@ -64,6 +64,9 @@ export function IntegrationsSettings({ onNavigate }: { onNavigate?: (tab: string
     }
     const [busy, setBusy] = useState<string | null>(null)
 
+    const [tab, setTab] = useState<string>(() => { try { return localStorage.getItem("ficv_integracoes_tab") ?? "" } catch { return "" } })
+    const pickTab = (id: string) => { setTab(id); try { localStorage.setItem("ficv_integracoes_tab", id) } catch { /* sem storage */ } }
+
     const { data, isLoading, refetch } = useQuery({
         queryKey: ["integrations"],
         queryFn: async () => (await call({ action: "list" })).integrations as Integration[],
@@ -103,6 +106,8 @@ export function IntegrationsSettings({ onNavigate }: { onNavigate?: (tab: string
         refetch()
     }
 
+    const current = data?.find((i) => i.id === tab) ?? data?.[0]
+
     if (isLoading) {
         return <div className="space-y-4 max-w-5xl mx-auto"><Skeleton className="h-24 w-full rounded-2xl" /><Skeleton className="h-64 w-full rounded-2xl" /></div>
     }
@@ -116,8 +121,27 @@ export function IntegrationsSettings({ onNavigate }: { onNavigate?: (tab: string
                 </p>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {data?.map((integ) => (
+            {/* uma aba por serviço, com o status do último teste no nome */}
+            <div className="flex flex-wrap gap-1 border-b border-[var(--border)]">
+                {data?.map((integ) => {
+                    const on = integ.id === current?.id
+                    const st = integ.last_test ? (integ.last_test.ok ? "ok" : "erro") : "sem"
+                    return (
+                        <button key={integ.id} onClick={() => pickTab(integ.id)}
+                            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm -mb-px border-b-2 transition-colors ${on
+                                ? "border-primary text-[var(--text-main)] font-semibold"
+                                : "border-transparent text-muted-foreground hover:text-[var(--text-main)]"}`}>
+                            {st === "ok" ? <CheckCircle2 size={14} className="text-emerald-500" />
+                                : st === "erro" ? <XCircle size={14} className="text-red-500" />
+                                : <span className="w-2 h-2 rounded-full bg-muted-foreground/40" />}
+                            {integ.name}
+                        </button>
+                    )
+                })}
+            </div>
+
+            <div className="max-w-2xl">
+                {current && [current].map((integ) => (
                     <Card key={integ.id} className="border-none shadow-xl bg-card/60 backdrop-blur-md">
                         <CardHeader className="pb-3">
                             <CardTitle className="text-lg font-bold flex items-center justify-between gap-2">
