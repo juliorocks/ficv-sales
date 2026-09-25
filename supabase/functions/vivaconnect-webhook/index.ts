@@ -14,7 +14,13 @@
 //    - canal oficial + não-aluno + ai_on_official → IA responde (fila).
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { mirror, sv } from "../_shared/db.ts";
-import { fillTemplate, findLeadByPhone, firstName, loadSettings, parseWebhook, toZproNumber } from "../_shared/vivaconnect.ts";
+import { fillTemplate, findLeadByPhone, firstName, loadSettings, parseWebhook, toZproNumber, zpro, zproErr } from "../_shared/vivaconnect.ts";
+
+// Bots de IA embutidos do Z-PRO que vêm LIGADOS por padrão em ticket novo
+// (ex.: chatgptStatus:true sem chave → nota "Falha na resposta automática").
+// Quem responde é a NOSSA IA — desligamos no ticket pra nunca ter 2 bots.
+// Typebot/chatflow (menus) ficam como estão.
+const ZPRO_AI_FLAGS = ["chatgptStatus", "difyStatus", "dialogflowStatus", "n8nStatus"];
 
 const j = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { "Content-Type": "application/json" } });
 const VIVACONNECT_SOURCE = "WhatsApp (VivaConnect)";
@@ -55,6 +61,14 @@ Deno.serve(async (req) => {
         if (m.ignorable) return await done("ignored:reação/edição/sistema");
         if (m.isGroup) return await done("ignored:grupo");
         if (!m.number) return await done("ignored:sem número");
+        const botsOn = ZPRO_AI_FLAGS.filter((f) => payload?.ticket?.[f] === true);
+        if (botsOn.length && m.ticketId) {
+            const { data: tok } = await db.from("vivaconnect_channels").select("api_id, api_token").eq("id", ch.id).single();
+            const r = await zpro(settings.base_url, tok, "/updateticketinfo",
+                { ticketId: Number(m.ticketId), ...Object.fromEntries(botsOn.map((f) => [f, false])) });
+            if (!r.ok) console.error(`vivaconnect-webhook: desligar ${botsOn.join(",")} no ticket ${m.ticketId}:`, zproErr(r.status, r.data));
+        }
+
         if (m.whatsappId && !ch.zpro_whatsapp_id) {
             await db.from("vivaconnect_channels").update({ zpro_whatsapp_id: m.whatsappId }).eq("id", ch.id);
         }
