@@ -7,7 +7,7 @@
 //   sem pergunta + conversa → "sugerir resposta" pra última fala do cliente
 //   → { resposta, encontrado, fontes: [{ titulo, trecho, similaridade }] }
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
-import { chatJSON, corsHeaders, embed, identify, jsonRes, toVector } from "../_shared/ai.ts";
+import { chatJSON, corsHeaders, identify, jsonRes, searchKnowledge } from "../_shared/ai.ts";
 
 const TEAM = ["admin", "agent", "secretaria", "tutor", "coordenador"];
 const hoje = () => new Date().toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "long", year: "numeric" });
@@ -28,12 +28,9 @@ Deno.serve(async (req) => {
         if (!consulta) return jsonRes({ error: "Escreva a pergunta (ou abra numa conversa pra sugerir resposta)." }, 400);
 
         const { data: s } = await db.from("ai_agent_settings").select("chat_model, embedding_model, match_count").eq("id", 1).single();
-        const [qv] = await embed([consulta], s?.embedding_model ?? "text-embedding-3-small");
-        const { data: hits, error } = await db.rpc("match_knowledge_chunks", {
-            query_embedding: toVector(qv), match_count: Math.max(6, s?.match_count ?? 6), min_similarity: 0.25, p_publico: publico,
-        });
-        if (error) throw new Error(error.message);
-        const trechos = (hits ?? []) as any[];
+        const trechos = await searchKnowledge(db, consulta, {
+            publico, embeddingModel: s?.embedding_model ?? "text-embedding-3-small", count: Math.max(6, s?.match_count ?? 6),
+        }) as any[];
         const kb = trechos.length ? trechos.map((h, i) => `[${i + 1}] (${h.title}) ${h.content}`).join("\n\n---\n\n") : "(nada encontrado na base)";
 
         const ctx = body.contexto ?? {};
@@ -43,6 +40,8 @@ Deno.serve(async (req) => {
             `Escreva a "resposta" já pronta pra o atendente enviar${publico === "alunos" ? "" : " pelo WhatsApp"}: cordial, curta (até 2 parágrafos), em português do Brasil, sem markdown de títulos (negrito com *texto* é ok).`,
             ctx.nome ? `Nome do ${publico === "alunos" ? "aluno" : "cliente"}: ${ctx.nome}.` : "",
             ctx.curso ? `Curso de interesse/matriculado: ${ctx.curso}.` : "",
+            `Se a pergunta é sobre um curso específico, use SÓ informações desse curso — nunca responda com dados de outro curso de nome parecido (ex.: Psicoteologia ≠ Psicopedagogia). A informação de um curso pode estar num documento geral (ex.: "Orientações Gerais"), não só no PPC dele.`,
+            `Se a base citar uma data que JÁ PASSOU (início de turma, prazo, promoção), não a apresente como futura; prefira a data mais recente que houver na base (documentos gerais costumam estar mais atualizados que PPCs).`,
             `Se a base não responder, "encontrado" = false e "resposta" = uma frase curta dizendo ao atendente o que não foi encontrado (não escreva pro cliente nesse caso).`,
             `Responda em JSON: {"resposta": "...", "encontrado": true|false, "fontes_usadas": [números dos trechos usados]}`,
             `BASE DE CONHECIMENTO:\n\n${kb}`,

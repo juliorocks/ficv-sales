@@ -12,7 +12,7 @@
 //
 // Quem chama em produção (futuro vivaconnect-webhook) usa a service role key.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
-import { chatJSON, corsHeaders, embed, identify, isAdmin, isStaff, jsonRes, toVector } from "../_shared/ai.ts";
+import { chatJSON, corsHeaders, identify, isAdmin, isStaff, jsonRes, searchKnowledge } from "../_shared/ai.ts";
 import { mirror, sv } from "../_shared/db.ts";
 
 type Msg = { role: "user" | "assistant"; content: string };
@@ -78,11 +78,9 @@ Deno.serve(async (req) => {
 
         // ── busca na base: últimas falas do lead viram a consulta ───────────
         const query = messages.filter((m) => m.role === "user").slice(-3).map((m) => m.content).join("\n");
-        const [qVec] = await embed([lead?.curso ? `${lead.curso}\n${query}` : query], s.embedding_model);
-        const { data: hits, error: mErr } = await db.rpc("match_knowledge_chunks", {
-            query_embedding: toVector(qVec), match_count: s.match_count, min_similarity: Number(s.min_similarity),
+        const hits = await searchKnowledge(db, lead?.curso ? `${lead.curso}\n${query}` : query, {
+            publico: "vendas", embeddingModel: s.embedding_model, count: s.match_count, minSimilarity: Number(s.min_similarity),
         });
-        if (mErr) throw new Error(`busca na base: ${mErr.message}`);
 
         const knowledge = (hits ?? []).length
             ? (hits as any[]).map((h, i) => `[${i + 1}] ${h.content}`).join("\n\n---\n\n")

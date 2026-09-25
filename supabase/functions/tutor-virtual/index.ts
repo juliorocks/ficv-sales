@@ -9,7 +9,7 @@
 // pagamento, notas). Passa pra fila humana pela ferramenta passar_para_equipe ou ao
 // estourar o limite de respostas. Equipe respondendo → gatilho tira o tutor do chamado.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
-import { chatWithTools, corsHeaders, embed, identify, jsonRes, toVector } from "../_shared/ai.ts";
+import { chatWithTools, corsHeaders, identify, jsonRes, searchKnowledge } from "../_shared/ai.ts";
 import { alunoBoletim, alunoOverview, alunoPagamento } from "../_shared/alunoSponte.ts";
 
 const hoje = () => new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", weekday: "long", day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -105,9 +105,9 @@ Deno.serve(async (req) => {
         // base de conhecimento dos alunos
         const { data: ai } = await db.from("ai_agent_settings").select("embedding_model, match_count, min_similarity").eq("id", 1).single();
         const pergunta = [t.titulo, ...conversa.filter((m) => m.role === "user").slice(-3).map((m) => m.content)].join("\n");
-        const [qv] = await embed([pergunta], ai?.embedding_model ?? "text-embedding-3-small");
-        const { data: hits } = await db.rpc("match_knowledge_chunks", {
-            query_embedding: toVector(qv), match_count: ai?.match_count ?? 6, min_similarity: Number(ai?.min_similarity ?? 0.25), p_publico: "alunos",
+        const hits = await searchKnowledge(db, pergunta, {
+            publico: "alunos", embeddingModel: ai?.embedding_model ?? "text-embedding-3-small",
+            count: ai?.match_count ?? 6, minSimilarity: Number(ai?.min_similarity ?? 0.25),
         });
         const kb = (hits ?? []).length ? (hits as any[]).map((h, i) => `[${i + 1}] (${h.title}) ${h.content}`).join("\n\n---\n\n")
             : "(nenhum trecho relevante na base de conhecimento)";

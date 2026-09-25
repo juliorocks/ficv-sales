@@ -63,7 +63,10 @@ Deno.serve(async (req) => {
 
     // nome: Content-Disposition (filename*=UTF-8''… ou filename="…") ou gerado
     const cd = res.headers.get("content-disposition") ?? "";
-    let name = decodeURIComponent(cd.match(/filename\*=UTF-8''([^;]+)/i)?.[1] ?? "") || (cd.match(/filename="?([^";]+)"?/i)?.[1] ?? "");
+    // filename*=UTF-8''… (padrão) ou filename="…" — o Drive manda o UTF-8 cru no header, que o
+    // fetch lê como Latin-1 ("ESPECIALIZAÃ\u0087Ã\u0083O"): re-decodifica os bytes como UTF-8
+    const latin1ToUtf8 = (v: string) => { try { return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from([...v].map((c) => c.charCodeAt(0) & 0xff))); } catch { return v; } };
+    let name = decodeURIComponent(cd.match(/filename\*=UTF-8''([^;]+)/i)?.[1] ?? "") || latin1ToUtf8(cd.match(/filename="?([^";]+)"?/i)?.[1] ?? "");
     const ext = EXT[type] ?? (bytes[0] === 0x25 && bytes[1] === 0x50 ? "pdf" : "");
     if (!name) name = `${r.kind === "link" ? (new URL(r.url).pathname.split("/").pop() || "arquivo") : `${r.kind.replace(/\s+/g, "-")}-${(r.id ?? "").slice(0, 8)}`}`;
     if (ext && !name.toLowerCase().endsWith(`.${ext}`)) name = `${name.replace(/\.[^.]{1,5}$/, "")}.${ext}`;
