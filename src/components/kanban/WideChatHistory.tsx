@@ -334,6 +334,26 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
     // Baileys não tem janela de 24h da Meta; WABA tem (e templates ainda não são suportados no VivaConnect)
     const vcNeedsWindow = vcChannel?.kind === 'waba'
 
+    // estado da IA neste lead (trava "IA nunca volta depois que um humano assumiu")
+    const { data: aiState, refetch: refetchAi } = useQuery<{ status: string | null; motivo: string | null; iaGeral: boolean } | null>({
+        queryKey: ['ai-lead-state', String(leadId)],
+        queryFn: async () => {
+            const [{ data: sess }, { data: cfg }] = await Promise.all([
+                supabase.from('ai_lead_sessions').select('status, handoff_reason').eq('lead_id', numericLeadId as number).maybeSingle(),
+                supabase.from('ai_agent_settings').select('enabled').eq('id', 1).maybeSingle(),
+            ])
+            return { status: sess?.status ?? null, motivo: sess?.handoff_reason ?? null, iaGeral: !!cfg?.enabled }
+        },
+        enabled: numericLeadId != null && isViva,
+        staleTime: 30_000,
+    })
+    const aiAction = async (action: 'takeover' | 'reactivate') => {
+        const { data, error } = await supabase.functions.invoke('ai-agent', { body: { action, lead_id: numericLeadId, reason: 'Atendente assumiu pelo CRM' } })
+        if (error || data?.error) { showError(data?.error ?? 'Não foi possível agora.'); return }
+        showSuccess(action === 'takeover' ? 'Você assumiu — a IA não responde mais este lead.' : 'IA reativada: ela responde a próxima mensagem do lead.')
+        refetchAi()
+    }
+
     // mídia RECEBIDA pelo VivaConnect chega sem link — busca no Z-PRO (o servidor guarda cópia no nosso storage)
     const vcMediaAsked = useRef(new Set<string>())
     useEffect(() => {
@@ -857,6 +877,19 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                                 {vc!.channels.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                               </select>
                             : <span>· {vcChannel?.name}</span>)}
+                </div>
+            )}
+            {isViva && aiState && (
+                <div className="flex items-center gap-2 px-3 pt-2 text-[11px] bg-[var(--bg-card)]">
+                    {aiState.status === 'handed_off' || aiState.status === 'disabled' ? (<>
+                        <span className="text-muted-foreground" title={aiState.motivo ?? ''}>👤 Atendimento humano — a IA não responde este lead</span>
+                        {user?.role === 'admin' && <button onClick={() => aiAction('reactivate')} className="text-primary hover:underline">Devolver para a IA</button>}
+                    </>) : (<>
+                        <span className={aiState.iaGeral ? 'text-violet-500' : 'text-muted-foreground'}>
+                            {aiState.iaGeral ? '🤖 IA conduzindo esta conversa' : '🤖 IA disponível, mas desligada em Gestão › IA de Atendimento'}
+                        </span>
+                        {aiState.iaGeral && <button onClick={() => aiAction('takeover')} className="text-primary hover:underline">Assumir</button>}
+                    </>)}
                 </div>
             )}
             {canTransfer && (
