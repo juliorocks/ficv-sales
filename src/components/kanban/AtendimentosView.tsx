@@ -12,7 +12,7 @@ import { ptBR } from "date-fns/locale"
 import { CheckCircle2, Clock, Loader2, MessageSquare, PencilLine, Search } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { WideChatHistory } from "./WideChatHistory"
-import { LeadDialogById } from "./LeadDialogById"
+import { ContactDetailsPanel } from "./ContactDetailsPanel"
 
 type Tab = "abertos" | "pendentes" | "finalizados"
 interface Row {
@@ -36,7 +36,9 @@ export function AtendimentosView({ assigneeFilter = "all", teamAgentIds }: { ass
     const [search, setSearch] = useState("")
     const [q, setQ] = useState("")
     const [selected, setSelected] = useState<number | null>(null)
-    const [editId, setEditId] = useState<number | null>(null)
+    // painel "Detalhes do contato" à direita (lembrado no navegador)
+    const [details, setDetails] = useState<boolean>(() => { try { return localStorage.getItem("ficv_inbox_details") === "1" } catch { return false } })
+    const toggleDetails = (v: boolean) => { setDetails(v); try { localStorage.setItem("ficv_inbox_details", v ? "1" : "0") } catch { /* sem storage */ } }
     useEffect(() => { const t = setTimeout(() => setQ(search.trim()), 300); return () => clearTimeout(t) }, [search])
 
     const agents = teamAgentIds?.filter((id) => id !== "__unassigned__")
@@ -142,7 +144,7 @@ export function AtendimentosView({ assigneeFilter = "all", teamAgentIds }: { ass
                                     #{current.lead_id} · {current.telefone ?? "sem telefone"} · {current.stage_name} · {current.atendente ?? "sem atendente"}
                                 </p>
                             </div>
-                            <button onClick={() => setEditId(current.lead_id)} className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-primary" title="Abrir detalhes do lead">
+                            <button onClick={() => toggleDetails(!details)} className={`flex items-center gap-1.5 text-xs ${details ? "text-primary" : "text-[var(--text-muted)] hover:text-primary"}`} title="Detalhes do contato">
                                 <PencilLine className="h-4 w-4" /> Detalhes
                             </button>
                         </header>
@@ -154,7 +156,7 @@ export function AtendimentosView({ assigneeFilter = "all", teamAgentIds }: { ass
                 )}
             </section>
 
-            {editId != null && <LeadDialogById leadId={editId} onClose={() => setEditId(null)} initialTab="details" />}
+            {current && details && <ContactDetailsPanel key={current.lead_id} leadId={current.lead_id} onClose={() => toggleDetails(false)} />}
         </div>
     )
 }
