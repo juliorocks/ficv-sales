@@ -144,7 +144,7 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
             category: formState.category,
             file_url: formState.file_url,
             type: 'document',
-            ...(selectedItem && isEditing ? {} : { publico: newDocPublico }),
+            ...(selectedItem && isEditing ? {} : { publico: formPublico }),
         };
 
         // .select() pra detectar UPDATE que filtrou 0 linhas sem erro (token em refresh)
@@ -228,6 +228,10 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
     // Público do documento: 'vendas' = IA do WhatsApp/leads · 'alunos' = Tutor Virtual (chamados) · 'ambos'
     const [publicoFilter, setPublicoFilter] = useState<'todos' | 'vendas' | 'alunos'>('todos');
     const newDocPublico = publicoFilter === 'alunos' ? 'alunos' : 'vendas';
+    // formulário: público escolhido no próprio documento (padrão = filtro atual) e categorias existentes
+    const [formPublico, setFormPublico] = useState<'vendas' | 'alunos' | 'ambos'>('vendas');
+    const [newCategory, setNewCategory] = useState(false);
+    const categories = useMemo(() => [...new Set(items.map(i => (i.category || 'Geral').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR')), [items]);
     const setPublico = async (item: KnowledgeItem, publico: 'vendas' | 'alunos' | 'ambos') => {
         const { data, error } = await supabase.from('knowledge_base').update({ publico }).eq('id', item.id).select('id');
         if (error || !data?.length) { toast.error('Não foi possível alterar. Recarregue a página.'); return; }
@@ -325,6 +329,8 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
                         <button
                             onClick={() => {
                                 setFormState({ title: '', content: '', category: 'Geral', file_url: '' });
+                                setNewCategory(false);
+                                setFormPublico(newDocPublico);
                                 setIsEditing(true);
                                 setSelectedItem(null);
                             }}
@@ -494,6 +500,7 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
                                                         category: selectedItem.category || 'Geral',
                                                         file_url: selectedItem.file_url || ''
                                                     });
+                                                    setNewCategory(false);
                                                     setIsEditing(true);
                                                 }}
                                                 className="p-2.5 rounded-xl bg-[var(--bg-card-hover)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-primary transition-all shadow-sm"
@@ -613,15 +620,50 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
                                     </div>
                                     <div className="space-y-2">
                                         <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest ml-1">Categoria</label>
-                                        <input
-                                            type="text"
-                                            className="w-full bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4 text-[var(--text-main)] focus:border-primary outline-none transition-all font-bold"
-                                            value={formState.category}
-                                            onChange={(e) => setFormState({ ...formState, category: e.target.value })}
-                                            placeholder="Ex: Vendas, RH, Processos..."
-                                        />
+                                        {newCategory ? (
+                                            <div className="flex gap-2">
+                                                <input
+                                                    type="text" autoFocus
+                                                    className="w-full bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4 text-[var(--text-main)] focus:border-primary outline-none transition-all font-bold"
+                                                    value={formState.category}
+                                                    onChange={(e) => setFormState({ ...formState, category: e.target.value })}
+                                                    placeholder="Nome da nova categoria"
+                                                />
+                                                {categories.length > 0 && (
+                                                    <button type="button" onClick={() => { setNewCategory(false); setFormState({ ...formState, category: categories.includes(formState.category) ? formState.category : categories[0] }) }}
+                                                        className="px-3 rounded-xl border border-[var(--border)] text-xs text-[var(--text-muted)] hover:text-[var(--text-main)]" title="Voltar pra lista">Lista</button>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <select
+                                                className="w-full bg-[var(--bg-card)] border border-[var(--border)] rounded-xl p-4 text-[var(--text-main)] focus:border-primary outline-none transition-all font-bold"
+                                                value={categories.includes(formState.category) ? formState.category : ''}
+                                                onChange={(e) => {
+                                                    if (e.target.value === '__nova__') { setNewCategory(true); setFormState({ ...formState, category: '' }) }
+                                                    else setFormState({ ...formState, category: e.target.value })
+                                                }}
+                                            >
+                                                {!categories.includes(formState.category) && <option value="" disabled>Escolha…</option>}
+                                                {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                                                <option value="__nova__">➕ Nova categoria…</option>
+                                            </select>
+                                        )}
                                     </div>
                                 </div>
+                                {!(selectedItem && isEditing) && (
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest ml-1">Público (qual IA usa este documento)</label>
+                                        <div className="grid grid-cols-3 gap-2">
+                                            {([['vendas', '💼 Vendas', 'IA do WhatsApp / leads'], ['alunos', '🎓 Alunos', 'Tutor Virtual dos chamados'], ['ambos', 'Ambos', 'as duas IAs']] as const).map(([v, l, h]) => (
+                                                <button key={v} type="button" onClick={() => setFormPublico(v)}
+                                                    className={`rounded-xl border p-3 text-left transition-all ${formPublico === v ? 'border-primary bg-primary/10' : 'border-[var(--border)] hover:border-primary/40'}`}>
+                                                    <p className="text-sm font-bold text-[var(--text-main)]">{l}</p>
+                                                    <p className="text-[11px] text-[var(--text-muted)]">{h}</p>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                                 <div className="space-y-2">
                                     <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest ml-1">Link do PDF Original (Opcional)</label>
                                     <input
