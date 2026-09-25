@@ -40,10 +40,12 @@ export function AtendimentosView({ assigneeFilter = "all", teamAgentIds }: { ass
     useEffect(() => { const t = setTimeout(() => setQ(search.trim()), 300); return () => clearTimeout(t) }, [search])
 
     const agents = teamAgentIds?.filter((id) => id !== "__unassigned__")
+    // buscando: procura em todas as conversas (ignora filtros de atendente/departamento)
+    const semFiltro = !!q
     const params = {
         p_tab: tab, p_search: q || null,
-        p_assignee: assigneeFilter !== "all" && assigneeFilter !== "unassigned" ? assigneeFilter : null,
-        p_agents: teamAgentIds ? agents : null,
+        p_assignee: !semFiltro && assigneeFilter !== "all" && assigneeFilter !== "unassigned" ? assigneeFilter : null,
+        p_agents: !semFiltro && teamAgentIds ? agents : null,
         p_no_owner: !!teamAgentIds?.includes("__unassigned__"),
         p_limit: 200,
     }
@@ -65,7 +67,7 @@ export function AtendimentosView({ assigneeFilter = "all", teamAgentIds }: { ass
         },
         refetchInterval: 15000,
     })
-    const list = useMemo(() => assigneeFilter === "unassigned" ? rows.filter((r) => !r.assigned_to_id) : rows, [rows, assigneeFilter])
+    const list = useMemo(() => !semFiltro && assigneeFilter === "unassigned" ? rows.filter((r) => !r.assigned_to_id) : rows, [rows, assigneeFilter, semFiltro])
     const current = list.find((r) => r.lead_id === selected) ?? null
 
     return (

@@ -551,10 +551,13 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     // "Secretaria" no filtro troca o funil de vendas pelo quadro de CHAMADOS (a Secretaria
     // atende pelo Portal do Aluno — pedido do usuário 25/09)
     const [secretariaTeamId, setSecretariaTeamId] = useState<string | null>(null);
+    // Comercial = dono da fila sem atendente (lead novo é do comercial) — 25/09
+    const [comercialTeamId, setComercialTeamId] = useState<string | null>(null);
     useEffect(() => {
         supabase.from('teams').select('id, name').then(({ data }) => {
             setNoTeamId((data ?? []).find((t: any) => /sem equipe/i.test(t.name ?? ''))?.id ?? null);
             setSecretariaTeamId((data ?? []).find((t: any) => /secretaria/i.test(t.name ?? ''))?.id ?? null);
+            setComercialTeamId((data ?? []).find((t: any) => /comercial/i.test(t.name ?? ''))?.id ?? null);
         });
     }, []);
     const kanbanIsNoTeam = !!kanbanTeamId && kanbanTeamId === noTeamId;
@@ -563,6 +566,10 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
             : kanbanAgentsList.filter(a => a.team_id === kanbanTeamId || (kanbanIsNoTeam && !a.team_id)),
         [kanbanAgentsList, kanbanTeamId, kanbanIsNoTeam]
     );
+    // filtro de departamento → ids dos atendentes (+ '__unassigned__' = incluir leads sem atendente)
+    const kanbanTeamAgentIds = kanbanTeamId
+        ? [...kanbanAgentsInTeam.map(a => a.id), ...((kanbanIsNoTeam || kanbanTeamId === comercialTeamId) ? ['__unassigned__'] : [])]
+        : undefined;
 
     // Filter results
     const filteredData = useMemo(() => {
@@ -1893,14 +1900,14 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                         {kanbanTeamId && kanbanTeamId === secretariaTeamId ? <SecretariaBoard /> : kanbanView === 'atendimentos' ? (
                             <AtendimentosView
                                 assigneeFilter={kanbanAssignee}
-                                teamAgentIds={kanbanTeamId ? [...kanbanAgentsInTeam.map(a => a.id), ...(kanbanIsNoTeam ? ['__unassigned__'] : [])] : undefined}
+                                teamAgentIds={kanbanTeamAgentIds}
                             />
                         ) : (
                         <KanbanBoard
                             searchTerm={kanbanSearch}
                             assigneeFilter={kanbanAssignee}
                             dateRange={kanbanDateRange}
-                            teamAgentIds={kanbanTeamId ? [...kanbanAgentsInTeam.map(a => a.id), ...(kanbanIsNoTeam ? ['__unassigned__'] : [])] : undefined}
+                            teamAgentIds={kanbanTeamAgentIds}
                         />
                         )}
                     </div>

@@ -161,11 +161,13 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
         // Filtrando por UM agente específico, os leads SEM atendente continuam
         // aparecendo — é a fila compartilhada de Entrada, qualquer agente precisa ver
         // pra poder "Atender"; escondê-los junto faria leads novos sumirem da tela.
-        if (assigneeFilter === 'unassigned') {
+        // buscando um nome/telefone: procura no funil inteiro, sem os filtros de atendente/departamento
+        const searching = !!searchTerm.trim();
+        if (!searching && assigneeFilter === 'unassigned') {
             out = out.filter(lead => !lead.assigned_to_id);
-        } else if (assigneeFilter && assigneeFilter !== 'all') {
+        } else if (!searching && assigneeFilter && assigneeFilter !== 'all') {
             out = out.filter(lead => lead.assigned_to_id === assigneeFilter || !lead.assigned_to_id);
-        } else if (teamAgentIds !== undefined) {
+        } else if (!searching && teamAgentIds !== undefined) {
             // Departamento selecionado, sem atendente específico — mesma filosofia do
             // filtro de atendente acima: mantém os SEM atendente visíveis (fila
             // compartilhada de Entrada), só esconde quem já está com outro departamento.
@@ -180,6 +182,8 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
             // os sem atendente fazia o filtro "não funcionar" (1.977 de 2.940 leads não têm
             // atendente — "Secretaria" continuava mostrando quase tudo). A fila sem dono
             // fica no departamento "Sem equipe" ('__unassigned__', montado no App).
+            // 2026-09-25 (depois): o COMERCIAL também leva os sem atendente — lead novo é
+            // do comercial (filtrar "Comercial" escondia os 320 da Entrada sem dono).
             out = out.filter(lead => lead.assigned_to_id
                 ? teamAgentIds.includes(lead.assigned_to_id)
                 : teamAgentIds.includes('__unassigned__'));
