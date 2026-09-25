@@ -22,12 +22,28 @@ export async function sponteCall(method: string, params: Record<string, string |
         body, signal: AbortSignal.timeout(25000),
     });
     if (!r.ok) throw new Error(`Sponte HTTP ${r.status}`);
-    let xml = new TextDecoder("utf-8").decode(await r.arrayBuffer());
-    // o Sponte às vezes devolve texto já "duplamente" codificado (NÃ£o) — conserta
-    if (/Ã[£§©¡³ºª‡]/.test(xml)) {
-        try { xml = new TextDecoder("utf-8").decode(Uint8Array.from([...xml].map((c) => c.charCodeAt(0) & 0xff))); } catch { /* mantém */ }
-    }
-    return xml;
+    return decodeSponte(new Uint8Array(await r.arrayBuffer()));
+}
+
+// O Sponte não é consistente na codificação: a mesma consulta volta em UTF-8 pra um
+// aluno, em Latin-1 pra outro ("Introdu��o" quando lido como UTF-8) e às vezes com
+// UTF-8 duplamente codificado ("NÃ£o"). Lê os bytes 1:1 (Latin-1) e remonta toda
+// sequência que for UTF-8 válida — funciona nos três casos e em respostas mistas.
+const UTF8_SEQ = /[\xC2-\xDF][\x80-\xBF]|[\xE0-\xEF][\x80-\xBF]{2}|[\xF0-\xF4][\x80-\xBF]{3}/g;
+const utf8 = new TextDecoder("utf-8");
+const cp1252 = new TextDecoder("windows-1252");
+function fixUtf8Runs(str: string): string {
+    return str.replace(UTF8_SEQ, (m) => {
+        const out = utf8.decode(Uint8Array.from([...m].map((c) => c.charCodeAt(0))));
+        return out.includes("\uFFFD") ? m : out;
+    });
+}
+export function decodeSponte(bytes: Uint8Array): string {
+    let s = "";
+    for (let i = 0; i < bytes.length; i += 8192) s += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    for (let k = 0; k < 2; k++) { const n = fixUtf8Runs(s); if (n === s) break; s = n; } // 2ª passada = dupla codificação
+    // o que sobrou em 0x80–0x9F é pontuação do Windows-1252 (aspas curvas, travessão…)
+    return s.replace(/[\x80-\x9F]/g, (c) => cp1252.decode(Uint8Array.of(c.charCodeAt(0))));
 }
 
 const decodeEntities = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
