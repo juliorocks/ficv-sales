@@ -36,3 +36,6 @@ surreal/backup-keeper-leads-*.json
 
 # Backups da migração SurrealDB->Supabase (grandes, não versionar)
 _migration-backups/
+
+# Instalador/pacote licenciado do VivaConnect (Z-PRO) — nunca versionar (786MB, código licenciado ZDG)
+vivaconnect/
