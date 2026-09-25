@@ -226,7 +226,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   // Se alunoId foi passado (portal do aluno), nunca é staff
-  const isStaff = alunoId ? false : (user?.role === 'admin' || user?.role === 'agent')
+  const isStaff = alunoId ? false : ['admin', 'agent', 'secretaria', 'tutor', 'coordenador'].includes(String(user?.role ?? ''))
   const currentUserId = alunoId ?? user?.id
   const currentUserName = alunoNome ?? user?.full_name ?? ''
 
@@ -431,7 +431,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
       const { data } = await supabase
         .from('profiles')
         .select('id, full_name')
-        .in('role', ['admin', 'agent'])
+        .in('role', ['admin', 'agent', 'secretaria', 'tutor', 'coordenador'])
       return data ?? []
     },
     enabled: isStaff,
@@ -509,6 +509,20 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
     showSuccess('Status atualizado.')
   }
 
+  // fila (Secretaria / Tutoria Graduação / Tutoria Pós…) — transferir de fila
+  const { data: queues = [] } = useQuery<{ id: number; nome: string }[]>({
+    queryKey: ['ticket-queues'],
+    queryFn: async () => (await supabase.from('ticket_queues').select('id, nome').eq('ativo', true).order('ordem')).data ?? [],
+    enabled: isStaff, staleTime: 5 * 60_000,
+  })
+  const changeQueue = async (queue_id: string) => {
+    const { data, error } = await supabase.from('tickets').update({ queue_id: Number(queue_id) }).eq('id', ticket.id).select('id')
+    if (error || !data?.length) { showError('Erro ao mudar a fila.'); return }
+    qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
+    qc.invalidateQueries({ queryKey: ['tickets'] })
+    showSuccess(`Chamado enviado para a fila ${queues.find(q => String(q.id) === queue_id)?.nome ?? ''}.`)
+  }
+
   const assignTo = async (atendente_id: string) => {
     const { error } = await supabase.from('tickets').update({ atendente_id }).eq('id', ticket.id)
     if (error) { showError('Erro ao atribuir.'); return }
@@ -540,12 +554,21 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
               <p className="text-xs text-[var(--text-muted)] mt-1">
                 Aberto por <strong>{t.aluno_nome}</strong> · {format(new Date(t.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
                 {t.curso && <> · <span className="text-[var(--primary)]/80">{t.curso.name}</span></>}
+                {(t as any).nivel && <> · {(t as any).nivel === 'pos' ? 'Pós-graduação' : 'Graduação'}</>}
               </p>
             </div>
 
             {/* Staff controls */}
             {isStaff && (
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+                <Select value={(t as any).queue_id ? String((t as any).queue_id) : ''} onValueChange={changeQueue}>
+                  <SelectTrigger className="h-8 text-xs w-44 bg-[var(--bg-main)] border-[var(--border)]" title="Fila do chamado">
+                    <SelectValue placeholder="Fila" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {queues.map(q => <SelectItem key={q.id} value={String(q.id)}>{q.nome}</SelectItem>)}
+                  </SelectContent>
+                </Select>
                 <Select value={t.status} onValueChange={(v) => changeStatus(v as TicketStatus)}>
                   <SelectTrigger className="h-8 text-xs w-40 bg-[var(--bg-main)] border-[var(--border)]">
                     <SelectValue />

@@ -6,7 +6,7 @@
 //   boletim  { turma_id }                     → notas/faltas por disciplina
 //   pagamento { conta_receber_id, numero_parcela } → link Sponte Pay ou linha digitável
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
-import { brDate, brNum, records, retorno, sponteCall } from "../_shared/sponte.ts";
+import { brDate, brNum, nivelDoCurso, records, retorno, sponteCall } from "../_shared/sponte.ts";
 
 const cors = {
     "Access-Control-Allow-Origin": "*",
@@ -21,7 +21,7 @@ Deno.serve(async (req) => {
     const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
     const { data: { user } } = await db.auth.getUser(jwt);
     if (!user?.email?.endsWith("@aluno.ficv.br")) return j({ error: "Sessão inválida." }, 401);
-    const { data: aluno } = await db.from("alunos").select("id, nome, cpf, email, telefone, ra, sponte_aluno_id").eq("id", user.id).maybeSingle();
+    const { data: aluno } = await db.from("alunos").select("id, nome, cpf, email, telefone, ra, sponte_aluno_id, nivel").eq("id", user.id).maybeSingle();
     if (!aluno?.sponte_aluno_id) return j({ error: "Sua conta ainda não está ligada ao Sponte. Procure a secretaria." }, 404);
     const A = aluno.sponte_aluno_id;
 
@@ -52,6 +52,10 @@ Deno.serve(async (req) => {
             if (n(a.Email) && !aluno.email) patch.email = a.Email.toLowerCase();
             if (n(a.Celular) && !aluno.telefone) patch.telefone = a.Celular;
             if (n(a.RA) && !aluno.ra) patch.ra = a.RA;
+            // nível (graduação/pós) decide a fila da Tutoria nos chamados acadêmicos
+            const vig = matriculas.find((m) => /vigente|ativ|cursando/i.test(m.situacao ?? "")) ?? matriculas[0];
+            const nivel = nivelDoCurso(vig?.curso) ?? matriculas.map((m) => nivelDoCurso(m.curso)).find(Boolean) ?? null;
+            if (nivel && nivel !== aluno.nivel) patch.nivel = nivel;
             if (Object.keys(patch).length) await db.from("alunos").update(patch).eq("id", aluno.id);
 
             return j({

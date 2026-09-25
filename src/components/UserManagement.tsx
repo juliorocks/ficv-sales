@@ -18,11 +18,36 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
+// Funções: admin/agent = CRM; secretaria/tutor/coordenador = só Chamados do Portal do Aluno
+// (quem vê o quê: ticket_visible() no banco; filas em Gestão > Filas de Atendimento).
+type Role = 'admin' | 'agent' | 'secretaria' | 'tutor' | 'coordenador';
+const ROLES: { value: Role; label: string; hint: string }[] = [
+    { value: 'admin', label: 'Admin', hint: 'Tudo' },
+    { value: 'agent', label: 'Comercial', hint: 'CRM / leads' },
+    { value: 'secretaria', label: 'Secretaria', hint: 'Chamados das suas filas' },
+    { value: 'tutor', label: 'Tutor', hint: 'Chamados das suas filas' },
+    { value: 'coordenador', label: 'Coordenador', hint: 'Todos os chamados' },
+];
+
+function RolePicker({ value, onChange }: { value: Role; onChange: (r: Role) => void }) {
+    return (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {ROLES.map(r => (
+                <button key={r.value} type="button" onClick={() => onChange(r.value)}
+                    className={`flex flex-col items-center justify-center gap-0.5 py-2.5 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${value === r.value ? 'bg-primary/20 border-primary/50 text-white' : 'bg-transparent border-[var(--border)] text-[var(--text-muted)] hover:border-primary/30'}`}>
+                    {r.label}
+                    <span className="text-[9px] font-medium normal-case tracking-normal opacity-70">{r.hint}</span>
+                </button>
+            ))}
+        </div>
+    );
+}
+
 interface Profile {
     id: string;
     full_name: string;
     email?: string;
-    role: 'admin' | 'agent';
+    role: Role;
     created_at: string;
 }
 
@@ -36,10 +61,10 @@ export const UserManagement: React.FC = () => {
         email: '',
         password: '',
         full_name: '',
-        role: 'agent' as 'admin' | 'agent'
+        role: 'agent' as Role
     });
     const [editingUser, setEditingUser] = useState<Profile | null>(null);
-    const [editForm, setEditForm] = useState({ full_name: '', email: '', role: 'agent' as 'admin' | 'agent', newPassword: '' });
+    const [editForm, setEditForm] = useState({ full_name: '', email: '', role: 'agent' as Role, newPassword: '' });
     const [editLoading, setEditLoading] = useState(false);
 
     useEffect(() => {
@@ -122,8 +147,7 @@ export const UserManagement: React.FC = () => {
         }
     };
 
-    const toggleRole = async (userId: string, currentRole: string) => {
-        const newRole = currentRole === 'admin' ? 'agent' : 'admin';
+    const changeRole = async (userId: string, newRole: Role) => {
         try {
             await supabase.functions.invoke('admin-manage-users', {
                 body: { action: 'update_profile', payload: { userId, role: newRole } },
@@ -199,13 +223,10 @@ export const UserManagement: React.FC = () => {
                                             </div>
                                         </td>
                                         <td className="py-4 px-4 text-center">
-                                            <button
-                                                onClick={() => toggleRole(p.id, p.role)}
-                                                className={`mx-auto flex items-center gap-2 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border transition-all ${p.role === 'admin' ? 'bg-primary/10 border-primary/20 text-primary' : 'bg-[var(--border)] border-transparent text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}
-                                            >
-                                                {p.role === 'admin' ? <ShieldCheck size={12} /> : <Shield size={12} />}
-                                                {p.role === 'admin' ? 'Administrador' : 'Agente'}
-                                            </button>
+                                            <select value={p.role} onChange={(e) => changeRole(p.id, e.target.value as Role)}
+                                                className={`mx-auto px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border bg-transparent ${p.role === 'admin' ? 'border-primary/30 text-primary' : 'border-[var(--border)] text-[var(--text-muted)]'}`}>
+                                                {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                                            </select>
                                         </td>
                                         <td className="py-4 px-4 text-center text-[10px] text-[var(--text-muted)] font-mono">
                                             {p.created_at ? new Date(p.created_at).toLocaleDateString() : '--/--/----'}
@@ -297,22 +318,7 @@ export const UserManagement: React.FC = () => {
 
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest ml-1">Nível de Acesso</label>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <button
-                                        type="button"
-                                        onClick={() => setNewUser({ ...newUser, role: 'agent' })}
-                                        className={`flex items-center justify-center gap-2 py-3 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${newUser.role === 'agent' ? 'bg-primary/20 border-primary/50 text-white' : 'bg-transparent border-[var(--border)] text-[var(--text-muted)] hover:border-primary/30'}`}
-                                    >
-                                        <Shield size={14} /> Agente
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setNewUser({ ...newUser, role: 'admin' })}
-                                        className={`flex items-center justify-center gap-2 py-3 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${newUser.role === 'admin' ? 'bg-primary/20 border-primary/50 text-white' : 'bg-transparent border-[var(--border)] text-[var(--text-muted)] hover:border-primary/30'}`}
-                                    >
-                                        <ShieldCheck size={14} /> Admin
-                                    </button>
-                                </div>
+                                <RolePicker value={newUser.role} onChange={(r) => setNewUser({ ...newUser, role: r })} />
                             </div>
 
                             <div className="flex gap-3 pt-4">
@@ -386,22 +392,7 @@ export const UserManagement: React.FC = () => {
 
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest ml-1">Nível de Acesso</label>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <button
-                                        type="button"
-                                        onClick={() => setEditForm({ ...editForm, role: 'agent' })}
-                                        className={`flex items-center justify-center gap-2 py-3 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${editForm.role === 'agent' ? 'bg-primary/20 border-primary/50 text-white' : 'bg-transparent border-[var(--border)] text-[var(--text-muted)] hover:border-primary/30'}`}
-                                    >
-                                        <Shield size={14} /> Agente
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setEditForm({ ...editForm, role: 'admin' })}
-                                        className={`flex items-center justify-center gap-2 py-3 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${editForm.role === 'admin' ? 'bg-primary/20 border-primary/50 text-white' : 'bg-transparent border-[var(--border)] text-[var(--text-muted)] hover:border-primary/30'}`}
-                                    >
-                                        <ShieldCheck size={14} /> Admin
-                                    </button>
-                                </div>
+                                <RolePicker value={editForm.role} onChange={(r) => setEditForm({ ...editForm, role: r })} />
                             </div>
 
                             <div className="space-y-2">

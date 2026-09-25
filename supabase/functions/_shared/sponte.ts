@@ -79,3 +79,21 @@ export async function sponteAlunoByCpf(cpf: string) {
         data_nascimento: brDate(a.DataNascimento),
     };
 }
+
+/** Nível pelo nome do curso: Pós/Especialização/MBA → pos; Bacharelado/Licenciatura/Tecnólogo/Graduação → graduacao. */
+export function nivelDoCurso(nome?: string | null): "pos" | "graduacao" | null {
+    const n = String(nome ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    if (/\bpos\b|pos-|especializa|mba/.test(n)) return "pos";
+    if (/bacharel|licencia|tecnolog|gradua/.test(n)) return "graduacao";
+    return null;
+}
+
+/** Nível do aluno pelas matrículas do Sponte (prefere a vigente/mais recente). */
+export async function sponteNivelAluno(alunoId: number): Promise<"pos" | "graduacao" | null> {
+    const xml = await sponteCall("GetMatriculas", { sParametrosBusca: `AlunoID=${alunoId}` });
+    const ms = records(xml, "wsMatricula").filter((r) => r.ContratoID && r.ContratoID !== "0")
+        .sort((a, b) => (/vigente|ativ|cursando/i.test(b.Situacao ?? "") ? 1 : 0) - (/vigente|ativ|cursando/i.test(a.Situacao ?? "") ? 1 : 0)
+            || String(brDate(b.DataMatricula)).localeCompare(String(brDate(a.DataMatricula))));
+    for (const m of ms) { const n = nivelDoCurso(m.NomeCurso); if (n) return n; }
+    return null;
+}

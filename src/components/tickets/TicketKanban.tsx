@@ -2,7 +2,8 @@
  * TicketKanban — visão em quadro dos chamados do Portal do Aluno (Secretaria e demais
  * setores). Colunas = status do chamado; arrastar muda o status igual ao TicketDetail
  * (resolvido grava resolved_at e dispara o e-mail "chamado resolvido" pro aluno).
- * Filtro de setor (categoria) lembrado por navegador — padrão: Secretaria.
+ * Filtro por FILA (Secretaria, Tutoria Graduação/Pós…) — cada pessoa já só recebe do banco
+ * os chamados das filas dela (ticket_visible); aqui só organiza. Lembrado por navegador.
  */
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -11,7 +12,7 @@ import { formatDistanceToNow } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { MessageCircleReply, Search, UserRound } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
-import type { Ticket, TicketCategoria, TicketStatus } from '../../types/database'
+import type { Ticket, TicketStatus } from '../../types/database'
 import { showError, showSuccess } from '../../utils/toast'
 import { Input } from '../ui/input'
 
@@ -22,27 +23,29 @@ const COLUMNS: { status: TicketStatus; label: string; hint: string; accent: stri
   { status: 'resolvido', label: 'Resolvidos', hint: 'Últimos 15 dias', accent: 'border-t-green-500' },
 ]
 
-const CATS: { value: TicketCategoria | 'todos'; label: string; icon: string }[] = [
-  { value: 'secretaria', label: 'Secretaria', icon: '📋' },
-  { value: 'financeiro', label: 'Financeiro', icon: '💳' },
-  { value: 'academico', label: 'Acadêmico', icon: '📚' },
-  { value: 'certificado', label: 'Certificado', icon: '🎓' },
-  { value: 'suporte_tecnico', label: 'Suporte', icon: '🔧' },
-  { value: 'cancelamento', label: 'Cancelamento', icon: '❌' },
-  { value: 'outros', label: 'Outros', icon: '💬' },
-  { value: 'todos', label: 'Todos', icon: '🗂️' },
-]
+const CAT_ICON: Record<string, string> = {
+  secretaria: '📋', financeiro: '💳', academico: '📚', certificado: '🎓', suporte_tecnico: '🔧', cancelamento: '❌', outros: '💬',
+}
 
 const PRIO_DOT: Record<string, string> = { urgente: 'bg-red-500', alta: 'bg-orange-500', media: 'bg-yellow-400', baixa: 'bg-green-500' }
-const CAT_KEY = 'ficv_ticket_kanban_cat'
+const QUEUE_KEY = 'ficv_ticket_kanban_queue'
 
-export function TicketKanban({ tickets, onOpen }: { tickets: Ticket[]; onOpen: (t: Ticket) => void }) {
+export function TicketKanban({ tickets, onOpen, defaultQueueName }: { tickets: Ticket[]; onOpen: (t: Ticket) => void; defaultQueueName?: string }) {
   const qc = useQueryClient()
-  const [cat, setCat] = useState<TicketCategoria | 'todos'>(() => {
-    try { return (localStorage.getItem(CAT_KEY) as TicketCategoria | 'todos') || 'secretaria' } catch { return 'secretaria' }
+  const { data: queues = [] } = useQuery<{ id: number; nome: string }[]>({
+    queryKey: ['ticket-queues'],
+    queryFn: async () => (await supabase.from('ticket_queues').select('id, nome').eq('ativo', true).order('ordem')).data ?? [],
+    staleTime: 5 * 60_000,
   })
+  const [queuePick, setQueuePick] = useState<string>(() => {
+    if (defaultQueueName) return `name:${defaultQueueName}`
+    try { return localStorage.getItem(QUEUE_KEY) || 'todas' } catch { return 'todas' }
+  })
+  const cat: number | 'todas' = queuePick === 'todas' ? 'todas'
+    : queuePick.startsWith('name:') ? (queues.find((q) => q.nome.toLowerCase().startsWith(queuePick.slice(5).toLowerCase()))?.id ?? 'todas')
+    : Number(queuePick)
   const [search, setSearch] = useState('')
-  const pickCat = (c: TicketCategoria | 'todos') => { setCat(c); try { localStorage.setItem(CAT_KEY, c) } catch { /* sem storage */ } }
+  const pickCat = (q: number | 'todas') => { setQueuePick(String(q)); try { if (!defaultQueueName) localStorage.setItem(QUEUE_KEY, String(q)) } catch { /* sem storage */ } }
 
   // quem falou por último em cada chamado → destaca "aluno respondeu" nos que estão com a equipe
   const ids = tickets.map((t) => t.id)
@@ -61,7 +64,7 @@ export function TicketKanban({ tickets, onOpen }: { tickets: Ticket[]; onOpen: (
 
   const since15 = Date.now() - 15 * 86400_000
   const visible = useMemo(() => tickets.filter((t) => {
-    if (cat !== 'todos' && t.categoria !== cat) return false
+    if (cat !== 'todas' && (t as any).queue_id !== cat) return false
     if (t.status === 'fechado') return false
     if (t.status === 'resolvido' && new Date(t.resolved_at ?? t.updated_at).getTime() < since15) return false
     if (search) {
@@ -73,8 +76,8 @@ export function TicketKanban({ tickets, onOpen }: { tickets: Ticket[]; onOpen: (
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {}
-    for (const t of tickets) if (!['resolvido', 'fechado'].includes(t.status)) c[t.categoria] = (c[t.categoria] ?? 0) + 1
-    c.todos = Object.values(c).reduce((a, b) => a + b, 0)
+    for (const t of tickets) if (!['resolvido', 'fechado'].includes(t.status)) c[String((t as any).queue_id)] = (c[String((t as any).queue_id)] ?? 0) + 1
+    c.todas = Object.values(c).reduce((a, b) => a + b, 0)
     return c
   }, [tickets])
 
@@ -99,12 +102,12 @@ export function TicketKanban({ tickets, onOpen }: { tickets: Ticket[]; onOpen: (
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        {CATS.map((c) => (
-          <button key={c.value} onClick={() => pickCat(c.value)}
-            className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${cat === c.value
+        {[{ id: 'todas' as const, nome: 'Todas as filas' }, ...queues].map((q) => (
+          <button key={q.id} onClick={() => pickCat(q.id)}
+            className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${cat === q.id
               ? 'bg-[var(--primary)] text-white border-[var(--primary)]'
               : 'border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}>
-            {c.icon} {c.label}{counts[c.value] ? <span className="ml-1 opacity-80">({counts[c.value]})</span> : null}
+            {q.nome}{counts[String(q.id)] ? <span className="ml-1 opacity-80">({counts[String(q.id)]})</span> : null}
           </button>
         ))}
         <div className="relative ml-auto w-full sm:w-64">
@@ -142,7 +145,7 @@ export function TicketKanban({ tickets, onOpen }: { tickets: Ticket[]; onOpen: (
                                 <div className="flex items-center gap-1.5 mb-1">
                                   <span className={`w-2 h-2 rounded-full shrink-0 ${PRIO_DOT[t.prioridade] ?? 'bg-slate-400'}`} title={`Prioridade ${t.prioridade}`} />
                                   <span className="text-[11px] font-mono text-[var(--primary)]">{t.protocolo}</span>
-                                  {cat === 'todos' && <span className="text-[11px]">{CATS.find((c) => c.value === t.categoria)?.icon}</span>}
+                                  <span className="text-[11px]" title={t.categoria}>{CAT_ICON[t.categoria]}</span>
                                   {alunoFalou && (
                                     <span className="ml-auto flex items-center gap-1 text-[10px] font-semibold text-purple-500">
                                       <MessageCircleReply className="w-3 h-3" /> aluno respondeu

@@ -31,7 +31,8 @@ import {
     CalendarClock,
     Bot,
     Plug,
-    KeyRound
+    KeyRound,
+    Inbox
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { reprocessAllAnalyses } from './services/reprocessor';
@@ -74,6 +75,7 @@ import { AiAgentSettings } from './components/admin/AiAgentSettings';
 import { VivaConnectSettings } from './components/admin/VivaConnectSettings';
 import { IntegrationsSettings } from './components/admin/IntegrationsSettings';
 import { SecretariaBoard } from './components/tickets/SecretariaBoard';
+import { TicketQueuesSettings } from './components/admin/TicketQueuesSettings';
 import { UserWidechatConfig } from './components/admin/UserWidechatConfig';
 import { TicketDashboard } from './components/tickets/TicketDashboard';
 import { SponteDashboard } from './components/SponteDashboard';
@@ -170,6 +172,11 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     useEffect(() => {
         localStorage.setItem('ficv_active_tab', activeTab);
     }, [activeTab]);
+    // Secretaria/Tutor/Coordenador trabalham só com Chamados (Portal do Aluno)
+    const isTicketRole = ['secretaria', 'tutor', 'coordenador'].includes(String(profile?.role ?? ''));
+    useEffect(() => {
+        if (isTicketRole && activeTab !== 'tickets') setActiveTab('tickets');
+    }, [isTicketRole, activeTab]);
 
     // Load team selection — always validate against DB to flush corrupted localStorage values
     useEffect(() => {
@@ -862,6 +869,13 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                     </div>
 
                     <div className="px-4 py-2 flex-1 overflow-y-auto custom-scrollbar">
+                        {/* Secretaria/Tutor/Coordenador: só Chamados (sem CRM de vendas) */}
+                        {isTicketRole ? (<>
+                        <p className="text-[10px] text-[var(--text-muted)] font-bold tracking-widest uppercase mb-4 px-2">Atendimento ao Aluno</p>
+                        <nav className="space-y-1">
+                            <NavItem icon={TicketIcon} label="Chamados" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
+                        </nav>
+                        </>) : (<>
                         <p className="text-[10px] text-[var(--text-muted)] font-bold tracking-widest uppercase mb-4 px-2">Menu Principal</p>
                         <nav className="space-y-1">
                             <NavItem icon={LayoutDashboard} label="Visão Geral" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
@@ -946,6 +960,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                             )}
                             {(profile?.role === 'admin') && <NavItem icon={Tv} label="Dashboard Live" active={isTvMode} onClick={() => setIsTvMode(!isTvMode)} />}
                         </nav>
+                        </>)}
 
                         {profile?.role === 'admin' && (
                             <>
@@ -953,6 +968,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                 <nav className="space-y-1">
                                     <NavItem icon={Users} label="Equipes" active={activeTab === 'teams'} onClick={() => setActiveTab('teams')} />
                                     <NavItem icon={Users} label="Usuários" active={activeTab === 'users'} onClick={() => setActiveTab('users')} />
+                                    <NavItem icon={Inbox} label="Filas de Atendimento" active={activeTab === 'ticket-queues'} onClick={() => setActiveTab('ticket-queues')} />
                                     <NavItem icon={KeyRound} label="Integrações" active={activeTab === 'integrations'} onClick={() => setActiveTab('integrations')} />
                                     <NavItem icon={Bot} label="IA de Atendimento" active={activeTab === 'ai-agent'} onClick={() => setActiveTab('ai-agent')} />
                                     <NavItem icon={Plug} label="VivaConnect" active={activeTab === 'vivaconnect'} onClick={() => setActiveTab('vivaconnect')} />
@@ -1785,6 +1801,12 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                     </div>
                 )}
 
+                {activeTab === 'ticket-queues' && profile?.role === 'admin' && (
+                    <div className="animate-fade-in">
+                        <TicketQueuesSettings />
+                    </div>
+                )}
+
                 {/* Integrações (chaves de API no Vault) */}
                 {activeTab === 'integrations' && profile?.role === 'admin' && (
                     <div className="animate-fade-in">
@@ -1895,7 +1917,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 )}
 
                 {/* Tickets — staff only (alunos usam /atendimento) */}
-                {activeTab === 'tickets' && (profile?.role === 'admin' || profile?.role === 'agent') && (
+                {activeTab === 'tickets' && (profile?.role === 'admin' || profile?.role === 'agent' || isTicketRole) && (
                     <div className="animate-fade-in">
                         <TicketDashboard />
                     </div>

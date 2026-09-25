@@ -26,7 +26,7 @@ export function SecretariaBoard() {
   return (
     <div className="space-y-2">
       <p className="text-xs text-[var(--text-muted)]">A Secretaria atende por <b>chamados</b> do Portal do Aluno — arraste pra mudar o status.</p>
-      <TicketKanban tickets={tickets} onOpen={setSelected} />
+      <TicketKanban tickets={tickets} onOpen={setSelected} defaultQueueName="Secretaria" />
       {selected && <TicketDetail ticket={selected} onClose={() => setSelected(null)} />}
     </div>
   )

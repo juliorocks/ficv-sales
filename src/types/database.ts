@@ -2,7 +2,7 @@ export interface User {
     id: string
     email?: string
     full_name: string
-    role: 'admin' | 'agent'
+    role: 'admin' | 'agent' | 'secretaria' | 'tutor' | 'coordenador'
     avatar_url?: string | null
 }
 
