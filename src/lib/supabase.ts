@@ -30,9 +30,29 @@ const boundedLock = async <R>(name: string, acquireTimeout: number, fn: () => Pr
     }
 };
 
+// Portal do Aluno (/aluno) e CRM ficam no MESMO domínio: com a mesma chave de storage,
+// logar como aluno no portal SOBRESCREVIA a sessão do admin/agente no CRM (o CRM passava
+// a consultar como aluno → RLS devolvia tudo vazio: "Nenhum estágio encontrado", 25/09).
+// Cada um guarda a sessão numa chave própria. /atendimento entra aqui antes de redirecionar.
+const isAlunoPortal = typeof window !== 'undefined' && /^\/(aluno|atendimento)(\/|$)/.test(window.location.pathname);
+const projectRef = (() => { try { return new URL(supabaseUrl).hostname.split('.')[0]; } catch { return 'app'; } })();
+const CRM_STORAGE_KEY = `sb-${projectRef}-auth-token`; // chave padrão do supabase-js (sessões atuais continuam valendo)
+const ALUNO_STORAGE_KEY = `sb-${projectRef}-aluno-auth-token`;
+
+// CRM: descarta sessão de ALUNO que tenha ficado na chave do CRM (antes da separação acima)
+if (!isAlunoPortal && typeof window !== 'undefined') {
+    try {
+        const raw = window.localStorage.getItem(CRM_STORAGE_KEY);
+        if (raw && String(JSON.parse(raw)?.user?.email ?? '').endsWith('@aluno.ficv.br')) {
+            window.localStorage.removeItem(CRM_STORAGE_KEY);
+        }
+    } catch { /* storage indisponível */ }
+}
+
 // Cliente Supabase direto — sem o proxy SurrealDB (migração de volta ao Supabase).
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
+        storageKey: isAlunoPortal ? ALUNO_STORAGE_KEY : CRM_STORAGE_KEY,
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
