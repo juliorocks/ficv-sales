@@ -755,6 +755,45 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
         onError: (e: any) => showError(`Erro ao finalizar: ${e.message}`),
     })
 
+    // ── Transferir pra Secretaria: a conversa vira CHAMADO do Portal do Aluno ─────
+    // 1) ticket-transfer cria o chamado (histórico do WhatsApp junto, e-mail pro aluno)
+    // 2) despedida no WhatsApp pelo canal do lead (se der pra enviar texto agora)
+    // 3) finaliza a conversa no WhatsApp — dali em diante é Portal/e-mail
+    const [secOpen, setSecOpen] = useState(false)
+    const [secForm, setSecForm] = useState({ cpf: '', email: '', titulo: '', resumo: '', categoria: 'secretaria' })
+    const openSecretaria = async () => {
+        let email = ''
+        if (numericLeadId != null) {
+            const { data } = await supabase.from('leads').select('email').eq('id', numericLeadId).maybeSingle()
+            email = data?.email ?? ''
+        }
+        setSecForm({ cpf: '', email, titulo: '', resumo: '', categoria: 'secretaria' })
+        setSecOpen(true)
+    }
+    const transferSecMutation = useMutation({
+        mutationFn: async () => {
+            const { data, error } = await supabase.functions.invoke('ticket-transfer', { body: { lead_id: numericLeadId, ...secForm } })
+            if (error) {
+                const ctx = await (error as any).context?.json?.().catch(() => null)
+                throw new Error(ctx?.error ?? error.message)
+            }
+            if (data?.error) throw new Error(data.error)
+            let avisoWhats = ''
+            if (canSendText && data.whatsapp_msg) {
+                try { await sendMessageMutation.mutateAsync(data.whatsapp_msg) } catch { avisoWhats = ' (não consegui enviar a despedida no WhatsApp)' }
+            } else avisoWhats = ' (janela do WhatsApp fechada — despedida não enviada)'
+            if (canTransfer) { try { await finishMutation.mutateAsync() } catch { /* finalizar é best-effort */ } }
+            return { protocolo: data.protocolo as string, portal: !!data.portal, avisoWhats }
+        },
+        onSuccess: ({ protocolo, portal, avisoWhats }) => {
+            setSecOpen(false)
+            showSuccess(`Chamado ${protocolo} aberto na Secretaria${portal ? ' (Portal do Aluno)' : ' (por e-mail)'}${avisoWhats}.`)
+            queryClient.invalidateQueries({ queryKey: ['leads'] })
+            queryClient.invalidateQueries({ queryKey: ['tickets'] })
+        },
+        onError: (e: any) => showError(`Transferência: ${e.message}`),
+    })
+
     // escolheu um template: se tem variável, abre o formulário pra preencher;
     // se não tem, envia direto.
     const openTemplate = (t: any) => {
@@ -819,6 +858,12 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
             )}
             {canTransfer && (
                 <div className="flex justify-end gap-1 px-3 pt-2 bg-[var(--bg-card)]">
+                    <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-primary"
+                        disabled={transferSecMutation.isPending || numericLeadId == null} onClick={openSecretaria}
+                        title="A conversa vira um chamado da Secretaria no Portal do Aluno (com o histórico)">
+                        {transferSecMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                        → Secretaria
+                    </Button>
                     <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-red-600"
                         disabled={finishMutation.isPending}
                         onClick={() => { if (window.confirm(isViva ? 'Finalizar esse atendimento? O lead vai para Finalizado (se o cliente escrever de novo, ele reabre sozinho).' : 'Finalizar esse atendimento no WideChat? Isso encerra a conversa lá (não só aqui).')) finishMutation.mutate() }}>
@@ -1121,6 +1166,47 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                     </Popover>
                 )}
             </div>
+
+            <Dialog open={secOpen} onOpenChange={setSecOpen}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="text-base">Transferir para a Secretaria</DialogTitle>
+                    </DialogHeader>
+                    <p className="text-xs text-muted-foreground">
+                        A conversa vira um <b>chamado no Portal do Aluno</b>, com o histórico do WhatsApp. O aluno recebe e-mail com o protocolo,
+                        o WhatsApp recebe uma mensagem de despedida e a conversa é finalizada aqui.
+                    </p>
+                    <div className="space-y-3">
+                        <div className="space-y-1">
+                            <Label className="text-xs">CPF do aluno (Sponte)</Label>
+                            <Input value={secForm.cpf} onChange={(e) => setSecForm((f) => ({ ...f, cpf: e.target.value }))} placeholder="000.000.000-00" />
+                            <p className="text-[11px] text-muted-foreground">Com CPF, o aluno acompanha pelo Portal. Sem CPF, o chamado segue só por e-mail.</p>
+                        </div>
+                        <div className="space-y-1">
+                            <Label className="text-xs">E-mail do aluno</Label>
+                            <Input value={secForm.email} onChange={(e) => setSecForm((f) => ({ ...f, email: e.target.value }))} placeholder="usado se o Sponte não tiver e-mail" />
+                        </div>
+                        <div className="space-y-1">
+                            <Label className="text-xs">Assunto do chamado *</Label>
+                            <Input value={secForm.titulo} onChange={(e) => setSecForm((f) => ({ ...f, titulo: e.target.value }))} placeholder="Ex: Declaração de matrícula" />
+                        </div>
+                        <div className="space-y-1">
+                            <Label className="text-xs">Recado para o aluno (opcional)</Label>
+                            <textarea value={secForm.resumo} onChange={(e) => setSecForm((f) => ({ ...f, resumo: e.target.value }))} rows={3}
+                                placeholder="Ex: A secretaria vai emitir sua declaração e te envia por aqui."
+                                className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm" />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setSecOpen(false)}>Cancelar</Button>
+                        <Button onClick={() => transferSecMutation.mutate()}
+                            disabled={transferSecMutation.isPending || !secForm.titulo.trim() || (!secForm.cpf.replace(/\D/g, '') && !secForm.email.includes('@'))}>
+                            {transferSecMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                            Transferir
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             {/* preenchimento das variáveis do template antes de enviar */}
             <Dialog open={!!tplForm} onOpenChange={(o) => { if (!o) setTplForm(null) }}>

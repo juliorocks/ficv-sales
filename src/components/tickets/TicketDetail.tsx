@@ -598,6 +598,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
         {/* Messages */}
         {!showEval && (
           <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+            {isStaff && (t as any).lead_id && <WhatsappHistory leadId={(t as any).lead_id} />}
             {isLoading ? (
               <div className="flex justify-center py-8">
                 <Loader2 className="w-6 h-6 animate-spin text-[var(--text-muted)]" />
@@ -835,5 +836,45 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
         )}
       </DialogContent>
     </Dialog>
+  )
+}
+
+// ── Conversa do WhatsApp que originou o chamado (transferência Comercial → Secretaria) ──
+// Só pra equipe. Lê widechat_messages do lead (WideChat e VivaConnect), recolhida por padrão.
+function WhatsappHistory({ leadId }: { leadId: number }) {
+  const [open, setOpen] = useState(false)
+  const { data: msgs = [] } = useQuery<any[]>({
+    queryKey: ['ticket-whatsapp-history', leadId],
+    queryFn: async () => {
+      const { data } = await supabase.from('widechat_messages')
+        .select('id, origin, sender_name, message, type, media_url, created_at')
+        .eq('lead_id', leadId).order('created_at', { ascending: true }).limit(300)
+      return data ?? []
+    },
+  })
+  if (!msgs.length) return null
+  const fmt = (iso: string) => new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  return (
+    <div className="rounded-xl border border-green-500/30 bg-green-500/5">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-semibold text-green-600 dark:text-green-400">
+        <span>📱 Conversa do WhatsApp antes da transferência ({msgs.length} mensagens)</span>
+        <span>{open ? 'recolher ▲' : 'ver ▼'}</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-3 space-y-2 max-h-80 overflow-y-auto">
+          {msgs.map(m => {
+            const cliente = m.origin === 'channel'
+            return (
+              <div key={m.id} className={`flex flex-col ${cliente ? 'items-start' : 'items-end'}`}>
+                <div className={`max-w-[85%] rounded-lg px-3 py-1.5 text-xs whitespace-pre-wrap ${cliente ? 'bg-[var(--bg-main)] text-[var(--text-main)]' : m.origin === 'auto' ? 'bg-slate-500/15 text-[var(--text-muted)]' : 'bg-green-600/20 text-[var(--text-main)]'}`}>
+                  {m.message || (m.media_url ? <a href={m.media_url} target="_blank" rel="noopener noreferrer" className="underline">[{m.type}] abrir anexo</a> : `[${m.type}]`)}
+                </div>
+                <span className="text-[10px] text-[var(--text-muted)] mt-0.5">{cliente ? 'Aluno' : m.origin === 'auto' ? 'Bot/IA' : (m.sender_name || 'Atendente')} · {fmt(m.created_at)}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }

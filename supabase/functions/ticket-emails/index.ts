@@ -1,7 +1,8 @@
 // ticket-emails — envia os e-mails dos chamados pro aluno (Resend). Cron 1/min.
 //
 // Regras de tempo (a fila é preenchida pelos gatilhos em tickets/ticket_messages):
-//   created  → na hora em que o aluno abre o chamado
+//   created     → na hora em que o aluno abre o chamado
+//   transferred → equipe transferiu a conversa do WhatsApp pra Secretaria (ticket-transfer)
 //   reply    → 5 min depois da 1ª resposta pública do atendimento (respostas seguidas
 //              viram um e-mail só) e nunca menos de 15 min depois do aviso anterior;
 //              não envia se o aluno já respondeu depois (ele está acompanhando)
@@ -9,7 +10,7 @@
 //   reminder → chamado "aguardando você" parado há 48h, 1 lembrete por resposta do atendimento
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { identify, jsonRes } from "../_shared/ai.ts";
-import { emailLayout, escHtml, PORTAL_URL, sendEmail } from "../_shared/email.ts";
+import { emailLayout, escHtml, PORTAL_URL, sendEmail, ticketReplyAddress } from "../_shared/email.ts";
 
 const CAT: Record<string, string> = {
     financeiro: "Financeiro", academico: "Acadêmico", secretaria: "Secretaria", suporte_tecnico: "Suporte Técnico",
@@ -51,18 +52,34 @@ Deno.serve(async (req) => {
         const { data: t } = await db.from("tickets").select("id, protocolo, titulo, categoria, status, aluno_id, aluno_nome, aluno_email, created_at")
             .eq("id", row.ticket_id).maybeSingle();
         if (!t) { await finish("skipped", { error: "chamado não existe mais" }); continue; }
-        const { data: al } = t.aluno_id ? await db.from("alunos").select("nome, email").eq("id", t.aluno_id).maybeSingle() : { data: null };
+        const { data: al } = t.aluno_id ? await db.from("alunos").select("nome, email, must_change_password").eq("id", t.aluno_id).maybeSingle() : { data: null };
+        const replyTo = await ticketReplyAddress(db, t.id); // null se RESEND_INBOUND_DOMAIN não configurado
+        const L = (title: string, body: string, cta?: { label: string; url: string }) => emailLayout(title, body, cta, !!replyTo);
         const to = (al?.email || t.aluno_email || "").trim();
         if (!to.includes("@") || to.endsWith("@aluno.ficv.br")) { await finish("skipped", { error: "aluno sem e-mail" }); continue; }
         const nome = first(al?.nome ?? t.aluno_nome);
         const tag = `#${t.protocolo}`;
         let subject = "", html = "";
 
-        if (row.kind === "created") {
+        if (row.kind === "transferred") {
+            const { data: m } = await db.from("ticket_messages").select("autor_nome, conteudo, created_at").eq("ticket_id", t.id)
+                .neq("autor_role", "aluno").eq("interno", false).order("created_at").limit(1).maybeSingle();
+            const aberto = new Date(t.created_at).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+            subject = `Seu atendimento agora é com a Secretaria — chamado ${tag}`;
+            html = L("Chamado aberto na Secretaria", `<p>Olá, ${escHtml(nome)}!</p>
+                <p>Sua conversa pelo WhatsApp foi transferida para a <b>Secretaria</b> e virou o chamado
+                <b style="color:#C9A84C">${escHtml(t.protocolo)}</b> — ${escHtml(t.titulo)}.</p>
+                <p>📅 Chamado aberto em <b>${escHtml(aberto)}</b> — o prazo de atendimento conta a partir daqui.</p>
+                ${m ? quote(m.autor_nome || "Equipe FICV", fmt(m.created_at), m.conteudo) : ""}
+                <p><b>A partir de agora, todas as tratativas acontecem pelo Portal do Aluno${replyTo ? " ou respondendo este e-mail" : ""}.</b>
+                O WhatsApp não será mais usado para este assunto.</p>
+                ${t.aluno_id ? `<p style="font-size:13px;color:#8A8A9A">Acesso ao portal: login = seu CPF${al?.must_change_password ? " · senha inicial = seu CPF (só números)" : ""}.</p>` : ""}`,
+                t.aluno_id ? { label: "Abrir o Portal do Aluno", url: PORTAL_URL } : undefined);
+        } else if (row.kind === "created") {
             const { data: m } = await db.from("ticket_messages").select("conteudo").eq("ticket_id", t.id).eq("autor_role", "aluno")
                 .order("created_at").limit(1).maybeSingle();
             subject = `Recebemos seu chamado ${tag} — ${t.titulo}`;
-            html = emailLayout("Recebemos seu chamado", `<p>Olá, ${escHtml(nome)}!</p>
+            html = L("Recebemos seu chamado", `<p>Olá, ${escHtml(nome)}!</p>
                 <p>Seu chamado foi aberto e já está com a nossa equipe (${escHtml(CAT[t.categoria] ?? t.categoria)}).
                 Guarde o protocolo: <b style="color:#C9A84C">${escHtml(t.protocolo)}</b>.</p>
                 ${m?.conteudo ? quote("Você escreveu", fmt(t.created_at), m.conteudo) : ""}
@@ -78,7 +95,7 @@ Deno.serve(async (req) => {
             if (!lastStaff) { await finish("skipped", { error: "sem resposta nova" }); continue; }
             if (lastAluno && lastAluno.created_at > lastStaff.created_at) { await finish("skipped", { error: "aluno já respondeu" }); continue; }
             subject = `Nova resposta no seu chamado ${tag} — ${t.titulo}`;
-            html = emailLayout("Respondemos seu chamado", `<p>Olá, ${escHtml(nome)}!</p>
+            html = L("Respondemos seu chamado", `<p>Olá, ${escHtml(nome)}!</p>
                 <p>Tem resposta nova no chamado <b style="color:#C9A84C">${escHtml(t.protocolo)}</b> — ${escHtml(t.titulo)}:</p>
                 ${staff.map((m) => quote(m.autor_nome || "Equipe FICV", fmt(m.created_at), m.conteudo)).join("")}
                 ${t.status === "aguardando_aluno" ? "<p><b>Precisamos da sua resposta</b> para continuar o atendimento.</p>" : ""}`,
@@ -86,19 +103,19 @@ Deno.serve(async (req) => {
         } else if (row.kind === "resolved") {
             if (t.status !== "resolvido") { await finish("skipped", { error: `status mudou para ${t.status}` }); continue; }
             subject = `Chamado ${tag} resolvido — ${t.titulo}`;
-            html = emailLayout("Chamado resolvido", `<p>Olá, ${escHtml(nome)}!</p>
+            html = L("Chamado resolvido", `<p>Olá, ${escHtml(nome)}!</p>
                 <p>Marcamos o chamado <b style="color:#C9A84C">${escHtml(t.protocolo)}</b> — ${escHtml(t.titulo)} como <b>resolvido</b>.</p>
                 <p>Se ainda precisar de algo, é só responder por lá que ele volta pra equipe. E, se puder, avalie o atendimento — leva 10 segundos. 💛</p>`,
                 { label: "Avaliar atendimento", url: PORTAL_URL });
         } else if (row.kind === "reminder") {
             if (t.status !== "aguardando_aluno") { await finish("skipped", { error: `status mudou para ${t.status}` }); continue; }
             subject = `Estamos aguardando sua resposta — chamado ${tag}`;
-            html = emailLayout("Aguardando sua resposta", `<p>Olá, ${escHtml(nome)}!</p>
+            html = L("Aguardando sua resposta", `<p>Olá, ${escHtml(nome)}!</p>
                 <p>O chamado <b style="color:#C9A84C">${escHtml(t.protocolo)}</b> — ${escHtml(t.titulo)} está esperando uma resposta sua há 2 dias.
                 Assim que você responder, a equipe continua o atendimento.</p>`, { label: "Responder no Portal", url: PORTAL_URL });
         }
 
-        const r = await sendEmail(to, subject, html);
+        const r = await sendEmail(to, subject, html, replyTo);
         if (r.ok) await finish("sent", { sent_at: new Date().toISOString(), to_email: to, error: null });
         else if (/não configurada/.test(r.error ?? "")) { out.failed++; break; } // sem chave: deixa na fila pra quando configurar
         else await finish("failed", { to_email: to, error: r.error });

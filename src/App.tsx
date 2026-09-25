@@ -73,6 +73,7 @@ import { TmaSettingsManagement } from './components/admin/TmaSettingsManagement'
 import { AiAgentSettings } from './components/admin/AiAgentSettings';
 import { VivaConnectSettings } from './components/admin/VivaConnectSettings';
 import { IntegrationsSettings } from './components/admin/IntegrationsSettings';
+import { SecretariaBoard } from './components/tickets/SecretariaBoard';
 import { UserWidechatConfig } from './components/admin/UserWidechatConfig';
 import { TicketDashboard } from './components/tickets/TicketDashboard';
 import { SponteDashboard } from './components/SponteDashboard';
@@ -533,9 +534,13 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     // "Sem equipe" é uma equipe cadastrada, mas sem ninguém — no filtro ela significa
     // "a fila que ninguém pegou": leads sem atendente + atendentes sem departamento.
     const [noTeamId, setNoTeamId] = useState<string | null>(null);
+    // "Secretaria" no filtro troca o funil de vendas pelo quadro de CHAMADOS (a Secretaria
+    // atende pelo Portal do Aluno — pedido do usuário 25/09)
+    const [secretariaTeamId, setSecretariaTeamId] = useState<string | null>(null);
     useEffect(() => {
         supabase.from('teams').select('id, name').then(({ data }) => {
             setNoTeamId((data ?? []).find((t: any) => /sem equipe/i.test(t.name ?? ''))?.id ?? null);
+            setSecretariaTeamId((data ?? []).find((t: any) => /secretaria/i.test(t.name ?? ''))?.id ?? null);
         });
     }, []);
     const kanbanIsNoTeam = !!kanbanTeamId && kanbanTeamId === noTeamId;
@@ -1841,12 +1846,14 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                     só as colunas do KanbanBoard rolam na horizontal. */}
                 {activeTab === 'kanban' && (
                     <div className="animate-fade-in min-w-0">
+                        {kanbanTeamId && kanbanTeamId === secretariaTeamId ? <SecretariaBoard /> : (
                         <KanbanBoard
                             searchTerm={kanbanSearch}
                             assigneeFilter={kanbanAssignee}
                             dateRange={kanbanDateRange}
                             teamAgentIds={kanbanTeamId ? [...kanbanAgentsInTeam.map(a => a.id), ...(kanbanIsNoTeam ? ['__unassigned__'] : [])] : undefined}
                         />
+                        )}
                     </div>
                 )}
 

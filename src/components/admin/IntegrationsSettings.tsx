@@ -30,6 +30,7 @@ interface Integration {
     fields: Field[]
     manageTab?: string
     last_test: { ok: boolean; at: string; message: string } | null
+    info?: { label: string; value: string }[]
 }
 
 const fieldLabel = "text-xs font-bold uppercase tracking-widest text-muted-foreground"
@@ -145,6 +146,16 @@ export function IntegrationsSettings({ onNavigate }: { onNavigate?: (tab: string
                                             {f.help}{f.help && f.updated_at ? " · " : ""}{f.updated_at ? `salva em ${fmt(f.updated_at)}` : ""}
                                         </p>
                                     )}
+                                </div>
+                            ))}
+
+                            {integ.info?.map((inf) => (
+                                <div key={inf.label} className="space-y-1">
+                                    <Label className={fieldLabel}>{inf.label}</Label>
+                                    <div className="flex gap-2">
+                                        <Input readOnly value={inf.value} className="bg-muted/20 font-mono text-[10px]" />
+                                        <Button size="sm" variant="outline" onClick={() => navigator.clipboard.writeText(inf.value).then(() => showSuccess("Copiado."))}>Copiar</Button>
+                                    </div>
                                 </div>
                             ))}
 

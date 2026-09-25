@@ -14,7 +14,7 @@ import { loadSettings, zpro, zproErr } from "../_shared/vivaconnect.ts";
 import { retorno, sponteCall } from "../_shared/sponte.ts";
 
 type Field = { key: string; label: string; placeholder?: string; optional?: boolean; help?: string };
-type Integration = { id: string; name: string; description: string; fields: Field[]; manageTab?: string };
+type Integration = { id: string; name: string; description: string; fields: Field[]; manageTab?: string; info?: { label: string; value: string }[] };
 
 const REGISTRY: Integration[] = [
     {
@@ -46,6 +46,8 @@ const REGISTRY: Integration[] = [
         fields: [
             { key: "RESEND_API_KEY", label: "API Key", placeholder: "re_...", help: "resend.com → API Keys" },
             { key: "RESEND_FROM", label: "Remetente", placeholder: "FICV <atendimento@ficv.edu.br>", help: "O domínio precisa estar verificado na Resend." },
+            { key: "RESEND_INBOUND_DOMAIN", label: "Domínio de respostas (opcional)", optional: true, placeholder: "xxxx.resend.app ou respostas.ficv.edu.br",
+              help: "Pro aluno responder o chamado pelo e-mail. Resend → Receiving (endereço .resend.app ou domínio com MX)." },
         ],
     },
     {
@@ -177,6 +179,7 @@ Deno.serve(async (req) => {
 
         if (action === "list") {
             const { data: st } = await db.from("integration_status").select("*");
+            const inboundKey = (await db.from("app_internal").select("value").eq("key", "inbound_key").maybeSingle()).data?.value;
             const byKey = new Map((st ?? []).map((r: any) => [r.key, r]));
             return jsonRes({
                 integrations: REGISTRY.map((i) => {
@@ -194,6 +197,10 @@ Deno.serve(async (req) => {
                             };
                         }),
                         last_test: s?.last_test_at ? { ok: s.last_test_ok, at: s.last_test_at, message: s.last_test_message } : null,
+                        info: i.id === "resend" && inboundKey ? [{
+                            label: "Webhook de respostas — Resend → Webhooks → evento email.received",
+                            value: `${Deno.env.get("SUPABASE_URL")}/functions/v1/email-inbound?key=${inboundKey}`,
+                        }] : undefined,
                     };
                 }),
             });

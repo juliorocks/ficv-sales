@@ -9,7 +9,8 @@
 // Respostas genéricas pra não confirmar quais CPFs existem; limite de 10 tentativas
 // por CPF a cada 15 min.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
-import { cpfDigits, sponteAlunoByCpf } from "../_shared/sponte.ts";
+import { cpfDigits } from "../_shared/sponte.ts";
+import { ensureAlunoAccount, fmtCpf } from "../_shared/aluno.ts";
 import { emailLayout, escHtml, PORTAL_URL, sendEmail } from "../_shared/email.ts";
 
 const cors = {
@@ -18,7 +19,6 @@ const cors = {
 };
 const j = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
 
-const fmtCpf = (d: string) => d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4");
 const maskEmail = (e: string) => e.replace(/^(.)(.*)(.@.*)$/, (_, a, b, c) => a + "*".repeat(Math.min(b.length, 6)) + c);
 const GENERIC = "CPF ou senha incorretos.";
 
@@ -45,26 +45,12 @@ Deno.serve(async (req) => {
                 await log("first_access", false);
                 return j({ error: GENERIC }, 401);
             }
-            const s = await sponteAlunoByCpf(cpf);
-            if (!s) {
+            const r = await ensureAlunoAccount(db, cpf);
+            if (r.error) {
                 await log("first_access", false);
-                return j({ error: "Não encontramos esse CPF entre os alunos da FICV. Procure a secretaria." }, 404);
-            }
-            const { data: created, error: cErr } = await db.auth.admin.createUser({
-                email: `${cpf}@aluno.ficv.br`, password: cpf, email_confirm: true,
-                user_metadata: { nome: s.nome, sponte_aluno_id: s.aluno_id },
-            });
-            if (cErr || !created.user) {
-                await log("first_access", false);
-                return j({ error: GENERIC }, 401);
-            }
-            const { error: iErr } = await db.from("alunos").insert({
-                id: created.user.id, cpf: fmtCpf(cpf), nome: s.nome, email: s.email ?? "", telefone: s.celular,
-                ra: s.ra, sponte_aluno_id: s.aluno_id, must_change_password: true,
-            });
-            if (iErr) {
-                await db.auth.admin.deleteUser(created.user.id);
-                return j({ error: "Não foi possível criar seu acesso agora. Tente de novo em instantes." }, 500);
+                return r.error.includes("Sponte")
+                    ? j({ error: "Não encontramos esse CPF entre os alunos da FICV. Procure a secretaria." }, 404)
+                    : j({ error: "Não foi possível criar seu acesso agora. Tente de novo em instantes." }, 500);
             }
             await log("first_access", true);
             return j({ ok: true });
