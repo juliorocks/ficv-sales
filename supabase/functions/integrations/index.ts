@@ -91,9 +91,8 @@ async function runTest(id: string, db: any): Promise<{ ok: boolean; message: str
         const { data: chans } = await db.from("vivaconnect_channels").select("id, name, phone, api_id, api_token").eq("active", true);
         if (!chans?.length) return { ok: false, message: "Nenhum número ativo cadastrado na tela VivaConnect." };
         const res = await Promise.all(chans.map(async (c: any) => {
-            const r = await zpro(settings.base_url, c, "/showChannel", { number: c.phone ?? "" });
-            const authOk = r.ok || (r.status !== 401 && r.status !== 403 && r.status !== 0);
-            return { name: c.name, ok: authOk, msg: r.ok ? "ok" : authOk ? `token ok (HTTP ${r.status})` : zproErr(r.status, r.data) };
+            const r = await zpro(settings.base_url, c, "/listChannels");
+            return { name: c.name, ok: r.ok, msg: r.ok ? "ok" : zproErr(r.status, r.data) };
         }));
         const bad = res.filter((x) => !x.ok);
         return { ok: !bad.length, message: res.map((x) => `${x.name}: ${x.msg}`).join(" · ") };

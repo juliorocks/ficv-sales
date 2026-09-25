@@ -73,7 +73,17 @@ function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange
     )
 }
 
-const emptyChannel = { name: "", purpose: "pool" as "official" | "pool", kind: "baileys", phone: "", api_id: "", api_token: "", daily_limit: 40 }
+const emptyChannel = {
+    api_ref: "", api_token: "",
+    // preenchidos pela busca no Z-PRO (editáveis)
+    found: false, name: "", purpose: "pool" as "official" | "pool", kind: "baileys", phone: "", api_id: "",
+    zpro_whatsapp_id: "", daily_limit: 40, zpro_info: null as unknown,
+    options: [] as { id: string; name: string; number: string | null; type: string | null; status: string | null }[],
+}
+const kindFromType = (t: string | null) => {
+    const v = String(t ?? "").toLowerCase()
+    return v.includes("hybrid") || v.includes("hibrid") ? "hybrid" : v.includes("waba") || v.includes("cloud") || v.includes("meta") ? "waba" : "baileys"
+}
 
 export function VivaConnectSettings() {
     const qc = useQueryClient()
@@ -153,13 +163,37 @@ export function VivaConnectSettings() {
         showSuccess("Configurações do VivaConnect salvas.")
     }
 
+    const pickOption = (ch: typeof emptyChannel, id: string) => {
+        const o = ch.options.find((x) => x.id === id)
+        return o ? { ...ch, zpro_whatsapp_id: o.id, name: o.name, phone: o.number ?? "", kind: kindFromType(o.type) } : { ...ch, zpro_whatsapp_id: id }
+    }
+
+    const discover = async () => {
+        if (!newCh?.api_ref.trim() || !newCh.api_token.trim()) return showError("Cole a URL de integração e o token.")
+        setBusy("discover")
+        const { data, error } = await supabase.functions.invoke("vivaconnect-api", {
+            body: { action: "discover", api_ref: newCh.api_ref, api_token: newCh.api_token },
+        })
+        setBusy(null)
+        if (error || data?.error) return showError(await fnError(error, data))
+        const base = { ...newCh, found: true, api_id: data.api_id, options: data.channels ?? [], zpro_info: data.raw }
+        if (!data.channels?.length) {
+            showSuccess("Token aceito, mas o Z-PRO não listou canais. Preencha nome e número à mão.")
+            return setNewCh(base)
+        }
+        const pre = data.bound_channel_id ?? data.channels[0].id
+        setNewCh(pickOption(base, pre))
+        showSuccess(data.bound_channel_id ? "Canal desta API encontrado — confira e salve." : "Token aceito. Escolha o canal desta API na lista.")
+    }
+
     const addChannel = async () => {
-        if (!newCh) return
-        if (!newCh.name.trim() || !newCh.api_id.trim() || !newCh.api_token.trim()) return showError("Nome, API ID e token são obrigatórios.")
+        if (!newCh?.found) return
+        if (!newCh.name.trim()) return showError("Informe um nome.")
         setBusy("add")
         const { data, error } = await supabase.from("vivaconnect_channels").insert({
             name: newCh.name.trim(), purpose: newCh.purpose, kind: newCh.kind,
-            phone: newCh.phone.replace(/\D/g, "") || null, api_id: newCh.api_id.trim(), api_token: newCh.api_token.trim(),
+            phone: newCh.phone.replace(/\D/g, "") || null, api_id: newCh.api_id, api_token: newCh.api_token.trim(),
+            zpro_whatsapp_id: newCh.zpro_whatsapp_id || null, zpro_info: newCh.zpro_info,
             daily_limit: Number(newCh.daily_limit) || 40,
         }).select("id")
         setBusy(null)
@@ -188,9 +222,8 @@ export function VivaConnectSettings() {
         setBusy(null)
         refetchChannels()
         if (error || data?.error) return showError(`Teste: ${await fnError(error, data)}`)
-        if (data.ok) showSuccess("Canal respondeu OK — token válido.")
-        else if (data.auth_ok) showSuccess(`Token aceito (HTTP ${data.status}). Confira o número do canal se quiser o status completo.`)
-        else showError(`Z-PRO recusou (HTTP ${data.status}): ${JSON.stringify(data.data).slice(0, 200)}`)
+        if (!data.ok) return showError(`Z-PRO: ${data.error}`)
+        showSuccess(data.channel ? `OK — ${data.channel.name} (${data.channel.number ?? "sem número"})${data.status ? ` · ${data.status}` : ""}` : "Token OK — dados atualizados do Z-PRO.")
     }
 
     const sendTest = async (id: number) => {
@@ -279,40 +312,59 @@ export function VivaConnectSettings() {
                     <CardContent className="space-y-4">
                         {newCh && (
                             <div className="rounded-xl border border-primary/40 p-4 space-y-3">
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div className="space-y-1"><Label className={fieldLabel}>Nome</Label>
-                                        <Input value={newCh.name} onChange={(e) => setNewCh({ ...newCh, name: e.target.value })} placeholder="Baileys 01" className="bg-muted/20" /></div>
-                                    <div className="space-y-1"><Label className={fieldLabel}>Número</Label>
-                                        <Input value={newCh.phone} onChange={(e) => setNewCh({ ...newCh, phone: e.target.value })} placeholder="5583999999999" className="bg-muted/20" /></div>
-                                    <div className="space-y-1"><Label className={fieldLabel}>Uso</Label>
-                                        <select value={newCh.purpose} onChange={(e) => setNewCh({ ...newCh, purpose: e.target.value as "official" | "pool" })}
-                                            className="w-full h-10 rounded-md border border-[var(--border)] bg-muted/20 px-3 text-sm">
-                                            <option value="pool">Pool — contato ativo (1ª mensagem)</option>
-                                            <option value="official">Oficial — entrada (WABA/Híbrido)</option>
-                                        </select></div>
-                                    <div className="space-y-1"><Label className={fieldLabel}>Tipo</Label>
-                                        <select value={newCh.kind} onChange={(e) => setNewCh({ ...newCh, kind: e.target.value })}
-                                            className="w-full h-10 rounded-md border border-[var(--border)] bg-muted/20 px-3 text-sm">
-                                            <option value="baileys">Baileys</option>
-                                            <option value="waba">WABA</option>
-                                            <option value="hybrid">Híbrido</option>
-                                        </select></div>
-                                    <div className="space-y-1"><Label className={fieldLabel}>API ID</Label>
-                                        <Input value={newCh.api_id} onChange={(e) => setNewCh({ ...newCh, api_id: e.target.value })} className="bg-muted/20 font-mono text-xs" /></div>
-                                    <div className="space-y-1"><Label className={fieldLabel}>Limite/dia</Label>
-                                        <Input type="number" value={newCh.daily_limit} onChange={(e) => setNewCh({ ...newCh, daily_limit: Number(e.target.value) })} className="bg-muted/20" /></div>
-                                </div>
-                                <div className="space-y-1"><Label className={fieldLabel}>Token (Bearer)</Label>
-                                    <Input type="password" value={newCh.api_token} onChange={(e) => setNewCh({ ...newCh, api_token: e.target.value })} className="bg-muted/20 font-mono text-xs" /></div>
+                                <p className="text-xs text-muted-foreground">
+                                    No Z-PRO, em <b>APIs</b>, copie a <b>URL de integração</b> e o <b>token</b> (o token só aparece quando a API é criada — se não guardou, gere outro no botão de atualizar da API).
+                                </p>
+                                <div className="space-y-1"><Label className={fieldLabel}>URL de integração</Label>
+                                    <Input value={newCh.api_ref} disabled={newCh.found} onChange={(e) => setNewCh({ ...newCh, api_ref: e.target.value })}
+                                        placeholder="https://api.ficv.edu.br/v2/api/external/..." className="bg-muted/20 font-mono text-xs" /></div>
+                                <div className="space-y-1"><Label className={fieldLabel}>Token</Label>
+                                    <Input type="password" autoComplete="off" value={newCh.api_token} disabled={newCh.found} onChange={(e) => setNewCh({ ...newCh, api_token: e.target.value })}
+                                        className="bg-muted/20 font-mono text-xs" /></div>
+
+                                {newCh.found && (
+                                    <div className="grid grid-cols-2 gap-3 pt-2 border-t border-[var(--border)]">
+                                        {newCh.options.length > 1 && (
+                                            <div className="space-y-1 col-span-2"><Label className={fieldLabel}>Canal desta API</Label>
+                                                <select value={newCh.zpro_whatsapp_id} onChange={(e) => setNewCh(pickOption(newCh, e.target.value))}
+                                                    className="w-full h-10 rounded-md border border-[var(--border)] bg-muted/20 px-3 text-sm">
+                                                    {newCh.options.map((o) => <option key={o.id} value={o.id}>{o.name} · {o.number ?? "sem número"} · {o.type ?? "?"}{o.status ? ` · ${o.status}` : ""}</option>)}
+                                                </select></div>
+                                        )}
+                                        <div className="space-y-1"><Label className={fieldLabel}>Nome</Label>
+                                            <Input value={newCh.name} onChange={(e) => setNewCh({ ...newCh, name: e.target.value })} className="bg-muted/20" /></div>
+                                        <div className="space-y-1"><Label className={fieldLabel}>Número</Label>
+                                            <Input value={newCh.phone} onChange={(e) => setNewCh({ ...newCh, phone: e.target.value })} placeholder="5583999999999" className="bg-muted/20" /></div>
+                                        <div className="space-y-1"><Label className={fieldLabel}>Uso</Label>
+                                            <select value={newCh.purpose} onChange={(e) => setNewCh({ ...newCh, purpose: e.target.value as "official" | "pool" })}
+                                                className="w-full h-10 rounded-md border border-[var(--border)] bg-muted/20 px-3 text-sm">
+                                                <option value="pool">Pool — contato ativo (1ª mensagem)</option>
+                                                <option value="official">Oficial — entrada (WABA/Híbrido)</option>
+                                            </select></div>
+                                        <div className="space-y-1"><Label className={fieldLabel}>Tipo</Label>
+                                            <select value={newCh.kind} onChange={(e) => setNewCh({ ...newCh, kind: e.target.value })}
+                                                className="w-full h-10 rounded-md border border-[var(--border)] bg-muted/20 px-3 text-sm">
+                                                <option value="baileys">Baileys</option>
+                                                <option value="waba">WABA</option>
+                                                <option value="hybrid">Híbrido</option>
+                                            </select></div>
+                                        <div className="space-y-1"><Label className={fieldLabel}>Limite de 1ªs mensagens/dia</Label>
+                                            <Input type="number" value={newCh.daily_limit} onChange={(e) => setNewCh({ ...newCh, daily_limit: Number(e.target.value) })} className="bg-muted/20" /></div>
+                                    </div>
+                                )}
+
                                 <div className="flex gap-2 justify-end">
                                     <Button variant="ghost" size="sm" onClick={() => setNewCh(null)}>Cancelar</Button>
-                                    <Button size="sm" onClick={addChannel} disabled={busy === "add"}>{busy === "add" ? <Loader2 className="animate-spin" size={14} /> : "Cadastrar"}</Button>
+                                    {newCh.found && <Button variant="ghost" size="sm" onClick={() => setNewCh({ ...newCh, found: false })}>Trocar token</Button>}
+                                    {!newCh.found
+                                        ? <Button size="sm" onClick={discover} disabled={busy === "discover"}>{busy === "discover" ? <Loader2 className="animate-spin" size={14} /> : "Buscar no Z-PRO"}</Button>
+                                        : <Button size="sm" onClick={addChannel} disabled={busy === "add"}>{busy === "add" ? <Loader2 className="animate-spin" size={14} /> : "Salvar número"}</Button>}
                                 </div>
                             </div>
                         )}
 
                         {!channels?.length && !newCh && (
-                            <p className="text-sm text-muted-foreground">Nenhum número cadastrado. Crie a API do número no painel do Z-PRO e cadastre aqui.</p>
+                            <p className="text-sm text-muted-foreground">Nenhum número cadastrado ainda. Clique em “+ Número” e cole a URL de integração + token da API do Z-PRO: nome, número e tipo vêm sozinhos.</p>
                         )}
 
                         {channels?.map((c) => (
@@ -329,7 +381,7 @@ export function VivaConnectSettings() {
                                         <label className="flex items-center gap-1 text-xs cursor-pointer mr-2">
                                             <input type="checkbox" checked={c.active} onChange={(e) => updateChannel(c.id, { active: e.target.checked })} className="accent-[var(--primary)]" /> ativo
                                         </label>
-                                        <Button size="icon" variant="ghost" title="Testar token" onClick={() => testChannel(c.id)} disabled={busy === `test-${c.id}`}>
+                                        <Button size="icon" variant="ghost" title="Testar e atualizar do Z-PRO" onClick={() => testChannel(c.id)} disabled={busy === `test-${c.id}`}>
                                             {busy === `test-${c.id}` ? <Loader2 className="animate-spin" size={14} /> : <RefreshCw size={14} />}
                                         </Button>
                                         <Button size="icon" variant="ghost" title="Remover" onClick={() => removeChannel(c)}><Trash2 size={14} /></Button>

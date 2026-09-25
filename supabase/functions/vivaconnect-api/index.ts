@@ -1,7 +1,9 @@
 // vivaconnect-api — envio pelo VivaConnect (Z-PRO) + worker da fila.
 //
 // actions:
-//   test_channel   { channel_id }            (admin)   → checa token/API no Z-PRO
+//   discover       { api_ref, api_token }    (admin)   → com a URL de integração + token, lista os
+//                                                        canais do Z-PRO e diz a qual canal essa API pertence
+//   test_channel   { channel_id }            (admin)   → testa o token e atualiza nome/número/status do Z-PRO
 //   send_test      { channel_id, number, body } (admin) → envio avulso de teste
 //   send           { lead_id, body }         (staff)   → mensagem do agente pelo CRM (fila + envio imediato)
 //   enqueue_first  { lead_id }               (staff)   → força a 1ª mensagem de um lead
@@ -17,7 +19,7 @@
 //     'vivaconnect'); o webhook ignora o eco.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { corsHeaders, identify, isAdmin, isStaff, jsonRes } from "../_shared/ai.ts";
-import { loadSettings, toZproNumber, zpro, zproErr } from "../_shared/vivaconnect.ts";
+import { asList, loadSettings, parseApiRef, toDiscovered, toZproNumber, zpro, zproErr } from "../_shared/vivaconnect.ts";
 
 const CH_COLS = "id, name, purpose, kind, phone, api_id, api_token, active, daily_limit, zpro_whatsapp_id, last_sent_at";
 
@@ -34,21 +36,34 @@ Deno.serve(async (req) => {
         const settings = await loadSettings(db);
         const createdBy = caller?.kind === "user" ? caller.id : null;
 
+        if (action === "discover") {
+            if (!isAdmin(caller)) return jsonRes({ error: "Só admin." }, 403);
+            const ref = parseApiRef(body.api_ref);
+            const token = String(body.api_token ?? "").trim();
+            if (!ref.apiId || !token) return jsonRes({ error: "Cole a URL de integração (ou o ID) e o token." }, 400);
+            const baseUrl = ref.baseUrl ?? settings.base_url;
+            const d = await discover(baseUrl, { api_id: ref.apiId, api_token: token });
+            if (!d.ok) return jsonRes({ error: d.error, raw: d.raw }, 400);
+            return jsonRes({ ...d, api_id: ref.apiId, base_url: baseUrl });
+        }
+
         if (action === "test_channel" || action === "send_test") {
             if (!isAdmin(caller)) return jsonRes({ error: "Só admin." }, 403);
             const { data: ch } = await db.from("vivaconnect_channels").select(CH_COLS).eq("id", body.channel_id).maybeSingle();
             if (!ch) return jsonRes({ error: "Canal não encontrado." }, 404);
 
             if (action === "test_channel") {
-                // showChannel pede o número do canal; sem número, qualquer resposta ≠ 401 já prova token válido
-                const r = await zpro(settings.base_url, ch, "/showChannel", { number: ch.phone ?? "" });
-                const authOk = r.status !== 401 && r.status !== 403 && r.status !== 0;
-                await markChannel(db, ch.id, r.ok, r.ok ? null : zproErr(r.status, r.data));
-                if (r.ok) {
-                    const wid = r.data?.id ?? r.data?.whatsapp?.id ?? r.data?.channel?.id;
-                    if (wid && !ch.zpro_whatsapp_id) await db.from("vivaconnect_channels").update({ zpro_whatsapp_id: String(wid) }).eq("id", ch.id);
+                const d = await discover(settings.base_url, ch);
+                await markChannel(db, ch.id, d.ok, d.ok ? null : d.error);
+                if (!d.ok) return jsonRes({ ok: false, error: d.error });
+                const bound = d.channels.find((c) => c.id === d.bound_channel_id);
+                const patch: Record<string, unknown> = { zpro_info: d.raw, updated_at: new Date().toISOString() };
+                if (bound) {
+                    patch.zpro_whatsapp_id = bound.id;
+                    if (bound.number) patch.phone = bound.number;
                 }
-                return jsonRes({ ok: r.ok, auth_ok: authOk, status: r.status, data: r.data });
+                await db.from("vivaconnect_channels").update(patch).eq("id", ch.id);
+                return jsonRes({ ok: true, channel: bound ?? null, status: bound?.status ?? null });
             }
 
             const number = toZproNumber(body.number);
@@ -169,6 +184,22 @@ async function sendRow(db: any, settings: any, row: any, ch: any) {
         }).eq("id", row.lead_id);
     }
     return { ok: true, outbox_id: row.id, response: r.data };
+}
+
+/** listChannels + getAllSessionApis: canais do tenant e a qual canal essa API está ligada. */
+async function discover(baseUrl: string, ch: { api_id: string; api_token: string }) {
+    const [lc, apis] = await Promise.all([zpro(baseUrl, ch, "/listChannels"), zpro(baseUrl, ch, "/getAllSessionApis")]);
+    const raw = { listChannels: lc.data, getAllSessionApis: apis.data, fetched_at: new Date().toISOString() };
+    if (!lc.ok) {
+        const msg = lc.status === 401 || lc.status === 403 ? "Token recusado pelo Z-PRO (confira se copiou o token completo)."
+            : lc.status === 404 ? "API não encontrada — confira a URL de integração." : zproErr(lc.status, lc.data);
+        return { ok: false as const, error: msg, raw, channels: [], bound_channel_id: null };
+    }
+    const channels = asList(lc.data).map(toDiscovered).filter((c) => c.id);
+    const me = asList(apis.data).find((a: any) => String(a.id ?? a.apiId ?? a.uuid ?? "") === ch.api_id);
+    let bound = me ? String(me.sessionId ?? me.whatsappId ?? me.channelId ?? "") || null : null;
+    if (!bound && channels.length === 1) bound = channels[0].id;
+    return { ok: true as const, error: null, raw, channels, bound_channel_id: bound };
 }
 
 function spHour(): number {

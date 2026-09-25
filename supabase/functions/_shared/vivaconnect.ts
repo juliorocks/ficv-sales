@@ -24,14 +24,14 @@ export async function loadSettings(db: SupabaseClient) {
     return data;
 }
 
-/** Chamada à API externa do Z-PRO pelo canal. Nunca lança: devolve ok/status/data. */
+/** Chamada à API externa do Z-PRO pelo canal. Nunca lança: devolve ok/status/data. body undefined → GET. */
 export async function zpro(baseUrl: string, ch: Pick<Channel, "api_id" | "api_token">, path: string, body?: unknown) {
     const url = `${baseUrl.replace(/\/$/, "")}/v2/api/external/${encodeURIComponent(ch.api_id)}${path}`;
     try {
         const r = await fetch(url, {
-            method: "POST",
+            method: body === undefined ? "GET" : "POST",
             headers: { "Content-Type": "application/json", "Authorization": `Bearer ${ch.api_token}` },
-            body: JSON.stringify(body ?? {}),
+            ...(body === undefined ? {} : { body: JSON.stringify(body) }),
             signal: AbortSignal.timeout(30000),
         });
         const text = await r.text();
@@ -41,6 +41,36 @@ export async function zpro(baseUrl: string, ch: Pick<Channel, "api_id" | "api_to
     } catch (e) {
         return { ok: false, status: 0, data: { error: (e as Error).message } };
     }
+}
+
+/** Aceita a "URL de integração" do painel do Z-PRO ou só o ID. */
+export function parseApiRef(input: string): { baseUrl: string | null; apiId: string } {
+    const s = String(input ?? "").trim();
+    const m = s.match(/^(https?:\/\/[^/]+)\/v2\/api\/external\/([^/?#\s]+)/i);
+    return m ? { baseUrl: m[1], apiId: m[2] } : { baseUrl: null, apiId: s };
+}
+
+/** Lista de objetos dentro da resposta (array direto ou em data/channels/whatsapps/...). */
+export function asList(d: any): any[] {
+    if (Array.isArray(d)) return d;
+    if (d && typeof d === "object") {
+        for (const k of ["data", "channels", "whatsapps", "sessions", "apis", "rows", "result", "items"]) {
+            if (Array.isArray(d[k])) return d[k];
+            if (d[k] && typeof d[k] === "object") { const inner = asList(d[k]); if (inner.length) return inner; }
+        }
+    }
+    return [];
+}
+
+export type DiscoveredChannel = { id: string; name: string; number: string | null; type: string | null; status: string | null };
+export function toDiscovered(c: any): DiscoveredChannel {
+    return {
+        id: String(c.id ?? c.whatsappId ?? c.sessionId ?? ""),
+        name: String(c.name ?? c.nome ?? `Canal ${c.id ?? ""}`),
+        number: onlyDigits(c.number ?? c.phone ?? c.wid ?? c.me?.id ?? "").slice(0, 15) || null,
+        type: c.type ?? c.channel ?? c.provider ?? null,
+        status: c.status ?? null,
+    };
 }
 
 export const zproErr = (status: number, data: any) =>
