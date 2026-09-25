@@ -55,6 +55,13 @@ function SourceBadge({ f }: { f: Field }) {
 
 export function IntegrationsSettings({ onNavigate }: { onNavigate?: (tab: string) => void }) {
     const [drafts, setDrafts] = useState<Record<string, string>>({})
+    const [testTo, setTestTo] = useState('')
+    const sendTestEmail = async () => {
+        setBusy('send-email')
+        try { await call({ action: 'send_test_email', to: testTo.trim() }); showSuccess(`E-mail de teste enviado para ${testTo.trim()}.`) }
+        catch (e) { showError((e as Error).message) }
+        setBusy(null)
+    }
     const [busy, setBusy] = useState<string | null>(null)
 
     const { data, isLoading, refetch } = useQuery({
@@ -162,6 +169,15 @@ export function IntegrationsSettings({ onNavigate }: { onNavigate?: (tab: string
                                     </div>
                                 </div>
                             ))}
+
+                            {integ.id === 'resend' && (
+                                <div className="flex gap-2">
+                                    <Input value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="seu@email.com" className="bg-muted/20 text-xs" />
+                                    <Button size="sm" variant="outline" onClick={sendTestEmail} disabled={!!busy || !testTo.includes('@')}>
+                                        {busy === 'send-email' ? <Loader2 className="animate-spin" size={14} /> : 'Enviar e-mail de teste'}
+                                    </Button>
+                                </div>
+                            )}
 
                             {integ.last_test && (
                                 <p className={`text-xs rounded-lg p-2 break-words ${integ.last_test.ok ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-red-500/10 text-red-500"}`}>

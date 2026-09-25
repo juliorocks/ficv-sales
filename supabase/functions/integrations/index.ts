@@ -11,7 +11,7 @@ import { corsHeaders, identify, isAdmin, jsonRes } from "../_shared/ai.ts";
 import { forgetSecret, getSecret } from "../_shared/secrets.ts";
 import { GITHUB_REPO } from "../_shared/gh-dispatch.ts";
 import { loadSettings, zpro, zproErr } from "../_shared/vivaconnect.ts";
-import { sendEmail } from "../_shared/email.ts";
+import { emailLayout, portalUrl, sendEmail } from "../_shared/email.ts";
 import { retorno, sponteCall } from "../_shared/sponte.ts";
 
 type Field = { key: string; label: string; placeholder?: string; optional?: boolean; help?: string; plain?: boolean }; // plain = não é segredo: mostra o valor
@@ -168,6 +168,24 @@ Deno.serve(async (req) => {
             if (error) return jsonRes({ error: error.message }, 400);
             forgetSecret(key);
             return jsonRes({ ok: true });
+        }
+
+        if (action === "send_test_email") {
+            const to = String(body.to ?? "").trim();
+            if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return jsonRes({ error: "E-mail inválido." }, 400);
+            const url = await portalUrl();
+            const agora = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+            const html = emailLayout("Teste de e-mail — Portal do Aluno", `<p>Olá!</p>
+                <p>Este é um <b>e-mail de teste</b> do Portal do Aluno da FICV, enviado em ${agora}.
+                É assim que os alunos vão receber as confirmações e respostas dos chamados.</p>
+                <div style="border-left:3px solid #C9A84C;background:#0D0F14;padding:10px 14px;margin:10px 0;border-radius:4px">
+                  <div style="font-size:11px;color:#8A8A9A;margin-bottom:4px">Secretaria FICV · exemplo</div>
+                  Recebemos sua solicitação e já estamos cuidando dela. Protocolo <b style="color:#C9A84C">FICV-2026-00000</b>.
+                </div>
+                <p>Se chegou na caixa de entrada (e não no spam), a configuração de envio está ok. ✅</p>`,
+                { label: "Abrir o Portal do Aluno", url });
+            const r = await sendEmail(to, "Teste — e-mails do Portal do Aluno FICV", html);
+            return r.ok ? jsonRes({ ok: true, id: r.id }) : jsonRes({ error: r.error }, 502);
         }
 
         if (action === "test") {
