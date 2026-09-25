@@ -20,13 +20,17 @@ export async function sendEmail(to: string, subject: string, html: string, reply
 const escHtml = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 export { escHtml };
 
+// logo dourado com fundo transparente, servido pelo próprio site (public/email/logo-ficv.png)
+const LOGO_URL = "https://portal.ficv.edu.br/email/logo-ficv.png";
+
 /** Layout FICV (escuro + dourado, igual ao portal). `body` já é HTML. */
 export function emailLayout(title: string, body: string, cta?: { label: string; url: string }, canReply = false) {
     return `<!doctype html><html><body style="margin:0;background:#0A0C10;font-family:Arial,Helvetica,sans-serif;color:#F0EDE8">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#0A0C10;padding:24px 12px"><tr><td align="center">
 <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#13161D;border:1px solid #2A2D36;border-radius:12px">
 <tr><td style="padding:24px 28px 8px;border-bottom:1px solid #2A2D36">
-  <div style="font-size:12px;letter-spacing:2px;color:#C9A84C;font-weight:bold">FICV · PORTAL DO ALUNO</div>
+  <img src="${LOGO_URL}" width="170" alt="Faculdade Internacional Cidade Viva" style="display:block;width:170px;max-width:60%;height:auto;border:0;margin:0 0 14px">
+  <div style="font-size:11px;letter-spacing:2px;color:#C9A84C;font-weight:bold">PORTAL DO ALUNO</div>
   <div style="font-size:20px;font-weight:bold;margin:8px 0 12px;color:#F0EDE8">${escHtml(title)}</div>
 </td></tr>
 <tr><td style="padding:20px 28px;font-size:14px;line-height:1.6;color:#D8D4CC">${body}
