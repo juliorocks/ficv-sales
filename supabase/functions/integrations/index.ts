@@ -11,6 +11,7 @@ import { corsHeaders, identify, isAdmin, jsonRes } from "../_shared/ai.ts";
 import { forgetSecret, getSecret } from "../_shared/secrets.ts";
 import { GITHUB_REPO } from "../_shared/gh-dispatch.ts";
 import { loadSettings, zpro, zproErr } from "../_shared/vivaconnect.ts";
+import { retorno, sponteCall } from "../_shared/sponte.ts";
 
 type Field = { key: string; label: string; placeholder?: string; optional?: boolean; help?: string };
 type Integration = { id: string; name: string; description: string; fields: Field[]; manageTab?: string };
@@ -31,6 +32,20 @@ const REGISTRY: Integration[] = [
             { key: "SENDPULSE_API_KEY", label: "API Key", optional: true, help: "Se preenchida, é usada no lugar do ID/Secret." },
             { key: "SENDPULSE_CLIENT_ID", label: "Client ID (REST API)", optional: true },
             { key: "SENDPULSE_CLIENT_SECRET", label: "Client Secret (REST API)", optional: true },
+        ],
+    },
+    {
+        id: "sponte", name: "Sponte", description: "Portal do Aluno: login pelo CPF, dados, financeiro e notas (API WSAPIEdu).",
+        fields: [
+            { key: "SPONTE_TOKEN", label: "Token da API", help: "Sponte → Configurações → Integrações/API" },
+            { key: "SPONTE_CODIGO_CLIENTE", label: "Código do cliente", optional: true, placeholder: "489166", help: "Vazio = 489166 (FICV)" },
+        ],
+    },
+    {
+        id: "resend", name: "Resend (e-mails)", description: "E-mails do Portal do Aluno: confirmação e respostas de chamados, redefinição de senha.",
+        fields: [
+            { key: "RESEND_API_KEY", label: "API Key", placeholder: "re_...", help: "resend.com → API Keys" },
+            { key: "RESEND_FROM", label: "Remetente", placeholder: "FICV <atendimento@ficv.edu.br>", help: "O domínio precisa estar verificado na Resend." },
         ],
     },
     {
@@ -74,6 +89,26 @@ async function runTest(id: string, db: any): Promise<{ ok: boolean; message: str
         const d = await r.json().catch(() => null);
         if (!r.ok) return { ok: false, message: `HTTP ${r.status}: ${d?.message ?? "sem detalhe"}` };
         return { ok: true, message: `Conectado (${apiKey ? "API Key" : "Client ID/Secret"}) — ${Array.isArray(d) ? d.length : "?"} listas visíveis.` };
+    }
+    if (id === "sponte") {
+        if (!(await getSecret("SPONTE_TOKEN"))) return { ok: false, message: "Token não configurado." };
+        const xml = await sponteCall("GetSituacoesAlunos", {});
+        const ret = retorno(xml);
+        return /^01\b/.test(ret) ? { ok: true, message: `Conectado — ${ret.replace(/^\d+\s*-\s*/, "")}` } : { ok: false, message: ret || "Resposta inesperada do Sponte." };
+    }
+    if (id === "resend") {
+        const key = await getSecret("RESEND_API_KEY"), from = await getSecret("RESEND_FROM");
+        if (!key) return { ok: false, message: "API Key não configurada." };
+        const r = await fetch("https://api.resend.com/domains", { headers: { Authorization: `Bearer ${key}` }, signal: timeout });
+        const d = await r.json().catch(() => null);
+        if (!r.ok) return { ok: false, message: `HTTP ${r.status}: ${d?.message ?? "sem detalhe"}` };
+        const doms: any[] = d?.data ?? [];
+        if (!from) return { ok: false, message: `Chave válida (${doms.length} domínio(s)). Falta o Remetente.` };
+        const fromDomain = (from.match(/@([^>\s]+)/) ?? [])[1]?.toLowerCase();
+        const dom = doms.find((x) => x.name?.toLowerCase() === fromDomain);
+        if (!dom) return { ok: false, message: `O domínio ${fromDomain ?? "?"} não está na Resend (domínios: ${doms.map((x) => x.name).join(", ") || "nenhum"}).` };
+        if (dom.status !== "verified") return { ok: false, message: `Domínio ${dom.name} ainda não verificado na Resend (status: ${dom.status}).` };
+        return { ok: true, message: `Conectado — enviando como ${from}.` };
     }
     if (id === "github") {
         const t = await getSecret("GITHUB_DISPATCH_TOKEN");

@@ -13,10 +13,11 @@ import { Textarea } from '../ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog'
 import { TicketDetail } from './TicketDetail'
+import { AlunoInicio, AlunoFinanceiro, AlunoNotas } from './AlunoPainel'
 import { showSuccess, showError } from '../../utils/toast'
 import {
   Plus, Ticket as TicketIcon, Clock, CheckCircle2,
-  AlertCircle, ChevronRight, Loader2, Search, Star, LogOut
+  AlertCircle, ChevronRight, Loader2, Search, Star, LogOut, Home, Wallet, BookOpen
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -240,6 +241,7 @@ interface TicketPortalProps {
 }
 
 export function TicketPortal({ alunoId, alunoNome, alunoEmail, onLogout }: TicketPortalProps) {
+  const [tab, setTab] = useState<'inicio' | 'financeiro' | 'notas' | 'chamados'>('inicio')
   const [showNew, setShowNew] = useState(false)
   const [selected, setSelected] = useState<Ticket | null>(null)
   const [search, setSearch] = useState('')
@@ -293,15 +295,41 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, onLogout }: Ticke
         )}
       </header>
 
-      <div className="p-6 max-w-3xl mx-auto space-y-6">
+      {/* Abas */}
+      <nav className="border-b border-[#2A2D36] bg-[#13161D] px-3 sm:px-6 overflow-x-auto">
+        <div className="max-w-3xl mx-auto flex gap-1">
+          {([
+            { id: 'inicio', label: 'Início', icon: Home },
+            { id: 'financeiro', label: 'Financeiro', icon: Wallet },
+            { id: 'notas', label: 'Notas', icon: BookOpen },
+            { id: 'chamados', label: 'Chamados', icon: TicketIcon, badge: aguardando },
+          ] as const).map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className={`relative flex items-center gap-1.5 px-3 py-3 text-sm whitespace-nowrap border-b-2 transition-colors ${tab === t.id ? 'border-[#C9A84C] text-[#F0EDE8] font-semibold' : 'border-transparent text-[#8A8A9A] hover:text-[#F0EDE8]'}`}>
+              <t.icon className="w-4 h-4" /> {t.label}
+              {'badge' in t && t.badge > 0 && <span className="ml-0.5 text-[10px] bg-purple-500 text-white rounded-full px-1.5">{t.badge}</span>}
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      {tab !== 'chamados' && (
+        <div className="p-4 sm:p-6 max-w-3xl mx-auto">
+          {tab === 'inicio' && <AlunoInicio onGo={(t) => { setTab(t); if (t === 'chamados') setShowNew(true) }} />}
+          {tab === 'financeiro' && <AlunoFinanceiro />}
+          {tab === 'notas' && <AlunoNotas />}
+        </div>
+      )}
+
+      {tab === 'chamados' && <div className="p-4 sm:p-6 max-w-3xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-bold text-[var(--text-main)]">Meus Tickets</h1>
+            <h1 className="text-xl font-bold text-[var(--text-main)]">Meus Chamados</h1>
             <p className="text-sm text-[var(--text-muted)] mt-0.5">Abra solicitações e acompanhe o atendimento</p>
           </div>
           <Button onClick={() => setShowNew(true)} className="btn-primary gap-2">
-            <Plus className="w-4 h-4" /> Novo Ticket
+            <Plus className="w-4 h-4" /> Novo Chamado
           </Button>
         </div>
 
@@ -385,7 +413,7 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, onLogout }: Ticke
             ))}
           </div>
         )}
-      </div>
+      </div>}
 
       {showNew && (
         <NewTicketDialog

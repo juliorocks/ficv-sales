@@ -422,3 +422,5 @@ verify_jwt = false
 verify_jwt = false
 [functions.vivaconnect-webhook]
 verify_jwt = false
+[functions.aluno-auth]
+verify_jwt = false

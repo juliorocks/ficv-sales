@@ -1,6 +1,9 @@
 /**
- * AlunoAuth — login / cadastro / recuperação de senha do aluno
- * Rota pública: /atendimento
+ * AlunoAuth — login / esqueci a senha / criar senha do Portal do Aluno
+ * Rota pública: /aluno
+ * Login = CPF. 1º acesso = CPF como senha (padrão do Sponte): a edge function
+ * aluno-auth confere no Sponte e cria a conta; em seguida o portal obriga a
+ * criar uma senha nova (SetPassword).
  * Visual: identidade FICV (fundo escuro, dourado #C9A84C)
  */
 import { useState } from 'react'
@@ -17,7 +20,7 @@ const BORDER = '#2A2D36'
 const TEXT = '#F0EDE8'
 const MUTED = '#8A8A9A'
 
-type Mode = 'login' | 'register' | 'forgot'
+type Mode = 'login' | 'forgot'
 
 // ── Subcomponentes de campo ──────────────────────────────────
 
@@ -98,11 +101,50 @@ function GoldButton({ children, onClick, type = 'button', loading = false }: {
 
 // ── Main ─────────────────────────────────────────────────────
 
+function Shell({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
+  return (
+    <div style={{ minHeight: '100vh', background: BG, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div style={{ width: '100%', maxWidth: 420 }}>
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <img
+            src="https://siteficv.vercel.app/images/test-logo.png"
+            alt="FICV"
+            style={{ height: 80, width: 'auto', margin: '0 auto 16px', display: 'block', objectFit: 'contain' }}
+            onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+          />
+          <h1 style={{ color: TEXT, fontSize: 22, fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>{title}</h1>
+          <p style={{ color: MUTED, fontSize: 13, marginTop: 4 }}>{subtitle}</p>
+        </div>
+        <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 16, padding: 28 }}>{children}</div>
+      </div>
+    </div>
+  )
+}
+
+function Msg({ kind, text }: { kind: 'error' | 'success'; text: string }) {
+  const c = kind === 'error'
+    ? { bg: 'rgba(220,38,38,0.1)', bd: 'rgba(220,38,38,0.3)', fg: '#F87171', Icon: AlertCircle }
+    : { bg: 'rgba(34,197,94,0.1)', bd: 'rgba(34,197,94,0.3)', fg: '#4ADE80', Icon: CheckCircle2 }
+  return (
+    <div style={{ background: c.bg, border: `1px solid ${c.bd}`, borderRadius: 8, padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+      <c.Icon className="w-4 h-4 shrink-0" style={{ color: c.fg }} />
+      <p style={{ color: c.fg, fontSize: 13, margin: 0 }}>{text}</p>
+    </div>
+  )
+}
+
+async function callAuth(body: Record<string, unknown>): Promise<{ ok?: boolean; message?: string; error?: string }> {
+  const { data, error } = await supabase.functions.invoke('aluno-auth', { body })
+  if (error) {
+    const ctx = await (error as any).context?.json?.().catch(() => null)
+    return { error: ctx?.error ?? 'Serviço indisponível no momento.' }
+  }
+  return data
+}
+
 export function AlunoAuth({ onAuth }: { onAuth: () => void }) {
   const [mode, setMode] = useState<Mode>('login')
   const [cpf, setCpf] = useState('')
-  const [nome, setNome] = useState('')
-  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPw, setShowPw] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -117,44 +159,16 @@ export function AlunoAuth({ onAuth }: { onAuth: () => void }) {
     if (!password) { setError('Informe a senha.'); return }
     setLoading(true)
     try {
-      const fakeEmail = `${cpf.replace(/\D/g, '')}@aluno.ficv.br`
-      const { error: authErr } = await supabase.auth.signInWithPassword({ email: fakeEmail, password })
-      if (authErr) { setError('CPF ou senha incorretos.'); return }
-      onAuth()
-    } finally { setLoading(false) }
-  }
-
-  async function handleRegister(e: React.FormEvent) {
-    e.preventDefault(); reset()
-    if (!nome.trim()) { setError('Informe seu nome completo.'); return }
-    if (!validateCPF(cpf)) { setError('CPF inválido.'); return }
-    if (!email.trim() || !email.includes('@')) { setError('Informe um e-mail válido.'); return }
-    if (password.length < 8) { setError('A senha deve ter pelo menos 8 caracteres.'); return }
-    setLoading(true)
-    try {
-      const fakeEmail = `${cpf.replace(/\D/g, '')}@aluno.ficv.br`
-      const { data: existing } = await supabase.from('alunos').select('id').eq('cpf', cpf).maybeSingle()
-      if (existing) { setError('CPF já cadastrado. Faça login.'); return }
-      const { data: authData, error: authErr } = await supabase.auth.signUp({ email: fakeEmail, password })
-      if (authErr || !authData.user) { setError(authErr?.message ?? 'Erro ao criar conta.'); return }
-
-      // Insere na tabela alunos
-      const { error: dbErr } = await supabase.from('alunos').insert({
-        id: authData.user.id, cpf, nome: nome.trim(), email: email.trim().toLowerCase(),
-      })
-      if (dbErr) { setError('Erro ao salvar dados. Tente novamente.'); return }
-
-      // Se confirmação de email está ativa, signUp não cria sessão automaticamente
-      // Fazemos login explícito logo após o cadastro
-      if (!authData.session) {
-        const { error: loginErr } = await supabase.auth.signInWithPassword({ email: fakeEmail, password })
-        if (loginErr) {
-          setSuccess('Conta criada! Faça login para continuar.')
-          setMode('login')
-          return
-        }
+      const digits = cpf.replace(/\D/g, '')
+      const email = `${digits}@aluno.ficv.br`
+      let { error: authErr } = await supabase.auth.signInWithPassword({ email, password })
+      // 1º acesso: senha = CPF (padrão do Sponte) → cria o acesso a partir do Sponte e entra
+      if (authErr && password.replace(/\D/g, '') === digits) {
+        const r = await callAuth({ action: 'first_access', cpf: digits, password })
+        if (r.error) { setError(r.error); return }
+        ;({ error: authErr } = await supabase.auth.signInWithPassword({ email, password: digits }))
       }
-
+      if (authErr) { setError('CPF ou senha incorretos.'); return }
       onAuth()
     } finally { setLoading(false) }
   }
@@ -162,198 +176,108 @@ export function AlunoAuth({ onAuth }: { onAuth: () => void }) {
   async function handleForgot(e: React.FormEvent) {
     e.preventDefault(); reset()
     if (!validateCPF(cpf)) { setError('CPF inválido.'); return }
-    if (!email.trim() || !email.includes('@')) { setError('Informe o e-mail cadastrado.'); return }
     setLoading(true)
     try {
-      const { data: aluno } = await supabase.from('alunos').select('id')
-        .eq('cpf', cpf).eq('email', email.trim().toLowerCase()).maybeSingle()
-      if (!aluno) { setError('CPF e e-mail não correspondem a nenhuma conta.'); return }
-      const fakeEmail = `${cpf.replace(/\D/g, '')}@aluno.ficv.br`
-      const { error: resetErr } = await supabase.auth.resetPasswordForEmail(fakeEmail, {
-        redirectTo: `${window.location.origin}/atendimento`,
-      })
-      if (resetErr) { setError('Erro ao enviar e-mail. Tente novamente.'); return }
-      setSuccess(`Link enviado para ${email}. Verifique sua caixa de entrada.`)
+      const r = await callAuth({ action: 'forgot', cpf: cpf.replace(/\D/g, '') })
+      if (r.error) setError(r.error)
+      else setSuccess(r.message ?? 'Verifique seu e-mail.')
+    } finally { setLoading(false) }
+  }
+
+  const cpfField = (
+    <div>
+      <Label>CPF</Label>
+      <Field value={cpf} onChange={v => setCpf(formatCPF(v))} placeholder="000.000.000-00" autoComplete="username" />
+    </div>
+  )
+
+  return (
+    <Shell title="Portal do Aluno" subtitle="Seus dados, financeiro, notas e atendimento">
+      {mode === 'login' ? (
+        <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {cpfField}
+          <div>
+            <Label>Senha</Label>
+            <Field
+              type={showPw ? 'text' : 'password'}
+              value={password}
+              onChange={setPassword}
+              placeholder="••••••••"
+              autoComplete="current-password"
+              suffix={
+                <button type="button" onClick={() => setShowPw(v => !v)} style={{ color: MUTED, background: 'none', border: 'none', cursor: 'pointer', display: 'flex' }}>
+                  {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              }
+            />
+            <p style={{ color: MUTED, fontSize: 12, marginTop: 8 }}>
+              <b style={{ color: GOLD }}>Primeiro acesso?</b> Use o seu CPF (só números) como senha.
+            </p>
+          </div>
+          {error && <Msg kind="error" text={error} />}
+          <GoldButton type="submit" loading={loading}>Entrar</GoldButton>
+          <button type="button" onClick={() => { setMode('forgot'); reset() }}
+            style={{ color: MUTED, background: 'none', border: 'none', cursor: 'pointer', fontSize: 13 }}>
+            Esqueci minha senha
+          </button>
+        </form>
+      ) : (
+        <form onSubmit={handleForgot} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <p style={{ color: MUTED, fontSize: 13, margin: 0 }}>
+            Informe seu CPF. Enviaremos um link para o e-mail cadastrado na secretaria.
+          </p>
+          {cpfField}
+          {error && <Msg kind="error" text={error} />}
+          {success && <Msg kind="success" text={success} />}
+          <GoldButton type="submit" loading={loading}>Enviar link</GoldButton>
+          <button type="button" onClick={() => { setMode('login'); reset() }}
+            style={{ color: MUTED, background: 'none', border: 'none', cursor: 'pointer', fontSize: 13 }}>
+            Voltar para o login
+          </button>
+        </form>
+      )}
+    </Shell>
+  )
+}
+
+/** Criar senha nova — obrigatório no 1º acesso (senha = CPF) e no link de "esqueci a senha". */
+export function SetPassword({ userId, cpf, reason, onDone }: { userId: string; cpf: string; reason: 'first' | 'recovery'; onDone: () => void }) {
+  const [pw, setPw] = useState('')
+  const [pw2, setPw2] = useState('')
+  const [show, setShow] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault(); setError(null)
+    if (pw.length < 8) { setError('A senha precisa ter pelo menos 8 caracteres.'); return }
+    if (pw.replace(/\D/g, '') === cpf.replace(/\D/g, '')) { setError('A nova senha não pode ser o seu CPF.'); return }
+    if (pw !== pw2) { setError('As senhas não conferem.'); return }
+    setLoading(true)
+    try {
+      const { error: uErr } = await supabase.auth.updateUser({ password: pw })
+      if (uErr) { setError(uErr.message.includes('different') ? 'Escolha uma senha diferente da atual.' : 'Não foi possível salvar. Tente de novo.'); return }
+      await supabase.from('alunos').update({ must_change_password: false }).eq('id', userId)
+      onDone()
     } finally { setLoading(false) }
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: BG, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-      <div style={{ width: '100%', maxWidth: 420 }}>
-
-        {/* Logo */}
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <img
-            src="https://siteficv.vercel.app/images/test-logo.png"
-            alt="FICV"
-            style={{ height: 80, width: 'auto', margin: '0 auto 16px', display: 'block', objectFit: 'contain' }}
-            onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
-          />
-          <h1 style={{ color: TEXT, fontSize: 22, fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>
-            Central de Atendimento
-          </h1>
-          <p style={{ color: MUTED, fontSize: 13, marginTop: 4 }}>
-            Abra o seu chamado
-          </p>
+    <Shell title="Crie sua senha" subtitle={reason === 'first' ? 'Bem-vindo(a)! Por segurança, troque a senha padrão (CPF).' : 'Escolha sua nova senha de acesso.'}>
+      <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div>
+          <Label>Nova senha</Label>
+          <Field type={show ? 'text' : 'password'} value={pw} onChange={setPw} placeholder="Mínimo 8 caracteres" autoComplete="new-password"
+            suffix={<button type="button" onClick={() => setShow(v => !v)} style={{ color: MUTED, background: 'none', border: 'none', cursor: 'pointer', display: 'flex' }}>
+              {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button>} />
         </div>
-
-        {/* Card */}
-        <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 16, padding: 28 }}>
-
-          {/* Tabs — não aparece em forgot */}
-          {mode !== 'forgot' && (
-            <div style={{ display: 'flex', gap: 4, marginBottom: 24, background: '#0D0F14', borderRadius: 10, padding: 4 }}>
-              {(['login', 'register'] as const).map(m => (
-                <button
-                  key={m}
-                  onClick={() => { setMode(m); reset() }}
-                  style={{
-                    flex: 1, padding: '8px 0', borderRadius: 8, border: 'none',
-                    background: mode === m ? GOLD : 'transparent',
-                    color: mode === m ? '#0A0C10' : MUTED,
-                    fontWeight: mode === m ? 700 : 500,
-                    fontSize: 13, cursor: 'pointer', transition: 'all 0.15s',
-                  }}
-                >
-                  {m === 'login' ? 'Entrar' : 'Criar conta'}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* LOGIN */}
-          {mode === 'login' && (
-            <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div>
-                <Label>CPF</Label>
-                <Field
-                  value={cpf}
-                  onChange={v => setCpf(formatCPF(v))}
-                  placeholder="000.000.000-00"
-                  autoComplete="username"
-                />
-              </div>
-              <div>
-                <Label>Senha</Label>
-                <Field
-                  type={showPw ? 'text' : 'password'}
-                  value={password}
-                  onChange={setPassword}
-                  placeholder="••••••••"
-                  autoComplete="current-password"
-                  suffix={
-                    <button type="button" onClick={() => setShowPw(v => !v)} style={{ color: MUTED, background: 'none', border: 'none', cursor: 'pointer', display: 'flex' }}>
-                      {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  }
-                />
-              </div>
-
-              {error && (
-                <div style={{ background: 'rgba(220,38,38,0.1)', border: '1px solid rgba(220,38,38,0.3)', borderRadius: 8, padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <AlertCircle className="w-4 h-4 shrink-0" style={{ color: '#F87171' }} />
-                  <p style={{ color: '#F87171', fontSize: 13, margin: 0 }}>{error}</p>
-                </div>
-              )}
-
-              <GoldButton type="submit" loading={loading}>Entrar</GoldButton>
-
-              <button type="button" onClick={() => { setMode('forgot'); reset() }}
-                style={{ background: 'none', border: 'none', color: MUTED, fontSize: 12, cursor: 'pointer', textAlign: 'center', marginTop: -4 }}>
-                Esqueci minha senha
-              </button>
-            </form>
-          )}
-
-          {/* REGISTER */}
-          {mode === 'register' && (
-            <form onSubmit={handleRegister} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div>
-                <Label>Nome completo</Label>
-                <Field value={nome} onChange={setNome} placeholder="Seu nome completo" />
-              </div>
-              <div>
-                <Label>CPF</Label>
-                <Field value={cpf} onChange={v => setCpf(formatCPF(v))} placeholder="000.000.000-00" />
-              </div>
-              <div>
-                <Label>E-mail</Label>
-                <Field type="email" value={email} onChange={setEmail} placeholder="seu@email.com" autoComplete="email" />
-                <p style={{ color: MUTED, fontSize: 11, marginTop: 4 }}>Usado para receber atualizações dos seus tickets</p>
-              </div>
-              <div>
-                <Label>Senha</Label>
-                <Field
-                  type={showPw ? 'text' : 'password'}
-                  value={password}
-                  onChange={setPassword}
-                  placeholder="Mínimo 8 caracteres"
-                  autoComplete="new-password"
-                  suffix={
-                    <button type="button" onClick={() => setShowPw(v => !v)} style={{ color: MUTED, background: 'none', border: 'none', cursor: 'pointer', display: 'flex' }}>
-                      {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  }
-                />
-              </div>
-
-              {error && (
-                <div style={{ background: 'rgba(220,38,38,0.1)', border: '1px solid rgba(220,38,38,0.3)', borderRadius: 8, padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <AlertCircle className="w-4 h-4 shrink-0" style={{ color: '#F87171' }} />
-                  <p style={{ color: '#F87171', fontSize: 13, margin: 0 }}>{error}</p>
-                </div>
-              )}
-
-              <GoldButton type="submit" loading={loading}>Criar conta</GoldButton>
-            </form>
-          )}
-
-          {/* FORGOT */}
-          {mode === 'forgot' && (
-            <form onSubmit={handleForgot} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div>
-                <h2 style={{ color: TEXT, fontSize: 16, fontWeight: 700, margin: '0 0 4px' }}>Recuperar senha</h2>
-                <p style={{ color: MUTED, fontSize: 13, margin: 0 }}>
-                  Informe seu CPF e e-mail cadastrado. Enviaremos um link de redefinição.
-                </p>
-              </div>
-              <div>
-                <Label>CPF</Label>
-                <Field value={cpf} onChange={v => setCpf(formatCPF(v))} placeholder="000.000.000-00" />
-              </div>
-              <div>
-                <Label>E-mail cadastrado</Label>
-                <Field type="email" value={email} onChange={setEmail} placeholder="seu@email.com" />
-              </div>
-
-              {error && (
-                <div style={{ background: 'rgba(220,38,38,0.1)', border: '1px solid rgba(220,38,38,0.3)', borderRadius: 8, padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <AlertCircle className="w-4 h-4 shrink-0" style={{ color: '#F87171' }} />
-                  <p style={{ color: '#F87171', fontSize: 13, margin: 0 }}>{error}</p>
-                </div>
-              )}
-              {success && (
-                <div style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 8, padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: '#4ADE80' }} />
-                  <p style={{ color: '#4ADE80', fontSize: 13, margin: 0 }}>{success}</p>
-                </div>
-              )}
-
-              <GoldButton type="submit" loading={loading}>Enviar link de redefinição</GoldButton>
-
-              <button type="button" onClick={() => { setMode('login'); reset() }}
-                style={{ background: 'none', border: 'none', color: MUTED, fontSize: 12, cursor: 'pointer', textAlign: 'center' }}>
-                Voltar ao login
-              </button>
-            </form>
-          )}
+        <div>
+          <Label>Repita a senha</Label>
+          <Field type={show ? 'text' : 'password'} value={pw2} onChange={setPw2} placeholder="••••••••" autoComplete="new-password" />
         </div>
-
-        {/* Footer */}
-        <p style={{ textAlign: 'center', color: MUTED, fontSize: 11, marginTop: 20 }}>
-          © {new Date().getFullYear()} FICV — Faculdade Internacional Cidade Viva
-        </p>
-      </div>
-    </div>
+        {error && <Msg kind="error" text={error} />}
+        <GoldButton type="submit" loading={loading}>Salvar e entrar</GoldButton>
+      </form>
+    </Shell>
   )
 }
