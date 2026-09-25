@@ -76,6 +76,7 @@ import { VivaConnectSettings } from './components/admin/VivaConnectSettings';
 import { IntegrationsSettings } from './components/admin/IntegrationsSettings';
 import { SecretariaBoard } from './components/tickets/SecretariaBoard';
 import { TicketQueuesSettings } from './components/admin/TicketQueuesSettings';
+import { TutorVirtualSettings } from './components/admin/TutorVirtualSettings';
 import { UserWidechatConfig } from './components/admin/UserWidechatConfig';
 import { TicketDashboard } from './components/tickets/TicketDashboard';
 import { SponteDashboard } from './components/SponteDashboard';
@@ -969,6 +970,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                     <NavItem icon={Users} label="Equipes" active={activeTab === 'teams'} onClick={() => setActiveTab('teams')} />
                                     <NavItem icon={Users} label="Usuários" active={activeTab === 'users'} onClick={() => setActiveTab('users')} />
                                     <NavItem icon={Inbox} label="Filas de Atendimento" active={activeTab === 'ticket-queues'} onClick={() => setActiveTab('ticket-queues')} />
+                                    <NavItem icon={GraduationCap} label="Tutor Virtual" active={activeTab === 'tutor-virtual'} onClick={() => setActiveTab('tutor-virtual')} />
                                     <NavItem icon={KeyRound} label="Integrações" active={activeTab === 'integrations'} onClick={() => setActiveTab('integrations')} />
                                     <NavItem icon={Bot} label="IA de Atendimento" active={activeTab === 'ai-agent'} onClick={() => setActiveTab('ai-agent')} />
                                     <NavItem icon={Plug} label="VivaConnect" active={activeTab === 'vivaconnect'} onClick={() => setActiveTab('vivaconnect')} />
@@ -1798,6 +1800,12 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {activeTab === 'ai-agent' && profile?.role === 'admin' && (
                     <div className="animate-fade-in">
                         <AiAgentSettings />
+                    </div>
+                )}
+
+                {activeTab === 'tutor-virtual' && profile?.role === 'admin' && (
+                    <div className="animate-fade-in">
+                        <TutorVirtualSettings />
                     </div>
                 )}
 

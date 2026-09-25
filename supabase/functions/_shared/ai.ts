@@ -96,6 +96,40 @@ export async function chatJSON(
     }
 }
 
+/**
+ * Chat com ferramentas (function calling da OpenAI): o modelo pede uma ferramenta,
+ * `run` executa (ex.: consulta ao Sponte do aluno) e o resultado volta pro modelo,
+ * até ele responder em texto (máx. `maxRounds` idas e voltas).
+ */
+export async function chatWithTools(
+    model: string, temperature: number, messages: any[],
+    tools: { name: string; description: string; parameters: Record<string, unknown> }[],
+    run: (name: string, args: any) => Promise<unknown>, maxRounds = 4,
+): Promise<{ text: string; toolsUsed: string[]; usage: any[] }> {
+    const msgs = [...messages];
+    const used: string[] = [];
+    const usage: any[] = [];
+    for (let round = 0; round <= maxRounds; round++) {
+        const data = await openai("/chat/completions", {
+            model, temperature, messages: msgs,
+            ...(round < maxRounds ? { tools: tools.map((t) => ({ type: "function", function: t })), tool_choice: "auto" } : {}),
+        });
+        usage.push(data.usage);
+        const m = data.choices?.[0]?.message;
+        if (!m?.tool_calls?.length) return { text: String(m?.content ?? "").trim(), toolsUsed: used, usage };
+        msgs.push(m);
+        for (const tc of m.tool_calls) {
+            let args: any = {};
+            try { args = JSON.parse(tc.function.arguments || "{}"); } catch { /* args vazios */ }
+            used.push(tc.function.name);
+            let result: unknown;
+            try { result = await run(tc.function.name, args); } catch (e) { result = { erro: (e as Error).message }; }
+            msgs.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(result).slice(0, 12000) });
+        }
+    }
+    return { text: "", toolsUsed: used, usage };
+}
+
 /** pgvector aceita o literal '[0.1,0.2,...]'. */
 export const toVector = (v: number[]) => `[${v.join(",")}]`;
 

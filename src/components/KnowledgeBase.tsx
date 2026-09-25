@@ -35,6 +35,7 @@ interface KnowledgeItem {
     file_name?: string | null;
     source_type?: 'text' | 'pdf' | 'sheet' | 'doc';
     ai_enabled?: boolean;
+    publico?: 'vendas' | 'alunos' | 'ambos';
     index_status?: 'pending' | 'processing' | 'ready' | 'error';
     index_error?: string | null;
     chunk_count?: number;
@@ -142,7 +143,8 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
             content: formState.content,
             category: formState.category,
             file_url: formState.file_url,
-            type: 'document'
+            type: 'document',
+            ...(selectedItem && isEditing ? {} : { publico: newDocPublico }),
         };
 
         // .select() pra detectar UPDATE que filtrou 0 linhas sem erro (token em refresh)
@@ -182,6 +184,7 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
                     content: text,
                     category: 'Geral',
                     type: 'document',
+                    publico: newDocPublico,
                     source_type: sourceType,
                     file_path: path,
                     file_name: file.name,
@@ -222,6 +225,16 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
         setIndexing(false);
     };
 
+    // Público do documento: 'vendas' = IA do WhatsApp/leads · 'alunos' = Tutor Virtual (chamados) · 'ambos'
+    const [publicoFilter, setPublicoFilter] = useState<'todos' | 'vendas' | 'alunos'>('todos');
+    const newDocPublico = publicoFilter === 'alunos' ? 'alunos' : 'vendas';
+    const setPublico = async (item: KnowledgeItem, publico: 'vendas' | 'alunos' | 'ambos') => {
+        const { data, error } = await supabase.from('knowledge_base').update({ publico }).eq('id', item.id).select('id');
+        if (error || !data?.length) { toast.error('Não foi possível alterar. Recarregue a página.'); return; }
+        setSelectedItem({ ...item, publico });
+        await fetchKnowledge();
+    };
+
     const toggleAi = async (item: KnowledgeItem) => {
         const { data, error } = await supabase.from('knowledge_base')
             .update({ ai_enabled: !item.ai_enabled }).eq('id', item.id).select('id');
@@ -248,12 +261,12 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
     };
 
     const filteredItems = useMemo(() => {
-        return items.filter(item =>
+        return items.filter(item => (publicoFilter === 'todos' || (item.publico ?? 'vendas') === publicoFilter || item.publico === 'ambos')).filter(item =>
             item.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
             item.content.toLowerCase().includes(searchTerm.toLowerCase()) ||
             item.category.toLowerCase().includes(searchTerm.toLowerCase())
         );
-    }, [items, searchTerm]);
+    }, [items, searchTerm, publicoFilter]);
 
     const groupedItems = useMemo(() => {
         const groups: Record<string, KnowledgeItem[]> = {};
@@ -293,6 +306,13 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
                             className="hidden"
                             onChange={(e) => handleFiles(e.target.files)}
                         />
+                        <select value={publicoFilter} onChange={(e) => setPublicoFilter(e.target.value as any)}
+                            title="Vendas = IA do WhatsApp · Alunos = Tutor Virtual dos chamados. Novos documentos entram no público selecionado."
+                            className="px-3 py-2.5 rounded-xl bg-[var(--bg-card-hover)] border border-[var(--border)] text-xs font-bold text-[var(--text-main)]">
+                            <option value="todos">Todos os documentos</option>
+                            <option value="vendas">💼 Vendas (IA do WhatsApp)</option>
+                            <option value="alunos">🎓 Alunos (Tutor Virtual)</option>
+                        </select>
                         <button
                             onClick={() => fileInputRef.current?.click()}
                             disabled={uploading}
@@ -425,6 +445,12 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
                                                 <input type="checkbox" checked={selectedItem.ai_enabled !== false} onChange={() => toggleAi(selectedItem)} className="accent-[var(--primary)]" />
                                                 Usar na IA
                                             </label>
+                                            <select value={selectedItem.publico ?? 'vendas'} onChange={(e) => setPublico(selectedItem, e.target.value as any)}
+                                                className="px-2 py-1 rounded-lg bg-transparent border border-[var(--border)] text-[var(--text-muted)]" title="Qual IA usa este documento">
+                                                <option value="vendas">💼 Vendas</option>
+                                                <option value="alunos">🎓 Alunos (Tutor Virtual)</option>
+                                                <option value="ambos">Ambos</option>
+                                            </select>
                                             <button
                                                 onClick={() => handleReindexOne(selectedItem.id)}
                                                 disabled={indexing}

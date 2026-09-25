@@ -223,7 +223,7 @@ export interface TicketMessage {
   ticket_id: number
   autor_id: string
   autor_nome: string
-  autor_role: 'aluno' | 'atendente' | 'admin'
+  autor_role: 'aluno' | 'atendente' | 'admin' | 'agent' | 'secretaria' | 'tutor' | 'coordenador' | 'tutor_virtual'
   conteudo: string
   interno: boolean
   created_at: string

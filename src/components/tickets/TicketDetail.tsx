@@ -523,6 +523,20 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
     showSuccess(`Chamado enviado para a fila ${queues.find(q => String(q.id) === queue_id)?.nome ?? ''}.`)
   }
 
+  // Tutor Virtual: aluno pede humano / equipe devolve o chamado pro tutor
+  const falarComEquipe = async () => {
+    const { error } = await supabase.functions.invoke('tutor-virtual', { body: { action: 'handoff', ticket_id: ticket.id } })
+    if (error) { showError('Não foi possível agora. Tente de novo.'); return }
+    qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
+    qc.invalidateQueries({ queryKey: ['ticket-messages', ticket.id] })
+  }
+  const devolverAoTutor = async () => {
+    const { error } = await supabase.functions.invoke('tutor-virtual', { body: { action: 'reactivate', ticket_id: ticket.id } })
+    if (error) { showError('Não foi possível reativar o Tutor Virtual.'); return }
+    qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
+    showSuccess('Tutor Virtual volta a responder a próxima mensagem do aluno.')
+  }
+
   const assignTo = async (atendente_id: string) => {
     const { error } = await supabase.from('tickets').update({ atendente_id }).eq('id', ticket.id)
     if (error) { showError('Erro ao atribuir.'); return }
@@ -555,6 +569,10 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                 Aberto por <strong>{t.aluno_nome}</strong> · {format(new Date(t.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
                 {t.curso && <> · <span className="text-[var(--primary)]/80">{t.curso.name}</span></>}
                 {(t as any).nivel && <> · {(t as any).nivel === 'pos' ? 'Pós-graduação' : 'Graduação'}</>}
+                {isStaff && (t as any).ai_status === 'active' && <> · <span className="text-purple-400">🤖 Tutor Virtual atendendo</span></>}
+                {isStaff && (t as any).ai_status === 'handed_off' && (
+                  <> · <button onClick={devolverAoTutor} className="text-purple-400 hover:underline">devolver ao Tutor Virtual</button></>
+                )}
               </p>
             </div>
 
@@ -633,7 +651,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
               </div>
             ) : (
               messages.map(m => {
-                const isMine = m.autor_id === currentUserId
+                const isMine = m.autor_id === currentUserId && m.autor_role !== 'tutor_virtual'
                 const isInterno = m.interno
 
                 return (
@@ -641,9 +659,9 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-xs font-bold
                       ${m.autor_role === 'aluno'
                         ? 'bg-[var(--primary)]/20 text-[var(--primary)]'
-                        : 'bg-green-500/20 text-green-400'
+                        : m.autor_role === 'tutor_virtual' ? 'bg-purple-500/20 text-purple-400' : 'bg-green-500/20 text-green-400'
                       }`}>
-                      {m.autor_nome.charAt(0).toUpperCase()}
+                      {m.autor_role === 'tutor_virtual' ? '🤖' : m.autor_nome.charAt(0).toUpperCase()}
                     </div>
                     <div className={`max-w-[70%] ${isMine ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
                       <div className="flex items-center gap-2">
@@ -657,14 +675,16 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                           {formatDistanceToNow(new Date(m.created_at), { addSuffix: true, locale: ptBR })}
                         </span>
                       </div>
-                      <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed
+                      <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words
                         ${isInterno
                           ? 'bg-amber-500/10 border border-amber-500/20 text-amber-200'
                           : isMine
                             ? 'bg-[var(--primary)] text-white rounded-tr-sm'
-                            : 'bg-[var(--bg-main)] border border-[var(--border)] text-[var(--text-main)] rounded-tl-sm'
+                            : m.autor_role === 'tutor_virtual'
+                              ? 'bg-purple-500/10 border border-purple-500/25 text-[var(--text-main)] rounded-tl-sm'
+                              : 'bg-[var(--bg-main)] border border-[var(--border)] text-[var(--text-main)] rounded-tl-sm'
                         }`}>
-                        {m.conteudo}
+                        {linkify(m.conteudo)}
                         {/* Anexos */}
                         {Array.isArray((m as any).attachments) && (m as any).attachments.length > 0 && (
                           <div className="mt-2 space-y-1.5">
@@ -704,6 +724,26 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                 )
               })
             )}
+            {/* Tutor Virtual: respondendo / falar com a equipe */}
+            {(t as any).ai_status === 'active' && messages.length > 0 && (() => {
+              const last = messages[messages.length - 1]
+              const pensando = last.autor_role === 'aluno' && Date.now() - new Date(last.created_at).getTime() < 90_000
+              const tutorFalou = messages.some(m => m.autor_role === 'tutor_virtual')
+              return (
+                <div className="flex flex-col items-start gap-2 pl-11">
+                  {pensando && (
+                    <span className="text-xs text-purple-400 flex items-center gap-1.5">
+                      <Loader2 className="w-3 h-3 animate-spin" /> Tutor Virtual está respondendo…
+                    </span>
+                  )}
+                  {!isStaff && tutorFalou && !pensando && (
+                    <button onClick={falarComEquipe} className="text-xs px-3 py-1.5 rounded-full border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:border-[var(--primary)]">
+                      🙋 Prefiro falar com a equipe
+                    </button>
+                  )}
+                </div>
+              )
+            })()}
             <div ref={bottomRef} />
           </div>
         )}
@@ -900,4 +940,12 @@ function WhatsappHistory({ leadId }: { leadId: number }) {
       )}
     </div>
   )
+}
+
+// URLs clicáveis no texto (ex.: link de pagamento que o Tutor Virtual manda)
+function linkify(text: string) {
+  const parts = String(text ?? '').split(/(https?:\/\/[^\s)]+)/g)
+  return parts.map((p, i) => /^https?:\/\//.test(p)
+    ? <a key={i} href={p} target="_blank" rel="noopener noreferrer" className="underline break-all">{p}</a>
+    : <span key={i}>{p}</span>)
 }
