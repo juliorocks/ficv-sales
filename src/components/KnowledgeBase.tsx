@@ -24,6 +24,7 @@ import {
     Link as LinkIcon,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { KbAskPanel } from './KbAskPanel';
 
 interface KnowledgeItem {
     id: string;
@@ -211,6 +212,7 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
 
     // Importar por link (Google Drive/Docs/Planilhas/Apresentações ou link direto): o servidor
     // baixa (kb-fetch-url) e o arquivo segue o mesmo caminho do "Enviar arquivos".
+    const [askOpen, setAskOpen] = useState(false);
     const [importOpen, setImportOpen] = useState(false);
     const [importUrl, setImportUrl] = useState('');
     const [importing, setImporting] = useState(false);
@@ -353,6 +355,13 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
                             <option value="vendas">💼 Vendas (IA do WhatsApp)</option>
                             <option value="alunos">🎓 Alunos (Tutor Virtual)</option>
                         </select>
+                        <button
+                            onClick={() => setAskOpen(o => !o)}
+                            className={`px-4 py-2.5 rounded-xl border text-xs font-bold transition-all flex items-center gap-2 ${askOpen ? 'bg-primary/10 border-primary text-primary' : 'bg-[var(--bg-card-hover)] border-[var(--border)] text-[var(--text-main)] hover:border-primary'}`}
+                            title="Pergunte e receba uma resposta pronta, com as fontes"
+                        >
+                            <Bot size={14} /> Perguntar à base
+                        </button>
                         <button
                             onClick={() => setImportOpen(true)}
                             disabled={uploading || importing}
@@ -749,6 +758,12 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
                     )}
                 </div>
             </div>
+            {askOpen && (
+                <div className="fixed bottom-6 right-6 z-40 w-[26rem] max-w-[calc(100vw-2rem)] max-h-[75vh] overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] shadow-2xl p-4">
+                    <div className="flex justify-end -mt-1 -mr-1"><button onClick={() => setAskOpen(false)} className="text-[var(--text-muted)] hover:text-[var(--text-main)]"><X size={16} /></button></div>
+                    <KbAskPanel publico={publicoFilter} />
+                </div>
+            )}
             {importOpen && (
                 <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => !importing && setImportOpen(false)}>
                     <div className="w-full max-w-lg rounded-2xl bg-[var(--bg-card)] border border-[var(--border)] p-6 space-y-4" onClick={(e) => e.stopPropagation()}>

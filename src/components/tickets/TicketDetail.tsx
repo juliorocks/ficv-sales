@@ -6,13 +6,14 @@ import type { Ticket, TicketMessage, TicketEvaluation, TicketStatus } from '../.
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog'
 import { Button } from '../ui/button'
 import { Textarea } from '../ui/textarea'
+import { KbAskPanel } from '../KbAskPanel'
 import { Badge } from '../ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { showSuccess, showError } from '../../utils/toast'
 import {
   X, Send, Lock, Clock, CheckCircle2, Star, ChevronRight,
   MessageSquare, Shield, Loader2, UserCircle2, AlertCircle,
-  Paperclip, FileText, ImageIcon, Download, XCircle, Mic, MicOff, Play
+  Paperclip, FileText, ImageIcon, Download, XCircle, Mic, MicOff, Play, BookOpen
 } from 'lucide-react'
 import { formatDistanceToNow, format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -231,6 +232,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   const currentUserName = alunoNome ?? user?.full_name ?? ''
 
   const [msg, setMsg] = useState('')
+  const [kbOpen, setKbOpen] = useState(false)
   const [interno, setInterno] = useState(false)
   const [sending, setSending] = useState(false)
   const [showEval, setShowEval] = useState(false)
@@ -832,6 +834,18 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
               </div>
             )}
 
+            {/* Consultar a Base (só equipe): resposta pronta pra inserir no chamado */}
+            {isStaff && kbOpen && (
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-3 mb-2 max-h-80 overflow-y-auto">
+                <KbAskPanel
+                  publico="alunos"
+                  contexto={{ nome: t.aluno_nome, curso: t.curso?.name ?? null }}
+                  conversa={messages.filter(m => !m.interno && m.conteudo).slice(-12)
+                    .map(m => ({ de: m.autor_role === 'aluno' ? 'cliente' as const : 'atendente' as const, texto: m.conteudo }))}
+                  onInsert={(txt) => { setMsg(prev => prev.trim() ? `${prev.trimEnd()}\n${txt}` : txt); setKbOpen(false) }}
+                />
+              </div>
+            )}
             {!recording && (
               <div className="flex gap-2">
                 <Textarea
@@ -847,6 +861,12 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                   }}
                 />
                 <div className="flex flex-col gap-1.5 self-end">
+                  {isStaff && (
+                    <button type="button" onClick={() => setKbOpen(o => !o)} title="Consultar a Base de Conhecimento"
+                      className={`h-10 w-10 flex items-center justify-center rounded-lg border transition-colors ${kbOpen ? 'border-[var(--primary)] text-[var(--primary)]' : 'border-[var(--border)] bg-[var(--bg-main)] text-[var(--text-muted)] hover:text-[var(--primary)] hover:border-[var(--primary)]'}`}>
+                      <BookOpen className="w-4 h-4" />
+                    </button>
+                  )}
                   {/* Botão de anexo */}
                   <input
                     ref={fileInputRef}

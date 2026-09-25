@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabase"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
-import { AlertCircle, MessageSquare, Send, Loader2, FileText, Zap, Plus, Smile, Paperclip, Mic, Square, X, Image as ImageIcon, FileAudio } from "lucide-react"
+import { AlertCircle, MessageSquare, Send, Loader2, FileText, Zap, Plus, Smile, Paperclip, Mic, Square, X, Image as ImageIcon, FileAudio, BookOpen } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label"
 import { showError, showSuccess } from "@/utils/toast"
 import { useAuth } from "@/hooks/use-auth"
+import { KbAskPanel } from "@/components/KbAskPanel"
 
 // ── Templates HSM: variáveis ────────────────────────────────────────────────
 // Um template pode ter variáveis no corpo — numeradas ({{1}}, {{2}}) ou nomeadas
@@ -160,6 +161,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
     const scrollRef = useRef<HTMLDivElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
     const [emojiOpen, setEmojiOpen] = useState(false)
+    const [kbOpen, setKbOpen] = useState(false)
     const [newMessage, setNewMessage] = useState("")
     // anexo (arquivo escolhido, aguardando confirmação/legenda antes de enviar)
     const fileInputRef = useRef<HTMLInputElement>(null)
@@ -1072,6 +1074,22 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                                     </DropdownMenuItem>
                                 </DropdownMenuContent>
                             </DropdownMenu>
+                            <Popover open={kbOpen} onOpenChange={setKbOpen}>
+                                <PopoverTrigger asChild>
+                                    <Button type="button" variant="outline" size="icon" className="rounded-full h-9 w-9 text-slate-600" title="Consultar a Base de Conhecimento">
+                                        <BookOpen className="h-4 w-4" />
+                                    </Button>
+                                </PopoverTrigger>
+                                <PopoverContent align="start" side="top" className="w-[26rem] max-h-[70vh] overflow-y-auto p-3">
+                                    <KbAskPanel
+                                        publico="vendas"
+                                        contexto={{ nome: leadName ?? null }}
+                                        conversa={(messages ?? []).filter((m) => m.message && m.message !== '[Mídia]').slice(-12)
+                                            .map((m) => ({ de: m.origin === 'channel' ? 'cliente' as const : 'atendente' as const, texto: m.message }))}
+                                        onInsert={(t) => { setNewMessage((prev) => prev.trim() ? `${prev.trimEnd()}\n${t}` : t); setKbOpen(false); requestAnimationFrame(() => textareaRef.current?.focus()) }}
+                                    />
+                                </PopoverContent>
+                            </Popover>
                             <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
                                 <PopoverTrigger asChild>
                                     <Button type="button" variant="outline" size="icon" className="rounded-full h-9 w-9 text-slate-600" title="Emojis">
