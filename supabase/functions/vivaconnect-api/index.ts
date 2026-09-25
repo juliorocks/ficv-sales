@@ -283,14 +283,17 @@ async function sendRow(db: any, settings: any, row: any, ch: any) {
     const now = new Date().toISOString();
     if (!r.ok) {
         const err = zproErr(r.status, r.data);
+        // número do CLIENTE sem WhatsApp/inválido (Z-PRO devolve 500 "reading 'jid'"): falha
+        // do destino, não do canal — não tenta de novo nem pinta o número de vermelho
+        const badRecipient = /jid|not.*(exist|registered|on whatsapp)|invalid.*number|n[úu]mero inv/i.test(err);
         // erro de rede/5xx: volta pra fila (até 3 tentativas); 4xx: falha definitiva
-        const retry = (r.status === 0 || r.status >= 500) && (row.attempts ?? 0) + 1 < 3;
+        const retry = !badRecipient && (r.status === 0 || r.status >= 500) && (row.attempts ?? 0) + 1 < 3;
         await db.from("vivaconnect_outbox").update({
             status: retry ? "queued" : "failed", error: err, response: r.data,
             scheduled_at: retry ? new Date(Date.now() + 5 * 60_000).toISOString() : row.scheduled_at,
         }).eq("id", row.id);
-        await markChannel(db, ch.id, false, err);
-        return { ok: false, error: err, retry };
+        if (!badRecipient) await markChannel(db, ch.id, false, err);
+        return { ok: false, error: badRecipient ? `Esse número não tem WhatsApp ou é inválido (${row.number}).` : err, retry };
     }
 
     await db.from("vivaconnect_outbox").update({ status: "sent", sent_at: now, response: r.data, error: null }).eq("id", row.id);

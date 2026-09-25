@@ -178,8 +178,17 @@ Deno.serve(async (req) => {
 
         if (m.fromMe) return await done(`stored:${origin}`, lead?.id ?? null);
 
+        // aluno = matrícula ativa no Sponte OU o NOSSO lead já diz que é aluno (perfil/etapa
+        // Matriculado). Só o Sponte não basta: o telefone de lá costuma ser outro (caso real
+        // 25/09: aluna em Matriculado escreveu no número da secretaria e o Sponte não casou).
+        let isStudent = !!aluno || lead?.perfil === "aluno";
+        if (!isStudent && lead?.stage_id) {
+            const { data: st } = await db.from("stages").select("name").eq("id", lead.stage_id).maybeSingle();
+            isStudent = /matricul/i.test(st?.name ?? "");
+        }
+
         // ── canal oficial: aluno → link do portal ───────────────────────────
-        if (ch.purpose === "official" && aluno) {
+        if (ch.purpose === "official" && isStudent) {
             if (!settings.student_reply_enabled) return await done("stored:aluno (resposta do portal desligada)", lead?.id ?? null);
             const since = new Date(Date.now() - 24 * 3600_000).toISOString();
             const number = toZproNumber(m.number)!;
@@ -188,7 +197,7 @@ Deno.serve(async (req) => {
             if (recent) return await done("stored:aluno (portal já enviado nas últimas 24h)", lead?.id ?? null);
             await db.from("vivaconnect_outbox").insert({
                 lead_id: lead?.id ?? null, channel_id: ch.id, kind: "student_reply", number,
-                body: fillTemplate(settings.student_reply_template, { primeiro_nome: firstName(m.contactName ?? (aluno as any).aluno) || "tudo bem" }),
+                body: fillTemplate(settings.student_reply_template, { primeiro_nome: firstName(m.contactName ?? (aluno as any)?.aluno) || "tudo bem" }),
             });
             return await done("stored:aluno → link do portal enfileirado", lead?.id ?? null);
         }
@@ -196,7 +205,7 @@ Deno.serve(async (req) => {
         // ── canal com "IA responde" marcado: não-aluno → IA ─────────────────
         // (aluno no oficial já saiu acima com o link do portal; a trava de handoff
         //  e a chave geral da IA ficam no ai-agent)
-        if (ch.ai_enabled && lead && lead.perfil !== "aluno" && !aluno && !m.agentUserId) {
+        if (ch.ai_enabled && lead && !isStudent && !m.agentUserId) {
             const outcome = await aiReply(db, lead.id, ch.id, m.number);
             return await done(`stored:${outcome}`, lead.id);
         }
