@@ -30,6 +30,7 @@ Deno.serve(async (req) => {
         const { data: s } = await db.from("ai_agent_settings").select("chat_model, embedding_model, match_count").eq("id", 1).single();
         const trechos = await searchKnowledge(db, consulta, {
             publico, embeddingModel: s?.embedding_model ?? "text-embedding-3-small", count: Math.max(6, s?.match_count ?? 6),
+            focus: pergunta || conversa.filter((m) => m.de === "cliente").slice(-1)[0]?.texto,
         }) as any[];
         const kb = trechos.length ? trechos.map((h, i) => `[${i + 1}] (${h.title}) ${h.content}`).join("\n\n---\n\n") : "(nada encontrado na base)";
 

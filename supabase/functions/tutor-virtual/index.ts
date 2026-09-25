@@ -107,6 +107,7 @@ Deno.serve(async (req) => {
         const pergunta = [t.titulo, ...conversa.filter((m) => m.role === "user").slice(-3).map((m) => m.content)].join("\n");
         const hits = await searchKnowledge(db, pergunta, {
             publico: "alunos", embeddingModel: ai?.embedding_model ?? "text-embedding-3-small",
+            focus: conversa[conversa.length - 1]?.content,
             count: ai?.match_count ?? 6, minSimilarity: Number(ai?.min_similarity ?? 0.25),
         });
         const kb = (hits ?? []).length ? (hits as any[]).map((h, i) => `[${i + 1}] (${h.title}) ${h.content}`).join("\n\n---\n\n")

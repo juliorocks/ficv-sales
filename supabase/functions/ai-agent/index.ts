@@ -80,6 +80,7 @@ Deno.serve(async (req) => {
         const query = messages.filter((m) => m.role === "user").slice(-3).map((m) => m.content).join("\n");
         const hits = await searchKnowledge(db, lead?.curso ? `${lead.curso}\n${query}` : query, {
             publico: "vendas", embeddingModel: s.embedding_model, count: s.match_count, minSimilarity: Number(s.min_similarity),
+            focus: messages[messages.length - 1].content,
         });
 
         const knowledge = (hits ?? []).length

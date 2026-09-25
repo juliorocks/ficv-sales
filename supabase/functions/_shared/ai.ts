@@ -139,7 +139,8 @@ const STOP = new Set(("quanto quantos quanta quais qual sobre curso cursos valor
     "informacao informação informacoes informações faculdade ficv favor obrigado obrigada tenho quero queria saber " +
     "pode poderia vocês voces vocês como onde quando porque então entao ainda também tambem minha minhas meus seus " +
     "sobre para pelo pela pelos pelas esse essa isso este esta isto aqui agora mesmo muito mais menos todas todos " +
-    "fazer fazer sendo estou estão estao boa bom dia tarde noite olá ola").split(/\s+/));
+    "fazer sendo estou estão estao boa bom dia tarde noite olá ola consigo consegue conseguir preciso precisa " +
+    "gostar existe existem voces falar falou poderiam seria teria tenho entrar começar comecar posso").split(/\s+/));
 export function keywordTerms(text: string): string[] {
     const words = String(text).toLowerCase().match(/[a-zà-ú0-9]{5,}/gi) ?? [];
     const terms = [...new Set(words.filter((w) => !STOP.has(w)).map((w) => (w.length >= 8 ? w.slice(0, w.length - 2) : w)))].slice(0, 6);
@@ -149,27 +150,45 @@ export function keywordTerms(text: string): string[] {
     }
     return terms;
 }
-export async function searchKnowledge(
+async function searchOnce(
     db: SupabaseClient, text: string,
-    opts: { publico: string; embeddingModel: string; count?: number; minSimilarity?: number },
-): Promise<{ document_id: string; title: string; category: string; content: string; similarity: number }[]> {
-    const count = opts.count ?? 6;
+    opts: { publico: string; embeddingModel: string; count: number; minSimilarity?: number },
+): Promise<any[]> {
     const [qv] = await embed([text], opts.embeddingModel);
     const terms = keywordTerms(text);
     const [vec, kw] = await Promise.all([
-        db.rpc("match_knowledge_chunks", { query_embedding: toVector(qv), match_count: count, min_similarity: opts.minSimilarity ?? 0.25, p_publico: opts.publico }),
+        db.rpc("match_knowledge_chunks", { query_embedding: toVector(qv), match_count: opts.count, min_similarity: opts.minSimilarity ?? 0.25, p_publico: opts.publico }),
         terms.length ? db.rpc("match_knowledge_keywords", { p_terms: terms, p_publico: opts.publico, p_limit: 5 }) : Promise.resolve({ data: [] as any[] }),
     ]);
     if ((vec as any).error) throw new Error(`busca na base: ${(vec as any).error.message}`);
     // trechos que casam ao menos metade dos termos vêm primeiro; depois os vetoriais
     const strong = ((kw as any).data ?? []).filter((h: any) => h.similarity >= 0.5).slice(0, 4);
+    return [...strong, ...((vec as any).data ?? [])];
+}
+
+/**
+ * Busca na base. `focus` = a pergunta que precisa de resposta AGORA (última mensagem):
+ * ela é buscada sozinha e os trechos dela vêm primeiro; `text` (contexto da conversa)
+ * completa. Motivo (25/09): 3 mensagens juntas — duas sobre Liderança Cristã e a última
+ * sobre Psicoteologia — enterravam o trecho com a duração da Psicoteologia.
+ */
+export async function searchKnowledge(
+    db: SupabaseClient, text: string,
+    opts: { publico: string; embeddingModel: string; count?: number; minSimilarity?: number; focus?: string },
+): Promise<{ document_id: string; title: string; category: string; content: string; similarity: number }[]> {
+    const count = opts.count ?? 6;
+    const focus = (opts.focus ?? "").trim();
+    const runs = await Promise.all([
+        focus ? searchOnce(db, focus, { ...opts, count }) : Promise.resolve([]),
+        !focus || focus !== text.trim() ? searchOnce(db, text, { ...opts, count }) : Promise.resolve([]),
+    ]);
     const out: any[] = [];
     const seen = new Set<string>();
-    for (const h of [...strong, ...((vec as any).data ?? [])]) {
+    for (const h of [...runs[0], ...runs[1]]) {
         const k = String(h.content).slice(0, 120);
         if (seen.has(k)) continue;
         seen.add(k); out.push(h);
-        if (out.length >= count + 2) break;
+        if (out.length >= count + 3) break;
     }
     return out;
 }
