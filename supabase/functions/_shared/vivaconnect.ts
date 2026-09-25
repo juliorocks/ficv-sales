@@ -197,7 +197,7 @@ export async function findLeadByPhone(db: SupabaseClient, phone: string | null) 
     const suffix = onlyDigits(phone).slice(-8);
     if (suffix.length < 8) return null;
     const { data } = await db.from("leads")
-        .select("id, nome_completo, perfil, assigned_to_id, vivaconnect_channel_id, curso_interesse")
+        .select("id, nome_completo, perfil, assigned_to_id, vivaconnect_channel_id, curso_interesse, stage_id")
         .ilike("telefone", `%${suffix}%`).order("id", { ascending: false }).limit(1).maybeSingle();
     return data;
 }

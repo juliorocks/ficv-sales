@@ -96,6 +96,7 @@ Deno.serve(async (req) => {
             : null;
 
         let lead = await findLeadByPhone(db, m.number);
+        const leadExisted = !!lead;
         if (!lead && !m.fromMe && !(aluno && ch.purpose === "official")) {
             const { data: src } = await db.from("lead_sources").select("id").eq("name", VIVACONNECT_SOURCE).maybeSingle();
             const now = new Date().toISOString();
@@ -106,7 +107,7 @@ Deno.serve(async (req) => {
                 data_entrada: now, stage_entry_date: now, valor_oportunidade: 0,
                 vivaconnect_channel_id: ch.id, vivaconnect_ticket_id: m.ticketId, vivaconnect_contact_id: m.contactId,
                 preferred_contact: "whatsapp",
-            }).select("id, nome_completo, perfil, assigned_to_id, vivaconnect_channel_id, curso_interesse").single();
+            }).select("id, nome_completo, perfil, assigned_to_id, vivaconnect_channel_id, curso_interesse, stage_id").single();
             if (error) throw new Error(`criar lead: ${error.message}`);
             lead = created;
             await mirror(
@@ -122,7 +123,40 @@ Deno.serve(async (req) => {
             if (!lead.vivaconnect_channel_id) patch.vivaconnect_channel_id = ch.id;
             if (m.ticketId) patch.vivaconnect_ticket_id = m.ticketId;
             if (m.contactId) patch.vivaconnect_contact_id = m.contactId;
+
+            // ── reabertura: mesma regra do widechat-webhook (decisão do usuário 17/09) ──
+            // cliente escreveu num lead Finalizado → volta pra Entrada sem agente; se a fala
+            // anterior era de agente (conversa humana em andamento) → Em Contato, mantém o agente.
+            let reopenNote: string | null = null;
+            if (leadExisted && !m.fromMe && lead.stage_id) {
+                const { data: st } = await db.from("stages").select("name").eq("id", lead.stage_id).maybeSingle();
+                if (st?.name && /finaliz|encerr|conclu/i.test(st.name)) {
+                    const { data: last } = await db.from("widechat_messages").select("origin")
+                        .eq("lead_id", lead.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+                    const now = new Date().toISOString();
+                    patch.stage_entry_date = now;
+                    if (last?.origin === "agent") {
+                        const { data: ec } = await db.from("stages").select("id").ilike("name", "%contato%")
+                            .order("order", { ascending: true }).limit(1).maybeSingle();
+                        patch.stage_id = ec?.id ?? 1;
+                        reopenNote = "🔁 Reaberto para Em Contato (agente mantido) — cliente retomou a conversa pelo VivaConnect após o atendimento ter sido finalizado.";
+                    } else {
+                        patch.stage_id = 1;
+                        patch.assigned_to_id = null;
+                        reopenNote = "🔁 Reaberto para Entrada (sem agente atribuído) — cliente voltou a escrever pelo VivaConnect após o atendimento ter sido finalizado.";
+                    }
+                }
+            }
             await db.from("leads").update(patch).eq("id", lead.id);
+            if (reopenNote) {
+                const now = String(patch.stage_entry_date);
+                await db.from("lead_notes").insert({ lead_id: lead.id, note: reopenNote, created_at: now });
+                await mirror(
+                    `UPDATE leads SET stage_id = stages:⟨${patch.stage_id}⟩, stage_entry_date = d${sv(now)}` +
+                    `${"assigned_to_id" in patch ? ", assigned_to_id = NONE" : ""} WHERE id = leads:⟨${lead.id}⟩;\n` +
+                    `INSERT INTO lead_notes [{ lead_id: leads:⟨${lead.id}⟩, note: ${sv(reopenNote)}, created_at: d${sv(now)} }] RETURN NONE;`,
+                );
+            }
 
             await db.from("widechat_messages").insert({
                 lead_id: lead.id, provider: "vivaconnect", channel_id: ch.id,
