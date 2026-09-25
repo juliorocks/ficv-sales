@@ -11,6 +11,7 @@ import { corsHeaders, identify, isAdmin, jsonRes } from "../_shared/ai.ts";
 import { forgetSecret, getSecret } from "../_shared/secrets.ts";
 import { GITHUB_REPO } from "../_shared/gh-dispatch.ts";
 import { loadSettings, zpro, zproErr } from "../_shared/vivaconnect.ts";
+import { sendEmail } from "../_shared/email.ts";
 import { retorno, sponteCall } from "../_shared/sponte.ts";
 
 type Field = { key: string; label: string; placeholder?: string; optional?: boolean; help?: string; plain?: boolean }; // plain = não é segredo: mostra o valor
@@ -103,16 +104,22 @@ async function runTest(id: string, db: any): Promise<{ ok: boolean; message: str
     if (id === "resend") {
         const key = await getSecret("RESEND_API_KEY"), from = await getSecret("RESEND_FROM");
         if (!key) return { ok: false, message: "API Key não configurada." };
-        const r = await fetch("https://api.resend.com/domains", { headers: { Authorization: `Bearer ${key}` }, signal: timeout });
-        const d = await r.json().catch(() => null);
-        if (!r.ok) return { ok: false, message: `HTTP ${r.status}: ${d?.message ?? "sem detalhe"}` };
-        const doms: any[] = d?.data ?? [];
-        if (!from) return { ok: false, message: `Chave válida (${doms.length} domínio(s)). Falta o Remetente.` };
-        const fromDomain = (from.match(/@([^>\s]+)/) ?? [])[1]?.toLowerCase();
-        const dom = doms.find((x) => x.name?.toLowerCase() === fromDomain);
-        if (!dom) return { ok: false, message: `O domínio ${fromDomain ?? "?"} não está na Resend (domínios: ${doms.map((x) => x.name).join(", ") || "nenhum"}).` };
-        if (dom.status !== "verified") return { ok: false, message: `Domínio ${dom.name} ainda não verificado na Resend (status: ${dom.status}).` };
-        return { ok: true, message: `Conectado — enviando como ${from}.` };
+        if (!from) return { ok: false, message: "Falta o Remetente (ex.: FICV <atendimento@email.ficv.edu.br>)." };
+        // envio REAL pro endereço de teste da Resend (aceita e descarta): valida chave + remetente +
+        // domínio verificado de uma vez — funciona com chave "Sending access" ou "Full access"
+        const sent = await sendEmail("delivered@resend.dev", "Teste de conexão — SalesPulse", "<p>Teste de conexão da integração Resend.</p>");
+        if (!sent.ok) {
+            const dom = (from.match(/@([^>\s]+)/) ?? [])[1];
+            return { ok: false, message: `${sent.error}${/domain|not verified|verify/i.test(sent.error ?? "") ? ` — o remetente precisa ser de um domínio verificado na Resend (hoje: ${dom ?? "?"}).` : ""}` };
+        }
+        // receber respostas por e-mail exige ler os e-mails recebidos → chave "Full access"
+        const inbound = await getSecret("RESEND_INBOUND_DOMAIN");
+        let aviso = "";
+        if (inbound) {
+            const r = await fetch("https://api.resend.com/domains", { headers: { Authorization: `Bearer ${key}` }, signal: timeout });
+            if (r.status === 401) aviso = " ⚠️ Para o aluno responder por e-mail, a API Key precisa ser 'Full access' (a atual é só de envio).";
+        }
+        return { ok: !aviso, message: `Envio OK como ${from}.${aviso}` };
     }
     if (id === "github") {
         const t = await getSecret("GITHUB_DISPATCH_TOKEN");
