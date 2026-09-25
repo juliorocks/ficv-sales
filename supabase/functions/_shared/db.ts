@@ -14,7 +14,7 @@ export function pg(): SupabaseClient {
 const SURREAL_ENDPOINT = Deno.env.get("SURREAL_ENDPOINT")
     ?? "https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud";
 const SURREAL_NS = "ficv", SURREAL_DB = "salespulse";
-const SURREAL_PASS = Deno.env.get("SURREAL_PASS") ?? "Ficv@Surreal2026!";
+const SURREAL_PASS = Deno.env.get("SURREAL_PASS") ?? "";
 
 let _surrealToken: string | null = null;
 async function surrealToken(): Promise<string> {

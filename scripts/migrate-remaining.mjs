@@ -4,14 +4,13 @@
 //          meta_account_stats, widechat_raw_messages
 
 const SUPABASE_URL = 'https://znypfroagfwohqeyxyqv.supabase.co';
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY ||
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpueXBmcm9hZ2Z3b2hxZXl4eXF2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjIwMDkyOSwiZXhwIjoyMDg3Nzc2OTI5fQ.aU7Qui8SKNzY1g0EwyMZFCp9JTsi_asKgMZeJCInXBQ';
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY; // service_role do projeto ANTIGO (OLD_SUPABASE_SERVICE_ROLE_KEY no .env.local)
 
 const SURREAL_ENDPOINT = 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
 const SURREAL_NS = 'ficv';
 const SURREAL_DB = 'salespulse';
 const SURREAL_USER = 'ficv_admin';
-const SURREAL_PASS = 'Ficv@Surreal2026!';
+const SURREAL_PASS = process.env.SURREAL_PASS;
 
 // ── Supabase ─────────────────────────────────────────────────
 

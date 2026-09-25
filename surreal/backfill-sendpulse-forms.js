@@ -31,7 +31,7 @@ if (!API_KEY) { console.error('sem SENDPULSE_API_KEY'); process.exit(1); }
 const S    = process.env.SURREAL_ENDPOINT || 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
 const NS = 'ficv', DB = 'salespulse';
 const USER = process.env.SURREAL_USER || 'ficv_admin';
-const PASS = process.env.SURREAL_PASS || 'Ficv@Surreal2026!';
+const PASS = process.env.SURREAL_PASS;
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 

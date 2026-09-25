@@ -10,7 +10,7 @@
 const S = process.env.SURREAL_ENDPOINT || 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
 const NS = 'ficv', DB = 'salespulse';
 const USER = process.env.SURREAL_USER || 'ficv_admin';
-const PASS = process.env.SURREAL_PASS || 'Ficv@Surreal2026!';
+const PASS = process.env.SURREAL_PASS;
 
 const token = (await (await fetch(`${S}/signin`, {
   method: 'POST', headers: { 'Content-Type': 'application/json', 'surreal-ns': NS },

@@ -8,13 +8,26 @@ import { pgUpsert, pgTry, pgEnabled } from './lib/pg-mirror.mjs';
 const SPONTE_URL = 'https://api.sponteeducacional.net.br/WSAPIEdu.asmx';
 const SPONTE_NS  = 'http://api.sponteeducacional.net.br/';
 const CODIGO_CLIENTE = 489166;
-const TOKEN = 'qBLjek3dpFxF';
+// Token do Sponte: Gestão > Integrações (Supabase Vault). SPONTE_TOKEN no ambiente tem prioridade.
+async function loadSponteToken() {
+    if (process.env.SPONTE_TOKEN) return process.env.SPONTE_TOKEN;
+    const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !key) throw new Error('Defina SPONTE_TOKEN ou SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY');
+    const r = await fetch(`${url}/rest/v1/rpc/integ_get_secret`, {
+        method: 'POST', headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_key: 'SPONTE_TOKEN' }),
+    });
+    const t = await r.json();
+    if (!r.ok || !t) throw new Error(`Token do Sponte não encontrado no cofre (HTTP ${r.status})`);
+    return t;
+}
+const TOKEN = await loadSponteToken();
 
 const SURREAL_ENDPOINT = process.env.SURREAL_ENDPOINT || 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
 const SURREAL_NS   = 'ficv';
 const SURREAL_DB   = 'salespulse';
 const SURREAL_USER = process.env.SURREAL_USER || 'ficv_admin';
-const SURREAL_PASS = process.env.SURREAL_PASS || 'Ficv@Surreal2026!';
+const SURREAL_PASS = process.env.SURREAL_PASS;
 
 const mode      = process.argv[2] ?? 'full';
 const now       = new Date();

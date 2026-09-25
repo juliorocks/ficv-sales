@@ -28,7 +28,15 @@ function jwtRole(jwt: string): string | null {
  * O claim role só é confiável porque essas functions rodam com verify_jwt = true
  * (padrão): o gateway do Supabase já validou a assinatura do JWT antes de chegar aqui.
  */
+let _cronKey: string | null = null;
+
 export async function identify(req: Request, db: SupabaseClient): Promise<Caller | null> {
+    // cron do Postgres (public.cron_call): chave interna em app_internal, header x-cron-key
+    const cronKey = req.headers.get("x-cron-key");
+    if (cronKey) {
+        _cronKey ??= (await db.from("app_internal").select("value").eq("key", "cron_key").maybeSingle()).data?.value ?? null;
+        if (_cronKey && cronKey === _cronKey) return { kind: "service" };
+    }
     const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
     if (!jwt) return null;
     if (jwt === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || jwtRole(jwt) === "service_role") {

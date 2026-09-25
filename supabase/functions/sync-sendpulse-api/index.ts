@@ -1,3 +1,4 @@
+import { getSecret } from "../_shared/secrets.ts";
 import { serve } from "https://deno.land/std@0.177.1/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 
@@ -26,8 +27,8 @@ serve(async (req) => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 grant_type: 'client_credentials',
-                client_id: '2cac91a87f0304d8cc5ba849431c260b',
-                client_secret: '15653f34547a43aeaf40f602cf15ebe3'
+                client_id: await getSecret('SENDPULSE_CLIENT_ID'),
+                client_secret: await getSecret('SENDPULSE_CLIENT_SECRET')
             })
         });
 

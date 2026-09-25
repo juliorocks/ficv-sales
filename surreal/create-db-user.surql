@@ -1,12 +1,12 @@
 -- Cria usuário root permanente no namespace ficv
 -- Rodar uma vez com token cloud (10min), depois usa admin/senha
 DEFINE USER IF NOT EXISTS ficv_admin ON NAMESPACE
-  PASSWORD 'Ficv@Surreal2026!'
+  PASSWORD '<SENHA>'
   ROLES OWNER;
 
 -- Alternativa: usuário no banco salespulse
 DEFINE USER IF NOT EXISTS ficv_admin ON DATABASE
-  PASSWORD 'Ficv@Surreal2026!'
+  PASSWORD '<SENHA>'
   ROLES OWNER;
 
 -- Confirma

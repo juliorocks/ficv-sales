@@ -12,7 +12,7 @@ const S    = process.env.SURREAL_ENDPOINT || 'https://heroic-quelea-06frhjc9ott4
 const NS   = process.env.SURREAL_NS   || 'ficv';
 const DB   = process.env.SURREAL_DB   || 'salespulse';
 const USER = process.env.SURREAL_USER || 'ficv_admin';
-const PASS = process.env.SURREAL_PASS || 'Ficv@Surreal2026!';
+const PASS = process.env.SURREAL_PASS;
 
 const sql = readFileSync(new URL('./schema-sendpulse-forms.surql', import.meta.url), 'utf8');
 

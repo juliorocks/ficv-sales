@@ -20,7 +20,7 @@ const SURREAL_ENDPOINT = process.env.SURREAL_ENDPOINT
 const SURREAL_NS   = process.env.SURREAL_NS  || 'ficv';
 const SURREAL_DB   = process.env.SURREAL_DB  || 'salespulse';
 const SURREAL_USER = process.env.SURREAL_USER || 'ficv_admin';
-const SURREAL_PASS = process.env.SURREAL_PASS || 'Ficv@Surreal2026!';
+const SURREAL_PASS = process.env.SURREAL_PASS;
 
 // Supabase Postgres — tenta conexão direta primeiro, pooler como fallback
 const SUPABASE_REF  = 'znypfroagfwohqeyxyqv';

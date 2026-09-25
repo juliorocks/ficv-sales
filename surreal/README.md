@@ -8,7 +8,7 @@
 | WSS | `wss://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud` |
 | Namespace | `ficv` |
 | Database | `salespulse` |
-| Usuário DB | `ficv_admin` / `Ficv@Surreal2026!` |
+| Usuário DB | `ficv_admin` / senha em `SURREAL_PASS` (.env.local / secrets) |
 
 Token cloud (Surreal Cloud dashboard) expira em **10 minutos** — use sempre `ficv_admin` no lugar.
 

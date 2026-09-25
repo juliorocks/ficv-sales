@@ -19,7 +19,7 @@ async function getAdminToken() {
     const res = await fetch(`${ENDPOINT}/signin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'surreal-ns': NS },
-        body: JSON.stringify({ ns: NS, user: 'ficv_admin', pass: 'Ficv@Surreal2026!' }),
+        body: JSON.stringify({ ns: NS, user: 'ficv_admin', pass: process.env.SURREAL_PASS }),
     });
     if (!res.ok) throw new Error(`Signin failed: HTTP ${res.status}`);
     return (await res.json()).token;

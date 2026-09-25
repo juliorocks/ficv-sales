@@ -12,7 +12,7 @@ const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 // ── espelho SurrealDB (transição) — best-effort ──────────────────────────────
 const SURREAL_ENDPOINT = Deno.env.get('SURREAL_ENDPOINT') ?? 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
 const SURREAL_NS = 'ficv', SURREAL_DB = 'salespulse';
-const SURREAL_PASS = Deno.env.get('SURREAL_PASS') ?? 'Ficv@Surreal2026!';
+const SURREAL_PASS = Deno.env.get('SURREAL_PASS') ?? '';
 function sq(v: unknown): string {
     if (v === null || v === undefined) return 'NONE';
     if (typeof v === 'number' || typeof v === 'boolean') return String(v);
