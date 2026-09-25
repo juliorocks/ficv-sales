@@ -148,6 +148,7 @@ interface WideChatMessage {
     type: string
     sender_name?: string
     media_url?: string | null
+    provider?: string
 }
 
 // emojis mais usados no atendimento — sem dependência de lib
@@ -303,6 +304,44 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
         scrollRef.current?.scrollIntoView({ behavior: 'smooth' })
     }, [messages])
 
+    // ── VivaConnect (WhatsApp próprio, Z-PRO) ────────────────────────────────
+    // O lead fala pelo VivaConnect quando já tem número fixo lá ou quando a última
+    // mensagem da conversa veio de lá. Lead sem conversa nenhuma: continua WideChat por
+    // padrão (o pool ainda é só o número de teste, 25/09) — o agente pode trocar no seletor.
+    // Tudo acontece aqui: agente nunca precisa abrir o painel do Z-PRO.
+    const { data: vc } = useQuery<{ enabled: boolean; channels: { id: number; name: string; kind: string; purpose: string; phone: string | null }[]; lead_channel_id: number | null } | null>({
+        queryKey: ['vivaconnect-chat-context', String(leadId)],
+        queryFn: async () => {
+            const { data, error } = await supabase.functions.invoke('vivaconnect-api', { body: { action: 'chat_context', lead_id: leadId } })
+            return error || data?.error ? null : data
+        },
+        enabled: numericLeadId != null,
+        staleTime: 60_000,
+    })
+    const vcAvailable = !!vc?.enabled && (vc.channels?.length ?? 0) > 0
+    const lastProvider = [...(messages ?? [])].reverse().find((m) => m.provider)?.provider
+    const autoProvider: 'widechat' | 'vivaconnect' =
+        vcAvailable && (vc?.lead_channel_id != null || lastProvider === 'vivaconnect') ? 'vivaconnect' : 'widechat'
+    const [providerChoice, setProviderChoice] = useState<'widechat' | 'vivaconnect' | null>(null)
+    const provider = vcAvailable ? (providerChoice ?? autoProvider) : 'widechat'
+    const isViva = provider === 'vivaconnect'
+    const [vcChannelChoice, setVcChannelChoice] = useState<number | null>(null)
+    const vcFixedChannel = vc?.channels.find((c) => c.id === vc?.lead_channel_id) ?? null
+    const vcChannel = vcFixedChannel ?? vc?.channels.find((c) => c.id === vcChannelChoice) ?? vc?.channels.find((c) => c.purpose === 'pool') ?? vc?.channels[0] ?? null
+    // Baileys não tem janela de 24h da Meta; WABA tem (e templates ainda não são suportados no VivaConnect)
+    const vcNeedsWindow = vcChannel?.kind === 'waba'
+
+    // mídia RECEBIDA pelo VivaConnect chega sem link — busca no Z-PRO (o servidor guarda cópia no nosso storage)
+    const vcMediaAsked = useRef(new Set<string>())
+    useEffect(() => {
+        const pending = (messages ?? []).filter((m) => m.provider === 'vivaconnect' && !m.media_url
+            && ['images', 'sounds', 'videos', 'files'].includes(m.type) && !vcMediaAsked.current.has(String(m.id)))
+        if (!pending.length) return
+        pending.forEach((m) => vcMediaAsked.current.add(String(m.id)))
+        Promise.all(pending.map((m) => supabase.functions.invoke('vivaconnect-api', { body: { action: 'media', message_row_id: m.id } })))
+            .then((rs) => { if (rs.some((r) => r.data?.url)) queryClient.invalidateQueries({ queryKey: msgKey }) })
+    }, [messages])
+
     // Atendimento no WideChat — SÓ pra pegar channel_id/attendance_id (envio atribuído
     // ao agente) e alimentar o botão Transferir. NÃO é mais o que decide se dá pra
     // mandar texto: essa chamada depende do token do WideChat (que fica em disputa
@@ -338,7 +377,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
     })()
     const windowOpen = lastInboundAt > 0 && (Date.now() - lastInboundAt) < 24 * 3600 * 1000
     const hasAnyConversation = (messages?.length ?? 0) > 0
-    const canSendText = windowOpen
+    const canSendText = isViva ? (!vcNeedsWindow || windowOpen) : windowOpen
     // sem atendimento identificado -> usa o canal padrão pra listar/enviar template.
     const effectiveChannelId = attendance?.channel_id || DEFAULT_CHANNEL_ID
 
@@ -346,7 +385,8 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
         mutationFn: async (arg: string | { hsm_template_name: string; hsm_placeholders: string[]; preview: string } | { media: File; caption: string }) => {
             const isHsm = typeof arg === 'object' && 'hsm_template_name' in arg
             const isMedia = typeof arg === 'object' && 'media' in arg
-            if (!isHsm && !isMedia && !windowOpen) throw new Error("Passaram 24h da última mensagem do cliente — só dá pra enviar um template aprovado.")
+            if (!isHsm && !isMedia && !canSendText) throw new Error("Passaram 24h da última mensagem do cliente — só dá pra enviar um template aprovado.")
+            if (isViva && isHsm) throw new Error("Templates ainda não estão disponíveis pelo VivaConnect.")
 
             let mediaField: Record<string, unknown> | undefined
             if (isMedia) {
@@ -363,6 +403,22 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                 // + file:"<url>"). Nosso bucket já é público.
                 const { data: pub } = supabase.storage.from('widechat-attachments').getPublicUrl(path)
                 mediaField = { public_url: pub.publicUrl, filename: file.name, mime_type: mime, type: mediaType, legend: arg.caption || undefined }
+            }
+
+            if (isViva) {
+                        const { data, error } = await supabase.functions.invoke('vivaconnect-api', {
+                    body: {
+                        action: 'send', lead_id: leadId, channel_id: vcChannel?.id,
+                        body: isMedia ? (arg.caption || '') : (arg as string),
+                        ...(isMedia && mediaField ? { media: { url: mediaField.public_url, type: mediaField.type, file_name: mediaField.filename } } : {}),
+                    },
+                })
+                if (error) {
+                    const ctx = await (error as any).context?.json?.().catch(() => null)
+                    throw new Error(ctx?.error ?? error.message)
+                }
+                if (data?.error) throw new Error(typeof data.error === 'string' ? data.error : JSON.stringify(data.error))
+                return data
             }
 
             const { data, error } = await supabase.functions.invoke('widechat-api', {
@@ -413,6 +469,25 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
             // etc). Confere o status REAL alguns segundos depois — vale pra texto E
             // template (o "deu sucesso mas não chegou" era isso).
             showSuccess(isHsm ? 'Template enviado — confirmando a entrega…' : 'Enviado — confirmando a entrega…')
+            if (isViva) {
+                const sentBody = typeof variables === 'string' ? variables.trim() : ('caption' in variables ? (variables.caption || '').trim() : '')
+                const checkViva = async (tries: number) => {
+                    try {
+                        const { data } = await supabase.functions.invoke('vivaconnect-api', {
+                            body: { action: 'message_status', lead_id: leadId, body: sentBody },
+                        })
+                        const st = data?.last?.status
+                        if (st === 'failed') { showError(`O WhatsApp NÃO entregou a mensagem.${data.last.error ? ` ${data.last.error}` : ''}`); return }
+                        if (st === 'delivered' || st === 'read') { showSuccess(st === 'read' ? 'Entregue e lida ✔✔' : 'Entregue no WhatsApp ✔'); return }
+                        if (tries > 0) { window.setTimeout(() => checkViva(tries - 1), 8000); return }
+                        if (st === 'missing') showError('A mensagem não apareceu no WhatsApp. Se era um anexo, tente de novo (arquivo pode não ter sido baixado).')
+                    } catch {
+                        if (tries > 0) window.setTimeout(() => checkViva(tries - 1), 8000)
+                    }
+                }
+                window.setTimeout(() => checkViva(3), 5000)
+                return
+            }
             const checkDelivery = async (tries: number) => {
                 try {
                     const { data } = await supabase.functions.invoke('widechat-api', {
@@ -606,7 +681,17 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
     // Transferir a conversa pra outro agente ou fila/equipe. Basta ter uma session
     // (conversa real) — o widechat-api resolve o atendimento no servidor. Antes exigia
     // `attendance` (que quase nunca vinha) e o botão nunca aparecia.
-    const canTransfer = !!sessionId && hasAnyConversation
+    const canTransfer = isViva ? hasAnyConversation : (!!sessionId && hasAnyConversation)
+    // VivaConnect: transferência é entre agentes DO CRM (ninguém trabalha no Z-PRO)
+    const { data: crmAgents, refetch: loadCrmAgents } = useQuery<{ id: string; full_name: string }[]>({
+        queryKey: ['crm-agents-for-transfer'],
+        queryFn: async () => {
+            const { data } = await supabase.from('profiles').select('id, full_name').in('role', ['agent', 'admin']).order('full_name')
+            return (data ?? []).filter((p: any) => p.full_name)
+        },
+        enabled: false,
+        staleTime: 5 * 60_000,
+    })
     const { data: agentsForTransfer, refetch: loadAgents } = useQuery<any[]>({
         queryKey: ['widechat-agents'],
         queryFn: async () => {
@@ -627,7 +712,13 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
     })
 
     const transferMutation = useMutation({
-        mutationFn: async (arg: { type: 'agent'; agent_id: string; label: string } | { type: 'attendance'; team_id: string; label: string }) => {
+        mutationFn: async (arg: { type: 'agent'; agent_id: string; label: string } | { type: 'attendance'; team_id: string; label: string } | { type: 'crm'; profile_id: string; label: string }) => {
+            if (arg.type === 'crm') {
+                const { data, error } = await supabase.functions.invoke('vivaconnect-api', { body: { action: 'transfer', lead_id: leadId, profile_id: arg.profile_id } })
+                if (error || data?.error) throw new Error(data?.error ?? error?.message)
+                queryClient.invalidateQueries({ queryKey: ['leads'] })
+                return arg.label
+            }
             const { data, error } = await supabase.functions.invoke('widechat-api', {
                 body: { action: 'transfer', session_id: sessionId, ...arg },
             })
@@ -645,6 +736,12 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
     // nativo do WideChat pra isso.
     const finishMutation = useMutation({
         mutationFn: async () => {
+            if (isViva) {
+                const { data, error } = await supabase.functions.invoke('vivaconnect-api', { body: { action: 'finish', lead_id: leadId } })
+                if (error || data?.error) throw new Error(data?.error ?? error?.message)
+                queryClient.invalidateQueries({ queryKey: ['leads'] })
+                return
+            }
             const { data, error } = await supabase.functions.invoke('widechat-api', {
                 body: { action: 'finish_attendance', session_id: sessionId },
             })
@@ -652,7 +749,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
             if (data?.error) throw new Error(typeof data.error === 'string' ? data.error : JSON.stringify(data.error))
         },
         onSuccess: () => {
-            showSuccess('Atendimento finalizado no WideChat.')
+            showSuccess(isViva ? 'Atendimento finalizado — lead movido para Finalizado.' : 'Atendimento finalizado no WideChat.')
             queryClient.invalidateQueries({ queryKey: msgKey })
         },
         onError: (e: any) => showError(`Erro ao finalizar: ${e.message}`),
@@ -702,15 +799,33 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
 
     return (
         <div className="flex flex-col rounded-xl overflow-hidden bg-[var(--bg-card)] shadow-[var(--card-shadow)]">
+            {vcAvailable && (
+                <div className="flex items-center gap-2 px-3 pt-2 text-[11px] text-muted-foreground bg-[var(--bg-card)]">
+                    <span className="font-semibold uppercase tracking-wide">Enviar por</span>
+                    <select value={provider} onChange={(e) => setProviderChoice(e.target.value as 'widechat' | 'vivaconnect')}
+                        className="h-6 rounded-md border border-[var(--border)] bg-transparent px-1.5 text-[11px]">
+                        <option value="vivaconnect">VivaConnect</option>
+                        <option value="widechat">WideChat</option>
+                    </select>
+                    {isViva && (vcFixedChannel
+                        ? <span title="O cliente conversa com esse número — as respostas sempre saem dele">· {vcFixedChannel.name}{vcFixedChannel.phone ? ` (${vcFixedChannel.phone})` : ''}</span>
+                        : (vc?.channels.length ?? 0) > 1
+                            ? <select value={vcChannel?.id ?? ''} onChange={(e) => setVcChannelChoice(Number(e.target.value))}
+                                className="h-6 rounded-md border border-[var(--border)] bg-transparent px-1.5 text-[11px]">
+                                {vc!.channels.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                              </select>
+                            : <span>· {vcChannel?.name}</span>)}
+                </div>
+            )}
             {canTransfer && (
                 <div className="flex justify-end gap-1 px-3 pt-2 bg-[var(--bg-card)]">
                     <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-red-600"
                         disabled={finishMutation.isPending}
-                        onClick={() => { if (window.confirm('Finalizar esse atendimento no WideChat? Isso encerra a conversa lá (não só aqui).')) finishMutation.mutate() }}>
+                        onClick={() => { if (window.confirm(isViva ? 'Finalizar esse atendimento? O lead vai para Finalizado (se o cliente escrever de novo, ele reabre sozinho).' : 'Finalizar esse atendimento no WideChat? Isso encerra a conversa lá (não só aqui).')) finishMutation.mutate() }}>
                         {finishMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
                         Finalizar
                     </Button>
-                    <DropdownMenu onOpenChange={(open) => { if (open) { loadAgents(); loadTeams() } }}>
+                    <DropdownMenu onOpenChange={(open) => { if (open) { if (isViva) loadCrmAgents(); else { loadAgents(); loadTeams() } } }}>
                         <DropdownMenuTrigger asChild>
                             <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 text-xs text-muted-foreground" disabled={transferMutation.isPending}>
                                 {transferMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5 rotate-45" />}
@@ -718,6 +833,16 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-64 max-h-80 overflow-y-auto">
+                            {isViva ? (<>
+                                <DropdownMenuLabel>Transferir para agente</DropdownMenuLabel>
+                                <DropdownMenuSeparator />
+                                {!crmAgents?.length && <div className="px-2 py-2 text-xs text-muted-foreground">Carregando…</div>}
+                                {crmAgents?.map((a) => (
+                                    <DropdownMenuItem key={a.id} onClick={() => transferMutation.mutate({ type: 'crm', profile_id: a.id, label: a.full_name })}>
+                                        {a.full_name}
+                                    </DropdownMenuItem>
+                                ))}
+                            </>) : (<>
                             <DropdownMenuLabel>Transferir para agente</DropdownMenuLabel>
                             <DropdownMenuSeparator />
                             {(!agentsForTransfer || agentsForTransfer.length === 0) && <div className="px-2 py-2 text-xs text-muted-foreground">Carregando / nenhum agente online.</div>}
@@ -736,11 +861,12 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                                     {t.name}
                                 </DropdownMenuItem>
                             ))}
+                            </>)}
                         </DropdownMenuContent>
                     </DropdownMenu>
                 </div>
             )}
-            {!hasAnyConversation && (
+            {!hasAnyConversation && !isViva && (
                 <Alert className="rounded-none border-x-0 border-t-0 bg-blue-50/50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800">
                     <AlertCircle className="h-4 w-4 text-blue-600" />
                     <AlertDescription className="text-xs text-blue-700 dark:text-blue-400">
@@ -748,11 +874,19 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                     </AlertDescription>
                 </Alert>
             )}
-            {hasAnyConversation && !windowOpen && (
+            {hasAnyConversation && !canSendText && (
                 <Alert className="rounded-none border-x-0 border-t-0 bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800">
                     <AlertCircle className="h-4 w-4 text-amber-600" />
                     <AlertDescription className="text-xs text-amber-700 dark:text-amber-400">
                         Passou de 24h da última mensagem do cliente. Só é possível enviar um <strong>template aprovado</strong> — depois que ele responder, o texto livre volta.
+                    </AlertDescription>
+                </Alert>
+            )}
+            {!hasAnyConversation && isViva && (
+                <Alert className="rounded-none border-x-0 border-t-0 bg-blue-50/50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800">
+                    <AlertCircle className="h-4 w-4 text-blue-600" />
+                    <AlertDescription className="text-xs text-blue-700 dark:text-blue-400">
+                        Ainda não teve conversa com esse lead. A 1ª mensagem sai pelo número <strong>{vcChannel?.name}</strong> e o lead fica fixo nele.
                     </AlertDescription>
                 </Alert>
             )}
