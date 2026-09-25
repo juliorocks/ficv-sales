@@ -175,7 +175,14 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
             // mostrando TUDO sem filtrar (bug real, 2026-09-24, reportado com print:
             // esses departamentos devolviam os mesmos números de "sem filtro nenhum").
             // Array vazio É um filtro válido — só sobra quem não tem atendente.
-            out = out.filter(lead => !lead.assigned_to_id || teamAgentIds.includes(lead.assigned_to_id));
+            //
+            // 2026-09-25: departamento agora mostra SÓ os leads dos atendentes dele. Manter
+            // os sem atendente fazia o filtro "não funcionar" (1.977 de 2.940 leads não têm
+            // atendente — "Secretaria" continuava mostrando quase tudo). A fila sem dono
+            // fica no departamento "Sem equipe" ('__unassigned__', montado no App).
+            out = out.filter(lead => lead.assigned_to_id
+                ? teamAgentIds.includes(lead.assigned_to_id)
+                : teamAgentIds.includes('__unassigned__'));
         }
 
         const term = searchTerm.toLowerCase().trim();

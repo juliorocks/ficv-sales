@@ -530,9 +530,19 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     // selecionado"). Trocar de departamento limpa o atendente selecionado, pra não
     // ficar um filtro de agente de outro departamento escondido/inválido.
     const [kanbanTeamId, setKanbanTeamId] = useState<string | null>(null);
+    // "Sem equipe" é uma equipe cadastrada, mas sem ninguém — no filtro ela significa
+    // "a fila que ninguém pegou": leads sem atendente + atendentes sem departamento.
+    const [noTeamId, setNoTeamId] = useState<string | null>(null);
+    useEffect(() => {
+        supabase.from('teams').select('id, name').then(({ data }) => {
+            setNoTeamId((data ?? []).find((t: any) => /sem equipe/i.test(t.name ?? ''))?.id ?? null);
+        });
+    }, []);
+    const kanbanIsNoTeam = !!kanbanTeamId && kanbanTeamId === noTeamId;
     const kanbanAgentsInTeam = useMemo(
-        () => kanbanTeamId ? kanbanAgentsList.filter(a => a.team_id === kanbanTeamId) : kanbanAgentsList,
-        [kanbanAgentsList, kanbanTeamId]
+        () => !kanbanTeamId ? kanbanAgentsList
+            : kanbanAgentsList.filter(a => a.team_id === kanbanTeamId || (kanbanIsNoTeam && !a.team_id)),
+        [kanbanAgentsList, kanbanTeamId, kanbanIsNoTeam]
     );
 
     // Filter results
@@ -1835,7 +1845,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                             searchTerm={kanbanSearch}
                             assigneeFilter={kanbanAssignee}
                             dateRange={kanbanDateRange}
-                            teamAgentIds={kanbanTeamId ? kanbanAgentsInTeam.map(a => a.id) : undefined}
+                            teamAgentIds={kanbanTeamId ? [...kanbanAgentsInTeam.map(a => a.id), ...(kanbanIsNoTeam ? ['__unassigned__'] : [])] : undefined}
                         />
                     </div>
                 )}
