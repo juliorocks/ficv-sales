@@ -133,7 +133,7 @@ Deno.serve(async (req) => {
         const system = [
             s.system_prompt,
             `Seu nome é ${s.nome}. Agora é ${hoje()} (horário de Brasília).`,
-            s.handoff_instructions + `\nPara passar para a equipe, chame a ferramenta passar_para_equipe E escreva uma resposta curta avisando o aluno que a equipe vai continuar por aqui (nesse caso NÃO pergunte se pode ajudar em mais alguma coisa).,
+            s.handoff_instructions + `\nPara passar para a equipe, chame a ferramenta passar_para_equipe E escreva uma resposta curta avisando o aluno que a equipe vai continuar por aqui (nesse caso NÃO pergunte se pode ajudar em mais alguma coisa).`,
             `Chamado ${t.protocolo} — assunto: ${t.titulo} (categoria: ${t.categoria}${t.nivel ? `, ${t.nivel === "pos" ? "Pós-graduação" : "Graduação"}` : ""}${(t as any).curso?.name ? `, curso: ${(t as any).curso.name}` : ""}).`,
             `Aluno: ${al?.nome ?? t.aluno_nome}${A ? "" : " (sem vínculo com o sistema acadêmico — ferramentas de consulta indisponíveis)"}.`,
             `Formatação: texto simples, sem markdown de títulos; valores em R$; datas no formato dd/mm/aaaa.`,
