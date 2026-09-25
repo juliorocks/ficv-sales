@@ -91,9 +91,16 @@ Deno.serve(async (req) => {
             ? `Dados do lead: nome ${lead.nome ?? "desconhecido"}${lead.curso ? `; curso de interesse informado no formulário: ${lead.curso}` : ""}.`
             : "Dados do lead: não informados.";
 
+        // o modelo não sabe a data de hoje (chutava 2024) — manda sempre no fuso de Brasília
+        const agora = new Date().toLocaleString("pt-BR", {
+            timeZone: "America/Sao_Paulo", weekday: "long", day: "2-digit", month: "long", year: "numeric",
+            hour: "2-digit", minute: "2-digit",
+        });
         const system = [
             s.system_prompt,
             `Seu nome é ${s.agent_name}.`,
+            `Agora é ${agora} (horário de Brasília). Use essa data para "hoje", prazos e saudações (bom dia/boa tarde/boa noite).
+Se a base de conhecimento citar uma data que JÁ PASSOU (início de aulas, prazo de matrícula, promoção "deste mês"), não a apresente como futura nem garanta que ainda vale: diga que um consultor vai confirmar a próxima data/condição e faça o handoff (handoff=true).`,
             s.handoff_instructions,
             leadCtx,
             `BASE DE CONHECIMENTO (use só isto como fonte de fatos):\n\n${knowledge}`,
