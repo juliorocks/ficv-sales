@@ -10,7 +10,7 @@
 //   reminder → chamado "aguardando você" parado há 48h, 1 lembrete por resposta do atendimento
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { identify, jsonRes } from "../_shared/ai.ts";
-import { emailLayout, escHtml, PORTAL_URL, sendEmail, ticketReplyAddress } from "../_shared/email.ts";
+import { emailLayout, escHtml, portalUrl, sendEmail, ticketReplyAddress } from "../_shared/email.ts";
 
 const CAT: Record<string, string> = {
     financeiro: "Financeiro", academico: "Acadêmico", secretaria: "Secretaria", suporte_tecnico: "Suporte Técnico",
@@ -42,6 +42,7 @@ Deno.serve(async (req) => {
     const { data: due } = await db.from("ticket_email_outbox").select("*")
         .eq("status", "pending").lte("scheduled_at", new Date().toISOString()).order("scheduled_at").limit(30);
     const out = { sent: 0, skipped: 0, failed: 0 };
+    const PORTAL_URL = await portalUrl();
 
     for (const row of due ?? []) {
         const finish = async (status: "sent" | "skipped" | "failed", extra: Record<string, unknown> = {}) => {

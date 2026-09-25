@@ -15,6 +15,7 @@ import { corsHeaders, identify, isStaff, jsonRes } from "../_shared/ai.ts";
 import { mirror, sv } from "../_shared/db.ts";
 import { ensureAlunoAccount } from "../_shared/aluno.ts";
 import { cpfDigits } from "../_shared/sponte.ts";
+import { portalUrl } from "../_shared/email.ts";
 
 const CATS = ["financeiro", "academico", "secretaria", "suporte_tecnico", "certificado", "cancelamento", "outros"];
 const hora = (iso: string) => new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
@@ -96,7 +97,7 @@ Deno.serve(async (req) => {
             // texto sugerido pra despedida no WhatsApp (o chat envia pelo canal do lead)
             whatsapp_msg: `Seu atendimento foi transferido para a Secretaria da FICV. 📋 Protocolo: *${ticket.protocolo}*.\n` +
                 (aluno
-                    ? `A partir de agora, acompanhe e responda pelo Portal do Aluno: https://ficv-sales.vercel.app/aluno (login e senha: seu CPF) ou pelo e-mail ${email}.`
+                    ? `A partir de agora, acompanhe e responda pelo Portal do Aluno: ${await portalUrl()} (login e senha: seu CPF) ou pelo e-mail ${email}.`
                     : `A partir de agora, as tratativas continuam pelo e-mail ${email} — é só responder a mensagem que enviamos.`),
         });
     } catch (e) {

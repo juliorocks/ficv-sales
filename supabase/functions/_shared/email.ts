@@ -37,7 +37,12 @@ ${cta ? `<div style="margin:24px 0 8px"><a href="${cta.url}" style="background:#
 </td></tr></table></td></tr></table></body></html>`;
 }
 
-export const PORTAL_URL = "https://ficv-sales.vercel.app/aluno";
+export const PORTAL_URL_DEFAULT = "https://ficv-sales.vercel.app/aluno";
+/** Endereço público do Portal do Aluno (Integrações > Resend > "Endereço do Portal"),
+ *  ex.: https://portal.ficv.edu.br — padrão: domínio da Vercel. */
+export async function portalUrl(): Promise<string> {
+    return ((await getSecret("PORTAL_URL")).trim().replace(/\/$/, "")) || PORTAL_URL_DEFAULT;
+}
 
 // ── resposta por e-mail (Resend inbound) ───────────────────────────────────
 // Cada chamado tem um endereço de resposta próprio, assinado:

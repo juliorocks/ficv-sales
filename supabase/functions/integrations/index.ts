@@ -46,6 +46,8 @@ const REGISTRY: Integration[] = [
         fields: [
             { key: "RESEND_API_KEY", label: "API Key", placeholder: "re_...", help: "resend.com → API Keys" },
             { key: "RESEND_FROM", label: "Remetente", placeholder: "FICV <atendimento@ficv.edu.br>", help: "O domínio precisa estar verificado na Resend." },
+            { key: "PORTAL_URL", label: "Endereço do Portal do Aluno (opcional)", optional: true, placeholder: "https://portal.ficv.edu.br",
+              help: "Link usado nos e-mails, na redefinição de senha e no WhatsApp. Vazio = ficv-sales.vercel.app/aluno." },
             { key: "RESEND_INBOUND_DOMAIN", label: "Domínio de respostas (opcional)", optional: true, placeholder: "xxxx.resend.app ou respostas.ficv.edu.br",
               help: "Pro aluno responder o chamado pelo e-mail. Resend → Receiving (endereço .resend.app ou domínio com MX)." },
         ],

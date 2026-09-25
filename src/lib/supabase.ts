@@ -34,7 +34,8 @@ const boundedLock = async <R>(name: string, acquireTimeout: number, fn: () => Pr
 // logar como aluno no portal SOBRESCREVIA a sessão do admin/agente no CRM (o CRM passava
 // a consultar como aluno → RLS devolvia tudo vazio: "Nenhum estágio encontrado", 25/09).
 // Cada um guarda a sessão numa chave própria. /atendimento entra aqui antes de redirecionar.
-const isAlunoPortal = typeof window !== 'undefined' && /^\/(aluno|atendimento)(\/|$)/.test(window.location.pathname);
+const isAlunoPortal = typeof window !== 'undefined'
+    && (/^portal\./i.test(window.location.hostname) || /^\/(aluno|atendimento)(\/|$)/.test(window.location.pathname));
 const projectRef = (() => { try { return new URL(supabaseUrl).hostname.split('.')[0]; } catch { return 'app'; } })();
 const CRM_STORAGE_KEY = `sb-${projectRef}-auth-token`; // chave padrão do supabase-js (sessões atuais continuam valendo)
 const ALUNO_STORAGE_KEY = `sb-${projectRef}-aluno-auth-token`;

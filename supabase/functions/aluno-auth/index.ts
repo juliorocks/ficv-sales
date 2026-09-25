@@ -11,7 +11,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { cpfDigits } from "../_shared/sponte.ts";
 import { ensureAlunoAccount, fmtCpf } from "../_shared/aluno.ts";
-import { emailLayout, escHtml, PORTAL_URL, sendEmail } from "../_shared/email.ts";
+import { emailLayout, escHtml, portalUrl, sendEmail } from "../_shared/email.ts";
 
 const cors = {
     "Access-Control-Allow-Origin": "*",
@@ -63,7 +63,7 @@ Deno.serve(async (req) => {
             }
             if (!existing.email) return j({ error: "Não há e-mail cadastrado para esse CPF. Procure a secretaria para atualizar." }, 400);
             const { data: link, error: lErr } = await db.auth.admin.generateLink({
-                type: "recovery", email: `${cpf}@aluno.ficv.br`, options: { redirectTo: PORTAL_URL },
+                type: "recovery", email: `${cpf}@aluno.ficv.br`, options: { redirectTo: await portalUrl() },
             });
             if (lErr || !link?.properties?.action_link) return j({ error: "Não foi possível gerar o link agora." }, 500);
             const sent = await sendEmail(existing.email, "Redefinição de senha — Portal do Aluno FICV", emailLayout(
