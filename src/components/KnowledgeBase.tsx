@@ -38,6 +38,7 @@ interface KnowledgeItem {
     source_type?: 'text' | 'pdf' | 'sheet' | 'doc';
     ai_enabled?: boolean;
     publico?: 'vendas' | 'alunos' | 'ambos';
+    essencial?: boolean;
     index_status?: 'pending' | 'processing' | 'ready' | 'error';
     index_error?: string | null;
     chunk_count?: number;
@@ -277,6 +278,14 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
         await fetchKnowledge();
     };
 
+    // ⭐ Essencial: documento central (preços, durações, turmas) — no empate da busca entra primeiro
+    const toggleEssencial = async (item: KnowledgeItem) => {
+        const { data, error } = await supabase.from('knowledge_base').update({ essencial: !item.essencial }).eq('id', item.id).select('id');
+        if (error || !data?.length) { toast.error('Não foi possível alterar. Recarregue a página.'); return; }
+        setSelectedItem({ ...item, essencial: !item.essencial });
+        await fetchKnowledge();
+    };
+
     const toggleAi = async (item: KnowledgeItem) => {
         const { data, error } = await supabase.from('knowledge_base')
             .update({ ai_enabled: !item.ai_enabled }).eq('id', item.id).select('id');
@@ -504,6 +513,11 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
                                             <label className="flex items-center gap-1.5 cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-main)]">
                                                 <input type="checkbox" checked={selectedItem.ai_enabled !== false} onChange={() => toggleAi(selectedItem)} className="accent-[var(--primary)]" />
                                                 Usar na IA
+                                            </label>
+                                            <label className="flex items-center gap-1.5 cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                                                title="Documento central (preços, durações, turmas): a IA sempre considera ele primeiro">
+                                                <input type="checkbox" checked={!!selectedItem.essencial} onChange={() => toggleEssencial(selectedItem)} className="accent-[var(--primary)]" />
+                                                ⭐ Essencial
                                             </label>
                                             <select value={selectedItem.publico ?? 'vendas'} onChange={(e) => setPublico(selectedItem, e.target.value as any)}
                                                 className="px-2 py-1 rounded-lg bg-transparent border border-[var(--border)] text-[var(--text-muted)]" title="Qual IA usa este documento">

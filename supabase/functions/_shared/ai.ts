@@ -142,8 +142,12 @@ const STOP = new Set(("quanto quantos quanta quais qual sobre curso cursos valor
     "fazer fazer sendo estou estão estao boa bom dia tarde noite olá ola").split(/\s+/));
 export function keywordTerms(text: string): string[] {
     const words = String(text).toLowerCase().match(/[a-zà-ú0-9]{5,}/gi) ?? [];
-    const terms = [...new Set(words.filter((w) => !STOP.has(w)).map((w) => (w.length >= 8 ? w.slice(0, w.length - 2) : w)))];
-    return terms.slice(0, 6);
+    const terms = [...new Set(words.filter((w) => !STOP.has(w)).map((w) => (w.length >= 8 ? w.slice(0, w.length - 2) : w)))].slice(0, 6);
+    // pergunta de preço: os valores ficam em linhas "N parcelas de R$ …" / "Até X% desconto"
+    if (/pre[çc]o|valor|mensalidade|parcela|custa|custo|investimento|desconto|pagar|pagamento/i.test(text)) {
+        for (const t of ["parcela", "desconto"]) if (!terms.includes(t)) terms.push(t);
+    }
+    return terms;
 }
 export async function searchKnowledge(
     db: SupabaseClient, text: string,
@@ -154,11 +158,11 @@ export async function searchKnowledge(
     const terms = keywordTerms(text);
     const [vec, kw] = await Promise.all([
         db.rpc("match_knowledge_chunks", { query_embedding: toVector(qv), match_count: count, min_similarity: opts.minSimilarity ?? 0.25, p_publico: opts.publico }),
-        terms.length ? db.rpc("match_knowledge_keywords", { p_terms: terms, p_publico: opts.publico, p_limit: 4 }) : Promise.resolve({ data: [] as any[] }),
+        terms.length ? db.rpc("match_knowledge_keywords", { p_terms: terms, p_publico: opts.publico, p_limit: 5 }) : Promise.resolve({ data: [] as any[] }),
     ]);
     if ((vec as any).error) throw new Error(`busca na base: ${(vec as any).error.message}`);
     // trechos que casam ao menos metade dos termos vêm primeiro; depois os vetoriais
-    const strong = ((kw as any).data ?? []).filter((h: any) => h.similarity >= 0.5).slice(0, 3);
+    const strong = ((kw as any).data ?? []).filter((h: any) => h.similarity >= 0.5).slice(0, 4);
     const out: any[] = [];
     const seen = new Set<string>();
     for (const h of [...strong, ...((vec as any).data ?? [])]) {
