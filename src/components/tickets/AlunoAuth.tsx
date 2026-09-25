@@ -241,7 +241,7 @@ export function AlunoAuth({ onAuth }: { onAuth: () => void }) {
 }
 
 /** Criar senha nova — obrigatório no 1º acesso (senha = CPF) e no link de "esqueci a senha". */
-export function SetPassword({ userId, cpf, reason, onDone }: { userId: string; cpf: string; reason: 'first' | 'recovery'; onDone: () => void }) {
+export function SetPassword({ userId, cpf, reason, onDone, onCancel }: { userId: string; cpf: string; reason: 'first' | 'recovery'; onDone: () => void; onCancel?: () => void }) {
   const [pw, setPw] = useState('')
   const [pw2, setPw2] = useState('')
   const [show, setShow] = useState(false)
@@ -263,7 +263,7 @@ export function SetPassword({ userId, cpf, reason, onDone }: { userId: string; c
   }
 
   return (
-    <Shell title="Crie sua senha" subtitle={reason === 'first' ? 'Bem-vindo(a)! Por segurança, troque a senha padrão (CPF).' : 'Escolha sua nova senha de acesso.'}>
+    <Shell title="Crie sua senha" subtitle={reason === 'first' ? 'Troque a senha padrão (CPF) por uma senha só sua.' : 'Escolha sua nova senha de acesso.'}>
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div>
           <Label>Nova senha</Label>
@@ -277,6 +277,11 @@ export function SetPassword({ userId, cpf, reason, onDone }: { userId: string; c
         </div>
         {error && <Msg kind="error" text={error} />}
         <GoldButton type="submit" loading={loading}>Salvar e entrar</GoldButton>
+        {onCancel && (
+          <button type="button" onClick={onCancel} style={{ color: MUTED, background: 'none', border: 'none', cursor: 'pointer', fontSize: 13 }}>
+            Agora não
+          </button>
+        )}
       </form>
     </Shell>
   )

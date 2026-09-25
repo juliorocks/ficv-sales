@@ -52,8 +52,14 @@ export function AlunoPortalPage() {
   )
 }
 
+// Troca de senha no 1º acesso (senha = CPF): por enquanto OPCIONAL (decisão do usuário
+// 25/09) — o portal só mostra um aviso. Pra voltar a obrigar, troque pra true.
+// alunos.must_change_password continua marcando quem ainda usa o CPF como senha.
+const FORCE_PASSWORD_CHANGE = false
+
 function TicketPortalWrapper({ session, recovery, onRecovered }: { session: Session; recovery: boolean; onRecovered: () => void }) {
   const [aluno, setAluno] = useState<{ nome: string; email: string; cpf: string; must_change_password: boolean } | null>(null)
+  const [wantsNewPassword, setWantsNewPassword] = useState(false)
 
   useEffect(() => {
     supabase
@@ -77,15 +83,17 @@ function TicketPortalWrapper({ session, recovery, onRecovered }: { session: Sess
     )
   }
 
-  if (recovery || aluno.must_change_password) {
+  if (recovery || (aluno.must_change_password && (FORCE_PASSWORD_CHANGE || wantsNewPassword))) {
     return (
       <SetPassword
         userId={session.user.id}
         cpf={aluno.cpf}
         reason={recovery ? 'recovery' : 'first'}
+        onCancel={!recovery && !FORCE_PASSWORD_CHANGE ? () => setWantsNewPassword(false) : undefined}
         onDone={() => {
           if (window.location.hash) history.replaceState(null, '', window.location.pathname)
           onRecovered()
+          setWantsNewPassword(false)
           setAluno({ ...aluno, must_change_password: false })
         }}
       />
@@ -93,11 +101,19 @@ function TicketPortalWrapper({ session, recovery, onRecovered }: { session: Sess
   }
 
   return (
+    <>
+    {aluno.must_change_password && (
+      <div className="bg-[#1A1710] border-b border-[#C9A84C]/30 px-4 py-2 flex items-center justify-center gap-3 text-xs text-[#E0BF6A]">
+        <span>Você está usando o CPF como senha. Recomendamos criar uma senha só sua.</span>
+        <button onClick={() => setWantsNewPassword(true)} className="font-semibold underline underline-offset-2 hover:text-white">Criar minha senha</button>
+      </div>
+    )}
     <TicketPortal
       alunoId={session.user.id}
       alunoNome={aluno.nome}
       alunoEmail={aluno.email}
       onLogout={handleLogout}
     />
+    </>
   )
 }
