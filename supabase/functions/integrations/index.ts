@@ -13,7 +13,7 @@ import { GITHUB_REPO } from "../_shared/gh-dispatch.ts";
 import { loadSettings, zpro, zproErr } from "../_shared/vivaconnect.ts";
 import { retorno, sponteCall } from "../_shared/sponte.ts";
 
-type Field = { key: string; label: string; placeholder?: string; optional?: boolean; help?: string };
+type Field = { key: string; label: string; placeholder?: string; optional?: boolean; help?: string; plain?: boolean }; // plain = não é segredo: mostra o valor
 type Integration = { id: string; name: string; description: string; fields: Field[]; manageTab?: string; info?: { label: string; value: string }[] };
 
 const REGISTRY: Integration[] = [
@@ -38,17 +38,17 @@ const REGISTRY: Integration[] = [
         id: "sponte", name: "Sponte", description: "Portal do Aluno: login pelo CPF, dados, financeiro e notas (API WSAPIEdu).",
         fields: [
             { key: "SPONTE_TOKEN", label: "Token da API", help: "Sponte → Configurações → Integrações/API" },
-            { key: "SPONTE_CODIGO_CLIENTE", label: "Código do cliente", optional: true, placeholder: "489166", help: "Vazio = 489166 (FICV)" },
+            { plain: true, key: "SPONTE_CODIGO_CLIENTE", label: "Código do cliente", optional: true, placeholder: "489166", help: "Vazio = 489166 (FICV)" },
         ],
     },
     {
         id: "resend", name: "Resend (e-mails)", description: "E-mails do Portal do Aluno: confirmação e respostas de chamados, redefinição de senha.",
         fields: [
             { key: "RESEND_API_KEY", label: "API Key", placeholder: "re_...", help: "resend.com → API Keys" },
-            { key: "RESEND_FROM", label: "Remetente", placeholder: "FICV <atendimento@ficv.edu.br>", help: "O domínio precisa estar verificado na Resend." },
-            { key: "PORTAL_URL", label: "Endereço do Portal do Aluno (opcional)", optional: true, placeholder: "https://portal.ficv.edu.br",
+            { plain: true, key: "RESEND_FROM", label: "Remetente", placeholder: "FICV <atendimento@ficv.edu.br>", help: "O domínio precisa estar verificado na Resend." },
+            { plain: true, key: "PORTAL_URL", label: "Endereço do Portal do Aluno (opcional)", optional: true, placeholder: "https://portal.ficv.edu.br",
               help: "Link usado nos e-mails, na redefinição de senha e no WhatsApp. Vazio = ficv-sales.vercel.app/aluno." },
-            { key: "RESEND_INBOUND_DOMAIN", label: "Domínio de respostas (opcional)", optional: true, placeholder: "xxxx.resend.app ou respostas.ficv.edu.br",
+            { plain: true, key: "RESEND_INBOUND_DOMAIN", label: "Domínio de respostas (opcional)", optional: true, placeholder: "xxxx.resend.app ou respostas.ficv.edu.br",
               help: "Pro aluno responder o chamado pelo e-mail. Resend → Receiving (endereço .resend.app ou domínio com MX)." },
         ],
     },
@@ -184,27 +184,28 @@ Deno.serve(async (req) => {
             const inboundKey = (await db.from("app_internal").select("value").eq("key", "inbound_key").maybeSingle()).data?.value;
             const byKey = new Map((st ?? []).map((r: any) => [r.key, r]));
             return jsonRes({
-                integrations: REGISTRY.map((i) => {
+                integrations: await Promise.all(REGISTRY.map(async (i) => {
                     const statusKey = i.fields[0]?.key ?? `__${i.id.toUpperCase()}`;
                     const s: any = byKey.get(statusKey);
                     return {
                         ...i,
-                        fields: i.fields.map((f) => {
+                        fields: await Promise.all(i.fields.map(async (f) => {
                             const r: any = byKey.get(f.key);
                             return {
+                                value: f.plain ? ((await getSecret(f.key)) || null) : undefined,
                                 ...f,
                                 source: r?.configured ? "painel" : Deno.env.get(f.key) ? "ambiente" : "faltando",
                                 hint: r?.configured ? r.hint : null,
                                 updated_at: r?.configured ? r.updated_at : null,
                             };
-                        }),
+                        })),
                         last_test: s?.last_test_at ? { ok: s.last_test_ok, at: s.last_test_at, message: s.last_test_message } : null,
                         info: i.id === "resend" && inboundKey ? [{
                             label: "Webhook de respostas — Resend → Webhooks → evento email.received",
                             value: `${Deno.env.get("SUPABASE_URL")}/functions/v1/email-inbound?key=${inboundKey}`,
                         }] : undefined,
                     };
-                }),
+                })),
             });
         }
 

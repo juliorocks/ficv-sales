@@ -22,6 +22,8 @@ interface Field {
     source: "painel" | "ambiente" | "faltando"
     hint: string | null
     updated_at: string | null
+    plain?: boolean        // não é segredo (remetente, endereço…): campo visível
+    value?: string | null  // valor salvo, só nos campos plain
 }
 interface Integration {
     id: string
@@ -46,7 +48,7 @@ async function call(body: Record<string, unknown>) {
 }
 
 function SourceBadge({ f }: { f: Field }) {
-    if (f.source === "painel") return <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-500">Painel {f.hint}</span>
+    if (f.source === "painel") return <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-500">{f.plain ? "Salvo" : `Painel ${f.hint}`}</span>
     if (f.source === "ambiente") return <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-500">Secrets do servidor</span>
     return <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${f.optional ? "bg-muted text-muted-foreground" : "bg-amber-500/15 text-amber-500"}`}>Não configurada</span>
 }
@@ -128,11 +130,11 @@ export function IntegrationsSettings({ onNavigate }: { onNavigate?: (tab: string
                                     </div>
                                     <div className="flex gap-2">
                                         <Input
-                                            type="password"
+                                            type={f.plain ? "text" : "password"}
                                             autoComplete="off"
-                                            value={drafts[f.key] ?? ""}
+                                            value={drafts[f.key] ?? (f.plain ? (f.value ?? "") : "")}
                                             onChange={(e) => setDrafts((d) => ({ ...d, [f.key]: e.target.value }))}
-                                            placeholder={f.source === "faltando" ? (f.placeholder ?? "Cole a chave aqui") : "Cole uma nova para substituir"}
+                                            placeholder={f.plain ? (f.placeholder ?? "") : f.source === "faltando" ? (f.placeholder ?? "Cole a chave aqui") : "Cole uma nova para substituir"}
                                             className="bg-muted/20 font-mono text-xs"
                                         />
                                         {f.source === "painel" && (
