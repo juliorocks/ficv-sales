@@ -938,7 +938,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName 
                 </Alert>
             )}
             {/* área de conversa sempre em tema claro — legibilidade acima de tudo */}
-            <ScrollArea className="h-[400px] w-full p-4 bg-[#eef1f5]">
+            <ScrollArea className="h-[400px] sm:h-[58vh] w-full p-4 bg-[#eef1f5]">
                 {!messages || messages.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-slate-400">
                         <MessageSquare className="h-8 w-8 mb-2" />

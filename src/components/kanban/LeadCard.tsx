@@ -31,7 +31,7 @@ interface LeadCardProps {
 export function LeadCard({ lead, users, leadSources, stages, courses, pending }: LeadCardProps) {
     const timeInStage = useTimeInStage(lead.stage_entry_date);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-    const [editTab, setEditTab] = useState<"details" | "chat">("details");
+    const [editTab, setEditTab] = useState<"details" | "chat">("chat");
     const [isLossOpen, setIsLossOpen] = useState(false);
     const openEdit = (tab: "details" | "chat") => { setEditTab(tab); setIsEditDialogOpen(true); };
     const { user } = useAuth();
@@ -201,7 +201,7 @@ export function LeadCard({ lead, users, leadSources, stages, courses, pending }:
                                 ))}
                             </DropdownMenuContent>
                         </DropdownMenu>
-                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEdit('details')}>
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEdit('chat')}>
                             <Pencil className="h-4 w-4" />
                             <span className="sr-only">Editar Lead</span>
                         </Button>

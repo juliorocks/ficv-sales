@@ -59,7 +59,7 @@ interface EditLeadDialogProps {
     initialTab?: "details" | "chat" | "history"
 }
 
-export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, initialTab = "details" }: EditLeadDialogProps) {
+export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, initialTab = "chat" }: EditLeadDialogProps) {
     const queryClient = useQueryClient()
     const { user, isLoading: isAuthLoading } = useAuth()
     const [isLossReasonOpen, setIsLossReasonOpen] = useState(false)
@@ -323,7 +323,7 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
         <>
             <Dialog open={isOpen} onOpenChange={onOpenChange}>
                 {children && <DialogTrigger asChild>{children}</DialogTrigger>}
-                <DialogContent className="sm:max-w-3xl">
+                <DialogContent className="w-[96vw] sm:max-w-6xl max-h-[94vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>Lead: {lead.nome_completo}</DialogTitle>
                         <DialogDescription>Gerencie as informações e o histórico do lead.</DialogDescription>
@@ -437,7 +437,7 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
                             </div>
                         </TabsContent>
                         <TabsContent value="chat">
-                            <div className="py-2 max-h-[60vh] overflow-y-auto pr-2 space-y-4">
+                            <div className="py-2 max-h-[78vh] overflow-y-auto pr-2 space-y-4">
                                 <WideChatHistory widechatContactId={lead.widechat_contact_id || ""} leadId={lead.id} telefone={lead.telefone} leadName={lead.nome_completo} />
                                 <LeadFollowupPanel lead={lead} users={users || []} />
                             </div>
