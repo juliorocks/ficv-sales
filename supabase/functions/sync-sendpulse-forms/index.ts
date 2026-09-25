@@ -52,6 +52,19 @@ function subName(sub: any): string {
     const email = String(sub.email ?? '');
     return email ? email.split('@')[0] : 'Novo Lead (SendPulse)';
 }
+// Pergunta "como prefere ser contatado?" do formulário (nome da variável livre no
+// SendPulse): acha pela chave e normaliza o valor. Sem pergunta → null (não dispara
+// a 1ª mensagem automática do VivaConnect).
+function preferredContact(vars: Record<string, unknown>): 'whatsapp' | 'email' | 'phone' | null {
+    for (const [k, raw] of Object.entries(vars ?? {})) {
+        if (!/canal|prefer|contato|contatad|como.*(falar|contat)/i.test(k)) continue;
+        const v = String(raw ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        if (/whats|zap/.test(v)) return 'whatsapp';
+        if (/e-?mail/.test(v)) return 'email';
+        if (/liga|telefon|chamada/.test(v)) return 'phone';
+    }
+    return null;
+}
 const onlyDigits = (v: unknown) => String(v ?? '').replace(/\D/g, '');
 const normEmail = (v: unknown) => String(v ?? '').toLowerCase().trim();
 const validPhone = (p: string) => p.length >= 8 && !/^0+$/.test(p);
@@ -188,6 +201,7 @@ serve(async (req) => {
                 stage_id: 1, source_id: sourceId, curso_interesse: courseId, valor_oportunidade: valor,
                 fonte_lead: form.form_name, observacoes: obs, temperatura: 'frio', contact_count: 1,
                 data_entrada: dataEntrada, stage_entry_date: nowIso,
+                preferred_contact: preferredContact(v),
             };
             const { data: created, error } = await db.from('leads').insert(newLead).select('id').single();
             if (error) { console.error('insert lead:', error.message); continue; }

@@ -420,3 +420,5 @@ verify_jwt = false
 verify_jwt = false
 [functions.sync-google-ads]
 verify_jwt = false
+[functions.vivaconnect-webhook]
+verify_jwt = false
