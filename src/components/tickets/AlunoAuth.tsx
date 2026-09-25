@@ -161,10 +161,13 @@ export function AlunoAuth({ onAuth }: { onAuth: () => void }) {
     try {
       const digits = cpf.replace(/\D/g, '')
       const email = `${digits}@aluno.ficv.br`
-      let { error: authErr } = await supabase.auth.signInWithPassword({ email, password })
+      // senha = CPF vale com ou sem pontuação ("711.003.301-51" = "71100330151"):
+      // a conta é criada com a senha só em números
+      const usingCpf = /^[\d.\-\s]+$/.test(password) && password.replace(/\D/g, '') === digits
+      let { error: authErr } = await supabase.auth.signInWithPassword({ email, password: usingCpf ? digits : password })
       // 1º acesso: senha = CPF (padrão do Sponte) → cria o acesso a partir do Sponte e entra
-      if (authErr && password.replace(/\D/g, '') === digits) {
-        const r = await callAuth({ action: 'first_access', cpf: digits, password })
+      if (authErr && usingCpf) {
+        const r = await callAuth({ action: 'first_access', cpf: digits, password: digits })
         if (r.error) { setError(r.error); return }
         ;({ error: authErr } = await supabase.auth.signInWithPassword({ email, password: digits }))
       }
