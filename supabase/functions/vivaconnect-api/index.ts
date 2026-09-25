@@ -305,7 +305,7 @@ async function sendRow(db: any, settings: any, row: any, ch: any) {
             type: row.media_type ?? "text", message: row.body, media_url: row.media_url ?? null,
             sender_name: row.sender_name ?? null,
             origin: row.kind === "manual" ? "agent" : "auto",
-            raw_data: { outbox_id: row.id, kind: row.kind, response: d },
+            raw_data: { outbox_id: row.id, kind: row.kind, response: d }, created_at: now,
         });
         // lead fica fixo no primeiro número que falou com ele
         await db.from("leads").update({ vivaconnect_channel_id: ch.id }).eq("id", row.lead_id).is("vivaconnect_channel_id", null);

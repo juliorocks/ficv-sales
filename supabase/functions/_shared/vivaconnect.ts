@@ -99,6 +99,8 @@ export type ParsedMsg = {
     contactName: string | null; ticketId: string | null; contactId: string | null;
     mediaType: string | null; mediaUrl: string | null; isGroup: boolean; whatsappId: string | null;
     event: string | null;
+    /** quando a mensagem foi enviada no WhatsApp (ISO) */
+    sentAt: string;
     /** ticket.userId do Z-PRO: preenchido = um agente humano pegou o atendimento lá */
     agentUserId: string | null;
     ticketStatus: string | null;
@@ -156,6 +158,7 @@ export function parseWebhook(p: any): ParsedMsg | null {
             isGroup: !!(t.isGroup || c.isGroup) || String(p.msg.key.remoteJid ?? "").endsWith("@g.us"),
             whatsappId: t.whatsappId != null ? String(t.whatsappId) : null,
             event: p.method ?? null,
+            sentAt: Number(p.msg.messageTimestamp) > 0 ? new Date(Number(p.msg.messageTimestamp) * 1000).toISOString() : new Date().toISOString(),
             agentUserId: t.userId != null ? String(t.userId) : null,
             ticketStatus: t.status ?? null,
             ignorable: IGNORABLE.includes(kind) || (!kind && !body),
@@ -186,6 +189,7 @@ export function parseWebhook(p: any): ParsedMsg | null {
         isGroup,
         whatsappId: findKey(p, ["whatsappId"]) != null ? String(findKey(p, ["whatsappId"])) : null,
         event: findKey(p, ["method", "event", "action"]) ?? null,
+        sentAt: new Date().toISOString(),
         agentUserId: ticket?.userId != null ? String(ticket.userId) : null,
         ticketStatus: ticket?.status ?? null,
         ignorable: false,

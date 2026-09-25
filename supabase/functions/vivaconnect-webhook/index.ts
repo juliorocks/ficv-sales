@@ -163,7 +163,7 @@ Deno.serve(async (req) => {
                 session_id: m.ticketId, message_id: m.messageId,
                 type: m.mediaType && m.mediaType !== "chat" && m.mediaType !== "conversation" ? m.mediaType : "text",
                 message: m.body, media_url: m.mediaUrl, origin,
-                sender_name: m.fromMe ? null : m.contactName, raw_data: payload,
+                sender_name: m.fromMe ? null : m.contactName, raw_data: payload, created_at: m.sentAt,
             });
 
             // agente humano falou (ou pegou o ticket no painel do Z-PRO) → IA sai de vez desse lead
