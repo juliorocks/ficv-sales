@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.177.1/http/server.ts";
 import { pg, mirror, sv } from "../_shared/db.ts";
+import { getSecret } from "../_shared/secrets.ts";
 
 // ============================================================================
 // sync-sendpulse-forms — polling (pg_cron ~3 min) dos formulários SendPulse.
@@ -14,19 +15,17 @@ const corsHeaders = {
 const j = (b: unknown, s = 200) =>
     new Response(JSON.stringify(b), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: s });
 
-const SENDPULSE_API_KEY = Deno.env.get('SENDPULSE_API_KEY') ?? '';
-const SP_CLIENT_ID = Deno.env.get('SENDPULSE_CLIENT_ID') ?? '';
-const SP_CLIENT_SECRET = Deno.env.get('SENDPULSE_CLIENT_SECRET') ?? '';
 const BACKFILL_DAYS = Number(Deno.env.get('SENDPULSE_BACKFILL_DAYS') ?? '14');
 const SP_TZ_OFFSET = Deno.env.get('SENDPULSE_TZ_OFFSET') ?? 'Z';
 
 let _spToken = '';
 async function spAuthHeader(): Promise<string> {
-    if (SENDPULSE_API_KEY) return `Bearer ${SENDPULSE_API_KEY}`;
+    const apiKey = await getSecret('SENDPULSE_API_KEY');
+    if (apiKey) return `Bearer ${apiKey}`;
     if (_spToken) return `Bearer ${_spToken}`;
     const r = await fetch('https://api.sendpulse.com/oauth/access_token', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ grant_type: 'client_credentials', client_id: SP_CLIENT_ID, client_secret: SP_CLIENT_SECRET }),
+        body: JSON.stringify({ grant_type: 'client_credentials', client_id: await getSecret('SENDPULSE_CLIENT_ID'), client_secret: await getSecret('SENDPULSE_CLIENT_SECRET') }),
     });
     _spToken = (await r.json()).access_token;
     if (!_spToken) throw new Error('SendPulse: falha na autenticação');

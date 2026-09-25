@@ -1,6 +1,7 @@
 // Helpers do motor de IA (VivaConnect): OpenAI (embeddings + chat), auth e
 // chunking da base de conhecimento. Usado por kb-ingest e ai-agent.
 import { SupabaseClient } from "npm:@supabase/supabase-js@2.47.10";
+import { getSecret } from "./secrets.ts";
 
 export const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
@@ -44,16 +45,16 @@ export const isStaff = (c: Caller | null) =>
     c?.kind === "service" || (c?.kind === "user" && ["admin", "agent"].includes(c.role));
 
 // ── OpenAI ──────────────────────────────────────────────────────────────────
-function openaiKey(): string {
-    const k = Deno.env.get("OPENAI_API_KEY");
-    if (!k) throw new Error("OPENAI_API_KEY não configurada nos secrets do Supabase.");
+async function openaiKey(): Promise<string> {
+    const k = await getSecret("OPENAI_API_KEY");
+    if (!k) throw new Error("Chave da OpenAI não configurada (Gestão > Integrações).");
     return k;
 }
 
 async function openai(path: string, body: unknown): Promise<any> {
     const r = await fetch(`https://api.openai.com/v1${path}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${openaiKey()}` },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${await openaiKey()}` },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(60000),
     });

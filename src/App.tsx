@@ -30,7 +30,8 @@ import {
     Megaphone,
     CalendarClock,
     Bot,
-    Plug
+    Plug,
+    KeyRound
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { reprocessAllAnalyses } from './services/reprocessor';
@@ -71,6 +72,7 @@ import { WideChatHistory } from './components/kanban/WideChatHistory';
 import { TmaSettingsManagement } from './components/admin/TmaSettingsManagement';
 import { AiAgentSettings } from './components/admin/AiAgentSettings';
 import { VivaConnectSettings } from './components/admin/VivaConnectSettings';
+import { IntegrationsSettings } from './components/admin/IntegrationsSettings';
 import { UserWidechatConfig } from './components/admin/UserWidechatConfig';
 import { TicketDashboard } from './components/tickets/TicketDashboard';
 import { SponteDashboard } from './components/SponteDashboard';
@@ -936,6 +938,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                 <nav className="space-y-1">
                                     <NavItem icon={Users} label="Equipes" active={activeTab === 'teams'} onClick={() => setActiveTab('teams')} />
                                     <NavItem icon={Users} label="Usuários" active={activeTab === 'users'} onClick={() => setActiveTab('users')} />
+                                    <NavItem icon={KeyRound} label="Integrações" active={activeTab === 'integrations'} onClick={() => setActiveTab('integrations')} />
                                     <NavItem icon={Bot} label="IA de Atendimento" active={activeTab === 'ai-agent'} onClick={() => setActiveTab('ai-agent')} />
                                     <NavItem icon={Plug} label="VivaConnect" active={activeTab === 'vivaconnect'} onClick={() => setActiveTab('vivaconnect')} />
                                     <NavItem icon={Settings} label="Configurações" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
@@ -1764,6 +1767,13 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {activeTab === 'ai-agent' && profile?.role === 'admin' && (
                     <div className="animate-fade-in">
                         <AiAgentSettings />
+                    </div>
+                )}
+
+                {/* Integrações (chaves de API no Vault) */}
+                {activeTab === 'integrations' && profile?.role === 'admin' && (
+                    <div className="animate-fade-in">
+                        <IntegrationsSettings onNavigate={setActiveTab} />
                     </div>
                 )}
 
