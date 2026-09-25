@@ -28,7 +28,8 @@ import {
     Ticket as TicketIcon,
     GraduationCap,
     Megaphone,
-    CalendarClock
+    CalendarClock,
+    Bot
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { reprocessAllAnalyses } from './services/reprocessor';
@@ -67,6 +68,7 @@ import { LossReasonManagement } from './components/admin/LossReasonManagement';
 import { AuditLogPage } from './components/admin/AuditLogPage';
 import { WideChatHistory } from './components/kanban/WideChatHistory';
 import { TmaSettingsManagement } from './components/admin/TmaSettingsManagement';
+import { AiAgentSettings } from './components/admin/AiAgentSettings';
 import { UserWidechatConfig } from './components/admin/UserWidechatConfig';
 import { TicketDashboard } from './components/tickets/TicketDashboard';
 import { SponteDashboard } from './components/SponteDashboard';
@@ -932,6 +934,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                 <nav className="space-y-1">
                                     <NavItem icon={Users} label="Equipes" active={activeTab === 'teams'} onClick={() => setActiveTab('teams')} />
                                     <NavItem icon={Users} label="Usuários" active={activeTab === 'users'} onClick={() => setActiveTab('users')} />
+                                    <NavItem icon={Bot} label="IA de Atendimento" active={activeTab === 'ai-agent'} onClick={() => setActiveTab('ai-agent')} />
                                     <NavItem icon={Settings} label="Configurações" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
                                     <NavItem icon={History} label="Relatórios (Admin)" active={activeTab === 'history'} onClick={() => { setHistoryAgentFilter(null); setActiveTab('history'); }} />
                                 </nav>
@@ -1751,6 +1754,13 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {activeTab === 'knowledge' && (
                     <div className="animate-fade-in">
                         <KnowledgeBase profile={profile} />
+                    </div>
+                )}
+
+                {/* IA de Atendimento (VivaConnect) */}
+                {activeTab === 'ai-agent' && profile?.role === 'admin' && (
+                    <div className="animate-fade-in">
+                        <AiAgentSettings />
                     </div>
                 )}
 

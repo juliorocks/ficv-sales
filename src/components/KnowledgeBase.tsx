@@ -1,5 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { toast } from 'sonner';
 import { supabase } from '../lib/supabase';
+import { ACCEPTED_EXTENSIONS, extractText } from '../lib/extractText';
 import {
     BookOpen,
     Plus,
@@ -13,7 +15,12 @@ import {
     X,
     Layout,
     ArrowUp,
-    List
+    List,
+    Upload,
+    RefreshCw,
+    Bot,
+    Download,
+    AlertTriangle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -24,7 +31,33 @@ interface KnowledgeItem {
     type: string;
     category: string;
     file_url?: string;
+    file_path?: string | null;
+    file_name?: string | null;
+    source_type?: 'text' | 'pdf' | 'sheet' | 'doc';
+    ai_enabled?: boolean;
+    index_status?: 'pending' | 'processing' | 'ready' | 'error';
+    index_error?: string | null;
+    chunk_count?: number;
     created_at: string;
+}
+
+const STATUS_STYLE: Record<string, { label: string; dot: string; text: string }> = {
+    ready: { label: 'Indexado', dot: 'bg-emerald-500', text: 'text-emerald-500' },
+    pending: { label: 'Pendente', dot: 'bg-amber-500', text: 'text-amber-500' },
+    processing: { label: 'Indexando…', dot: 'bg-sky-500 animate-pulse', text: 'text-sky-500' },
+    error: { label: 'Erro', dot: 'bg-red-500', text: 'text-red-500' },
+};
+
+/** Chama a edge function kb-ingest (chunk + embedding). Devolve msg de erro ou null. */
+async function runIngest(body: Record<string, unknown>): Promise<{ error: string | null; data?: any }> {
+    const { data, error } = await supabase.functions.invoke('kb-ingest', { body });
+    if (error) {
+        const ctx = await (error as any).context?.json?.().catch(() => null);
+        return { error: ctx?.error ?? error.message };
+    }
+    if (data?.error) return { error: data.error };
+    const failed = (data?.results ?? []).find((r: any) => !r.ok);
+    return { error: failed ? failed.error : null, data };
 }
 
 interface UserProfile {
@@ -39,6 +72,10 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
     const [searchTerm, setSearchTerm] = useState('');
     const [saving, setSaving] = useState(false);
     const [showScrollTop, setShowScrollTop] = useState(false);
+    const [uploading, setUploading] = useState(false);
+    const [indexing, setIndexing] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const isAdmin = profile?.role === 'admin';
 
     // Form state
     const [formState, setFormState] = useState({
@@ -108,31 +145,103 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
             type: 'document'
         };
 
-        let error;
-        if (selectedItem && isEditing) {
-            const { error: err } = await supabase
-                .from('knowledge_base')
-                .update(payload)
-                .eq('id', selectedItem.id);
-            error = err;
-        } else {
-            const { error: err } = await supabase
-                .from('knowledge_base')
-                .insert(payload);
-            error = err;
-        }
+        // .select() pra detectar UPDATE que filtrou 0 linhas sem erro (token em refresh)
+        const { data: saved, error } = selectedItem && isEditing
+            ? await supabase.from('knowledge_base').update(payload).eq('id', selectedItem.id).select('id')
+            : await supabase.from('knowledge_base').insert(payload).select('id');
 
-        if (!error) {
-            setIsEditing(false);
-            fetchKnowledge();
+        if (error || !saved?.length) {
+            toast.error(`Não foi possível salvar: ${error?.message ?? 'sessão expirada, recarregue a página.'}`);
+            setSaving(false);
+            return;
         }
+        setIsEditing(false);
         setSaving(false);
+        await fetchKnowledge();
+        // reindexa pra IA já enxergar o conteúdo novo
+        const { error: ingErr } = await runIngest({ document_id: saved[0].id });
+        if (ingErr) toast.error(`Salvo, mas a indexação para a IA falhou: ${ingErr}`);
+        await fetchKnowledge();
+    };
+
+    const handleFiles = async (files: FileList | null) => {
+        if (!files?.length) return;
+        setUploading(true);
+        let ok = 0;
+        for (const file of Array.from(files)) {
+            const tid = toast.loading(`Lendo ${file.name}…`);
+            try {
+                const { text, sourceType } = await extractText(file);
+                const safeName = file.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w.-]+/g, '_');
+                const path = `${crypto.randomUUID()}/${safeName}`;
+                const { error: upErr } = await supabase.storage.from('knowledge-files').upload(path, file, { contentType: file.type || undefined });
+                if (upErr) throw new Error(`upload do arquivo: ${upErr.message}`);
+
+                const { data: rows, error: insErr } = await supabase.from('knowledge_base').insert({
+                    title: file.name.replace(/\.[^.]+$/, ''),
+                    content: text,
+                    category: 'Geral',
+                    type: 'document',
+                    source_type: sourceType,
+                    file_path: path,
+                    file_name: file.name,
+                }).select('id');
+                if (insErr || !rows?.length) {
+                    await supabase.storage.from('knowledge-files').remove([path]);
+                    throw new Error(insErr?.message ?? 'sessão expirada, recarregue a página.');
+                }
+                toast.loading(`Indexando ${file.name} para a IA…`, { id: tid });
+                const { error: ingErr } = await runIngest({ document_id: rows[0].id });
+                if (ingErr) toast.error(`${file.name}: salvo, mas indexação falhou — ${ingErr}`, { id: tid });
+                else { toast.success(`${file.name} adicionado à base`, { id: tid }); ok++; }
+            } catch (e) {
+                toast.error(`${file.name}: ${(e as Error).message}`, { id: tid });
+            }
+            await fetchKnowledge();
+        }
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        setUploading(false);
+        if (ok > 1) toast.success(`${ok} arquivos adicionados.`);
+    };
+
+    const handleIndexPending = async () => {
+        setIndexing(true);
+        const tid = toast.loading('Indexando documentos pendentes…');
+        const { error, data } = await runIngest({ all_pending: true });
+        if (error) toast.error(`Indexação: ${error}`, { id: tid });
+        else toast.success(`${data?.indexed ?? 0} documento(s) indexado(s).`, { id: tid });
+        await fetchKnowledge();
+        setIndexing(false);
+    };
+
+    const handleReindexOne = async (id: string) => {
+        setIndexing(true);
+        const { error } = await runIngest({ document_id: id });
+        if (error) toast.error(`Indexação: ${error}`); else toast.success('Documento reindexado.');
+        await fetchKnowledge();
+        setIndexing(false);
+    };
+
+    const toggleAi = async (item: KnowledgeItem) => {
+        const { data, error } = await supabase.from('knowledge_base')
+            .update({ ai_enabled: !item.ai_enabled }).eq('id', item.id).select('id');
+        if (error || !data?.length) toast.error('Não foi possível alterar. Recarregue a página.');
+        await fetchKnowledge();
+    };
+
+    const openOriginal = async (item: KnowledgeItem) => {
+        if (!item.file_path) return;
+        const { data, error } = await supabase.storage.from('knowledge-files').createSignedUrl(item.file_path, 300);
+        if (error || !data) { toast.error('Não foi possível abrir o arquivo.'); return; }
+        window.open(data.signedUrl, '_blank', 'noopener');
     };
 
     const handleDelete = async (id: string) => {
         if (!confirm('Deseja excluir este documento da base de conhecimento?')) return;
+        const path = items.find(i => i.id === id)?.file_path;
         const { error } = await supabase.from('knowledge_base').delete().eq('id', id);
         if (!error) {
+            if (path) await supabase.storage.from('knowledge-files').remove([path]);
             setSelectedItem(null);
             fetchKnowledge();
         }
@@ -163,17 +272,49 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
                     <h2 className="text-3xl font-black text-[var(--text-main)] tracking-tighter mb-1">Base de Conhecimento</h2>
                     <p className="text-[var(--text-muted)] text-sm font-medium">Documentação centralizada no estilo GitBook para consulta e treinamento de IA.</p>
                 </div>
-                <button
-                    onClick={() => {
-                        setFormState({ title: '', content: '', category: 'Geral', file_url: '' });
-                        setIsEditing(true);
-                        setSelectedItem(null);
-                    }}
-                    className="btn-primary flex items-center gap-2"
-                >
-                    <Plus size={18} />
-                    Novo Documento
-                </button>
+                {isAdmin && (
+                    <div className="flex items-center gap-2">
+                        {items.some(i => i.index_status !== 'ready') && (
+                            <button
+                                onClick={handleIndexPending}
+                                disabled={indexing}
+                                className="px-4 py-2.5 rounded-xl bg-[var(--bg-card-hover)] border border-[var(--border)] text-xs font-bold text-[var(--text-main)] hover:border-primary transition-all flex items-center gap-2 disabled:opacity-50"
+                                title="Gera os trechos vetorizados que a IA consulta"
+                            >
+                                <RefreshCw size={14} className={indexing ? 'animate-spin' : ''} />
+                                Indexar pendentes ({items.filter(i => i.index_status !== 'ready').length})
+                            </button>
+                        )}
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            multiple
+                            accept={ACCEPTED_EXTENSIONS}
+                            className="hidden"
+                            onChange={(e) => handleFiles(e.target.files)}
+                        />
+                        <button
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={uploading}
+                            className="px-4 py-2.5 rounded-xl bg-[var(--bg-card-hover)] border border-[var(--border)] text-xs font-bold text-[var(--text-main)] hover:border-primary transition-all flex items-center gap-2 disabled:opacity-50"
+                            title="PDF, DOCX, XLSX, CSV, TXT ou MD"
+                        >
+                            {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                            Enviar arquivos
+                        </button>
+                        <button
+                            onClick={() => {
+                                setFormState({ title: '', content: '', category: 'Geral', file_url: '' });
+                                setIsEditing(true);
+                                setSelectedItem(null);
+                            }}
+                            className="btn-primary flex items-center gap-2"
+                        >
+                            <Plus size={18} />
+                            Novo Documento
+                        </button>
+                    </div>
+                )}
             </header>
 
             <div className="flex gap-6 h-full overflow-hidden border-t border-[var(--border)] pt-6">
@@ -209,7 +350,13 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
                                             className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all group relative ${selectedItem?.id === item.id ? 'bg-primary/10 text-primary font-bold shadow-sm' : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-card-hover)]'}`}
                                         >
                                             <FileText size={16} className={selectedItem?.id === item.id ? 'text-primary' : 'text-[var(--border)] group-hover:text-[var(--text-muted)]'} />
-                                            <span className="truncate">{item.title}</span>
+                                            <span className="truncate flex-1 text-left">{item.title}</span>
+                                            {isAdmin && (
+                                                <span
+                                                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${item.ai_enabled === false ? 'bg-[var(--border)]' : STATUS_STYLE[item.index_status ?? 'pending']?.dot}`}
+                                                    title={item.ai_enabled === false ? 'Fora da IA' : `IA: ${STATUS_STYLE[item.index_status ?? 'pending']?.label}`}
+                                                />
+                                            )}
                                             {selectedItem?.id === item.id && (
                                                 <motion.div layoutId="active-doc" className="absolute left-0 w-1 h-4 bg-primary rounded-full" />
                                             )}
@@ -260,6 +407,43 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
                                         )}
                                     </div>
                                     <h1 className="text-4xl font-black text-[var(--text-main)] tracking-tight">{selectedItem.title}</h1>
+                                    {isAdmin && (
+                                        <div className="flex flex-wrap items-center gap-3 mt-3 text-[11px] font-bold">
+                                            <span className="flex items-center gap-1.5 text-[var(--text-muted)]">
+                                                <Bot size={13} />
+                                                IA:
+                                                {selectedItem.ai_enabled === false ? (
+                                                    <span className="text-[var(--text-muted)]">fora da base da IA</span>
+                                                ) : (
+                                                    <span className={STATUS_STYLE[selectedItem.index_status ?? 'pending']?.text}>
+                                                        {STATUS_STYLE[selectedItem.index_status ?? 'pending']?.label}
+                                                        {selectedItem.index_status === 'ready' && ` · ${selectedItem.chunk_count} trechos`}
+                                                    </span>
+                                                )}
+                                            </span>
+                                            <label className="flex items-center gap-1.5 cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-main)]">
+                                                <input type="checkbox" checked={selectedItem.ai_enabled !== false} onChange={() => toggleAi(selectedItem)} className="accent-[var(--primary)]" />
+                                                Usar na IA
+                                            </label>
+                                            <button
+                                                onClick={() => handleReindexOne(selectedItem.id)}
+                                                disabled={indexing}
+                                                className="flex items-center gap-1 text-[var(--text-muted)] hover:text-primary disabled:opacity-50"
+                                            >
+                                                <RefreshCw size={12} className={indexing ? 'animate-spin' : ''} /> Reindexar
+                                            </button>
+                                            {selectedItem.file_path && (
+                                                <button onClick={() => openOriginal(selectedItem)} className="flex items-center gap-1 text-[var(--text-muted)] hover:text-primary">
+                                                    <Download size={12} /> {selectedItem.file_name ?? 'Arquivo original'}
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
+                                    {isAdmin && selectedItem.index_status === 'error' && selectedItem.index_error && (
+                                        <p className="mt-2 flex items-start gap-1.5 text-[11px] text-red-500">
+                                            <AlertTriangle size={12} className="mt-0.5 shrink-0" /> {selectedItem.index_error}
+                                        </p>
+                                    )}
                                 </div>
                                 <div className="flex gap-2">
                                     {selectedItem.file_url && (

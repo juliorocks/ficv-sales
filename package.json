@@ -45,7 +45,9 @@
     "dotenv": "^17.3.1",
     "framer-motion": "^11.5.4",
     "lucide-react": "^0.577.0",
+    "mammoth": "^1.12.3",
     "papaparse": "^5.4.1",
+    "pdfjs-dist": "^6.3.289",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-hook-form": "^7.71.2",
@@ -53,6 +55,7 @@
     "recharts": "^2.12.7",
     "sonner": "^2.0.7",
     "tailwind-merge": "^2.5.2",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "^4.3.6"
   },
   "devDependencies": {
