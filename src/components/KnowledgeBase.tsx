@@ -20,7 +20,8 @@ import {
     RefreshCw,
     Bot,
     Download,
-    AlertTriangle
+    AlertTriangle,
+    Link as LinkIcon,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -166,7 +167,7 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
         await fetchKnowledge();
     };
 
-    const handleFiles = async (files: FileList | null) => {
+    const handleFiles = async (files: FileList | File[] | null, sourceUrl?: string) => {
         if (!files?.length) return;
         setUploading(true);
         let ok = 0;
@@ -188,6 +189,7 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
                     source_type: sourceType,
                     file_path: path,
                     file_name: file.name,
+                    ...(sourceUrl ? { file_url: sourceUrl } : {}),
                 }).select('id');
                 if (insErr || !rows?.length) {
                     await supabase.storage.from('knowledge-files').remove([path]);
@@ -205,6 +207,40 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
         if (fileInputRef.current) fileInputRef.current.value = '';
         setUploading(false);
         if (ok > 1) toast.success(`${ok} arquivos adicionados.`);
+    };
+
+    // Importar por link (Google Drive/Docs/Planilhas/Apresentações ou link direto): o servidor
+    // baixa (kb-fetch-url) e o arquivo segue o mesmo caminho do "Enviar arquivos".
+    const [importOpen, setImportOpen] = useState(false);
+    const [importUrl, setImportUrl] = useState('');
+    const [importing, setImporting] = useState(false);
+    const handleImportUrl = async () => {
+        const url = importUrl.trim();
+        if (!/^https?:\/\//i.test(url)) { toast.error('Cole um link começando com https://'); return; }
+        setImporting(true);
+        const tid = toast.loading('Baixando o arquivo…');
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
+            const r = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/kb-fetch-url`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}`, apikey: import.meta.env.VITE_SUPABASE_ANON_KEY },
+                body: JSON.stringify({ url }),
+            });
+            if (!r.ok || (r.headers.get('content-type') ?? '').includes('application/json')) {
+                const d = await r.json().catch(() => null);
+                throw new Error(d?.error ?? `HTTP ${r.status}`);
+            }
+            const name = decodeURIComponent(r.headers.get('x-file-name') ?? 'arquivo');
+            const file = new File([await r.blob()], name, { type: r.headers.get('content-type') ?? '' });
+            toast.dismiss(tid);
+            setImportOpen(false);
+            setImportUrl('');
+            await handleFiles([file], url);
+        } catch (e) {
+            toast.error(`Importar: ${(e as Error).message}`, { id: tid });
+        } finally {
+            setImporting(false);
+        }
     };
 
     const handleIndexPending = async () => {
@@ -317,6 +353,15 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
                             <option value="vendas">💼 Vendas (IA do WhatsApp)</option>
                             <option value="alunos">🎓 Alunos (Tutor Virtual)</option>
                         </select>
+                        <button
+                            onClick={() => setImportOpen(true)}
+                            disabled={uploading || importing}
+                            className="px-4 py-2.5 rounded-xl bg-[var(--bg-card-hover)] border border-[var(--border)] text-xs font-bold text-[var(--text-main)] hover:border-primary transition-all flex items-center gap-2 disabled:opacity-50"
+                            title="Google Drive, Docs, Planilhas, Apresentações ou link direto de PDF"
+                        >
+                            {importing ? <Loader2 size={14} className="animate-spin" /> : <LinkIcon size={14} />}
+                            Importar do Drive
+                        </button>
                         <button
                             onClick={() => fileInputRef.current?.click()}
                             disabled={uploading}
@@ -704,6 +749,27 @@ export const KnowledgeBase: React.FC<{ profile: UserProfile | null }> = ({ profi
                     )}
                 </div>
             </div>
+            {importOpen && (
+                <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => !importing && setImportOpen(false)}>
+                    <div className="w-full max-w-lg rounded-2xl bg-[var(--bg-card)] border border-[var(--border)] p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+                        <h3 className="text-lg font-bold text-[var(--text-main)] flex items-center gap-2"><LinkIcon size={18} /> Importar do Google Drive</h3>
+                        <p className="text-xs text-[var(--text-muted)]">
+                            Cole o link de um <b>PDF, Word ou Excel no Drive</b>, de um <b>Google Docs / Planilhas / Apresentações</b> ou um link direto de PDF.
+                            O arquivo precisa estar compartilhado como <b>"Qualquer pessoa com o link"</b>. Entra no público <b>{newDocPublico === 'alunos' ? '🎓 Alunos' : '💼 Vendas'}</b> (filtro do topo).
+                        </p>
+                        <input autoFocus value={importUrl} onChange={(e) => setImportUrl(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') handleImportUrl() }}
+                            placeholder="https://drive.google.com/file/d/…"
+                            className="w-full bg-[var(--bg-main)] border border-[var(--border)] rounded-xl p-3 text-sm text-[var(--text-main)] focus:border-primary outline-none" />
+                        <div className="flex justify-end gap-2">
+                            <button onClick={() => setImportOpen(false)} disabled={importing} className="px-4 py-2 text-sm text-[var(--text-muted)]">Cancelar</button>
+                            <button onClick={handleImportUrl} disabled={importing || !importUrl.trim()} className="btn-primary flex items-center gap-2 disabled:opacity-50">
+                                {importing ? <Loader2 size={14} className="animate-spin" /> : null} Importar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
