@@ -18,14 +18,16 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-// Funções: admin/agent = CRM; secretaria/tutor/coordenador = só Chamados do Portal do Aluno
+// Funções: admin/agent = CRM; secretaria/tutor/atendente/biblioteca/coordenador = só Chamados do Portal do Aluno
 // (quem vê o quê: ticket_visible() no banco; filas em Gestão > Filas de Atendimento).
-type Role = 'admin' | 'agent' | 'secretaria' | 'tutor' | 'coordenador';
+type Role = 'admin' | 'agent' | 'secretaria' | 'tutor' | 'coordenador' | 'atendente' | 'biblioteca';
 const ROLES: { value: Role; label: string; hint: string }[] = [
     { value: 'admin', label: 'Admin', hint: 'Tudo' },
-    { value: 'agent', label: 'Comercial', hint: 'CRM / leads' },
+    { value: 'agent', label: 'Agente Comercial', hint: 'CRM / leads' },
     { value: 'secretaria', label: 'Secretaria', hint: 'Chamados das suas filas' },
     { value: 'tutor', label: 'Tutor', hint: 'Chamados das suas filas' },
+    { value: 'atendente', label: 'Atendente', hint: 'Chamados das suas filas' },
+    { value: 'biblioteca', label: 'Biblioteca', hint: 'Chamados das suas filas' },
     { value: 'coordenador', label: 'Coordenador', hint: 'Todos os chamados' },
 ];
 

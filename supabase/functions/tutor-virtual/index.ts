@@ -68,7 +68,7 @@ Deno.serve(async (req) => {
     // ── aluno pede humano / equipe reativa ──────────────────────────────────
     if (body.action === "handoff" || body.action === "reactivate") {
         const isOwner = caller?.kind === "user" && caller.id === t.aluno_id;
-        const isTeam = caller?.kind === "service" || (caller?.kind === "user" && ["admin", "agent", "secretaria", "tutor", "coordenador"].includes(caller.role));
+        const isTeam = caller?.kind === "service" || (caller?.kind === "user" && ["admin", "agent", "secretaria", "tutor", "coordenador", "atendente", "biblioteca"].includes(caller.role));
         if (body.action === "handoff" && !isOwner && !isTeam) return jsonRes({ error: "Não autorizado." }, 401);
         if (body.action === "reactivate" && !isTeam) return jsonRes({ error: "Não autorizado." }, 401);
         if (body.action === "handoff") {

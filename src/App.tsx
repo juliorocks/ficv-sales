@@ -180,7 +180,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
         localStorage.setItem('ficv_active_tab', activeTab);
     }, [activeTab]);
     // Secretaria/Tutor/Coordenador trabalham só com Chamados (Portal do Aluno)
-    const isTicketRole = ['secretaria', 'tutor', 'coordenador'].includes(String(profile?.role ?? ''));
+    const isTicketRole = ['secretaria', 'tutor', 'coordenador', 'atendente', 'biblioteca'].includes(String(profile?.role ?? ''));
     useEffect(() => {
         if (isTicketRole && activeTab !== 'tickets') setActiveTab('tickets');
     }, [isTicketRole, activeTab]);

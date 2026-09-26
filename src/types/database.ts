@@ -2,7 +2,7 @@ export interface User {
     id: string
     email?: string
     full_name: string
-    role: 'admin' | 'agent' | 'secretaria' | 'tutor' | 'coordenador'
+    role: 'admin' | 'agent' | 'secretaria' | 'tutor' | 'coordenador' | 'atendente' | 'biblioteca'
     avatar_url?: string | null
 }
 
@@ -225,7 +225,7 @@ export interface TicketMessage {
   ticket_id: number
   autor_id: string
   autor_nome: string
-  autor_role: 'aluno' | 'atendente' | 'admin' | 'agent' | 'secretaria' | 'tutor' | 'coordenador' | 'tutor_virtual'
+  autor_role: 'aluno' | 'atendente' | 'admin' | 'agent' | 'secretaria' | 'tutor' | 'coordenador' | 'biblioteca' | 'tutor_virtual'
   conteudo: string
   interno: boolean
   created_at: string

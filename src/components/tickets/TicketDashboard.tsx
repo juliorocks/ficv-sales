@@ -205,7 +205,7 @@ export function TicketDashboard() {
   const { data: atendentes = [] } = useQuery({
     queryKey: ['staff-profiles'],
     queryFn: async () => {
-      const { data } = await supabase.from('profiles').select('id, full_name').in('role', ['admin', 'agent', 'secretaria', 'tutor', 'coordenador'])
+      const { data } = await supabase.from('profiles').select('id, full_name').in('role', ['admin', 'agent', 'secretaria', 'tutor', 'coordenador', 'atendente', 'biblioteca'])
       return data ?? []
     },
   })

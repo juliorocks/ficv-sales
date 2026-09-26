@@ -43,7 +43,7 @@ export function TicketQueuesSettings() {
     const { data: people = [] } = useQuery<{ id: string; full_name: string; role: string }[]>({
         queryKey: ["ticket-people"],
         queryFn: async () => ((await supabase.from("profiles").select("id, full_name, role")
-            .in("role", ["secretaria", "tutor", "coordenador", "admin", "agent"]).order("full_name")).data ?? []).filter((p: any) => p.full_name),
+            .in("role", ["secretaria", "tutor", "atendente", "biblioteca", "coordenador", "admin", "agent"]).order("full_name")).data ?? []).filter((p: any) => p.full_name),
     })
 
     useEffect(() => {

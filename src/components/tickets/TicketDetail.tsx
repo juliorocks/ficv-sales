@@ -227,7 +227,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   // Se alunoId foi passado (portal do aluno), nunca é staff
-  const isStaff = alunoId ? false : ['admin', 'agent', 'secretaria', 'tutor', 'coordenador'].includes(String(user?.role ?? ''))
+  const isStaff = alunoId ? false : ['admin', 'agent', 'secretaria', 'tutor', 'coordenador', 'atendente', 'biblioteca'].includes(String(user?.role ?? ''))
   const currentUserId = alunoId ?? user?.id
   const currentUserName = alunoNome ?? user?.full_name ?? ''
 
@@ -433,7 +433,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
       const { data } = await supabase
         .from('profiles')
         .select('id, full_name')
-        .in('role', ['admin', 'agent', 'secretaria', 'tutor', 'coordenador'])
+        .in('role', ['admin', 'agent', 'secretaria', 'tutor', 'coordenador', 'atendente', 'biblioteca'])
       return data ?? []
     },
     enabled: isStaff,

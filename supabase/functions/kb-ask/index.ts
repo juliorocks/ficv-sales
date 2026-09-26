@@ -9,7 +9,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { chatJSON, corsHeaders, identify, jsonRes, searchKnowledge } from "../_shared/ai.ts";
 
-const TEAM = ["admin", "agent", "secretaria", "tutor", "coordenador"];
+const TEAM = ["admin", "agent", "secretaria", "tutor", "coordenador", "atendente", "biblioteca"];
 const hoje = () => new Date().toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "long", year: "numeric" });
 
 Deno.serve(async (req) => {
