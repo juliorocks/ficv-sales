@@ -13,6 +13,7 @@ import { Textarea } from '../ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog'
 import { TicketDetail } from './TicketDetail'
+import { InstallAppBanner } from './InstallAppBanner'
 import { AlunoInicio, AlunoFinanceiro, AlunoNotas, useOverview } from './AlunoPainel'
 import { showSuccess, showError } from '../../utils/toast'
 import {
@@ -330,21 +331,27 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, onLogout }: Ticke
   const open = tickets.filter(t => !['resolvido', 'fechado'].includes(t.status)).length
   const aguardando = tickets.filter(t => t.status === 'aguardando_aluno').length
   const fechados = tickets.filter(t => ['resolvido', 'fechado'].includes(t.status)).length
+  const tabs = [
+    { id: 'inicio', label: 'Início', icon: Home },
+    { id: 'financeiro', label: 'Financeiro', icon: Wallet },
+    { id: 'notas', label: 'Notas', icon: BookOpen },
+    { id: 'chamados', label: 'Chamados', icon: TicketIcon, badge: aguardando },
+  ] as const
 
   return (
     <div className="min-h-screen bg-[var(--bg-main)]">
       {/* Top bar */}
-      <header className="border-b border-[#2A2D36] bg-[#13161D] px-6 py-3 flex items-center justify-between">
+      <header className="sticky top-0 z-30 border-b border-[#2A2D36] bg-[#13161D] px-4 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <img
             src="https://siteficv.vercel.app/images/test-logo.png"
             alt="FICV"
-            className="h-9 w-auto object-contain"
+            className="h-8 sm:h-9 w-auto object-contain"
             onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
           />
           <div className="border-l border-[#2A2D36] pl-3">
             <p className="text-xs font-semibold text-[#F0EDE8]">Portal do Aluno</p>
-            <p className="text-xs text-[#8A8A9A]">{alunoNome}</p>
+            <p className="text-xs text-[#8A8A9A] truncate max-w-[45vw] sm:max-w-none">{alunoNome}</p>
           </div>
         </div>
         {onLogout && (
@@ -352,20 +359,15 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, onLogout }: Ticke
             onClick={onLogout}
             className="flex items-center gap-1.5 text-xs text-[#8A8A9A] hover:text-red-400 transition-colors"
           >
-            <LogOut className="w-3.5 h-3.5" /> Sair
+            <LogOut className="w-4 h-4 sm:w-3.5 sm:h-3.5" /> <span className="hidden sm:inline">Sair</span>
           </button>
         )}
       </header>
 
-      {/* Abas */}
-      <nav className="border-b border-[#2A2D36] bg-[#13161D] px-3 sm:px-6 overflow-x-auto">
+      {/* Abas — no computador ficam em cima; no celular viram a barra fixa de baixo (estilo app) */}
+      <nav className="hidden sm:block border-b border-[#2A2D36] bg-[#13161D] px-6">
         <div className="max-w-3xl mx-auto flex gap-1">
-          {([
-            { id: 'inicio', label: 'Início', icon: Home },
-            { id: 'financeiro', label: 'Financeiro', icon: Wallet },
-            { id: 'notas', label: 'Notas', icon: BookOpen },
-            { id: 'chamados', label: 'Chamados', icon: TicketIcon, badge: aguardando },
-          ] as const).map(t => (
+          {tabs.map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
               className={`relative flex items-center gap-1.5 px-3 py-3 text-sm whitespace-nowrap border-b-2 transition-colors ${tab === t.id ? 'border-[#C9A84C] text-[#F0EDE8] font-semibold' : 'border-transparent text-[#8A8A9A] hover:text-[#F0EDE8]'}`}>
               <t.icon className="w-4 h-4" /> {t.label}
@@ -375,22 +377,24 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, onLogout }: Ticke
         </div>
       </nav>
 
+      <InstallAppBanner />
+
       {tab !== 'chamados' && (
-        <div className="p-4 sm:p-6 max-w-3xl mx-auto">
+        <div className="p-4 sm:p-6 pb-28 sm:pb-6 max-w-3xl mx-auto">
           {tab === 'inicio' && <AlunoInicio onGo={(t) => { setTab(t); if (t === 'chamados') setShowNew(true) }} />}
           {tab === 'financeiro' && <AlunoFinanceiro />}
           {tab === 'notas' && <AlunoNotas />}
         </div>
       )}
 
-      {tab === 'chamados' && <div className="p-4 sm:p-6 max-w-3xl mx-auto space-y-6">
+      {tab === 'chamados' && <div className="p-4 sm:p-6 pb-28 sm:pb-6 max-w-3xl mx-auto space-y-5 sm:space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-[var(--text-main)]">Meus Chamados</h1>
             <p className="text-sm text-[var(--text-muted)] mt-0.5">Abra solicitações e acompanhe o atendimento</p>
           </div>
-          <Button onClick={() => setShowNew(true)} className="btn-primary gap-2">
+          <Button onClick={() => setShowNew(true)} className="btn-primary gap-2 hidden sm:inline-flex">
             <Plus className="w-4 h-4" /> Novo Chamado
           </Button>
         </div>
@@ -402,11 +406,11 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, onLogout }: Ticke
             { label: 'Aguardando você', value: aguardando, icon: AlertCircle, color: 'text-purple-400' },
             { label: 'Encerrados', value: fechados, icon: CheckCircle2, color: 'text-green-400' },
           ].map(stat => (
-            <div key={stat.label} className="glass-card p-4 flex items-center gap-3">
+            <div key={stat.label} className="glass-card p-3 sm:p-4 flex flex-col sm:flex-row items-center sm:items-center gap-1 sm:gap-3 text-center sm:text-left">
               <stat.icon className={`w-5 h-5 ${stat.color}`} />
               <div>
                 <p className="text-xl font-bold text-[var(--text-main)]">{stat.value}</p>
-                <p className="text-xs text-[var(--text-muted)]">{stat.label}</p>
+                <p className="text-[11px] sm:text-xs leading-tight text-[var(--text-muted)]">{stat.label}</p>
               </div>
             </div>
           ))}
@@ -476,6 +480,29 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, onLogout }: Ticke
           </div>
         )}
       </div>}
+
+      {/* Celular: botão flutuante de novo chamado + barra de navegação de baixo */}
+      {tab === 'chamados' && (
+        <button onClick={() => setShowNew(true)} aria-label="Novo chamado"
+          className="sm:hidden fixed right-4 z-40 bottom-[calc(5rem+env(safe-area-inset-bottom))] flex items-center gap-2 rounded-full bg-[var(--primary)] pl-4 pr-5 py-3.5 text-sm font-semibold text-white shadow-lg shadow-black/30 active:scale-95 transition-transform">
+          <Plus className="w-5 h-5" /> Novo chamado
+        </button>
+      )}
+      <nav className="sm:hidden fixed bottom-0 inset-x-0 z-40 border-t border-[#2A2D36] bg-[#13161D]/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
+        <div className="grid grid-cols-4">
+          {tabs.map(t => (
+            <button key={t.id} onClick={() => { setTab(t.id); window.scrollTo({ top: 0 }) }}
+              className={`relative flex flex-col items-center gap-1 pt-2.5 pb-2 text-[11px] transition-colors ${tab === t.id ? 'text-[#C9A84C] font-semibold' : 'text-[#8A8A9A]'}`}>
+              {tab === t.id && <span className="absolute top-0 h-0.5 w-8 rounded-full bg-[#C9A84C]" />}
+              <span className="relative">
+                <t.icon className="w-[22px] h-[22px]" />
+                {'badge' in t && t.badge > 0 && <span className="absolute -top-1.5 -right-2.5 min-w-[18px] h-[18px] text-[10px] leading-[18px] text-center bg-purple-500 text-white rounded-full px-1">{t.badge}</span>}
+              </span>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </nav>
 
       {showNew && (
         <NewTicketDialog

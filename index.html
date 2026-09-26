@@ -3,7 +3,25 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <script>
+      // Portal do Aluno (portal.* ou /aluno) = app instalável (PWA). O CRM não ganha manifest.
+      (function () {
+        if (!/^portal\./i.test(location.hostname) && !/^\/(aluno|atendimento)/.test(location.pathname)) return
+        var h = document.head
+        function add(tag, attrs) { var el = document.createElement(tag); for (var k in attrs) el.setAttribute(k, attrs[k]); h.appendChild(el) }
+        add('link', { rel: 'manifest', href: '/pwa/manifest.webmanifest' })
+        add('link', { rel: 'apple-touch-icon', href: '/pwa/apple-touch-icon.png' })
+        add('link', { rel: 'icon', type: 'image/png', href: '/pwa/icon-192.png' })
+        add('meta', { name: 'theme-color', content: '#13161D' })
+        add('meta', { name: 'apple-mobile-web-app-capable', content: 'yes' })
+        add('meta', { name: 'mobile-web-app-capable', content: 'yes' })
+        add('meta', { name: 'apple-mobile-web-app-status-bar-style', content: 'black' })
+        add('meta', { name: 'apple-mobile-web-app-title', content: 'FICV Aluno' })
+        document.title = 'Portal do Aluno | FICV'
+        if ('serviceWorker' in navigator) window.addEventListener('load', function () { navigator.serviceWorker.register('/sw-aluno.js', { scope: /^portal\./i.test(location.hostname) ? '/' : '/aluno' }).catch(function () {}) })
+      })()
+    </script>
     <title>SalesPulse | Inteligência Comercial</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
