@@ -304,15 +304,35 @@ interface TicketPortalProps {
   onLogout?: () => void
 }
 
+// Versão nova publicada? Compara o script principal (nome com hash, muda a cada deploy)
+// da página que está rodando com o da página no servidor. Em dev não há hash → nunca "nova".
+async function hasNewVersion(): Promise<boolean> {
+  try {
+    const current = document.querySelector<HTMLScriptElement>('script[type=module][src*="/assets/index-"]')?.src.match(/\/assets\/index-[^/]+\.js/)?.[0]
+    if (!current) return false
+    const html = await fetch(`/?v=${Date.now()}`, { cache: 'no-store' }).then((r) => r.text())
+    const latest = html.match(/\/assets\/index-[^"']+\.js/)?.[0]
+    return !!latest && latest !== current
+  } catch { return false }
+}
+
 export function TicketPortal({ alunoId, alunoNome, alunoEmail, appInstalado, onLogout }: TicketPortalProps) {
   const qc = useQueryClient()
   const [refreshing, setRefreshing] = useState(false)
   // App instalado (principalmente iPhone) não tem "puxar pra atualizar" → botão no cabeçalho
+  // Se já saiu versão nova do portal, recarrega o app inteiro; senão só os dados.
   const refreshAll = async () => {
     setRefreshing(true)
+    if (await hasNewVersion()) { window.location.reload(); return }
     await qc.invalidateQueries().catch(() => {})
     setTimeout(() => setRefreshing(false), 400)
   }
+  // App instalado fica "vivo" em segundo plano: ao voltar pra ele, pega a versão nova sozinho
+  useEffect(() => {
+    const onVisible = async () => { if (document.visibilityState === 'visible' && await hasNewVersion()) window.location.reload() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [])
   const [tab, setTab] = useState<'inicio' | 'financeiro' | 'notas' | 'chamados'>('inicio')
   const [showNew, setShowNew] = useState(false)
   const [selected, setSelected] = useState<Ticket | null>(null)
