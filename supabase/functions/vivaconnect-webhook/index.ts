@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
 
     const reqChannel = Number(url.searchParams.get("channel")) || null;
     const { data: ch } = reqChannel
-        ? await db.from("vivaconnect_channels").select("id, name, purpose, zpro_whatsapp_id, ai_enabled, hub_enabled").eq("id", reqChannel).maybeSingle()
+        ? await db.from("vivaconnect_channels").select("id, name, purpose, zpro_whatsapp_id, ai_enabled, hub_enabled, zpro_type, zpro_hybrid_mode").eq("id", reqChannel).maybeSingle()
         : { data: null };
     const raw = await req.text();
     let payload: any;
@@ -73,6 +73,15 @@ Deno.serve(async (req) => {
             const r = await zpro(settings.base_url, tok, "/updateticketinfo",
                 { ticketId: Number(m.ticketId), ...Object.fromEntries(botsOn.map((f) => [f, false])) });
             if (!r.ok) console.error(`vivaconnect-webhook: desligar ${botsOn.join(",")} no ticket ${m.ticketId}:`, zproErr(r.status, r.data));
+        }
+
+        // modo do número no Z-PRO (waba/baileys + Híbrido) — base da trava de custo Meta no envio
+        const zw = payload?.ticket?.whatsapp;
+        if (zw && (zw.type != null || zw.hybridMode != null)) {
+            const zType = zw.type != null ? String(zw.type) : null, zHyb = zw.hybridMode != null ? String(zw.hybridMode) : null;
+            if (zType !== (ch as any).zpro_type || zHyb !== (ch as any).zpro_hybrid_mode) {
+                await db.from("vivaconnect_channels").update({ zpro_type: zType, zpro_hybrid_mode: zHyb, zpro_mode_seen_at: new Date().toISOString() }).eq("id", ch.id);
+            }
         }
 
         if (m.whatsappId && !ch.zpro_whatsapp_id) {

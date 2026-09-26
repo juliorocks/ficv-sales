@@ -29,7 +29,23 @@ import { asList, loadSettings, parseApiRef, toDiscovered, toZproNumber, zpro, zp
 import { mirror, sv } from "../_shared/db.ts";
 import { type HubMsg, loadDestinations, planejar } from "../_shared/hub.ts";
 
-const CH_COLS = "id, name, purpose, kind, phone, api_id, api_token, active, daily_limit, zpro_whatsapp_id, last_sent_at";
+const CH_COLS = "id, name, purpose, kind, phone, api_id, api_token, active, daily_limit, zpro_whatsapp_id, last_sent_at, zpro_type, zpro_hybrid_mode";
+
+// Respostas automáticas (IA / Hub / portal / 1ª mensagem) nunca saem pela API OFICIAL paga
+// da Meta: número WABA só envia automático com o Modo Híbrido ativo no Z-PRO (decisão 26/09).
+const AUTO_KINDS = new Set(["ai_reply", "hub_menu", "hub_redirect", "hub_forward", "student_reply", "first_message"]);
+function hybridBlock(ch: any, kind: string): string | null {
+    if (!AUTO_KINDS.has(kind)) return null;
+    const isWaba = ch.zpro_type ? /waba|official|cloud/i.test(ch.zpro_type) : ch.kind === "waba" || ch.kind === "hybrid";
+    if (!isWaba) return null;
+    const mode = String(ch.zpro_hybrid_mode ?? "");
+    if (mode && !/^(disabled|false|off|0)$/i.test(mode)) return null;
+    // número de outra empresa do grupo declarado Híbrido: não manda webhook pra cá, então o modo nunca é "visto"
+    if (!mode && ch.purpose === "grupo" && ch.kind === "hybrid") return null;
+    return mode
+        ? "Número oficial com o Modo Híbrido DESLIGADO no Z-PRO — resposta automática bloqueada pra não gerar custo Meta. Ative o Híbrido no canal."
+        : "Modo do número oficial ainda não confirmado pelo Z-PRO (chega na 1ª mensagem recebida) — resposta automática bloqueada até confirmar o Híbrido.";
+}
 
 Deno.serve(async (req) => {
     if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -301,6 +317,12 @@ async function markChannel(db: any, id: number, ok: boolean, err: string | null,
 
 /** Envia UMA linha da fila (já com canal definido). Trava a linha com status 'sending'. */
 async function sendRow(db: any, settings: any, row: any, ch: any) {
+    const blocked = hybridBlock(ch, row.kind);
+    if (blocked) {
+        await db.from("vivaconnect_outbox").update({ status: "failed", error: blocked }).eq("id", row.id).eq("status", "queued");
+        await markChannel(db, ch.id, false, blocked);
+        return { ok: false, error: blocked };
+    }
     const { data: claimed } = await db.from("vivaconnect_outbox")
         .update({ status: "sending", channel_id: ch.id, attempts: (row.attempts ?? 0) + 1 })
         .eq("id", row.id).eq("status", "queued").select("id").maybeSingle();

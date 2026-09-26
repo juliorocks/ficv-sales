@@ -48,6 +48,9 @@ interface ChannelHealth {
     has_token: boolean
     ai_enabled: boolean
     hub_enabled: boolean
+    zpro_type: string | null
+    zpro_hybrid_mode: string | null
+    zpro_mode_seen_at: string | null
 }
 
 const fieldLabel = "text-xs font-bold uppercase tracking-widest text-muted-foreground"
@@ -379,11 +382,23 @@ export function VivaConnectSettings() {
                                             {c.name} <span className="text-xs font-normal text-muted-foreground">#{c.id} · {c.purpose === "pool" ? "Pool" : c.purpose === "grupo" ? "Outra empresa do grupo" : "Oficial"} · {c.kind}</span>
                                         </p>
                                         <p className="text-xs text-muted-foreground font-mono">{c.phone ?? "sem número"} · API {c.api_id}</p>
+                                        {c.purpose === "official" && (() => {
+                                            const waba = c.zpro_type ? /waba|official|cloud/i.test(c.zpro_type) : c.kind !== "baileys"
+                                            if (!waba) return null
+                                            const on = !!c.zpro_hybrid_mode && !/^(disabled|false|off|0)$/i.test(c.zpro_hybrid_mode)
+                                            return (
+                                                <p className={`text-xs mt-1 ${on ? "text-emerald-600 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"}`}>
+                                                    {on ? "✅ Modo Híbrido ativo — IA e Hub respondem sem custo Meta"
+                                                        : c.zpro_hybrid_mode ? "⚠️ Modo Híbrido DESLIGADO no Z-PRO — respostas automáticas (IA/Hub/portal) bloqueadas até ativar"
+                                                        : "⏳ Modo Híbrido ainda não confirmado (chega com a 1ª mensagem recebida) — respostas automáticas esperam a confirmação"}
+                                                </p>
+                                            )
+                                        })()}
                                     </div>
                                     <div className="flex items-center gap-1">
                                         {c.purpose === "official" && (
                                             <label className="flex items-center gap-1 text-xs cursor-pointer mr-2" title="Número antigo do Grupo Cidade Viva: contato novo passa pela triagem do Hub (Faculdade fica; outras empresas recebem o número novo)">
-                                                <input type="checkbox" checked={c.hub_enabled} onChange={(e) => updateChannel(c.id, { hub_enabled: e.target.checked })} className="accent-[var(--primary)]" /> 🔀 Hub do Grupo
+                                                <input type="checkbox" checked={c.hub_enabled} onChange={(e) => updateChannel(c.id, e.target.checked ? { hub_enabled: true, ai_enabled: true } : { hub_enabled: false })} className="accent-[var(--primary)]" /> 🔀 Hub do Grupo
                                             </label>
                                         )}
                                         {c.purpose !== "grupo" && <label className="flex items-center gap-1 text-xs cursor-pointer mr-2" title="A IA responde automaticamente quem escrever neste número (não-alunos)">

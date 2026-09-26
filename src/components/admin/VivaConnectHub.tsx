@@ -63,6 +63,10 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
         refetchInterval: 20000,
     })
 
+    const { data: iaLigada } = useQuery({
+        queryKey: ["ai_agent_enabled"],
+        queryFn: async () => !!(await supabase.from("ai_agent_settings").select("enabled").eq("id", 1).single()).data?.enabled,
+    })
     const hubChannels = channels.filter((c) => c.hub_enabled)
     const grupoChannels = channels.filter((c) => c.purpose === "grupo")
     const set = (id: number, patch: Partial<Dest>) => setDraft((d) => d.map((x) => (x.id === id ? { ...x, ...patch } : x)))
@@ -140,6 +144,13 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
                         ? <>Hub ligado em: <b>{hubChannels.map((c) => `${c.name} (${c.phone ?? "sem número"})`).join(", ")}</b></>
                         : <>Hub ainda <b>desligado</b>: cadastre o número oficial (83 3041-7471) acima como <b>Oficial</b>, tipo <b>Híbrido</b>, e marque <b>🔀 Hub do Grupo</b> no cartão dele.</>}
                 </div>
+
+                {iaLigada === false && (
+                    <div className="rounded-xl p-3 text-sm bg-amber-500/10 text-amber-700 dark:text-amber-400">
+                        A <b>IA de Atendimento</b> está desligada (Gestão &gt; IA de Atendimento). A triagem do Hub funciona, mas quem for da Faculdade
+                        só vira lead e espera um agente — ligue a IA pra ela já ir atendendo.
+                    </div>
+                )}
 
                 {/* ── Destinos ── */}
                 <div className="space-y-2">
