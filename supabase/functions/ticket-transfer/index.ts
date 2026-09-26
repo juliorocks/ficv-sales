@@ -17,7 +17,7 @@ import { ensureAlunoAccount } from "../_shared/aluno.ts";
 import { cpfDigits } from "../_shared/sponte.ts";
 import { portalUrl } from "../_shared/email.ts";
 
-const CATS = ["financeiro", "academico", "secretaria", "suporte_tecnico", "certificado", "cancelamento", "outros"];
+const CATS = ["financeiro", "academico", "secretaria", "suporte_tecnico", "certificado", "cancelamento", "tutoria", "biblioteca", "outros"];
 const hora = (iso: string) => new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 
 Deno.serve(async (req) => {

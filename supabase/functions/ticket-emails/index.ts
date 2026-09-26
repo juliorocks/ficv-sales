@@ -14,7 +14,7 @@ import { emailLayout, escHtml, portalUrl, sendEmail, ticketReplyAddress } from "
 
 const CAT: Record<string, string> = {
     financeiro: "Financeiro", academico: "Acadêmico", secretaria: "Secretaria", suporte_tecnico: "Suporte Técnico",
-    certificado: "Certificado", cancelamento: "Cancelamento", outros: "Outros",
+    certificado: "Certificado", cancelamento: "Cancelamento", tutoria: "Tutoria", biblioteca: "Biblioteca", outros: "Outros",
 };
 const first = (s: unknown) => String(s ?? "").trim().split(/\s+/)[0] || "aluno(a)";
 const para = (t: string) => escHtml(t).replace(/\n/g, "<br>");

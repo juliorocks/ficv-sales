@@ -28,7 +28,7 @@ const COLUMNS: { status: TicketStatus | typeof TUTOR; label: string; hint: strin
 ]
 
 const CAT_ICON: Record<string, string> = {
-  secretaria: '📋', financeiro: '💳', academico: '📚', certificado: '🎓', suporte_tecnico: '🔧', cancelamento: '❌', outros: '💬',
+  secretaria: '📋', financeiro: '💳', academico: '📚', certificado: '🎓', suporte_tecnico: '🔧', cancelamento: '❌', tutoria: '🧑‍🏫', biblioteca: '📖', outros: '💬',
 }
 
 const PRIO_DOT: Record<string, string> = { urgente: 'bg-red-500', alta: 'bg-orange-500', media: 'bg-yellow-400', baixa: 'bg-green-500' }

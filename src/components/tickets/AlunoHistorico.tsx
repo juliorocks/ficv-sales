@@ -18,13 +18,13 @@ import { ptBR } from 'date-fns/locale'
 
 const CATEGORIA_ICON: Record<string, string> = {
   financeiro: '💳', academico: '📚', secretaria: '📋',
-  suporte_tecnico: '🔧', certificado: '🎓', cancelamento: '❌', outros: '💬',
+  suporte_tecnico: '🔧', certificado: '🎓', cancelamento: '❌', tutoria: '🧑‍🏫', biblioteca: '📖', outros: '💬',
 }
 
 const CATEGORIAS_LABEL: Record<string, string> = {
   financeiro: 'Financeiro', academico: 'Acadêmico', secretaria: 'Secretaria',
   suporte_tecnico: 'Suporte Técnico', certificado: 'Certificado',
-  cancelamento: 'Cancelamento', outros: 'Outros',
+  cancelamento: 'Cancelamento', tutoria: 'Tutoria', biblioteca: 'Biblioteca', outros: 'Outros',
 }
 
 const STATUS_COLORS: Record<string, string> = {

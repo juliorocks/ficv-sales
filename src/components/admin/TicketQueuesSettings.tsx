@@ -17,6 +17,7 @@ interface Queue { id: number; nome: string; nivel: Nivel; categorias: string[]; 
 const CATS = [
     { v: "secretaria", l: "📋 Secretaria" }, { v: "academico", l: "📚 Acadêmico" }, { v: "financeiro", l: "💳 Financeiro" },
     { v: "certificado", l: "🎓 Certificado" }, { v: "suporte_tecnico", l: "🔧 Suporte técnico" },
+    { v: "tutoria", l: "🧑‍🏫 Tutoria" }, { v: "biblioteca", l: "📖 Biblioteca" },
     { v: "cancelamento", l: "❌ Cancelamento" }, { v: "outros", l: "💬 Outros" },
 ]
 const NIVEIS: { v: Nivel; l: string }[] = [{ v: "todos", l: "Todos os níveis" }, { v: "graduacao", l: "Graduação" }, { v: "pos", l: "Pós-graduação" }]
