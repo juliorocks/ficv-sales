@@ -84,6 +84,8 @@ import { SponteDashboard } from './components/SponteDashboard';
 import { CampaignsDashboard } from './components/CampaignsDashboard';
 import { NotificationBell } from './components/notifications/NotificationBell';
 import { FollowupsPage } from './components/followups/FollowupsPage';
+import { MarketingFormsList } from './components/marketing/MarketingFormsList';
+import { MarketingFormBuilder } from './components/marketing/MarketingFormBuilder';
 
 const queryClient = new QueryClient({
     defaultOptions: {
@@ -173,6 +175,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     // aparecendo em cima do funil por acidente de layout.
     const [kanbanDateRange, setKanbanDateRange] = useState<{ start: string; end: string }>({ start: '', end: '' });
     const [historyAgentFilter, setHistoryAgentFilter] = useState<string | null>(null); // agente clicado em "Performance do Período" — pré-filtra Relatórios (Admin)
+    const [marketingFormEditId, setMarketingFormEditId] = useState<number | null>(null); // formulário aberto no editor de Marketing > Formulários
     const kanbanAssigneeInit = useRef(false); // só aplica o default (perfil logado) uma vez — não sobrescreve se o agente trocar o filtro depois
 
     // Persist activeTab in localStorage
@@ -970,7 +973,30 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                 <NavItem icon={GraduationCap} label="Matrículas" active={activeTab === 'matriculas'} onClick={() => setActiveTab('matriculas')} />
                             )}
                             {(profile?.role === 'admin') && (
-                                <NavItem icon={Megaphone} label="Campanhas (Ads)" active={activeTab === 'campanhas'} onClick={() => setActiveTab('campanhas')} />
+                                <div className="space-y-1">
+                                    <NavItem
+                                        icon={Megaphone}
+                                        label="Marketing"
+                                        active={activeTab.startsWith('marketing') || activeTab === 'campanhas'}
+                                        onClick={() => setActiveTab('marketing-forms')}
+                                    />
+                                    {(activeTab.startsWith('marketing') || activeTab === 'campanhas') && (
+                                        <div className="ml-6 flex flex-col gap-1 border-l border-primary/20 pl-2 mt-1 animate-in slide-in-from-left-2 duration-200">
+                                            <button
+                                                onClick={() => { setMarketingFormEditId(null); setActiveTab('marketing-forms') }}
+                                                className={`text-[11px] py-1.5 px-3 rounded-lg text-left transition-all ${activeTab.startsWith('marketing-forms') ? 'bg-primary/10 text-primary font-bold' : 'text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text-main)]'}`}
+                                            >
+                                                Formulários
+                                            </button>
+                                            <button
+                                                onClick={() => setActiveTab('campanhas')}
+                                                className={`text-[11px] py-1.5 px-3 rounded-lg text-left transition-all ${activeTab === 'campanhas' ? 'bg-primary/10 text-primary font-bold' : 'text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text-main)]'}`}
+                                            >
+                                                Campanhas (Ads)
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
                             )}
                             {(profile?.role === 'admin') && <NavItem icon={Tv} label="Dashboard Live" active={isTvMode} onClick={() => setIsTvMode(!isTvMode)} />}
                         </nav>
@@ -1968,6 +1994,17 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {activeTab === 'campanhas' && profile?.role === 'admin' && (
                     <div className="animate-fade-in">
                         <CampaignsDashboard isAdmin={profile?.role === 'admin'} />
+                    </div>
+                )}
+
+                {/* Marketing > Formulários */}
+                {activeTab === 'marketing-forms' && profile?.role === 'admin' && (
+                    <div className="animate-fade-in">
+                        {marketingFormEditId != null ? (
+                            <MarketingFormBuilder id={marketingFormEditId} onBack={() => setMarketingFormEditId(null)} />
+                        ) : (
+                            <MarketingFormsList onEdit={(id) => setMarketingFormEditId(id)} />
+                        )}
                     </div>
                 )}
 

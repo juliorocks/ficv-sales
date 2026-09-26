@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { Suspense } from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import App from './App'
@@ -6,6 +6,11 @@ import { AgentReportPage } from './components/AgentReport'
 import { AlunoPortalPage } from './components/tickets/AlunoPortalPage'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import './index.css'
+
+// code-split: formulário público embedado via iframe em sites externos não deve
+// carregar o bundle do CRM (App.tsx/Kanban/Dashboard)
+const PublicMarketingFormPage = React.lazy(() =>
+    import('./components/marketing/PublicMarketingFormPage').then((m) => ({ default: m.PublicMarketingFormPage })))
 
 // portal.ficv.edu.br = só o Portal do Aluno (mesmo deploy da Vercel do CRM): qualquer
 // caminho nesse domínio abre o portal; o CRM continua no domínio da Vercel.
@@ -24,6 +29,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                     <Route path="/relatorio/:token" element={<AgentReportPage />} />
                     <Route path="/aluno" element={<AlunoPortalPage />} />
                     <Route path="/atendimento" element={<Navigate to="/aluno" replace />} />
+                    <Route path="/f/:slug" element={<Suspense fallback={null}><PublicMarketingFormPage /></Suspense>} />
                     <Route path="/*" element={<App />} />
                 </Routes>
                 )}

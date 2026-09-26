@@ -104,6 +104,70 @@ export interface LossReason {
     motivo: string;
 }
 
+export type MarketingFormFieldType = 'text' | 'phone' | 'email' | 'select' | 'checkbox' | 'radio' | 'static_text' | 'spacer'
+
+export interface MarketingFormField {
+    id: string
+    type: MarketingFormFieldType
+    label?: string
+    placeholder?: string
+    required?: boolean
+    options?: string[]
+    content?: string
+    height?: number
+    width?: 'full' | 'half'
+    role?: 'name' | 'whatsapp' | 'email' | null
+}
+
+export interface MarketingFormDesign {
+    background_color?: string
+    border_color?: string
+    border_radius?: number
+    font?: string
+    field_size?: 'sm' | 'md' | 'lg'
+    field_background_color?: string
+    button_color?: string
+    button_text_color?: string
+}
+
+export type MarketingFormPostSubmit =
+    | { type: 'message'; message: string }
+    | { type: 'redirect'; url: string }
+    | { type: 'whatsapp'; whatsapp_number: string; message_template: string }
+
+export interface MarketingForm {
+    id: number
+    slug: string
+    name: string
+    course_id: number | null
+    source_id: number
+    fields: MarketingFormField[]
+    design: MarketingFormDesign
+    post_submit: MarketingFormPostSubmit
+    allowed_domains: string[]
+    lgpd_enabled: boolean
+    lgpd_text: string | null
+    ativo: boolean
+    view_count: number
+    created_at: string
+    updated_at: string
+    courses?: { name: string } | null
+}
+
+export interface MarketingFormSubmission {
+    id: number
+    form_id: number
+    lead_id: number | null
+    payload: Record<string, unknown>
+    utm: Record<string, unknown> | null
+    ip: string | null
+    referrer: string | null
+    outcome: 'pending' | 'created' | 'updated' | 'rejected'
+    reject_reason: string | null
+    created_at: string
+    leads?: { nome_completo: string } | null
+}
+
 export interface LeadForm {
     id: string
     name: string
