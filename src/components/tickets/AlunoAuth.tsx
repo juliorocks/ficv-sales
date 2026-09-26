@@ -33,15 +33,17 @@ function Label({ children }: { children: React.ReactNode }) {
 }
 
 function Field({
-  type = 'text', value, onChange, placeholder, autoComplete, suffix
+  type = 'text', value, onChange, placeholder, autoComplete, suffix, inputMode
 }: {
   type?: string; value: string; onChange: (v: string) => void
   placeholder?: string; autoComplete?: string; suffix?: React.ReactNode
+  inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode']
 }) {
   return (
     <div className="relative">
       <input
         type={type}
+        inputMode={inputMode}
         value={value}
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder}
@@ -190,7 +192,7 @@ export function AlunoAuth({ onAuth }: { onAuth: () => void }) {
   const cpfField = (
     <div>
       <Label>CPF</Label>
-      <Field value={cpf} onChange={v => setCpf(formatCPF(v))} placeholder="000.000.000-00" autoComplete="username" />
+      <Field value={cpf} onChange={v => setCpf(formatCPF(v))} placeholder="000.000.000-00" inputMode="numeric" autoComplete="username" />
     </div>
   )
 
