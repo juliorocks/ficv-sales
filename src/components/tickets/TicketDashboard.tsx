@@ -9,6 +9,7 @@ import { useAuth } from '../../hooks/use-auth'
 import type { Ticket, TicketCategoria, TicketStatus, TicketEvaluation } from '../../types/database'
 import { TicketDetail } from './TicketDetail'
 import { TicketKanban } from './TicketKanban'
+import { NpsPanel } from './NpsPanel'
 import { AlunoHistorico } from './AlunoHistorico'
 import { Input } from '../ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
@@ -163,10 +164,12 @@ export function TicketDashboard() {
   const isAdmin = user?.role === 'admin'
 
   const [selected, setSelected] = useState<Ticket | null>(null)
-  const [view, setView] = useState<'painel' | 'kanban'>(() => {
-    try { return localStorage.getItem('ficv_tickets_view') === 'kanban' ? 'kanban' : 'painel' } catch { return 'painel' }
+  const podeVerNpsGeral = user?.role === 'admin' || user?.role === 'coordenador'
+  type View = 'painel' | 'kanban' | 'nps'
+  const [view, setView] = useState<View>(() => {
+    try { const v = localStorage.getItem('ficv_tickets_view'); return v === 'kanban' || v === 'nps' ? v : 'painel' } catch { return 'painel' }
   })
-  const pickView = (v: 'painel' | 'kanban') => { setView(v); try { localStorage.setItem('ficv_tickets_view', v) } catch { /* sem storage */ } }
+  const pickView = (v: View) => { setView(v); try { localStorage.setItem('ficv_tickets_view', v) } catch { /* sem storage */ } }
   const [selectedAluno, setSelectedAluno] = useState<{ id: string; nome: string; email: string } | null>(null)
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState<TicketStatus | 'todos'>('todos')
@@ -253,10 +256,10 @@ export function TicketDashboard() {
         </div>
         <div className="flex items-center gap-3">
           <div className="flex rounded-lg border border-[var(--border)] p-0.5 bg-[var(--bg-card)]">
-            {(['painel', 'kanban'] as const).map(v => (
+            {(['painel', 'kanban', 'nps'] as const).map(v => (
               <button key={v} onClick={() => pickView(v)}
                 className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${view === v ? 'bg-[var(--primary)] text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}>
-                {v === 'painel' ? 'Painel' : 'Kanban'}
+                {v === 'painel' ? 'Painel' : v === 'kanban' ? 'Kanban' : podeVerNpsGeral ? 'NPS' : 'Meu NPS'}
               </button>
             ))}
           </div>
@@ -268,6 +271,8 @@ export function TicketDashboard() {
           </button>
         </div>
       </div>
+
+      {view === 'nps' && <NpsPanel podeVerTudo={podeVerNpsGeral} />}
 
       {view === 'kanban' && <TicketKanban tickets={tickets} onOpen={setSelected} />}
 
