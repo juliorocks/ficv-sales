@@ -44,7 +44,6 @@ import { AgentProfile } from './components/AgentProfile';
 import { Login } from './components/Login';
 import { AnalysisDetail } from './components/AnalysisDetail';
 import { KnowledgeBase } from './components/KnowledgeBase';
-import { Scripts } from './components/Scripts';
 import { ArcGauge, GoalsPage, useFinancialGoals } from './components/GoalGauge';
 import { AgentAdmin, useAgentProfiles, AgentAvatar } from './components/AgentAdmin';
 import { MyProfile } from './components/MyProfile';
@@ -961,7 +960,6 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                             {(profile?.role === 'admin') && <NavItem icon={Target} label="Metas" active={activeTab === 'goals'} onClick={() => setActiveTab('goals')} />}
                             {(profile?.role === 'admin') && <NavItem icon={FileUp} label="Uploads" active={activeTab === 'uploads'} onClick={() => setActiveTab('uploads')} />}
                             <NavItem icon={BookOpen} label="Base de Conhecimento" active={activeTab === 'knowledge'} onClick={() => setActiveTab('knowledge')} />
-                            <NavItem icon={MessageSquare} label="Scripts" active={activeTab === 'scripts'} onClick={() => setActiveTab('scripts')} />
                             <NavItem icon={MessageSquare} label="Meu Widechat" active={activeTab === 'widechat'} onClick={() => setActiveTab('widechat')} />
                             {(profile?.role === 'admin' || profile?.role === 'agent') && (
                                 <NavItem icon={CalendarClock} label="Follow-ups" active={activeTab === 'followups'} onClick={() => setActiveTab('followups')} />
@@ -1873,13 +1871,6 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {activeTab === 'vivaconnect' && profile?.role === 'admin' && (
                     <div className="animate-fade-in">
                         <VivaConnectSettings />
-                    </div>
-                )}
-
-                {/* Scripts Tab */}
-                {activeTab === 'scripts' && (
-                    <div className="animate-fade-in">
-                        <Scripts isAdmin={profile?.role === 'admin'} />
                     </div>
                 )}
 
