@@ -85,9 +85,10 @@ interface NewTicketDialogProps {
   alunoNome: string
   alunoEmail: string
   onClose: () => void
+  onCreated?: (t: Ticket) => void  // abre a conversa do chamado recém-criado
 }
 
-function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose }: NewTicketDialogProps) {
+function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose, onCreated }: NewTicketDialogProps) {
   const qc = useQueryClient()
   const [step, setStep] = useState<'categoria' | 'detalhes'>('categoria')
   const [categoria, setCategoria] = useState<TicketCategoria | null>(null)
@@ -159,8 +160,9 @@ function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose }: NewTicketD
       if (mErr) throw mErr
 
       qc.invalidateQueries({ queryKey: ['tickets'] })
-      showSuccess(`Ticket ${ticketData.protocolo} aberto com sucesso!`)
+      showSuccess(`Chamado ${ticketData.protocolo} aberto!`)
       onClose()
+      onCreated?.(ticketData as Ticket)
     } catch (e: any) {
       showError(e?.message ?? 'Erro ao abrir ticket.')
     } finally {
@@ -481,6 +483,7 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, onLogout }: Ticke
           alunoNome={alunoNome}
           alunoEmail={alunoEmail}
           onClose={() => setShowNew(false)}
+          onCreated={(t) => setSelected(t)}
         />
       )}
       {selected && (
