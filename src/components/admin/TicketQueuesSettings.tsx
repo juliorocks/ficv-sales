@@ -21,12 +21,15 @@ const CATS = [
     { v: "cancelamento", l: "❌ Cancelamento" }, { v: "outros", l: "💬 Outros" },
 ]
 const NIVEIS: { v: Nivel; l: string }[] = [{ v: "todos", l: "Todos os níveis" }, { v: "graduacao", l: "Graduação" }, { v: "pos", l: "Pós-graduação" }]
-const ROLE_LABEL: Record<string, string> = { admin: "Admin", agent: "Comercial", secretaria: "Secretaria", tutor: "Tutor", coordenador: "Coordenador" }
+const ROLE_LABEL: Record<string, string> = { admin: "Admin", agent: "Agente Comercial", secretaria: "Secretaria", tutor: "Tutor", coordenador: "Coordenador", atendente: "Atendente", biblioteca: "Biblioteca" }
+const NIVEL_TIPO: Record<Nivel, string | null> = { todos: null, graduacao: "Graduação", pos: "Pós-Graduação" }
 
 export function TicketQueuesSettings() {
     const qc = useQueryClient()
     const [draft, setDraft] = useState<Queue[]>([])
     const [members, setMembers] = useState<Record<number, string[]>>({})
+    // cursos que cada membro atende naquela fila ("fila:pessoa" → ids de courses; vazio = todos)
+    const [cursosDe, setCursosDe] = useState<Record<string, number[]>>({})
     const [saving, setSaving] = useState<number | null>(null)
 
     const { data, isLoading } = useQuery({
@@ -34,7 +37,7 @@ export function TicketQueuesSettings() {
         queryFn: async () => {
             const [q, m] = await Promise.all([
                 supabase.from("ticket_queues").select("*").order("ordem"),
-                supabase.from("ticket_queue_members").select("queue_id, profile_id"),
+                supabase.from("ticket_queue_members").select("queue_id, profile_id, cursos"),
             ])
             if (q.error) throw q.error
             return { queues: q.data as Queue[], members: m.data ?? [] }
@@ -46,12 +49,19 @@ export function TicketQueuesSettings() {
             .in("role", ["secretaria", "tutor", "atendente", "biblioteca", "coordenador", "admin", "agent"]).order("full_name")).data ?? []).filter((p: any) => p.full_name),
     })
 
+    const { data: courses = [] } = useQuery<{ id: number; name: string; type: string }[]>({
+        queryKey: ["courses-catalog"],
+        queryFn: async () => (await supabase.from("courses").select("id, name, type").order("name")).data ?? [],
+    })
+
     useEffect(() => {
         if (!data) return
         setDraft(data.queues)
         const m: Record<number, string[]> = {}
-        for (const r of data.members) (m[r.queue_id] ??= []).push(r.profile_id)
+        const c: Record<string, number[]> = {}
+        for (const r of data.members as any[]) { (m[r.queue_id] ??= []).push(r.profile_id); c[`${r.queue_id}:${r.profile_id}`] = r.cursos ?? [] }
         setMembers(m)
+        setCursosDe(c)
     }, [data])
 
     const set = (id: number, patch: Partial<Queue>) => setDraft((d) => d.map((q) => (q.id === id ? { ...q, ...patch } : q)))
@@ -67,7 +77,10 @@ export function TicketQueuesSettings() {
         if (!error) {
             const want = members[q.id] ?? []
             await supabase.from("ticket_queue_members").delete().eq("queue_id", q.id)
-            if (want.length) mErr = (await supabase.from("ticket_queue_members").insert(want.map((profile_id) => ({ queue_id: q.id, profile_id })))).error
+            if (want.length) mErr = (await supabase.from("ticket_queue_members").insert(want.map((profile_id) => {
+                const cs = cursosDe[`${q.id}:${profile_id}`] ?? []
+                return { queue_id: q.id, profile_id, cursos: cs.length ? cs : null }
+            }))).error
         }
         setSaving(null)
         if (error || !ok?.length || mErr) return showError(`Não foi possível salvar: ${(error ?? mErr)?.message ?? "sessão expirada, recarregue."}`)
@@ -98,7 +111,7 @@ export function TicketQueuesSettings() {
                     <h2 className="text-2xl font-bold flex items-center gap-2 text-[var(--text-main)]"><Inbox size={22} className="text-primary" /> Filas de Atendimento</h2>
                     <p className="text-sm text-muted-foreground mt-1">
                         Chamado novo cai na fila que atende aquele <b>assunto</b> e o <b>nível</b> do aluno (Graduação/Pós, pelo Sponte).
-                        Secretaria e Tutores só veem os chamados das filas de que participam; Coordenadores veem todas.
+                        Secretaria, Tutores, Atendentes e Biblioteca só veem os chamados das filas de que participam (e, se marcado, só dos seus cursos); Coordenadores veem todas.
                     </p>
                 </div>
                 <Button onClick={add} size="sm"><Plus size={14} className="mr-1" /> Fila</Button>
@@ -156,6 +169,43 @@ export function TicketQueuesSettings() {
                                 {!people.length && <p className="text-xs text-muted-foreground">Cadastre as pessoas em Gestão &gt; Usuários com a função Secretaria, Tutor ou Coordenador.</p>}
                             </div>
                         </div>
+                        {(members[q.id] ?? []).length > 0 && (() => {
+                            const tipo = NIVEL_TIPO[q.nivel]
+                            const opts = courses.filter((c) => !tipo || c.type === tipo)
+                            if (!opts.length) return null
+                            return (
+                                <div>
+                                    <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-1">Cursos de cada pessoa</p>
+                                    <p className="text-[11px] text-muted-foreground mb-2">Sem curso marcado = atende todos os cursos da fila. Chamado sem curso identificado aparece pra todos da fila.</p>
+                                    <div className="space-y-2">
+                                        {people.filter((p) => (members[q.id] ?? []).includes(p.id)).map((p) => {
+                                            const k = `${q.id}:${p.id}`
+                                            const sel = cursosDe[k] ?? []
+                                            return (
+                                                <div key={p.id} className="flex items-start gap-3 rounded-lg border border-[var(--border)] p-2">
+                                                    <span className="text-xs font-semibold text-[var(--text-main)] w-40 shrink-0 pt-1 truncate">{p.full_name}</span>
+                                                    <div className="flex flex-wrap gap-1.5">
+                                                        <button onClick={() => setCursosDe((c) => ({ ...c, [k]: [] }))}
+                                                            className={`px-2.5 py-1 rounded-full text-[11px] border ${!sel.length ? "bg-primary text-white border-primary" : "border-[var(--border)] text-muted-foreground"}`}>
+                                                            Todos
+                                                        </button>
+                                                        {opts.map((c) => {
+                                                            const on = sel.includes(c.id)
+                                                            return (
+                                                                <button key={c.id} onClick={() => setCursosDe((m) => ({ ...m, [k]: on ? sel.filter((x) => x !== c.id) : [...sel, c.id] }))}
+                                                                    className={`px-2.5 py-1 rounded-full text-[11px] border ${on ? "bg-primary/15 text-primary border-primary/40 font-semibold" : "border-[var(--border)] text-muted-foreground"}`}>
+                                                                    {c.name}{!tipo ? <span className="opacity-60"> · {c.type === "Pós-Graduação" ? "pós" : "grad."}</span> : null}
+                                                                </button>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                            )
+                        })()}
                         <div className="flex justify-end">
                             <Button size="sm" onClick={() => save(q)} disabled={saving === q.id}>
                                 {saving === q.id ? <Loader2 className="animate-spin" size={14} /> : "Salvar fila"}

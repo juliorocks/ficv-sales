@@ -62,23 +62,31 @@ const norm = (v: string) => v.toLowerCase().normalize('NFD').replace(/[\u0300-\u
 const semTurma = (v: string) => v.replace(/\s*\([^)]*\)\s*$/, '').trim()
 const cursoBase = (v: string) => norm(semTurma(v))
 const PALAVRAS_VAZIAS = new Set(['e', 'de', 'do', 'da', 'dos', 'das', 'em', 'o', 'a', 'presencial'])
-function cursoDoCatalogo(nomeSponte: string, cursos: { id: number; name: string }[]): number | null {
-  const alvo = norm(nomeSponte)
-  const ead = /\bead\b/.test(alvo)
-  let melhor: { id: number; n: number } | null = null
-  for (const c of cursos) {
-    const nome = norm(c.name)
-    if (/\bead\b/.test(nome) !== ead && /(\bead\b|presencial)/.test(nome)) continue
-    const toks = nome.split(/[^a-z0-9]+/).filter(t => t && !PALAVRAS_VAZIAS.has(t) && t !== 'ead')
-    if (toks.length && toks.every(t => alvo.includes(t)) && (!melhor || toks.length > melhor.n)) melhor = { id: c.id, n: toks.length }
-  }
-  return melhor?.id ?? null
-}
 const nivelDoCurso = (nome: string): 'pos' | 'graduacao' | null => {
   const n = norm(nome)
   if (/\bpos\b|pos-|especializa|mba/.test(n)) return 'pos'
   if (/bacharel|licencia|tecnolog|gradua/.test(n)) return 'graduacao'
   return null
+}
+// Palavra INTEIRA (não substring: "Psicoteologia" não é "Teologia") e mesmo nível (pós só casa
+// com curso de pós) — o curso decide qual tutor vê o chamado (ticket_queue_members.cursos).
+function cursoDoCatalogo(nomeSponte: string, cursos: { id: number; name: string; type?: string }[]): number | null {
+  const alvo = norm(nomeSponte)
+  const palavras = new Set(alvo.split(/[^a-z0-9]+/).filter(Boolean))
+  const ead = palavras.has('ead')
+  const nivel = nivelDoCurso(nomeSponte)
+  let melhor: { id: number; n: number } | null = null
+  for (const c of cursos) {
+    const nome = norm(c.name)
+    if (/\bead\b/.test(nome) !== ead && /(\bead\b|presencial)/.test(nome)) continue
+    if (nivel && c.type) {
+      const tipo = /p[oó]s/i.test(c.type) ? 'pos' : /gradua/i.test(c.type) ? 'graduacao' : null
+      if (tipo && tipo !== nivel) continue
+    }
+    const toks = nome.split(/[^a-z0-9]+/).filter(t => t && !PALAVRAS_VAZIAS.has(t) && t !== 'ead')
+    if (toks.length && toks.every(t => palavras.has(t)) && (!melhor || toks.length > melhor.n)) melhor = { id: c.id, n: toks.length }
+  }
+  return melhor?.id ?? null
 }
 
 // ── New Ticket Form ──────────────────────────────────────────
