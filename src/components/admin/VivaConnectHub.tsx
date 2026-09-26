@@ -4,7 +4,7 @@
 // cadastrado, já chama a pessoa); sem assunto claro → menu numerado.
 import { useEffect, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ChevronDown, ChevronRight, FlaskConical, Loader2, Plus, Shuffle, Trash2 } from "lucide-react"
+import { ChevronDown, ChevronRight, FlaskConical, Loader2, Plus, Shuffle, Trash2, Upload } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -14,7 +14,7 @@ import { showError, showSuccess } from "@/utils/toast"
 interface Dest {
     id: number; nome: string; emoji: string; assuntos: string; is_self: boolean; numero: string | null
     channel_id: number | null; avisar_destino: boolean; mensagem_redirect: string; mensagem_destino: string
-    ativo: boolean; ordem: number
+    ativo: boolean; ordem: number; logo_url: string | null
 }
 interface Routing {
     id: number; number: string; contact_name: string | null; status: "perguntando" | "faculdade" | "encaminhado"
@@ -26,6 +26,12 @@ type Ch = { id: number; name: string; purpose: string; phone: string | null; hub
 const fieldLabel = "text-[11px] font-bold uppercase tracking-widest text-muted-foreground"
 const textareaCls = "w-full min-h-[80px] rounded-xl border border-[var(--border)] bg-muted/20 p-3 text-sm leading-relaxed text-[var(--text-main)] outline-none focus:border-primary custom-scrollbar"
 const digits = (v: string | null) => String(v ?? "").replace(/\D/g, "")
+/** Logo da empresa (ou o emoji, se não tiver logo) */
+function Logo({ d, size = 28 }: { d: Pick<Dest, "logo_url" | "emoji" | "nome">; size?: number }) {
+    return d.logo_url
+        ? <img src={d.logo_url} alt={d.nome} style={{ width: size, height: size }} className="rounded-md object-cover shrink-0 bg-white/5" />
+        : <span style={{ width: size, height: size, fontSize: size * 0.7 }} className="flex items-center justify-center shrink-0">{d.emoji}</span>
+}
 const fmt = (s: string) => new Date(s).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })
 
 export function VivaConnectHub({ channels }: { channels: Ch[] }) {
@@ -70,7 +76,25 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
     const hubChannels = channels.filter((c) => c.hub_enabled)
     const grupoChannels = channels.filter((c) => c.purpose === "grupo")
     const set = (id: number, patch: Partial<Dest>) => setDraft((d) => d.map((x) => (x.id === id ? { ...x, ...patch } : x)))
-    const destName = (id: number | null) => { const d = draft.find((x) => x.id === id); return d ? `${d.emoji} ${d.nome}` : "—" }
+    const destOf = (id: number | null) => draft.find((x) => x.id === id) ?? null
+    const [uploading, setUploading] = useState<number | null>(null)
+    const uploadLogo = async (d: Dest, file: File | undefined) => {
+        if (!file) return
+        if (!file.type.startsWith("image/")) return showError("Escolha uma imagem (PNG ou JPG).")
+        if (file.size > 2 * 1024 * 1024) return showError("Imagem muito grande (máx. 2 MB).")
+        setUploading(d.id)
+        const ext = (file.name.split(".").pop() || "png").toLowerCase()
+        const path = `hub-logos/${d.id}-${Date.now()}.${ext}`
+        const { error } = await supabase.storage.from("agent-photos").upload(path, file, { upsert: true, contentType: file.type })
+        if (error) { setUploading(null); return showError(`Não foi possível enviar: ${error.message}`) }
+        const url = supabase.storage.from("agent-photos").getPublicUrl(path).data.publicUrl
+        const { data, error: e2 } = await supabase.from("vivaconnect_hub_destinations").update({ logo_url: url, updated_at: new Date().toISOString() }).eq("id", d.id).select("id")
+        setUploading(null)
+        if (e2 || !data?.length) return showError(`Não foi possível salvar o logo: ${e2?.message ?? "sessão expirada."}`)
+        set(d.id, { logo_url: url })
+        qc.invalidateQueries({ queryKey: ["hub_destinations"] })
+        showSuccess(`Logo de ${d.nome} atualizado.`)
+    }
 
     const saveDest = async (d: Dest) => {
         if (!d.nome.trim()) return showError("Dê um nome.")
@@ -166,7 +190,7 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
                             <div key={d.id} className="rounded-xl border border-[var(--border)]">
                                 <button onClick={() => setOpen(aberto ? null : d.id)} className="w-full flex items-center gap-3 p-3 text-left">
                                     {aberto ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                                    <span className="text-lg">{d.emoji}</span>
+                                    <Logo d={d} />
                                     <span className="font-semibold text-sm text-[var(--text-main)] flex-1">{d.nome}{d.is_self && <span className="ml-2 text-[11px] font-normal text-muted-foreground">fica neste número</span>}</span>
                                     <span className="text-xs text-muted-foreground font-mono">{d.is_self ? "" : d.numero ? digits(d.numero) : "sem número"}</span>
                                     <span className={`text-[11px] px-2 py-0.5 rounded-full ${d.ativo && pronto ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "bg-muted text-muted-foreground"}`}>
@@ -175,8 +199,16 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
                                 </button>
                                 {aberto && (
                                     <div className="px-4 pb-4 space-y-3 border-t border-[var(--border)] pt-3">
-                                        <div className="grid grid-cols-1 md:grid-cols-[70px_1fr_220px] gap-3">
-                                            <div className="space-y-1"><p className={fieldLabel}>Emoji</p><Input value={d.emoji} onChange={(e) => set(d.id, { emoji: e.target.value })} className="bg-muted/20 text-center" /></div>
+                                        <div className="grid grid-cols-1 md:grid-cols-[auto_1fr_220px] gap-3">
+                                            <div className="space-y-1"><p className={fieldLabel}>Logo</p>
+                                                <label className="flex items-center gap-2 cursor-pointer h-10" title="Trocar o logo (PNG/JPG quadrado)">
+                                                    <Logo d={d} size={40} />
+                                                    <span className="text-xs text-primary flex items-center gap-1">
+                                                        {uploading === d.id ? <Loader2 className="animate-spin" size={12} /> : <Upload size={12} />} trocar
+                                                    </span>
+                                                    <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
+                                                        onChange={(e) => { uploadLogo(d, e.target.files?.[0]); e.target.value = "" }} />
+                                                </label></div>
                                             <div className="space-y-1"><p className={fieldLabel}>Nome</p><Input value={d.nome} onChange={(e) => set(d.id, { nome: e.target.value })} className="bg-muted/20" /></div>
                                             {!d.is_self && <div className="space-y-1"><p className={fieldLabel}>Número novo (WhatsApp)</p>
                                                 <Input value={d.numero ?? ""} onChange={(e) => set(d.id, { numero: e.target.value })} placeholder="83 99999-0000" className="bg-muted/20 font-mono" /></div>}
@@ -268,7 +300,7 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
                     <p className={fieldLabel}>Últimos direcionamentos</p>
                     {porDestino.length > 0 && (
                         <div className="flex flex-wrap gap-2 text-xs">
-                            {porDestino.map(({ d, n }) => <span key={d.id} className="px-2.5 py-1 rounded-full bg-muted/40">{d.emoji} {d.nome}: <b>{n}</b></span>)}
+                            {porDestino.map(({ d, n }) => <span key={d.id} className="px-2.5 py-1 rounded-full bg-muted/40 flex items-center gap-1.5"><Logo d={d} size={16} /> {d.nome}: <b>{n}</b></span>)}
                             {semResposta > 0 && <span className="px-2.5 py-1 rounded-full bg-muted/40">❔ aguardando resposta do menu: <b>{semResposta}</b></span>}
                             <span className="text-muted-foreground self-center">últimos 30 dias</span>
                         </div>
@@ -283,7 +315,10 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
                                     <p className="text-muted-foreground truncate">“{r.messages.filter((m) => m.de === "contato").map((m) => m.texto).join(" / ")}”</p>
                                 </div>
                                 <span className="shrink-0 text-right">
-                                    {r.status === "encaminhado" ? destName(r.destination_id) : r.status === "faculdade" ? "🎓 Faculdade" : "❔ menu enviado"}
+                                    {(() => {
+                                        const d = r.status === "encaminhado" ? destOf(r.destination_id) : r.status === "faculdade" ? draft.find((x) => x.is_self) ?? null : null
+                                        return d ? <span className="inline-flex items-center gap-1.5"><Logo d={d} size={16} /> {d.is_self ? "Faculdade" : d.nome}</span> : "❔ menu enviado"
+                                    })()}
                                     <span className="block text-[10px] text-muted-foreground">{r.metodo ?? ""}{r.lead_id ? ` · lead #${r.lead_id}` : ""}</span>
                                 </span>
                             </div>
