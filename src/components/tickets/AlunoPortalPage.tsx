@@ -56,6 +56,9 @@ export function AlunoPortalPage() {
 // 25/09) — o portal só mostra um aviso. Pra voltar a obrigar, troque pra true.
 // alunos.must_change_password continua marcando quem ainda usa o CPF como senha.
 const FORCE_PASSWORD_CHANGE = false
+// Aviso "você está usando o CPF como senha": DESLIGADO (26/09) — o padrão da FICV é o CPF,
+// igual ao Sponte. Pra voltar a sugerir a troca, troque pra true.
+const SUGGEST_PASSWORD_CHANGE = false
 
 function TicketPortalWrapper({ session, recovery, onRecovered }: { session: Session; recovery: boolean; onRecovered: () => void }) {
   const [aluno, setAluno] = useState<{ nome: string; email: string; cpf: string; must_change_password: boolean; app_instalado_em: string | null } | null>(null)
@@ -106,7 +109,7 @@ function TicketPortalWrapper({ session, recovery, onRecovered }: { session: Sess
 
   return (
     <>
-    {aluno.must_change_password && (
+    {SUGGEST_PASSWORD_CHANGE && aluno.must_change_password && (
       <div className="hidden sm:flex bg-[#1A1710] border-b border-[#C9A84C]/30 px-4 py-2 items-center justify-center gap-3 text-xs text-[#E0BF6A]">
         <span>Você está usando o CPF como senha. Recomendamos criar uma senha só sua.</span>
         <button onClick={() => setWantsNewPassword(true)} className="font-semibold underline underline-offset-2 hover:text-white">Criar minha senha</button>
