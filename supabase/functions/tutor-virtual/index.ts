@@ -11,6 +11,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { chatWithTools, corsHeaders, identify, jsonRes, searchKnowledge } from "../_shared/ai.ts";
 import { alunoBoletim, alunoOverview, alunoPagamento } from "../_shared/alunoSponte.ts";
+import { getSecret } from "../_shared/secrets.ts";
 
 const hoje = () => new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", weekday: "long", day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
 const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -41,10 +42,28 @@ Deno.serve(async (req) => {
     if (!ticketId) return jsonRes({ error: "ticket_id obrigatório." }, 400);
 
     const { data: t } = await db.from("tickets")
-        .select("id, protocolo, titulo, categoria, status, nivel, aluno_id, aluno_nome, ai_status, ai_turns, curso:courses(name)")
+        .select("id, protocolo, titulo, categoria, status, nivel, aluno_id, aluno_nome, aluno_email, ai_status, ai_turns, curso:courses(name), fila:ticket_queues(nome)")
         .eq("id", ticketId).maybeSingle();
     if (!t) return jsonRes({ error: "Chamado não encontrado." }, 404);
     const { data: s } = await db.from("tutor_settings").select("*").eq("id", 1).single();
+
+    // mensagem de passagem pra equipe: texto PADRÃO (Gestão > Tutor Virtual), não improvisado —
+    // sempre com horário de atendimento, aviso por e-mail e (se ativa) resposta pelo e-mail
+    const mensagemPassagem = async () => {
+        const { data: al } = t.aluno_id ? await db.from("alunos").select("nome, email").eq("id", t.aluno_id).maybeSingle() : { data: null };
+        const email = (al?.email || (t as any).aluno_email || "").trim();
+        const respondePorEmail = !!(await getSecret("RESEND_INBOUND_DOMAIN"));
+        const fila = String((t as any).fila?.nome ?? "responsável");
+        const vars: Record<string, string> = {
+            primeiro_nome: String(al?.nome ?? t.aluno_nome ?? "").trim().split(/\s+/)[0] || "Olá",
+            fila: /^secretaria$/i.test(fila) ? "da Secretaria" : /tutoria/i.test(fila) ? "de Tutoria" : `(${fila})`,
+            horario: s?.horario_atendimento ?? "de segunda a sexta-feira, das 8h às 20h (exceto feriados)",
+            email: email && !email.endsWith("@aluno.ficv.br") ? email : "cadastrado",
+            protocolo: t.protocolo,
+            resposta_email: respondePorEmail ? " — e pode responder direto por lá, que a sua resposta entra no chamado" : "",
+        };
+        return String(s?.handoff_message ?? "").replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? "");
+    };
 
     // ── aluno pede humano / equipe reativa ──────────────────────────────────
     if (body.action === "handoff" || body.action === "reactivate") {
@@ -56,7 +75,7 @@ Deno.serve(async (req) => {
             await db.from("tickets").update({ ai_status: "handed_off", status: "aberto" }).eq("id", t.id);
             await db.from("ticket_messages").insert({
                 ticket_id: t.id, autor_id: null, autor_nome: s?.nome ?? "Tutor Virtual", autor_role: "tutor_virtual", interno: false,
-                conteudo: "Certo! Passei seu chamado para a nossa equipe. Assim que alguém responder, você recebe aqui e por e-mail. 😉",
+                conteudo: await mensagemPassagem(),
             });
         } else {
             await db.from("tickets").update({ ai_status: "active", ai_turns: 0 }).eq("id", t.id);
@@ -88,7 +107,7 @@ Deno.serve(async (req) => {
 
     try {
         if ((t.ai_turns ?? 0) >= s.max_turns) {
-            await handoff(`limite de ${s.max_turns} respostas automáticas`, "", "Vou passar seu chamado para a nossa equipe continuar com você. Assim que alguém responder, você recebe aqui e por e-mail.");
+            await handoff(`limite de ${s.max_turns} respostas automáticas`, "", await mensagemPassagem());
             return jsonRes({ handoff: true, reason: "max_turns" });
         }
 
@@ -134,7 +153,7 @@ Deno.serve(async (req) => {
         const system = [
             s.system_prompt,
             `Seu nome é ${s.nome}. Agora é ${hoje()} (horário de Brasília).`,
-            s.handoff_instructions + `\nPara passar para a equipe, chame a ferramenta passar_para_equipe E escreva uma resposta curta avisando o aluno que a equipe vai continuar por aqui (nesse caso NÃO pergunte se pode ajudar em mais alguma coisa).`,
+            s.handoff_instructions + `\nPara passar para a equipe, chame a ferramenta passar_para_equipe (o sistema envia ao aluno o aviso padrão com horário de atendimento e e-mail — você não precisa escrever esse aviso).`,
             `Chamado ${t.protocolo} — assunto: ${t.titulo} (categoria: ${t.categoria}${t.nivel ? `, ${t.nivel === "pos" ? "Pós-graduação" : "Graduação"}` : ""}${(t as any).curso?.name ? `, curso: ${(t as any).curso.name}` : ""}).`,
             `Aluno: ${al?.nome ?? t.aluno_nome}${A ? "" : " (sem vínculo com o sistema acadêmico — ferramentas de consulta indisponíveis)"}.`,
             `Formatação: texto simples, sem markdown de títulos; valores em R$; datas no formato dd/mm/aaaa.`,
@@ -142,7 +161,9 @@ Deno.serve(async (req) => {
         ].join("\n\n");
 
         const { text, toolsUsed } = await chatWithTools(s.chat_model, Number(s.temperature), [{ role: "system", content: system }, ...conversa], TOOLS, run);
-        const reply = text || "Vou passar seu chamado para a nossa equipe, que vai continuar com você por aqui.";
+        // passou pra equipe: no lugar do texto da IA vai a mensagem padrão (horário, e-mail, protocolo)
+        const vaiPraEquipe = !!handoffCall || !text;
+        const reply = vaiPraEquipe ? await mensagemPassagem() : text;
 
         await db.from("ticket_messages").insert({ ticket_id: t.id, autor_id: null, autor_nome: s.nome, autor_role: "tutor_virtual", interno: false, conteudo: reply });
         await db.from("tickets").update({ ai_turns: (t.ai_turns ?? 0) + 1, ...(handoffCall || !text ? {} : { status: "aguardando_aluno" }) }).eq("id", t.id);
@@ -152,7 +173,7 @@ Deno.serve(async (req) => {
         return jsonRes({ ok: true, handoff: !!(hc || !text), tools: toolsUsed, sources: (hits ?? []).length });
     } catch (e) {
         console.error("tutor-virtual:", e);
-        await handoff(`erro no tutor: ${(e as Error).message.slice(0, 200)}`, "", "Vou passar seu chamado para a nossa equipe, que vai continuar com você por aqui.");
+        await handoff(`erro no tutor: ${(e as Error).message.slice(0, 200)}`, "", await mensagemPassagem().catch(() => "Vou passar seu chamado para a nossa equipe, que vai continuar com você por aqui."));
         return jsonRes({ error: (e as Error).message }, 500);
     }
 });

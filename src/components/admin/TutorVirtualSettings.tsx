@@ -15,6 +15,7 @@ import { showError, showSuccess } from "@/utils/toast"
 interface TutorSettings {
     enabled: boolean; nome: string; system_prompt: string; handoff_instructions: string
     chat_model: string; temperature: number; max_turns: number
+    horario_atendimento: string; handoff_message: string
 }
 const fieldLabel = "text-xs font-bold uppercase tracking-widest text-muted-foreground"
 const textareaCls = "w-full min-h-[150px] rounded-xl border border-[var(--border)] bg-muted/20 p-3 text-sm leading-relaxed text-[var(--text-main)] outline-none focus:border-primary custom-scrollbar"
@@ -68,6 +69,7 @@ export function TutorVirtualSettings() {
             enabled: form.enabled, nome: form.nome.trim() || "Tutor Virtual", system_prompt: form.system_prompt,
             handoff_instructions: form.handoff_instructions, chat_model: form.chat_model.trim(),
             temperature: Number(form.temperature), max_turns: Number(form.max_turns),
+            horario_atendimento: form.horario_atendimento.trim(), handoff_message: form.handoff_message,
             updated_at: new Date().toISOString(), updated_by: user?.id ?? null,
         }).eq("id", 1).select("id")
         setSaving(false)
@@ -133,6 +135,15 @@ export function TutorVirtualSettings() {
                         <textarea className={textareaCls} value={form.system_prompt} onChange={(e) => set("system_prompt", e.target.value)} /></div>
                     <div className="space-y-2"><Label className={fieldLabel}>Quando passar para a equipe</Label>
                         <textarea className={`${textareaCls} min-h-[130px]`} value={form.handoff_instructions} onChange={(e) => set("handoff_instructions", e.target.value)} /></div>
+                    <div className="space-y-2"><Label className={fieldLabel}>Horário de atendimento da equipe</Label>
+                        <Input value={form.horario_atendimento} onChange={(e) => set("horario_atendimento", e.target.value)} className="bg-muted/20" /></div>
+                    <div className="space-y-2"><Label className={fieldLabel}>Mensagem ao passar para a equipe</Label>
+                        <textarea className={`${textareaCls} min-h-[140px]`} value={form.handoff_message} onChange={(e) => set("handoff_message", e.target.value)} />
+                        <p className="text-[11px] text-muted-foreground">
+                            Enviada sempre que o chamado vai pra equipe (a IA não improvisa). Variáveis: {"{primeiro_nome}"}, {"{fila}"}, {"{horario}"}, {"{email}"}, {"{protocolo}"},
+                            {" {resposta_email}"} (vira "e pode responder direto por lá…" só quando a resposta por e-mail estiver ativa).
+                        </p>
+                    </div>
                     <Button onClick={save} disabled={saving} className="w-full">{saving ? <Loader2 className="animate-spin" size={16} /> : "Salvar"}</Button>
                 </CardContent>
             </Card>
