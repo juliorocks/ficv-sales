@@ -50,7 +50,7 @@ Deno.serve(async (req) => {
             out[status === "sent" ? "sent" : status === "skipped" ? "skipped" : "failed"]++;
         };
         if (Date.now() - new Date(row.created_at).getTime() > 24 * 3600_000) { await finish("skipped", { error: "expirado (>24h na fila)" }); continue; }
-        const { data: t } = await db.from("tickets").select("id, protocolo, titulo, categoria, status, aluno_id, aluno_nome, aluno_email, created_at")
+        const { data: t } = await db.from("tickets").select("id, protocolo, titulo, categoria, status, aluno_id, aluno_nome, aluno_email, created_at, encerrado_pelo_aluno")
             .eq("id", row.ticket_id).maybeSingle();
         if (!t) { await finish("skipped", { error: "chamado não existe mais" }); continue; }
         const { data: al } = t.aluno_id ? await db.from("alunos").select("nome, email, must_change_password").eq("id", t.aluno_id).maybeSingle() : { data: null };
@@ -103,6 +103,7 @@ Deno.serve(async (req) => {
                 { label: "Responder no Portal", url: PORTAL_URL });
         } else if (row.kind === "resolved") {
             if (t.status !== "resolvido") { await finish("skipped", { error: `status mudou para ${t.status}` }); continue; }
+            if ((t as any).encerrado_pelo_aluno) { await finish("skipped", { error: "o próprio aluno encerrou" }); continue; }
             subject = `Chamado ${tag} resolvido — ${t.titulo}`;
             html = L("Chamado resolvido", `<p>Olá, ${escHtml(nome)}!</p>
                 <p>Marcamos o chamado <b style="color:#C9A84C">${escHtml(t.protocolo)}</b> — ${escHtml(t.titulo)} como <b>resolvido</b>.</p>

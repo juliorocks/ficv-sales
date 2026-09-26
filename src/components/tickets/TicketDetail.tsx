@@ -558,6 +558,25 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   }
 
   const canEvaluate = !isStaff && (t.status === 'resolvido') && !t.avaliado
+  // aluno encerra o próprio chamado: Tutor sai ANTES da mensagem (senão ele responderia a ela),
+  // sem e-mail de "resolvido", e a avaliação já abre
+  const canClose = !isStaff && !['resolvido', 'fechado'].includes(t.status)
+  const encerrarChamado = async () => {
+    if (!window.confirm('Encerrar este chamado? Use quando o seu problema já foi resolvido.')) return
+    const { data, error } = await supabase.from('tickets').update({
+      status: 'resolvido', resolved_at: new Date().toISOString(), ai_status: 'off', encerrado_pelo_aluno: true,
+    }).eq('id', ticket.id).select('id')
+    if (error || !data?.length) { showError('Não foi possível encerrar agora. Tente de novo.'); return }
+    await supabase.from('ticket_messages').insert({
+      ticket_id: ticket.id, autor_id: currentUserId, autor_nome: currentUserName, autor_role: 'aluno', interno: false,
+      conteudo: '✅ Encerrei este chamado — meu problema foi resolvido.',
+    })
+    qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
+    qc.invalidateQueries({ queryKey: ['ticket-messages', ticket.id] })
+    qc.invalidateQueries({ queryKey: ['tickets'] })
+    showSuccess('Chamado encerrado. Conta pra gente como foi o atendimento?')
+    setShowEval(true)
+  }
 
   return (
     <Dialog open onOpenChange={onClose}>
@@ -581,6 +600,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                 Aberto por <strong>{t.aluno_nome}</strong> · {format(new Date(t.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
                 {(t.curso || (t as any).curso_nome) && <> · <span className="text-[var(--primary)]/80">{(t as any).curso_nome ?? t.curso?.name}</span></>}
                 {(t as any).nivel && <> · {(t as any).nivel === 'pos' ? 'Pós-graduação' : 'Graduação'}</>}
+                {isStaff && (t as any).encerrado_pelo_aluno && <> · <span className="text-green-500">✅ encerrado pelo próprio aluno</span></>}
                 {isStaff && (t as any).ai_status === 'active' && (
                   <> · <span className="text-purple-400">🤖 Tutor Virtual atendendo</span>
                   {' '}<button onClick={assumirConversa} className="ml-1 px-2 py-0.5 rounded-md bg-primary text-white text-[11px] font-semibold hover:opacity-90">Assumir conversa</button></>
@@ -627,6 +647,16 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
             )}
           </div>
         </DialogHeader>
+
+        {/* Aluno: encerrar o próprio chamado */}
+        {canClose && (
+          <div className="mx-6 mt-3 shrink-0 flex justify-end">
+            <button onClick={encerrarChamado}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-[var(--border)] text-[var(--text-muted)] hover:text-green-500 hover:border-green-500/50 transition-colors">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Meu problema foi resolvido — encerrar chamado
+            </button>
+          </div>
+        )}
 
         {/* Avaliação pendente */}
         {canEvaluate && !showEval && (
