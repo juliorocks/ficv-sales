@@ -532,6 +532,16 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
     qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
     qc.invalidateQueries({ queryKey: ['ticket-messages', ticket.id] })
   }
+  // equipe entra na conversa: Tutor sai deste chamado e ele vai pra "Em atendimento" com você
+  const assumirConversa = async () => {
+    const { data, error } = await supabase.from('tickets').update({
+      ai_status: 'handed_off', status: 'em_atendimento', ...(t.atendente_id ? {} : { atendente_id: currentUserId }),
+    }).eq('id', ticket.id).select('id')
+    if (error || !data?.length) { showError('Não foi possível assumir agora.'); return }
+    qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
+    qc.invalidateQueries({ queryKey: ['tickets'] })
+    showSuccess('Você assumiu a conversa — o Tutor Virtual não responde mais este chamado.')
+  }
   const devolverAoTutor = async () => {
     const { error } = await supabase.functions.invoke('tutor-virtual', { body: { action: 'reactivate', ticket_id: ticket.id } })
     if (error) { showError('Não foi possível reativar o Tutor Virtual.'); return }
@@ -571,8 +581,11 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                 Aberto por <strong>{t.aluno_nome}</strong> · {format(new Date(t.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
                 {(t.curso || (t as any).curso_nome) && <> · <span className="text-[var(--primary)]/80">{(t as any).curso_nome ?? t.curso?.name}</span></>}
                 {(t as any).nivel && <> · {(t as any).nivel === 'pos' ? 'Pós-graduação' : 'Graduação'}</>}
-                {isStaff && (t as any).ai_status === 'active' && <> · <span className="text-purple-400">🤖 Tutor Virtual atendendo</span></>}
-                {isStaff && (t as any).ai_status === 'handed_off' && (
+                {isStaff && (t as any).ai_status === 'active' && (
+                  <> · <span className="text-purple-400">🤖 Tutor Virtual atendendo</span>
+                  {' '}<button onClick={assumirConversa} className="ml-1 px-2 py-0.5 rounded-md bg-primary text-white text-[11px] font-semibold hover:opacity-90">Assumir conversa</button></>
+                )}
+                {isStaff && ['handed_off', 'off'].includes((t as any).ai_status) && (
                   <> · <button onClick={devolverAoTutor} className="text-purple-400 hover:underline">devolver ao Tutor Virtual</button></>
                 )}
               </p>

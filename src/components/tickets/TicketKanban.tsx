@@ -16,7 +16,11 @@ import type { Ticket, TicketStatus } from '../../types/database'
 import { showError, showSuccess } from '../../utils/toast'
 import { Input } from '../ui/input'
 
-const COLUMNS: { status: TicketStatus; label: string; hint: string; accent: string }[] = [
+// 1ª coluna: chamados que o Tutor Virtual está atendendo (ai_status = 'active') — a equipe
+// acompanha abrindo o card e só entra se quiser (Assumir / arrastar pra outra coluna).
+const TUTOR = 'tutor' as const
+const COLUMNS: { status: TicketStatus | typeof TUTOR; label: string; hint: string; accent: string }[] = [
+  { status: TUTOR, label: '🤖 Tutor Virtual', hint: 'IA atendendo — abra pra acompanhar', accent: 'border-t-violet-500' },
   { status: 'aberto', label: 'Novos', hint: 'Ninguém respondeu ainda', accent: 'border-t-blue-500' },
   { status: 'em_atendimento', label: 'Em atendimento', hint: 'Equipe trabalhando', accent: 'border-t-amber-500' },
   { status: 'aguardando_aluno', label: 'Aguardando aluno', hint: 'Esperando resposta do aluno', accent: 'border-t-purple-500' },
@@ -83,12 +87,15 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName }: { tickets: T
 
   const onDragEnd = async (r: DropResult) => {
     if (!r.destination || r.destination.droppableId === r.source.droppableId) return
+    if (r.destination.droppableId === TUTOR) return // o tutor só entra pelo "devolver ao Tutor Virtual" dentro do chamado
     const status = r.destination.droppableId as TicketStatus
     const id = Number(r.draggableId)
+    const assumindo = r.source.droppableId === TUTOR  // tirar do Tutor = um humano assume
     // otimista: move o card já
-    qc.setQueryData<Ticket[]>(['tickets', 'dashboard'], (old) => old?.map((t) => (t.id === id ? { ...t, status } : t)))
+    qc.setQueryData<Ticket[]>(['tickets', 'dashboard'], (old) => old?.map((t) => (t.id === id ? { ...t, status, ...(assumindo ? { ai_status: 'handed_off' } : {}) } as Ticket : t)))
     const { data, error } = await supabase.from('tickets').update({
       status,
+      ...(assumindo ? { ai_status: 'handed_off' } : {}),
       ...(status === 'resolvido' ? { resolved_at: new Date().toISOString() } : {}),
     }).eq('id', id).select('id')
     if (error || !data?.length) {
@@ -118,9 +125,10 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName }: { tickets: T
       </div>
 
       <DragDropContext onDragEnd={onDragEnd}>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
+        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-4 items-start">
           {COLUMNS.map((col) => {
-            const items = visible.filter((t) => t.status === col.status)
+            const comTutor = (t: Ticket) => (t as any).ai_status === 'active'
+            const items = visible.filter((t) => col.status === TUTOR ? comTutor(t) : !comTutor(t) && t.status === col.status)
               .sort((a, b) => new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime())
             return (
               <div key={col.status} className={`rounded-xl bg-[var(--bg-card)]/60 border border-[var(--border)] border-t-4 ${col.accent}`}>
@@ -131,7 +139,7 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName }: { tickets: T
                   </div>
                   <p className="text-[11px] text-[var(--text-muted)]">{col.hint}</p>
                 </div>
-                <Droppable droppableId={col.status}>
+                <Droppable droppableId={col.status} isDropDisabled={col.status === TUTOR}>
                   {(prov, snap) => (
                     <div ref={prov.innerRef} {...prov.droppableProps}
                       className={`px-2 pb-2 space-y-2 min-h-[120px] max-h-[70vh] overflow-y-auto custom-scrollbar rounded-b-xl ${snap.isDraggingOver ? 'bg-[var(--primary)]/5' : ''}`}>
