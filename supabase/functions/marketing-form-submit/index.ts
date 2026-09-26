@@ -47,8 +47,19 @@ type MarketingFormField = {
     type: "text" | "phone" | "email" | "select" | "checkbox" | "radio" | "static_text" | "spacer";
     label?: string;
     required?: boolean;
-    role?: "name" | "whatsapp" | "email" | null;
+    role?: "name" | "whatsapp" | "email" | "preferred_contact" | null;
 };
+
+// mesma heurística do sync-sendpulse-forms (supabase/functions/sync-sendpulse-forms/index.ts),
+// aplicada aqui à resposta de um campo explicitamente marcado role:'preferred_contact'
+// (em vez de adivinhar por regex no NOME da variável, que é o que o SendPulse força).
+function normalizePreferredContact(raw: unknown): "whatsapp" | "email" | "phone" | null {
+    const v = String(raw ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+    if (/whats|zap/.test(v)) return "whatsapp";
+    if (/e-?mail/.test(v)) return "email";
+    if (/liga|telefon|chamada/.test(v)) return "phone";
+    return null;
+}
 
 Deno.serve(async (req) => {
     if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -148,10 +159,15 @@ Deno.serve(async (req) => {
     const nameField = fields.find((f) => f.role === "name");
     const phoneField = fields.find((f) => f.role === "whatsapp");
     const emailField = fields.find((f) => f.role === "email");
+    const preferredField = fields.find((f) => f.role === "preferred_contact");
     const nome = String((nameField && values[nameField.id]) ?? "").trim() || "Novo Lead (Formulário)";
     const telefone = phoneField ? normPhone(values[phoneField.id]) : "";
     const email = emailField ? normEmail(values[emailField.id]) : "";
-    const preferredContact = telefone ? "whatsapp" : null;
+    // se o form tem um campo explícito de canal preferido, a resposta da PESSOA manda;
+    // sem esse campo, mantém o comportamento anterior (assume whatsapp se telefone foi preenchido)
+    const preferredContact = preferredField
+        ? normalizePreferredContact(values[preferredField.id])
+        : (telefone ? "whatsapp" : null);
     const extraObs = fields
         .filter((f) => !f.role && f.type !== "static_text" && f.type !== "spacer" && values[f.id] != null && values[f.id] !== "")
         .map((f) => `${f.label || f.id}: ${values[f.id]}`).join("\n");

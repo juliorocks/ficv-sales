@@ -116,11 +116,12 @@ export interface MarketingFormField {
     content?: string
     height?: number
     width?: 'full' | 'half'
-    role?: 'name' | 'whatsapp' | 'email' | null
+    role?: 'name' | 'whatsapp' | 'email' | 'preferred_contact' | null
 }
 
 export interface MarketingFormDesign {
     background_color?: string
+    text_color?: string
     border_color?: string
     border_radius?: number
     font?: string

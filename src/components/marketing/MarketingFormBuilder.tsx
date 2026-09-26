@@ -27,6 +27,10 @@ const FIELD_PALETTE: { type: MarketingFormFieldType; label: string }[] = [
 
 const PREVIEW_VARS = { nome: "João da Silva", telefone: "5511988887777", email: "joao@example.com", curso: "Curso Exemplo" }
 
+// campos-semente (Nome/WhatsApp/Email) não podem ser removidos — o campo de canal
+// preferido (preferred_contact) é opcional, o admin pode adicionar/remover livremente
+const LOCKED_ROLES = ["name", "whatsapp", "email"]
+
 interface MarketingFormBuilderProps {
     id: number
     onBack: () => void
@@ -171,7 +175,7 @@ export function MarketingFormBuilder({ id, onBack }: MarketingFormBuilderProps) 
                                             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => moveField(i, 1)} disabled={i === form.fields.length - 1}>
                                                 <ArrowDown className="h-3.5 w-3.5" />
                                             </Button>
-                                            {!f.role && (
+                                            {!(f.role && LOCKED_ROLES.includes(f.role)) && (
                                                 <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => removeField(f.id)}>
                                                     <Trash2 className="h-3.5 w-3.5" />
                                                 </Button>
@@ -210,17 +214,29 @@ export function MarketingFormBuilder({ id, onBack }: MarketingFormBuilderProps) 
                                                 Obrigatório
                                             </label>
                                             {(selectedField.type === "select" || selectedField.type === "radio") && (
-                                                <div className="space-y-2">
-                                                    <Label>Opções (uma por linha)</Label>
-                                                    <Textarea
-                                                        value={(selectedField.options ?? []).join("\n")}
-                                                        onChange={(e) => updateField(selectedField.id, { options: e.target.value.split("\n").filter(Boolean) })}
-                                                    />
-                                                </div>
+                                                <>
+                                                    <div className="space-y-2">
+                                                        <Label>Opções (uma por linha)</Label>
+                                                        <Textarea
+                                                            value={(selectedField.options ?? []).join("\n")}
+                                                            onChange={(e) => updateField(selectedField.id, { options: e.target.value.split("\n") })}
+                                                        />
+                                                    </div>
+                                                    <label className="flex items-center gap-2 text-sm">
+                                                        <input type="checkbox" checked={selectedField.role === "preferred_contact"}
+                                                            onChange={(e) => updateField(selectedField.id, { role: e.target.checked ? "preferred_contact" : null })} />
+                                                        Este campo define o canal de contato preferido
+                                                    </label>
+                                                    {selectedField.role === "preferred_contact" && (
+                                                        <p className="text-[11px] text-muted-foreground">
+                                                            Se a resposta contiver "whatsapp"/"zap", a IA de Atendimento já inicia contato automático pelo WhatsApp assim que o lead entra.
+                                                        </p>
+                                                    )}
+                                                </>
                                             )}
                                         </>
                                     )}
-                                    {selectedField.role && (
+                                    {selectedField.role && LOCKED_ROLES.includes(selectedField.role) && (
                                         <p className="text-[11px] text-muted-foreground">Este campo alimenta o campo "{selectedField.role}" do lead — rótulo e obrigatoriedade podem ser ajustados, mas ele não pode ser removido.</p>
                                     )}
                                 </div>
@@ -326,6 +342,10 @@ export function MarketingFormBuilder({ id, onBack }: MarketingFormBuilderProps) 
                         <div className="space-y-2">
                             <Label>Cor de fundo</Label>
                             <input type="color" value={form.design.background_color || "#ffffff"} onChange={(e) => updateDesign({ background_color: e.target.value })} className="w-full h-10 rounded" />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Cor do texto</Label>
+                            <input type="color" value={form.design.text_color || "#111827"} onChange={(e) => updateDesign({ text_color: e.target.value })} className="w-full h-10 rounded" />
                         </div>
                         <div className="space-y-2">
                             <Label>Cor da borda</Label>

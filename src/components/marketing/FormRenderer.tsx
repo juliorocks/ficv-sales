@@ -23,22 +23,29 @@ export function FormRenderer({
     lgpdEnabled, lgpdText, lgpdChecked, onLgpdChange,
     submitLabel = "Enviar", submitting, onSubmit, children,
 }: FormRendererProps) {
+    // Cor de texto sempre explícita: este componente é embedado tanto no preview do
+    // builder (que pode estar em tema escuro) quanto num iframe em site externo — nunca
+    // pode herdar a cor de texto do app, senão fica ilegível contra o fundo do formulário.
+    const textColor = design.text_color || "#111827"
     const fieldStyle: React.CSSProperties = {
         width: "100%",
         padding: FIELD_SIZE_PADDING[design.field_size ?? "md"],
         borderRadius: (design.border_radius ?? 8) - 2,
         border: `1px solid ${design.border_color || "#ddd"}`,
         background: design.field_background_color || "#fff",
+        color: textColor,
         fontFamily: design.font || "inherit",
         fontSize: 14,
         boxSizing: "border-box",
     }
+    const optionsOf = (f: MarketingFormField) => (f.options ?? []).filter((opt) => opt.trim() !== "")
 
     return (
         <form
             onSubmit={onSubmit}
             style={{
                 background: design.background_color || "#fff",
+                color: textColor,
                 border: design.border_color ? `1px solid ${design.border_color}` : undefined,
                 borderRadius: design.border_radius ?? 8,
                 padding: 24,
@@ -50,10 +57,10 @@ export function FormRenderer({
         >
             {fields.map((f) => {
                 if (f.type === "spacer") return <div key={f.id} style={{ height: f.height ?? 16 }} />
-                if (f.type === "static_text") return <p key={f.id} style={{ margin: 0, fontFamily: design.font }}>{f.content}</p>
+                if (f.type === "static_text") return <p key={f.id} style={{ margin: 0, color: textColor, fontFamily: design.font }}>{f.content}</p>
 
                 const label = (
-                    <label style={{ fontSize: 13, fontWeight: 600, display: f.type === "checkbox" ? "none" : "block", marginBottom: 4 }}>
+                    <label style={{ fontSize: 13, fontWeight: 600, color: textColor, display: f.type === "checkbox" ? "none" : "block", marginBottom: 4 }}>
                         {f.label}{f.required ? " *" : ""}
                     </label>
                 )
@@ -78,13 +85,13 @@ export function FormRenderer({
                                 style={fieldStyle}
                             >
                                 <option value="">{f.placeholder || "Selecione..."}</option>
-                                {(f.options ?? []).map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                                {optionsOf(f).map((opt) => <option key={opt} value={opt}>{opt}</option>)}
                             </select>
                         )}
                         {f.type === "radio" && (
                             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                                {(f.options ?? []).map((opt) => (
-                                    <label key={opt} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 400 }}>
+                                {optionsOf(f).map((opt) => (
+                                    <label key={opt} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 400, color: textColor }}>
                                         <input type="radio" name={f.id} value={opt} checked={values[f.id] === opt}
                                             onChange={() => onChange(f.id, opt)} />
                                         {opt}
@@ -93,7 +100,7 @@ export function FormRenderer({
                             </div>
                         )}
                         {f.type === "checkbox" && (
-                            <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13, fontWeight: 400 }}>
+                            <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13, fontWeight: 400, color: textColor }}>
                                 <input type="checkbox" checked={!!values[f.id]} onChange={(e) => onChange(f.id, e.target.checked)}
                                     style={{ marginTop: 2 }} />
                                 <span>{f.label}{f.required ? " *" : ""}</span>
@@ -105,7 +112,7 @@ export function FormRenderer({
             })}
 
             {lgpdEnabled && (
-                <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, fontWeight: 400 }}>
+                <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, fontWeight: 400, color: textColor }}>
                     <input type="checkbox" checked={!!lgpdChecked} onChange={(e) => onLgpdChange?.(e.target.checked)}
                         style={{ marginTop: 2 }} />
                     <span>{lgpdText}</span>
