@@ -3,7 +3,7 @@
  * Permite abrir novos tickets e acompanhar os seus.
  * Props passadas pelo AlunoPortalPage (auth separado do sistema interno).
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import type { Ticket, TicketCategoria, TicketPrioridade } from '../../types/database'
@@ -13,7 +13,7 @@ import { Textarea } from '../ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog'
 import { TicketDetail } from './TicketDetail'
-import { AlunoInicio, AlunoFinanceiro, AlunoNotas } from './AlunoPainel'
+import { AlunoInicio, AlunoFinanceiro, AlunoNotas, useOverview } from './AlunoPainel'
 import { showSuccess, showError } from '../../utils/toast'
 import {
   Plus, Ticket as TicketIcon, Clock, CheckCircle2,
@@ -50,6 +50,34 @@ const STATUS_COLORS: Record<string, string> = {
   fechado: 'bg-gray-500/15 text-gray-400 border-gray-500/30',
 }
 
+// ── Curso do chamado = matrículas do aluno no Sponte ─────────
+// O nome do Sponte ("Bacharelado Em Teologia - Ead (Teologia Ead 2026.1)") é ligado ao
+// catálogo do CRM (courses) quando todas as palavras do curso aparecem nele; EAD ×
+// Presencial pela palavra "ead". O nível (graduação/pós) decide a fila da Tutoria.
+const norm = (v: string) => v.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+// "Bacharelado Em Teologia - Ead (Teologia Ead 2026.1)" → "Bacharelado Em Teologia - Ead" (mesmo curso, outra turma)
+const semTurma = (v: string) => v.replace(/\s*\([^)]*\)\s*$/, '').trim()
+const cursoBase = (v: string) => norm(semTurma(v))
+const PALAVRAS_VAZIAS = new Set(['e', 'de', 'do', 'da', 'dos', 'das', 'em', 'o', 'a', 'presencial'])
+function cursoDoCatalogo(nomeSponte: string, cursos: { id: number; name: string }[]): number | null {
+  const alvo = norm(nomeSponte)
+  const ead = /\bead\b/.test(alvo)
+  let melhor: { id: number; n: number } | null = null
+  for (const c of cursos) {
+    const nome = norm(c.name)
+    if (/\bead\b/.test(nome) !== ead && /(\bead\b|presencial)/.test(nome)) continue
+    const toks = nome.split(/[^a-z0-9]+/).filter(t => t && !PALAVRAS_VAZIAS.has(t) && t !== 'ead')
+    if (toks.length && toks.every(t => alvo.includes(t)) && (!melhor || toks.length > melhor.n)) melhor = { id: c.id, n: toks.length }
+  }
+  return melhor?.id ?? null
+}
+const nivelDoCurso = (nome: string): 'pos' | 'graduacao' | null => {
+  const n = norm(nome)
+  if (/\bpos\b|pos-|especializa|mba/.test(n)) return 'pos'
+  if (/bacharel|licencia|tecnolog|gradua/.test(n)) return 'graduacao'
+  return null
+}
+
 // ── New Ticket Form ──────────────────────────────────────────
 
 interface NewTicketDialogProps {
@@ -76,6 +104,21 @@ function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose }: NewTicketD
       return data ?? []
     },
   })
+  // matrículas do próprio aluno no Sponte (vigentes primeiro, sem repetir o curso)
+  const ov = useOverview()
+  const minhas = (() => {
+    const vistos = new Set<string>()
+    return [...(ov.data?.matriculas ?? [])]
+      .sort((a, b) => Number(/vigente|ativ|cursando/i.test(b.situacao ?? '')) - Number(/vigente|ativ|cursando/i.test(a.situacao ?? ''))
+        || String(b.data_matricula).localeCompare(String(a.data_matricula)))
+      .filter(m => m.curso && !vistos.has(cursoBase(m.curso)) && vistos.add(cursoBase(m.curso)))
+  })()
+  const usaSponte = minhas.length > 0
+  // já vem marcada a matrícula atual (quem tem um curso só não precisa escolher)
+  const [autoSel, setAutoSel] = useState(false)
+  useEffect(() => {
+    if (usaSponte && !autoSel && cursoId === '__nenhum__') { setCursoId('m:0'); setAutoSel(true) }
+  }, [usaSponte, autoSel, cursoId])
 
   const submit = async () => {
     if (!titulo.trim() || !descricao.trim() || !categoria) {
@@ -93,7 +136,15 @@ function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose }: NewTicketD
         aluno_id: alunoId,
         aluno_nome: alunoNome,
         aluno_email: alunoEmail,
-        curso_id: (cursoId && cursoId !== '__nenhum__') ? Number(cursoId) : null,
+        ...(() => {
+          if (!cursoId || cursoId === '__nenhum__') return { curso_id: null }
+          if (usaSponte && cursoId.startsWith('m:')) {
+            const m = minhas[Number(cursoId.slice(2))]
+            if (!m?.curso) return { curso_id: null }
+            return { curso_nome: m.curso, curso_id: cursoDoCatalogo(m.curso, cursos as any), nivel: nivelDoCurso(m.curso) }
+          }
+          return { curso_id: Number(cursoId) }
+        })(),
       }).select().single()
       if (tErr) throw tErr
 
@@ -177,14 +228,23 @@ function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose }: NewTicketD
             </div>
 
             <div>
-              <label className="text-xs font-medium text-[var(--text-muted)] mb-1 block">Curso (opcional)</label>
+              <label className="text-xs font-medium text-[var(--text-muted)] mb-1 block">{usaSponte ? 'Curso (das suas matrículas)' : 'Curso (opcional)'}</label>
               <Select value={cursoId} onValueChange={setCursoId}>
                 <SelectTrigger className="bg-[var(--bg-main)] border-[var(--border)] text-[var(--text-main)]">
                   <SelectValue placeholder="Selecione o curso relacionado..." />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__nenhum__">— Não se aplica —</SelectItem>
-                  {['Graduação', 'Pós-Graduação', 'Curso Livre'].map(tipo => {
+                  {usaSponte ? (
+                    <div>
+                      <div className="px-2 py-1.5 text-xs font-bold text-[var(--text-muted)] uppercase tracking-wide">Minhas matrículas</div>
+                      {minhas.map((m, i) => (
+                        <SelectItem key={m.contrato_id} value={`m:${i}`}>
+                          {semTurma(m.curso!)}{m.situacao && !/vigente|ativ|cursando/i.test(m.situacao) ? ` (${m.situacao.toLowerCase()})` : ''}
+                        </SelectItem>
+                      ))}
+                    </div>
+                  ) : ['Graduação', 'Pós-Graduação', 'Curso Livre'].map(tipo => {
                     const grupo = cursos.filter((c: any) => c.type === tipo)
                     if (!grupo.length) return null
                     return (
@@ -403,7 +463,7 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, onLogout }: Ticke
                     </p>
                     <p className="text-xs text-[var(--text-muted)] mt-1">
                       {CATEGORIAS.find(c => c.value === t.categoria)?.label}
-                      {t.curso && <> · <span className="text-[var(--primary)]/70">{t.curso.name}</span></>}
+                      {(t.curso?.name || (t as any).curso_nome) && <> · <span className="text-[var(--primary)]/70">{t.curso?.name ?? (t as any).curso_nome}</span></>}
                       {' · '}{formatDistanceToNow(new Date(t.updated_at), { addSuffix: true, locale: ptBR })}
                     </p>
                   </div>

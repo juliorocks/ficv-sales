@@ -569,7 +569,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
               </DialogTitle>
               <p className="text-xs text-[var(--text-muted)] mt-1">
                 Aberto por <strong>{t.aluno_nome}</strong> · {format(new Date(t.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                {t.curso && <> · <span className="text-[var(--primary)]/80">{t.curso.name}</span></>}
+                {(t.curso || (t as any).curso_nome) && <> · <span className="text-[var(--primary)]/80">{(t as any).curso_nome ?? t.curso?.name}</span></>}
                 {(t as any).nivel && <> · {(t as any).nivel === 'pos' ? 'Pós-graduação' : 'Graduação'}</>}
                 {isStaff && (t as any).ai_status === 'active' && <> · <span className="text-purple-400">🤖 Tutor Virtual atendendo</span></>}
                 {isStaff && (t as any).ai_status === 'handed_off' && (
