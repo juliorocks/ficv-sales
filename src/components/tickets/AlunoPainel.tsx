@@ -5,7 +5,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
-import { AlertCircle, BookOpen, CalendarDays, CheckCircle2, Copy, CreditCard, ExternalLink, GraduationCap, Loader2, RefreshCw, Wallet } from 'lucide-react'
+import { AlertCircle, BookOpen, CalendarDays, CheckCircle2, ChevronsUpDown, Copy, CreditCard, ExternalLink, GraduationCap, Loader2, RefreshCw, Wallet } from 'lucide-react'
 import { showError, showSuccess } from '../../utils/toast'
 
 export interface Parcela {
@@ -231,12 +231,32 @@ export function AlunoNotas() {
 
   return (
     <div className="space-y-4">
-      {turmas.length > 1 && (
-        <select value={sel ?? ''} onChange={(e) => setTurma(Number(e.target.value))}
-          className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-main)] text-sm px-3 py-2">
-          {turmas.map((m) => <option key={m.contrato_id} value={m.turma_id!}>{m.curso} — {m.turma}</option>)}
-        </select>
-      )}
+      {/* Curso: cartão com o nome inteiro (quebra linha, não corta); com mais de 1 turma o cartão
+          inteiro vira o seletor (select nativo invisível por cima → picker do celular) */}
+      {(() => {
+        const m = turmas.find((m) => m.turma_id === sel) ?? turmas[0]
+        return (
+          <div className="relative glass-card px-4 py-3 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[var(--primary)]/10 text-[var(--primary)] flex items-center justify-center shrink-0">
+              <GraduationCap className="w-5 h-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] uppercase tracking-wider text-[var(--text-muted)]">{turmas.length > 1 ? 'Curso · toque para trocar' : 'Curso'}</p>
+              <p className="text-sm font-semibold text-[var(--text-main)] leading-snug">{m.curso}</p>
+              {m.turma && m.turma !== m.curso && <p className="text-xs text-[var(--text-muted)]">{m.turma}{m.situacao ? ` · ${m.situacao}` : ''}</p>}
+            </div>
+            {turmas.length > 1 && (
+              <>
+                <ChevronsUpDown className="w-4 h-4 text-[var(--text-muted)] shrink-0" />
+                <select value={sel ?? ''} onChange={(e) => setTurma(Number(e.target.value))} aria-label="Trocar curso"
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-base">
+                  {turmas.map((t) => <option key={t.contrato_id} value={t.turma_id!}>{t.curso}{t.turma && t.turma !== t.curso ? ` — ${t.turma}` : ''}</option>)}
+                </select>
+              </>
+            )}
+          </div>
+        )
+      })()}
       {!b.data ? <LoadState isLoading={b.isLoading} error={b.error} refetch={b.refetch} /> : (
         <Box>
           {b.data.disciplinas.length === 0 ? <p className="text-sm text-[var(--text-muted)]">Nenhuma disciplina lançada ainda.</p> : (

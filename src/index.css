@@ -185,3 +185,13 @@
 .recharts-tooltip-cursor {
   fill: rgba(255, 255, 255, 0.03);
 }
+/* Tema CLARO: os amarelos/âmbar claros (feitos pro tema escuro) somem no fundo branco.
+   Aqui viram âmbar escuro (contraste ≥ 4.5:1 no branco e no fundo âmbar/10). Tema escuro não muda. */
+html:not(.dark) .text-amber-200,
+html:not(.dark) .text-amber-300 { color: #92400e; }             /* amber-800 */
+html:not(.dark) .text-amber-400,
+html:not(.dark) .text-amber-500,
+html:not(.dark) .text-yellow-400,
+html:not(.dark) .text-orange-400 { color: #b45309; }            /* amber-700 */
+html:not(.dark) .placeholder\:text-amber-200::placeholder,
+html:not(.dark) .placeholder\:text-amber-300::placeholder { color: #b45309; }
