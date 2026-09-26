@@ -81,7 +81,7 @@ export function MarketingFormsList({ onEdit }: MarketingFormsListProps) {
                 { id: crypto.randomUUID(), type: "email", label: "Email", required: false, role: "email" },
                 {
                     id: crypto.randomUUID(), type: "select", label: "Prefiro contato por", required: false,
-                    role: "preferred_contact", options: ["Whatsapp", "E-mail"],
+                    role: "preferred_contact", options: ["Whatsapp", "E-mail", "Ligação"],
                 },
             ]
             const { data: authData } = await supabase.auth.getUser()
