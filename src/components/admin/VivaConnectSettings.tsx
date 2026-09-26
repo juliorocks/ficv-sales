@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { showError, showSuccess } from "@/utils/toast"
+import { VivaConnectHub } from "./VivaConnectHub"
 
 interface VcSettings {
     enabled: boolean
@@ -31,7 +32,7 @@ interface VcSettings {
 interface ChannelHealth {
     id: number
     name: string
-    purpose: "official" | "pool"
+    purpose: "official" | "pool" | "grupo"
     kind: string
     phone: string | null
     api_id: string
@@ -46,6 +47,7 @@ interface ChannelHealth {
     leads_fixed: number
     has_token: boolean
     ai_enabled: boolean
+    hub_enabled: boolean
 }
 
 const fieldLabel = "text-xs font-bold uppercase tracking-widest text-muted-foreground"
@@ -76,7 +78,7 @@ function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange
 const emptyChannel = {
     api_ref: "", api_token: "",
     // preenchidos pela busca no Z-PRO (editáveis)
-    found: false, name: "", purpose: "pool" as "official" | "pool", kind: "baileys", phone: "", api_id: "",
+    found: false, name: "", purpose: "pool" as "official" | "pool" | "grupo", kind: "baileys", phone: "", api_id: "",
     zpro_whatsapp_id: "", daily_limit: 40, zpro_info: null as unknown,
     options: [] as { id: string; name: string; number: string | null; type: string | null; status: string | null }[],
 }
@@ -202,7 +204,7 @@ export function VivaConnectSettings() {
         showSuccess("Canal cadastrado. Copie a URL do webhook dele e cole na API do Z-PRO.")
     }
 
-    const updateChannel = async (id: number, patch: Partial<{ active: boolean; daily_limit: number; ai_enabled: boolean }>) => {
+    const updateChannel = async (id: number, patch: Partial<{ active: boolean; daily_limit: number; ai_enabled: boolean; hub_enabled: boolean }>) => {
         const { data, error } = await supabase.from("vivaconnect_channels").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id).select("id")
         if (error || !data?.length) return showError(`Não foi possível atualizar: ${error?.message ?? "sessão expirada."}`)
         refetchChannels()
@@ -336,10 +338,11 @@ export function VivaConnectSettings() {
                                         <div className="space-y-1"><Label className={fieldLabel}>Número</Label>
                                             <Input value={newCh.phone} onChange={(e) => setNewCh({ ...newCh, phone: e.target.value })} placeholder="5583999999999" className="bg-muted/20" /></div>
                                         <div className="space-y-1"><Label className={fieldLabel}>Uso</Label>
-                                            <select value={newCh.purpose} onChange={(e) => setNewCh({ ...newCh, purpose: e.target.value as "official" | "pool" })}
+                                            <select value={newCh.purpose} onChange={(e) => setNewCh({ ...newCh, purpose: e.target.value as "official" | "pool" | "grupo" })}
                                                 className="w-full h-10 rounded-md border border-[var(--border)] bg-muted/20 px-3 text-sm">
                                                 <option value="pool">Pool — contato ativo (1ª mensagem)</option>
                                                 <option value="official">Oficial — entrada (WABA/Híbrido)</option>
+                                                <option value="grupo">Outra empresa do grupo — só pro Hub avisar</option>
                                             </select></div>
                                         <div className="space-y-1"><Label className={fieldLabel}>Tipo</Label>
                                             <select value={newCh.kind} onChange={(e) => setNewCh({ ...newCh, kind: e.target.value })}
@@ -373,14 +376,19 @@ export function VivaConnectSettings() {
                                     <div>
                                         <p className="font-bold text-[var(--text-main)] flex items-center gap-2">
                                             <span className={`w-2 h-2 rounded-full ${!c.active ? "bg-muted-foreground" : c.last_error_at && (!c.last_ok_at || c.last_error_at > c.last_ok_at) ? "bg-red-500" : c.last_ok_at ? "bg-emerald-500" : "bg-amber-500"}`} />
-                                            {c.name} <span className="text-xs font-normal text-muted-foreground">#{c.id} · {c.purpose === "pool" ? "Pool" : "Oficial"} · {c.kind}</span>
+                                            {c.name} <span className="text-xs font-normal text-muted-foreground">#{c.id} · {c.purpose === "pool" ? "Pool" : c.purpose === "grupo" ? "Outra empresa do grupo" : "Oficial"} · {c.kind}</span>
                                         </p>
                                         <p className="text-xs text-muted-foreground font-mono">{c.phone ?? "sem número"} · API {c.api_id}</p>
                                     </div>
                                     <div className="flex items-center gap-1">
-                                        <label className="flex items-center gap-1 text-xs cursor-pointer mr-2" title="A IA responde automaticamente quem escrever neste número (não-alunos)">
+                                        {c.purpose === "official" && (
+                                            <label className="flex items-center gap-1 text-xs cursor-pointer mr-2" title="Número antigo do Grupo Cidade Viva: contato novo passa pela triagem do Hub (Faculdade fica; outras empresas recebem o número novo)">
+                                                <input type="checkbox" checked={c.hub_enabled} onChange={(e) => updateChannel(c.id, { hub_enabled: e.target.checked })} className="accent-[var(--primary)]" /> 🔀 Hub do Grupo
+                                            </label>
+                                        )}
+                                        {c.purpose !== "grupo" && <label className="flex items-center gap-1 text-xs cursor-pointer mr-2" title="A IA responde automaticamente quem escrever neste número (não-alunos)">
                                             <input type="checkbox" checked={c.ai_enabled} onChange={(e) => updateChannel(c.id, { ai_enabled: e.target.checked })} className="accent-[var(--primary)]" /> 🤖 IA responde
-                                        </label>
+                                        </label>}
                                         <label className="flex items-center gap-1 text-xs cursor-pointer mr-2">
                                             <input type="checkbox" checked={c.active} onChange={(e) => updateChannel(c.id, { active: e.target.checked })} className="accent-[var(--primary)]" /> ativo
                                         </label>
@@ -414,6 +422,9 @@ export function VivaConnectSettings() {
                     </CardContent>
                 </Card>
             </div>
+
+            {/* ── Hub do Grupo ────────────────────────────────────────────── */}
+            <VivaConnectHub channels={(channels ?? []).map((c) => ({ id: c.id, name: c.name, purpose: c.purpose, phone: c.phone, hub_enabled: c.hub_enabled }))} />
 
             {/* ── Diagnóstico ─────────────────────────────────────────────── */}
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">

@@ -12,9 +12,13 @@
 //      Z-PRO) → trava a IA daquele lead (IA nunca reentra);
 //    - canal oficial + aluno (Sponte) → resposta com link do portal (fila);
 //    - não-aluno num canal com "IA responde" marcado (vivaconnect_channels.ai_enabled) → IA responde (fila).
+// 4. Canal com "Hub do Grupo" (vivaconnect_channels.hub_enabled — o número antigo do Grupo
+//    Cidade Viva): contato NOVO (sem lead, não-aluno) passa antes pela triagem (_shared/hub.ts):
+//    Faculdade segue o fluxo acima; outra empresa recebe o número novo; sem assunto → menu.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { mirror, sv } from "../_shared/db.ts";
 import { fillTemplate, findLeadByPhone, firstName, loadSettings, parseWebhook, toZproNumber, zpro, zproErr } from "../_shared/vivaconnect.ts";
+import { type HubMsg, loadDestinations, planejar } from "../_shared/hub.ts";
 
 // Bots de IA embutidos do Z-PRO que vêm LIGADOS por padrão em ticket novo
 // (ex.: chatgptStatus:true sem chave → nota "Falha na resposta automática").
@@ -36,7 +40,7 @@ Deno.serve(async (req) => {
 
     const reqChannel = Number(url.searchParams.get("channel")) || null;
     const { data: ch } = reqChannel
-        ? await db.from("vivaconnect_channels").select("id, name, purpose, zpro_whatsapp_id, ai_enabled").eq("id", reqChannel).maybeSingle()
+        ? await db.from("vivaconnect_channels").select("id, name, purpose, zpro_whatsapp_id, ai_enabled, hub_enabled").eq("id", reqChannel).maybeSingle()
         : { data: null };
     const raw = await req.text();
     let payload: any;
@@ -54,6 +58,8 @@ Deno.serve(async (req) => {
         if (!settings.enabled) return await done(ch ? "logged:integração desligada" : `logged:integração desligada; canal desconhecido (?channel=${reqChannel ?? "faltando"})`);
 
         if (!ch) return await done(`ignored:canal desconhecido (?channel=${reqChannel ?? "faltando"})`);
+        // número de OUTRA empresa do grupo (só usado pelo Hub pra avisar): nunca vira lead da Faculdade
+        if (ch.purpose === "grupo") return await done("ignored:canal de outra empresa do grupo");
 
         const m = parseWebhook(payload);
         if (!m) return await done("ignored:sem mensagem reconhecível");
@@ -97,6 +103,16 @@ Deno.serve(async (req) => {
 
         let lead = await findLeadByPhone(db, m.number);
         const leadExisted = !!lead;
+
+        // ── Hub do Grupo: contato novo no número antigo do grupo → triagem ──────
+        let hubBacklog: HubMsg[] = [];
+        let hubRoutingId: number | null = null;
+        if (ch.hub_enabled && !m.fromMe && !aluno && !lead && !m.agentUserId) {
+            const r = await hubRouteLocked(db, settings, ch, m, log?.id ?? 0);
+            if (r.handled) return await done(r.outcome);
+            hubBacklog = r.backlog;
+            hubRoutingId = r.routingId;
+        }
         if (!lead && !m.fromMe && !(aluno && ch.purpose === "official")) {
             const { data: src } = await db.from("lead_sources").select("id").eq("name", VIVACONNECT_SOURCE).maybeSingle();
             const now = new Date().toISOString();
@@ -157,6 +173,16 @@ Deno.serve(async (req) => {
                     `INSERT INTO lead_notes [{ lead_id: leads:⟨${lead.id}⟩, note: ${sv(reopenNote)}, created_at: d${sv(now)} }] RETURN NONE;`,
                 );
             }
+
+            // veio do hub (menu, etc.): leva a conversa da triagem pro chat do lead (contexto da IA/agente)
+            if (hubBacklog.length) {
+                await db.from("widechat_messages").insert(hubBacklog.map((h) => ({
+                    lead_id: lead!.id, provider: "vivaconnect", channel_id: ch.id, session_id: m.ticketId,
+                    type: "text", message: h.texto, origin: h.de === "contato" ? "channel" : "auto",
+                    sender_name: h.de === "contato" ? m.contactName : null, raw_data: { hub: true }, created_at: h.em,
+                })));
+            }
+            if (hubRoutingId) await db.from("vivaconnect_hub_routings").update({ lead_id: lead.id }).eq("id", hubRoutingId);
 
             await db.from("widechat_messages").insert({
                 lead_id: lead.id, provider: "vivaconnect", channel_id: ch.id,
@@ -238,12 +264,103 @@ async function aiReply(db: any, leadId: number, channelId: number, number: strin
     await db.from("vivaconnect_outbox").insert({
         lead_id: leadId, channel_id: channelId, kind: "ai_reply", number: toZproNumber(number) ?? number, body: out.reply,
     });
-    // dispara o worker agora (senão a resposta só sai no próximo ciclo do cron, até 1 min)
+    await kickOutbox();
+    return out.handoff ? "ia:respondeu + handoff" : "ia:respondeu";
+}
+
+/** Dispara o worker da fila agora (senão só sai no próximo ciclo do cron, até 1 min). */
+async function kickOutbox() {
     await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/vivaconnect-api`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` },
         body: JSON.stringify({ action: "process_outbox" }),
         signal: AbortSignal.timeout(30000),
     }).catch((e) => console.error("vivaconnect-webhook: process_outbox:", e.message));
-    return out.handoff ? "ia:respondeu + handoff" : "ia:respondeu";
 }
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const HUB_DEBOUNCE_MS = 4000;
+
+/**
+ * Um contato por vez + espera curta: se chegar outra mensagem do mesmo número enquanto
+ * isso ("Oi" … "quero ser membro"), esta só entra no histórico e a MAIS NOVA decide por todas.
+ */
+async function hubRouteLocked(db: any, settings: any, ch: any, m: any, logId: number) {
+    const number = toZproNumber(m.number) ?? m.number;
+    const t0 = Date.now();
+    while (!(await db.rpc("hub_try_lock", { p_number: number })).data) {
+        if (Date.now() - t0 > 25000) break; // trava presa: segue sem ela
+        await sleep(700);
+    }
+    try {
+        await sleep(HUB_DEBOUNCE_MS);
+        const sufixo = number.slice(-8);
+        const { data: newer } = await db.from("vivaconnect_webhook_logs").select("id, payload")
+            .eq("channel_id", ch.id).gt("id", logId).limit(20);
+        const chegouOutra = (newer ?? []).some((l: any) => {
+            const p = parseWebhook(l.payload);
+            return p && !p.fromMe && String(p.number ?? "").endsWith(sufixo);
+        });
+        return await hubRoute(db, settings, ch, m, chegouOutra);
+    } finally {
+        await db.from("vivaconnect_hub_locks").delete().eq("number", number);
+    }
+}
+
+/**
+ * Triagem do Hub do Grupo. handled=true → o hub respondeu (menu/encaminhou/ignorou) e o
+ * webhook para aqui (não vira lead). handled=false → é da Faculdade: segue o fluxo normal
+ * levando as falas anteriores da triagem (backlog) pro chat do lead.
+ */
+async function hubRoute(db: any, settings: any, ch: any, m: any, soAcumular = false): Promise<{ handled: boolean; outcome: string; backlog: HubMsg[]; routingId: number | null }> {
+    const number = toZproNumber(m.number) ?? m.number;
+    const now = new Date().toISOString();
+    const texto = String(m.body ?? "").trim() || "[mídia]";
+    const { data: sessao } = await db.from("vivaconnect_hub_routings").select("*")
+        .eq("number", number).gte("updated_at", new Date(Date.now() - 7 * 86400_000).toISOString())
+        .order("updated_at", { ascending: false }).limit(1).maybeSingle();
+    if (sessao?.status === "faculdade") return { handled: false, outcome: "", backlog: [], routingId: sessao.id };
+
+    const falaEm = m.sentAt ?? now;
+    const msgs: HubMsg[] = [...(sessao?.messages ?? []), { de: "contato", texto, em: falaEm }];
+    // resposta do hub sempre DEPOIS da fala (ordem certa no chat, mesmo com relógio do WhatsApp adiantado)
+    const hubEm = new Date(Math.max(Date.now(), Date.parse(falaEm) + 1000 || 0)).toISOString();
+    const dests = await loadDestinations(db);
+    const save = async (patch: Record<string, unknown>) => {
+        const row = { channel_id: ch.id, number, contact_name: m.contactName ?? sessao?.contact_name ?? null, messages: msgs, updated_at: now, ...patch };
+        if (sessao) { await db.from("vivaconnect_hub_routings").update(row).eq("id", sessao.id); return sessao.id as number; }
+        const { data } = await db.from("vivaconnect_hub_routings").insert(row).select("id").single();
+        return (data?.id ?? null) as number | null;
+    };
+    // chegou outra mensagem logo depois: guarda esta no histórico e deixa a próxima decidir
+    if (soAcumular) {
+        await save(sessao ? {} : { status: "perguntando" });
+        return { handled: true, outcome: "hub:aguardando próxima mensagem do contato", backlog: [], routingId: null };
+    }
+    const plano = await planejar(db, { settings, dests, sessao, texto, nome: m.contactName });
+    const enqueue = (channelId: number, kind: string, body: string) =>
+        db.from("vivaconnect_outbox").insert({ lead_id: null, channel_id: channelId, kind, number, body });
+
+    if (plano.acao === "faculdade") {
+        const id = await save({ status: "faculdade", destination_id: plano.destino.id, metodo: plano.metodo, confianca: plano.confianca, motivo: plano.motivo });
+        return { handled: false, outcome: "", backlog: msgs.slice(0, -1), routingId: id };
+    }
+    if (plano.acao === "encaminhar") {
+        await enqueue(ch.id, "hub_redirect", plano.redirect);
+        msgs.push({ de: "hub", texto: plano.redirect, em: hubEm });
+        if (plano.forward && plano.destino.channel_id) await enqueue(plano.destino.channel_id, "hub_forward", plano.forward);
+        await save({ status: "encaminhado", destination_id: plano.destino.id, metodo: plano.metodo, confianca: plano.confianca, motivo: plano.motivo, redirected_at: now });
+        await kickOutbox();
+        return { handled: true, outcome: `hub:encaminhado → ${plano.destino.nome}${plano.forward ? " (+ canal da empresa avisado)" : ""}`, backlog: [], routingId: null };
+    }
+    if (plano.acao === "menu") {
+        await enqueue(ch.id, "hub_menu", plano.texto);
+        msgs.push({ de: "hub", texto: plano.texto, em: hubEm });
+        await save({ status: "perguntando", menus: (sessao?.menus ?? 0) + 1, motivo: plano.motivo });
+        await kickOutbox();
+        return { handled: true, outcome: "hub:menu enviado", backlog: [], routingId: null };
+    }
+    await save({});
+    return { handled: true, outcome: `hub:ignorado (${plano.motivo})`, backlog: [], routingId: null };
+}
+

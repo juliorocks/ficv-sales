@@ -27,6 +27,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { corsHeaders, identify, isAdmin, isStaff, jsonRes } from "../_shared/ai.ts";
 import { asList, loadSettings, parseApiRef, toDiscovered, toZproNumber, zpro, zproErr } from "../_shared/vivaconnect.ts";
 import { mirror, sv } from "../_shared/db.ts";
+import { type HubMsg, loadDestinations, planejar } from "../_shared/hub.ts";
 
 const CH_COLS = "id, name, purpose, kind, phone, api_id, api_token, active, daily_limit, zpro_whatsapp_id, last_sent_at";
 
@@ -85,7 +86,8 @@ Deno.serve(async (req) => {
         if (action === "chat_context") {
             const leadId = Number(body.lead_id);
             const { data: lead } = await db.from("leads").select("vivaconnect_channel_id, vivaconnect_ticket_id").eq("id", leadId).maybeSingle();
-            const { data: chans } = await db.from("vivaconnect_channels").select("id, name, kind, purpose, phone").eq("active", true).order("id");
+            // canais de OUTRAS empresas do grupo (purpose 'grupo') nunca aparecem no chat dos leads
+            const { data: chans } = await db.from("vivaconnect_channels").select("id, name, kind, purpose, phone").eq("active", true).neq("purpose", "grupo").order("id");
             return jsonRes({
                 enabled: !!settings.enabled,
                 channels: chans ?? [],
@@ -244,6 +246,36 @@ Deno.serve(async (req) => {
             }).select("id").single();
             if (error) return jsonRes({ error: error.code === "23505" ? "Esse lead já tem 1ª mensagem na fila/enviada." : error.message }, 400);
             return jsonRes({ ok: true, outbox_id: row.id });
+        }
+
+        // Simulador do Hub do Grupo: roda a triagem numa conversa de mentira, sem enviar nada
+        //   { mensagens: ["oi", "quero ser membro"], nome?: "Maria" }
+        if (action === "hub_simulate") {
+            if (!isAdmin(caller)) return jsonRes({ error: "Só admin." }, 403);
+            const falas: string[] = (body.mensagens ?? []).map((x: unknown) => String(x ?? "").trim()).filter(Boolean).slice(0, 8);
+            if (!falas.length) return jsonRes({ error: "Escreva ao menos uma mensagem." }, 400);
+            const dests = await loadDestinations(db);
+            let sessao: any = null;
+            const passos: any[] = [];
+            for (const texto of falas) {
+                if (sessao?.status === "faculdade") { passos.push({ fala: texto, acao: "faculdade", motivo: "já está no atendimento da Faculdade" }); continue; }
+                const plano = await planejar(db, { settings, dests, sessao, texto, nome: body.nome ?? null });
+                const now = new Date().toISOString();
+                const msgs: HubMsg[] = [...(sessao?.messages ?? []), { de: "contato", texto, em: now }];
+                if (plano.acao === "menu") { msgs.push({ de: "hub", texto: plano.texto, em: now }); sessao = { status: "perguntando", menus: (sessao?.menus ?? 0) + 1, destination_id: null, redirected_at: null, messages: msgs }; }
+                else if (plano.acao === "encaminhar") { sessao = { status: "encaminhado", menus: sessao?.menus ?? 0, destination_id: plano.destino.id, redirected_at: now, messages: msgs }; }
+                else if (plano.acao === "faculdade") { sessao = { ...(sessao ?? {}), status: "faculdade", messages: msgs }; }
+                else sessao = { ...(sessao ?? { status: "perguntando", menus: 0, destination_id: null, redirected_at: null }), messages: msgs };
+                passos.push({
+                    fala: texto, acao: plano.acao, motivo: plano.motivo,
+                    destino: "destino" in plano ? `${plano.destino.emoji} ${plano.destino.nome}` : null,
+                    confianca: "confianca" in plano ? plano.confianca : null,
+                    metodo: "metodo" in plano ? plano.metodo : null,
+                    envia: plano.acao === "menu" ? plano.texto : plano.acao === "encaminhar" ? plano.redirect : null,
+                    avisa_empresa: plano.acao === "encaminhar" ? plano.forward : null,
+                });
+            }
+            return jsonRes({ passos, destinos_ativos: dests.map((d) => `${d.emoji} ${d.nome}`) });
         }
 
         if (action === "process_outbox") {
