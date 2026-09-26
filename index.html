@@ -9,6 +9,11 @@
       (function () {
         if (!/^portal\./i.test(location.hostname) && !/^\/(aluno|atendimento)/.test(location.pathname)) return
         var h = document.head
+        // iPhone dá zoom sozinho ao tocar num campo com letra < 16px (login do CPF) e a página
+        // fica ampliada depois: rolagem lateral e menu de baixo fora da tela. maximum-scale=1 evita
+        // esse zoom automático (o iOS continua deixando ampliar com os dedos).
+        var vp = document.querySelector('meta[name=viewport]')
+        if (vp) vp.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover')
         function add(tag, attrs) { var el = document.createElement(tag); for (var k in attrs) el.setAttribute(k, attrs[k]); h.appendChild(el) }
         add('link', { rel: 'manifest', href: '/pwa/manifest.webmanifest' })
         add('link', { rel: 'apple-touch-icon', href: '/pwa/apple-touch-icon.png' })

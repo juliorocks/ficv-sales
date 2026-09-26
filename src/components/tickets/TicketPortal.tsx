@@ -18,7 +18,7 @@ import { AlunoInicio, AlunoFinanceiro, AlunoNotas, useOverview } from './AlunoPa
 import { showSuccess, showError } from '../../utils/toast'
 import {
   Plus, Ticket as TicketIcon, Clock, CheckCircle2,
-  AlertCircle, ChevronRight, Loader2, Search, Star, LogOut, Home, Wallet, BookOpen
+  AlertCircle, ChevronRight, Loader2, Search, Star, LogOut, Home, Wallet, BookOpen, RefreshCw
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -300,10 +300,19 @@ interface TicketPortalProps {
   alunoId: string
   alunoNome: string
   alunoEmail: string
+  appInstalado?: boolean
   onLogout?: () => void
 }
 
-export function TicketPortal({ alunoId, alunoNome, alunoEmail, onLogout }: TicketPortalProps) {
+export function TicketPortal({ alunoId, alunoNome, alunoEmail, appInstalado, onLogout }: TicketPortalProps) {
+  const qc = useQueryClient()
+  const [refreshing, setRefreshing] = useState(false)
+  // App instalado (principalmente iPhone) não tem "puxar pra atualizar" → botão no cabeçalho
+  const refreshAll = async () => {
+    setRefreshing(true)
+    await qc.invalidateQueries().catch(() => {})
+    setTimeout(() => setRefreshing(false), 400)
+  }
   const [tab, setTab] = useState<'inicio' | 'financeiro' | 'notas' | 'chamados'>('inicio')
   const [showNew, setShowNew] = useState(false)
   const [selected, setSelected] = useState<Ticket | null>(null)
@@ -339,7 +348,7 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, onLogout }: Ticke
   ] as const
 
   return (
-    <div className="min-h-screen bg-[var(--bg-main)]">
+    <div className="min-h-screen bg-[var(--bg-main)] overflow-x-clip">
       {/* Top bar */}
       <header className="sticky top-0 z-30 border-b border-[#2A2D36] bg-[#13161D] px-4 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -354,6 +363,11 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, onLogout }: Ticke
             <p className="text-xs text-[#8A8A9A] truncate max-w-[45vw] sm:max-w-none">{alunoNome}</p>
           </div>
         </div>
+        <div className="flex items-center gap-4 sm:gap-5">
+        <button onClick={refreshAll} disabled={refreshing} aria-label="Atualizar"
+          className="flex items-center gap-1.5 text-xs text-[#8A8A9A] hover:text-[#F0EDE8] transition-colors">
+          <RefreshCw className={`w-4 h-4 sm:w-3.5 sm:h-3.5 ${refreshing ? 'animate-spin' : ''}`} /> <span className="hidden sm:inline">Atualizar</span>
+        </button>
         {onLogout && (
           <button
             onClick={onLogout}
@@ -362,6 +376,7 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, onLogout }: Ticke
             <LogOut className="w-4 h-4 sm:w-3.5 sm:h-3.5" /> <span className="hidden sm:inline">Sair</span>
           </button>
         )}
+        </div>
       </header>
 
       {/* Abas — no computador ficam em cima; no celular viram a barra fixa de baixo (estilo app) */}
@@ -377,7 +392,7 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, onLogout }: Ticke
         </div>
       </nav>
 
-      <InstallAppBanner />
+      {tab === 'inicio' && !appInstalado && <InstallAppBanner />}
 
       {tab !== 'chamados' && (
         <div className="p-4 sm:p-6 pb-28 sm:pb-6 max-w-3xl mx-auto">

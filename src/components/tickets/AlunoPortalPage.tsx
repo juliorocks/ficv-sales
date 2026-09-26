@@ -58,17 +58,21 @@ export function AlunoPortalPage() {
 const FORCE_PASSWORD_CHANGE = false
 
 function TicketPortalWrapper({ session, recovery, onRecovered }: { session: Session; recovery: boolean; onRecovered: () => void }) {
-  const [aluno, setAluno] = useState<{ nome: string; email: string; cpf: string; must_change_password: boolean } | null>(null)
+  const [aluno, setAluno] = useState<{ nome: string; email: string; cpf: string; must_change_password: boolean; app_instalado_em: string | null } | null>(null)
   const [wantsNewPassword, setWantsNewPassword] = useState(false)
 
   useEffect(() => {
     supabase
       .from('alunos')
-      .select('nome, email, cpf, must_change_password')
+      .select('nome, email, cpf, must_change_password, app_instalado_em')
       .eq('id', session.user.id)
       .single()
       .then(({ data }) => setAluno(data))
-    supabase.from('alunos').update({ last_login_at: new Date().toISOString() }).eq('id', session.user.id).then(() => {})
+    // Aberto pelo app instalado (tela inicial) → registra, pra o convite "Instale o app" não aparecer
+    // mais nem no navegador (no iPhone o Safari não tem como saber que o app foi instalado).
+    const standalone = window.matchMedia?.('(display-mode: standalone)').matches || (navigator as any).standalone === true
+    const now = new Date().toISOString()
+    supabase.from('alunos').update({ last_login_at: now, ...(standalone ? { app_instalado_em: now } : {}) }).eq('id', session.user.id).then(() => {})
   }, [session.user.id])
 
   async function handleLogout() {
@@ -103,7 +107,7 @@ function TicketPortalWrapper({ session, recovery, onRecovered }: { session: Sess
   return (
     <>
     {aluno.must_change_password && (
-      <div className="bg-[#1A1710] border-b border-[#C9A84C]/30 px-4 py-2 flex items-center justify-center gap-3 text-xs text-[#E0BF6A]">
+      <div className="hidden sm:flex bg-[#1A1710] border-b border-[#C9A84C]/30 px-4 py-2 items-center justify-center gap-3 text-xs text-[#E0BF6A]">
         <span>Você está usando o CPF como senha. Recomendamos criar uma senha só sua.</span>
         <button onClick={() => setWantsNewPassword(true)} className="font-semibold underline underline-offset-2 hover:text-white">Criar minha senha</button>
       </div>
@@ -112,6 +116,7 @@ function TicketPortalWrapper({ session, recovery, onRecovered }: { session: Sess
       alunoId={session.user.id}
       alunoNome={aluno.nome}
       alunoEmail={aluno.email}
+      appInstalado={!!aluno.app_instalado_em}
       onLogout={handleLogout}
     />
     </>
