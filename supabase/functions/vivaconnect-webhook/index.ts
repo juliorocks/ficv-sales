@@ -75,12 +75,22 @@ Deno.serve(async (req) => {
             if (!r.ok) console.error(`vivaconnect-webhook: desligar ${botsOn.join(",")} no ticket ${m.ticketId}:`, zproErr(r.status, r.data));
         }
 
-        // modo do número no Z-PRO (waba/baileys + Híbrido) — base da trava de custo Meta no envio
+        // modo do número no Z-PRO (waba/baileys + Híbrido) — base da trava de custo Meta no envio.
+        // 28/09: payload de ticket WABA nunca manda `hybridMode` (só canal Baileys manda) — "campo
+        // ausente" NÃO é "híbrido desligado". Sem essa distinção, toda mensagem recebida reescrevia
+        // zpro_hybrid_mode pra null e apagava até a confirmação MANUAL feita em Gestão > VivaConnect
+        // (confirmado ao vivo: usuário confirmava, próxima msg zerava de novo, resposta falhava).
         const zw = payload?.ticket?.whatsapp;
-        if (zw && (zw.type != null || zw.hybridMode != null)) {
-            const zType = zw.type != null ? String(zw.type) : null, zHyb = zw.hybridMode != null ? String(zw.hybridMode) : null;
-            if (zType !== (ch as any).zpro_type || zHyb !== (ch as any).zpro_hybrid_mode) {
-                await db.from("vivaconnect_channels").update({ zpro_type: zType, zpro_hybrid_mode: zHyb, zpro_mode_seen_at: new Date().toISOString() }).eq("id", ch.id);
+        if (zw && (zw.type != null || "hybridMode" in zw)) {
+            const zType = zw.type != null ? String(zw.type) : null;
+            const patch: Record<string, unknown> = {};
+            if (zType !== (ch as any).zpro_type) patch.zpro_type = zType;
+            if ("hybridMode" in zw) {
+                const zHyb = zw.hybridMode != null ? String(zw.hybridMode) : null;
+                if (zHyb !== (ch as any).zpro_hybrid_mode) patch.zpro_hybrid_mode = zHyb;
+            }
+            if (Object.keys(patch).length) {
+                await db.from("vivaconnect_channels").update({ ...patch, zpro_mode_seen_at: new Date().toISOString() }).eq("id", ch.id);
             }
         }
 
