@@ -208,7 +208,7 @@ export function VivaConnectSettings() {
         showSuccess("Canal cadastrado. Copie a URL do webhook dele e cole na API do Z-PRO.")
     }
 
-    const updateChannel = async (id: number, patch: Partial<{ active: boolean; daily_limit: number; ai_enabled: boolean; hub_enabled: boolean }>) => {
+    const updateChannel = async (id: number, patch: Partial<{ active: boolean; daily_limit: number; ai_enabled: boolean; hub_enabled: boolean; zpro_hybrid_mode: string | null }>) => {
         const { data, error } = await supabase.from("vivaconnect_channels").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id).select("id")
         if (error || !data?.length) return showError(`Não foi possível atualizar: ${error?.message ?? "sessão expirada."}`)
         refetchChannels()
@@ -383,16 +383,34 @@ export function VivaConnectSettings() {
                                             {c.name} <span className="text-xs font-normal text-muted-foreground">#{c.id} · {c.purpose === "pool" ? "Pool" : c.purpose === "grupo" ? "Outra empresa do grupo" : "Oficial"} · {c.kind}</span>
                                         </p>
                                         <p className="text-xs text-muted-foreground font-mono">{c.phone ?? "sem número"} · API {c.api_id}</p>
-                                        {c.purpose === "official" && (() => {
-                                            const waba = c.zpro_type ? /waba|official|cloud/i.test(c.zpro_type) : c.kind !== "baileys"
-                                            if (!waba) return null
+                                        {(() => {
+                                            const waba = c.zpro_type ? /waba|official|cloud/i.test(c.zpro_type) : c.kind === "waba" || c.kind === "hybrid"
+                                            if (!waba || c.purpose === "grupo") return null
                                             const on = !!c.zpro_hybrid_mode && !/^(disabled|false|off|0)$/i.test(c.zpro_hybrid_mode)
                                             return (
-                                                <p className={`text-xs mt-1 ${on ? "text-emerald-600 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"}`}>
-                                                    {on ? "✅ Modo Híbrido ativo — IA e Hub respondem sem custo Meta"
-                                                        : c.zpro_hybrid_mode ? "⚠️ Modo Híbrido DESLIGADO no Z-PRO — respostas automáticas (IA/Hub/portal) bloqueadas até ativar"
-                                                        : "⏳ Modo Híbrido ainda não confirmado (chega com a 1ª mensagem recebida) — respostas automáticas esperam a confirmação"}
-                                                </p>
+                                                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                                    <p className={`text-xs ${on ? "text-emerald-600 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"}`}>
+                                                        {on ? "✅ Modo Híbrido ativo — IA e Hub respondem sem custo Meta"
+                                                            : c.zpro_hybrid_mode ? "⚠️ Modo Híbrido DESLIGADO no Z-PRO — respostas automáticas (IA/Hub/portal) bloqueadas até ativar"
+                                                            : "⏳ Modo Híbrido ainda não confirmado pelo Z-PRO — respostas automáticas bloqueadas até confirmar"}
+                                                    </p>
+                                                    {/* 28/09: em Coexistência, o payload de webhook do WABA não manda hybridMode (só
+                                                        os canais Baileys mandam) — a detecção automática nunca confirma sozinha nesse
+                                                        caso, mesmo com a Coexistência ativa de verdade no Z-PRO. Confirmação manual pra
+                                                        quem já viu "Modo de envio: Coexistência" na tela Editar Canal do Z-PRO. */}
+                                                    {!on && (
+                                                        <button onClick={() => updateChannel(c.id, { zpro_hybrid_mode: "confirmado manualmente" })}
+                                                            className="text-[10px] underline text-muted-foreground hover:text-primary">
+                                                            Já vi "Coexistência" ativa no Z-PRO — confirmar manualmente
+                                                        </button>
+                                                    )}
+                                                    {on && c.zpro_hybrid_mode === "confirmado manualmente" && (
+                                                        <button onClick={() => updateChannel(c.id, { zpro_hybrid_mode: null })}
+                                                            className="text-[10px] underline text-muted-foreground hover:text-primary">
+                                                            Desfazer confirmação manual
+                                                        </button>
+                                                    )}
+                                                </div>
                                             )
                                         })()}
                                     </div>
