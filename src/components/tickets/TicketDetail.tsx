@@ -627,9 +627,12 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {(Object.entries(STATUS_LABELS) as [TicketStatus, string][]).map(([k, v]) => (
-                      <SelectItem key={k} value={k}>{v}</SelectItem>
-                    ))}
+                    {(Object.entries(STATUS_LABELS) as [TicketStatus, string][])
+                      // 'fechado' só nasce da avaliação do aluno — a equipe não escolhe (só aparece se já estiver assim)
+                      .filter(([k]) => k !== 'fechado' || t.status === 'fechado')
+                      .map(([k, v]) => (
+                        <SelectItem key={k} value={k}>{v}</SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
 
