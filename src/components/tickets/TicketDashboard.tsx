@@ -35,14 +35,13 @@ const CATEGORIAS_LABEL: Record<TicketCategoria, string> = {
   suporte_tecnico: 'Suporte Técnico',
   certificado: 'Certificado',
   cancelamento: 'Cancelamento',
-  tutoria: 'Tutoria',
   biblioteca: 'Biblioteca',
   outros: 'Outros',
 }
 
 const CATEGORIA_ICON: Record<TicketCategoria, string> = {
   financeiro: '💳', academico: '📚', secretaria: '📋',
-  suporte_tecnico: '🔧', certificado: '🎓', cancelamento: '❌', tutoria: '🧑‍🏫', biblioteca: '📖', outros: '💬',
+  suporte_tecnico: '🔧', certificado: '🎓', cancelamento: '❌', biblioteca: '📖', outros: '💬',
 }
 
 const STATUS_LABELS: Record<TicketStatus, string> = {

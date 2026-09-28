@@ -250,7 +250,6 @@ export type TicketCategoria =
   | 'suporte_tecnico'
   | 'certificado'
   | 'cancelamento'
-  | 'tutoria'
   | 'biblioteca'
   | 'outros'
 

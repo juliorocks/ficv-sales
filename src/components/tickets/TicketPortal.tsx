@@ -27,8 +27,7 @@ import { ptBR } from 'date-fns/locale'
 
 const CATEGORIAS: { value: TicketCategoria; label: string; desc: string; icon: string }[] = [
   { value: 'financeiro',      label: 'Financeiro',      desc: 'Boleto, pagamento, desconto',        icon: '💳' },
-  { value: 'tutoria',         label: 'Tutoria',         desc: 'Dúvidas de conteúdo e atividades com o tutor do seu curso', icon: '🧑‍🏫' },
-  { value: 'academico',       label: 'Acadêmico',       desc: 'Notas, conteúdo, dúvidas do curso',  icon: '📚' },
+  { value: 'academico',       label: 'Acadêmico',       desc: 'Notas, conteúdo e atividades — com o tutor do seu curso', icon: '📚' },
   { value: 'secretaria',      label: 'Secretaria',      desc: 'Matrícula, documentos, declarações', icon: '📋' },
   { value: 'suporte_tecnico', label: 'Suporte Técnico', desc: 'Acesso à plataforma, login, erros',  icon: '🔧' },
   { value: 'certificado',     label: 'Certificado',     desc: 'Emissão, prazo, reenvio',            icon: '🎓' },
@@ -145,8 +144,8 @@ function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose, onCreated }:
       showError('Preencha todos os campos obrigatórios.')
       return
     }
-    if (categoria === 'tutoria' && (!cursoId || cursoId === '__nenhum__')) {
-      showError('Para a Tutoria, escolha o curso — é ele que define a sua turma de tutores.')
+    if (categoria === 'academico' && (!cursoId || cursoId === '__nenhum__')) {
+      showError('Para o assunto Acadêmico, escolha o curso — é ele que define a sua turma de tutores.')
       return
     }
     setSaving(true)
@@ -254,14 +253,14 @@ function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose, onCreated }:
 
             <div>
               <label className="text-xs font-medium text-[var(--text-muted)] mb-1 block">
-                {categoria === 'tutoria' ? 'Curso *' : usaSponte ? 'Curso (das suas matrículas)' : 'Curso (opcional)'}
+                {categoria === 'academico' ? 'Curso *' : usaSponte ? 'Curso (das suas matrículas)' : 'Curso (opcional)'}
               </label>
               <Select value={cursoId} onValueChange={setCursoId}>
                 <SelectTrigger className="bg-[var(--bg-main)] border-[var(--border)] text-[var(--text-main)]">
                   <SelectValue placeholder="Selecione o curso relacionado..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {categoria !== 'tutoria' && <SelectItem value="__nenhum__">— Não se aplica —</SelectItem>}
+                  {categoria !== 'academico' && <SelectItem value="__nenhum__">— Não se aplica —</SelectItem>}
                   {usaSponte ? (
                     <div>
                       <div className="px-2 py-1.5 text-xs font-bold text-[var(--text-muted)] uppercase tracking-wide">Minhas matrículas</div>
@@ -285,7 +284,7 @@ function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose, onCreated }:
                   })}
                 </SelectContent>
               </Select>
-              {categoria === 'tutoria' && nivelEscolhido && (
+              {categoria === 'academico' && nivelEscolhido && (
                 <p className="text-[11px] text-[var(--text-muted)] mt-1">Vai para a <b className="text-[var(--text-main)]">Tutoria da {nivelEscolhido === 'pos' ? 'Pós-graduação' : 'Graduação'}</b>.</p>
               )}
             </div>
