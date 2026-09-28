@@ -396,8 +396,8 @@ export function VivaConnectSettings() {
                                         })()}
                                     </div>
                                     <div className="flex items-center gap-1">
-                                        {c.purpose === "official" && (
-                                            <label className="flex items-center gap-1 text-xs cursor-pointer mr-2" title="Número antigo do Grupo Cidade Viva: contato novo passa pela triagem do Hub (Faculdade fica; outras empresas recebem o número novo)">
+                                        {c.purpose !== "grupo" && (
+                                            <label className="flex items-center gap-1 text-xs cursor-pointer mr-2" title="Contato novo neste número passa pela triagem do Hub (Faculdade fica; outras empresas recebem o número novo). Normalmente só o número oficial do Grupo, mas dá pra ligar em qualquer número pra testar antes de trocar.">
                                                 <input type="checkbox" checked={c.hub_enabled} onChange={(e) => updateChannel(c.id, e.target.checked ? { hub_enabled: true, ai_enabled: true } : { hub_enabled: false })} className="accent-[var(--primary)]" /> 🔀 Hub do Grupo
                                             </label>
                                         )}
