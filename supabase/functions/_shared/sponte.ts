@@ -53,7 +53,8 @@ export function records(xml: string, tag: string): Record<string, string>[] {
     const out: Record<string, string>[] = [];
     for (const m of xml.matchAll(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, "g"))) {
         const rec: Record<string, string> = {};
-        for (const f of m[1].matchAll(/<([A-Za-z]+)>([^<]*)<\/\1>/g)) rec[f[1]] = decodeEntities(f[2]).trim();
+        // nomes com dígito importam: Nota1, Recuperacao1, NotaAposRec1, Faltas1… (GetBoletim)
+        for (const f of m[1].matchAll(/<([A-Za-z][A-Za-z0-9]*)>([^<]*)<\/\1>/g)) rec[f[1]] = decodeEntities(f[2]).trim();
         out.push(rec);
     }
     return out;

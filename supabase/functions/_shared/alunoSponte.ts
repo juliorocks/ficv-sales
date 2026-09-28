@@ -36,11 +36,21 @@ export async function alunoBoletim(A: number, turma: number) {
     const xm = await sponteCall("GetMatriculas", { sParametrosBusca: `AlunoID=${A}` });
     if (!records(xm, "wsMatricula").some((r) => Number(r.TurmaID) === turma)) return null;
     const xb = await sponteCall("GetBoletim", { nAlunoID: A, nTurmaID: turma, nDisciplinaID: 0, nModulo: 0 });
-    return records(xb, "NotasBoletim").map((r) => ({
-        disciplina: r.Disciplina, modulo: Number(r.Modulo) || null,
-        notas: [1, 2, 3, 4].map((i) => n(r[`NotaAposRec${i}`]) ?? n(r[`Nota${i}`])).filter(Boolean),
-        media: n(r.MediaFinal) ?? n(r.Media), faltas: n(r.TotalFaltas), situacao: n(r.SituacaoDidatica),
-    }));
+    // NotaAposRec vem "0" (não vazio) quando NÃO houve recuperação — só vale se Recuperacao foi lançada.
+    // Antes o "0" ganhava da Nota real (ex.: Nota1=85,0 aparecia como sem nota).
+    const nota = (r: Record<string, string>, i: number) => {
+        const apos = n(r[`NotaAposRec${i}`]);
+        return n(r[`Recuperacao${i}`]) && apos && brNum(apos) > 0 ? apos : n(r[`Nota${i}`]);
+    };
+    return records(xb, "NotasBoletim").map((r) => {
+        const notas = [1, 2, 3, 4].map((i) => nota(r, i)).filter((v): v is string => !!v);
+        return {
+            disciplina: r.Disciplina, modulo: Number(r.Modulo) || null, notas,
+            // o Sponte da FICV não preenche Media/MediaFinal — com uma nota só, ela é o resultado
+            media: n(r.MediaFinal) ?? n(r.Media) ?? (notas.length === 1 ? notas[0] : null),
+            faltas: n(r.TotalFaltas), situacao: n(r.SituacaoDidatica),
+        };
+    });
 }
 
 /** Link Sponte Pay ou linha digitável de uma parcela do próprio aluno. */
