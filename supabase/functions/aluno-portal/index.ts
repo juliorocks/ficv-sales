@@ -5,10 +5,11 @@
 //   overview                                  → dados, matrículas, parcelas
 //   boletim  { turma_id }                     → notas/faltas por disciplina
 //   boletim  { turma_ids: [...] }             → o mesmo, de vários períodos do curso de uma vez
+//   foto                                      → foto do aluno (data URL) ou null
 //   pagamento { conta_receber_id, numero_parcela } → link Sponte Pay ou linha digitável
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { nivelDoCurso } from "../_shared/sponte.ts";
-import { alunoBoletim, alunoBoletins, alunoOverview, alunoPagamento } from "../_shared/alunoSponte.ts";
+import { alunoBoletim, alunoBoletins, alunoFoto, alunoOverview, alunoPagamento } from "../_shared/alunoSponte.ts";
 
 const cors = {
     "Access-Control-Allow-Origin": "*",
@@ -66,6 +67,8 @@ Deno.serve(async (req) => {
             if (!disciplinas) return j({ error: "Turma não encontrada." }, 404);
             return j({ disciplinas });
         }
+
+        if (action === "foto") return j({ foto: await alunoFoto(A) });
 
         if (action === "pagamento") {
             const r = await alunoPagamento(A, Number(body.conta_receber_id), Number(body.numero_parcela));

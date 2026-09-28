@@ -4,6 +4,11 @@ import { brDate, brNum, records, retorno, sponteCall } from "./sponte.ts";
 
 const n = (v?: string) => (v && v.trim() !== "" ? v.trim() : null);
 
+// Financeiro no Portal do Aluno / Tutor Virtual: só parcelas com vencimento a partir desta data
+// (decisão do usuário 28/09/2026 — o histórico anterior do Sponte não é mostrado nem cobrado).
+export const FINANCEIRO_DESDE = "2026-02-01";
+const noPeriodo = (vencimento: string | null) => !vencimento || vencimento >= FINANCEIRO_DESDE;
+
 // O Sponte cria um "curso" por ciclo de entrada: "Bacharelado Em Teologia - Ead (Teologia Ead 2026.1)",
 // "Teologia - EAD - 2024.2"… — é tudo o mesmo curso, só muda o período. Nome-base = sem o "(ciclo)" e sem
 // o "- 2024.2" do fim. Cursos com a mesma chave (sem acento/pontuação/ano e sem o "Bacharelado Em" inicial,
@@ -37,7 +42,7 @@ export async function alunoOverview(A: number) {
         vencimento: brDate(r.Vencimento), valor: brNum(r.ValorParcela), valor_pago: brNum(r.ValorPago) || null,
         data_pagamento: brDate(r.DataPagamento), situacao: n(r.SituacaoParcela), forma: n(r.FormaCobranca),
         categoria: n(r.Categoria), bolsa: n(r.BolsaAssociada),
-    })).sort((x, y) => String(x.vencimento).localeCompare(String(y.vencimento)));
+    })).filter((p) => noPeriodo(p.vencimento)).sort((x, y) => String(x.vencimento).localeCompare(String(y.vencimento)));
     return {
         raw: a,
         aluno: {
@@ -84,11 +89,23 @@ export async function alunoBoletins(A: number, turmas: number[]): Promise<{ turm
     return await Promise.all(ids.map(async (t) => ({ turma_id: t, disciplinas: await boletimDaTurma(A, t) })));
 }
 
+/** Foto do aluno (a do app do Sponte) como data URL, ou null se não tiver. Só ~7% dos alunos têm foto lá.
+ *  Só aceita JPEG/PNG em base64 válido — o valor vai direto pra um <img src>. */
+export async function alunoFoto(A: number): Promise<string | null> {
+    const x = await sponteCall("GetImageApp", { nAlunoID: A, nResponsavelID: 0 });
+    const b64 = ((x.match(/<Foto>([^<]*)<\/Foto>/) ?? [])[1] ?? "").replace(/\s+/g, "");
+    if (b64.length < 100 || b64.length > 6_000_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return null;
+    const mime = b64.startsWith("/9j/") ? "image/jpeg" : b64.startsWith("iVBOR") ? "image/png" : null;
+    return mime ? `data:${mime};base64,${b64}` : null;
+}
+
 /** Link Sponte Pay ou linha digitável de uma parcela do próprio aluno. */
 export async function alunoPagamento(A: number, conta: number, parc: number):
     Promise<{ notFound?: true; link?: string; linha_digitavel?: string; indisponivel?: true; motivo?: string }> {
     const xp = await sponteCall("GetParcelas", { sParametrosBusca: `AlunoID=${A}` });
-    if (!records(xp, "wsParcela").some((r) => Number(r.ContaReceberID) === conta && Number(r.NumeroParcela) === parc)) return { notFound: true };
+    // só parcela do próprio aluno E dentro do período exibido no portal
+    if (!records(xp, "wsParcela").some((r) => Number(r.ContaReceberID) === conta && Number(r.NumeroParcela) === parc
+        && noPeriodo(brDate(r.Vencimento)))) return { notFound: true };
     const xl = await sponteCall("GetLinkPagamentoSpontePay", { nContaReceberID: conta, nNumeroParcela: parc });
     const link = (xl.match(/https?:\/\/[^<\s"]+/g) ?? []).find((u) => !/sponteeducacional\.net\.br\/?$|w3\.org|microsoft|xmlsoap|api\.sponteeducacional/i.test(u));
     if (link) return { link: link.replace(/&amp;/g, "&") };

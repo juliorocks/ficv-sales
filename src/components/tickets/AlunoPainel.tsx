@@ -75,6 +75,26 @@ function agruparCursos(ms: Matricula[]): CursoAgrupado[] {
     .sort((x, y) => Number(y.vigente) - Number(x.vigente) || y.ultima.localeCompare(x.ultima))
 }
 
+/** Foto do aluno no Sponte (só ~7% têm); cache longo — a foto quase não muda e vem pesada (base64). */
+function useFoto() {
+  return useQuery<string | null>({
+    queryKey: ['aluno-foto'],
+    queryFn: async () => (await portal<{ foto: string | null }>({ action: 'foto' })).foto,
+    staleTime: 30 * 60_000, retry: 0,
+  })
+}
+
+/** Foto redonda; sem foto (ou se ela falhar ao carregar), as iniciais do nome. */
+function Avatar({ nome, src, size = 56 }: { nome: string; src?: string | null; size?: number }) {
+  const [falhou, setFalhou] = useState(false)
+  const partes = nome.trim().split(/\s+/).filter(Boolean)
+  const iniciais = ((partes[0]?.[0] ?? '') + (partes.length > 1 ? partes[partes.length - 1][0] : '')).toUpperCase()
+  const box = { width: size, height: size }
+  return src && !falhou
+    ? <img src={src} alt={nome} style={box} onError={() => setFalhou(true)} className="rounded-full object-cover object-top shrink-0 border border-[var(--border)]" />
+    : <div style={{ ...box, fontSize: size * 0.36 }} aria-label={nome} className="rounded-full bg-[var(--primary)]/10 text-[var(--primary)] font-bold flex items-center justify-center shrink-0 select-none">{iniciais || '?'}</div>
+}
+
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const dt = (iso: string | null) => (iso ? new Date(`${iso}T12:00:00`).toLocaleDateString('pt-BR') : '—')
 const today = new Date().toISOString().slice(0, 10)
@@ -100,6 +120,7 @@ function LoadState({ isLoading, error, refetch }: { isLoading: boolean; error: u
 
 export function AlunoInicio({ onGo }: { onGo: (tab: 'financeiro' | 'notas' | 'chamados', foco?: NotasFoco) => void }) {
   const q = useOverview()
+  const foto = useFoto()
   if (!q.data) return <LoadState isLoading={q.isLoading} error={q.error} refetch={q.refetch} />
   const { aluno, matriculas, parcelas } = q.data
   const proxima = parcelas.find((p) => !isPaid(p))
@@ -111,13 +132,16 @@ export function AlunoInicio({ onGo }: { onGo: (tab: 'financeiro' | 'notas' | 'ch
 
   return (
     <div className="space-y-4">
-      <Box>
-        <p className="text-xs uppercase tracking-widest text-[var(--text-muted)]">Olá,</p>
-        <p className="text-xl font-bold text-[var(--text-main)]">{aluno.nome}</p>
-        <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2 text-xs text-[var(--text-muted)]">
-          {aluno.ra && <span>RA <b className="text-[var(--text-main)]">{aluno.ra}</b></span>}
-          {aluno.situacao && <span>Situação <b className="text-[var(--text-main)]">{aluno.situacao}</b></span>}
-          {aluno.email && <span>{aluno.email}</span>}
+      <Box className="flex items-center gap-4">
+        <Avatar nome={aluno.nome} src={foto.data} size={64} />
+        <div className="min-w-0 flex-1">
+          <p className="text-xs uppercase tracking-widest text-[var(--text-muted)]">Olá,</p>
+          <p className="text-xl font-bold text-[var(--text-main)] leading-tight">{aluno.nome}</p>
+          <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2 text-xs text-[var(--text-muted)]">
+            {aluno.ra && <span>RA <b className="text-[var(--text-main)]">{aluno.ra}</b></span>}
+            {aluno.situacao && <span>Situação <b className="text-[var(--text-main)]">{aluno.situacao}</b></span>}
+            {aluno.email && <span className="break-all">{aluno.email}</span>}
+          </div>
         </div>
       </Box>
 
@@ -279,7 +303,7 @@ export function AlunoFinanceiro() {
           {pagas.map((p) => <Row key={`${p.conta_receber_id}-${p.numero_parcela}`} p={p} />)}
         </Box>
       )}
-      <p className="text-xs text-[var(--text-muted)] text-center">Dados do sistema acadêmico (Sponte). Pagou há pouco? Pode levar até 3 dias úteis para aparecer.</p>
+      <p className="text-xs text-[var(--text-muted)] text-center">Parcelas com vencimento a partir de 01/02/2026, do sistema acadêmico (Sponte). Pagou há pouco? Pode levar até 3 dias úteis para aparecer.</p>
     </div>
   )
 }
