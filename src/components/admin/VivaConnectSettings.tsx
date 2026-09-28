@@ -52,6 +52,7 @@ interface ChannelHealth {
     zpro_type: string | null
     zpro_hybrid_mode: string | null
     zpro_mode_seen_at: string | null
+    send_via_channel_id: number | null
 }
 
 const fieldLabel = "text-xs font-bold uppercase tracking-widest text-muted-foreground"
@@ -208,7 +209,7 @@ export function VivaConnectSettings() {
         showSuccess("Canal cadastrado. Copie a URL do webhook dele e cole na API do Z-PRO.")
     }
 
-    const updateChannel = async (id: number, patch: Partial<{ active: boolean; daily_limit: number; ai_enabled: boolean; hub_enabled: boolean; zpro_hybrid_mode: string | null }>) => {
+    const updateChannel = async (id: number, patch: Partial<{ active: boolean; daily_limit: number; ai_enabled: boolean; hub_enabled: boolean; zpro_hybrid_mode: string | null; send_via_channel_id: number | null }>) => {
         const { data, error } = await supabase.from("vivaconnect_channels").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id).select("id")
         if (error || !data?.length) return showError(`Não foi possível atualizar: ${error?.message ?? "sessão expirada."}`)
         refetchChannels()
@@ -413,6 +414,20 @@ export function VivaConnectSettings() {
                                                 </div>
                                             )
                                         })()}
+                                        {/* 28/09: em vez de confiar na Coexistência do Z-PRO pra escolher o caminho, a gente
+                                            decide — toda resposta AUTOMÁTICA (IA/Hub/1ª mensagem/portal) deste canal sai pela
+                                            API do canal escolhido aqui (normalmente a Baileys vinculada de verdade). Envio
+                                            manual (chat do CRM) e templates HSM continuam pelo canal original, sem mudança. */}
+                                        <div className="flex items-center gap-2 mt-1.5">
+                                            <label className="text-[11px] text-muted-foreground shrink-0">Enviar automáticos por</label>
+                                            <select value={c.send_via_channel_id ?? ""} onChange={(e) => updateChannel(c.id, { send_via_channel_id: e.target.value ? Number(e.target.value) : null })}
+                                                className="h-7 rounded-md border border-[var(--border)] bg-muted/20 px-2 text-xs">
+                                                <option value="">Este canal mesmo (deixa o Z-PRO decidir)</option>
+                                                {(channels ?? []).filter((o) => o.id !== c.id && o.purpose !== "grupo").map((o) => (
+                                                    <option key={o.id} value={o.id}>{o.name}</option>
+                                                ))}
+                                            </select>
+                                        </div>
                                     </div>
                                     <div className="flex items-center gap-1">
                                         {c.purpose !== "grupo" && (

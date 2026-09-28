@@ -29,7 +29,7 @@ import { asList, loadSettings, parseApiRef, toDiscovered, toZproNumber, zpro, zp
 import { mirror, sv } from "../_shared/db.ts";
 import { type HubMsg, loadDestinations, planejar } from "../_shared/hub.ts";
 
-const CH_COLS = "id, name, purpose, kind, phone, api_id, api_token, active, daily_limit, zpro_whatsapp_id, last_sent_at, zpro_type, zpro_hybrid_mode";
+const CH_COLS = "id, name, purpose, kind, phone, api_id, api_token, active, daily_limit, zpro_whatsapp_id, last_sent_at, zpro_type, zpro_hybrid_mode, send_via_channel_id";
 
 // Respostas automáticas (IA / Hub / portal / 1ª mensagem) nunca saem pela API OFICIAL paga
 // da Meta: número WABA só envia automático com o Modo Híbrido ativo no Z-PRO (decisão 26/09).
@@ -326,7 +326,20 @@ async function markChannel(db: any, id: number, ok: boolean, err: string | null,
 
 /** Envia UMA linha da fila (já com canal definido). Trava a linha com status 'sending'. */
 async function sendRow(db: any, settings: any, row: any, ch: any) {
-    const blocked = hybridBlock(ch, row.kind);
+    // "Enviar automáticos por" (Gestão > VivaConnect): resposta AUTOMÁTICA de um canal com
+    // send_via_channel_id configurado sai pela API do canal delegado (normalmente a Baileys
+    // vinculada de verdade) — a gente decide o caminho, não confia na Coexistência do Z-PRO
+    // escolher sozinha (28/09: não dava pra confirmar qual caminho ele usava). `ch` continua
+    // sendo o canal "dono" pra tudo o mais (histórico, lead fixo, limites/contadores do pool);
+    // só a chamada HTTP de envio usa `execCh`. Envio manual e HSM (só a oficial manda) não mudam.
+    let execCh = ch;
+    if (AUTO_KINDS.has(row.kind) && ch.send_via_channel_id) {
+        const { data: via } = await db.from("vivaconnect_channels").select(CH_COLS).eq("id", ch.send_via_channel_id).maybeSingle();
+        if (via?.active) execCh = via;
+    }
+    // a trava de custo Meta só faz sentido quando a chamada REALMENTE pode cair na API paga —
+    // com canal delegado configurado, já sabemos que não vai (é a Baileys por baixo)
+    const blocked = execCh.id === ch.id ? hybridBlock(ch, row.kind) : null;
     if (blocked) {
         await db.from("vivaconnect_outbox").update({ status: "failed", error: blocked }).eq("id", row.id).eq("status", "queued");
         await markChannel(db, ch.id, false, blocked);
@@ -339,10 +352,10 @@ async function sendRow(db: any, settings: any, row: any, ch: any) {
 
     const base = { number: row.number, externalKey: row.external_key };
     const r = row.media_type === "sounds" && row.media_url
-        ? await zpro(settings.base_url, ch, "/voice", { ...base, audio: row.media_url })
+        ? await zpro(settings.base_url, execCh, "/voice", { ...base, audio: row.media_url })
         : row.media_url
-            ? await zpro(settings.base_url, ch, "/url", { ...base, mediaUrl: row.media_url, body: row.body || row.file_name || "" })
-            : await zpro(settings.base_url, ch, "", { ...base, body: row.body });
+            ? await zpro(settings.base_url, execCh, "/url", { ...base, mediaUrl: row.media_url, body: row.body || row.file_name || "" })
+            : await zpro(settings.base_url, execCh, "", { ...base, body: row.body });
     const now = new Date().toISOString();
     if (!r.ok) {
         const err = zproErr(r.status, r.data);
@@ -355,12 +368,16 @@ async function sendRow(db: any, settings: any, row: any, ch: any) {
             status: retry ? "queued" : "failed", error: err, response: r.data,
             scheduled_at: retry ? new Date(Date.now() + 5 * 60_000).toISOString() : row.scheduled_at,
         }).eq("id", row.id);
-        if (!badRecipient) await markChannel(db, ch.id, false, err);
+        if (!badRecipient) {
+            await markChannel(db, ch.id, false, err);
+            if (execCh.id !== ch.id) await markChannel(db, execCh.id, false, err); // saúde da conexão que de fato tentou enviar
+        }
         return { ok: false, error: badRecipient ? `Esse número não tem WhatsApp ou é inválido (${row.number}).` : err, retry };
     }
 
     await db.from("vivaconnect_outbox").update({ status: "sent", sent_at: now, response: r.data, error: null }).eq("id", row.id);
     await markChannel(db, ch.id, true, null, true);
+    if (execCh.id !== ch.id) await markChannel(db, execCh.id, true, null, false);
     if (row.lead_id) {
         const d = r.data ?? {};
         const ticketId = d.ticket?.id ?? d.ticketId ?? d.message?.ticketId ?? null;
