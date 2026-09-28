@@ -8,7 +8,7 @@ import { Button } from '../ui/button'
 import { Textarea } from '../ui/textarea'
 import { KbAskPanel } from '../KbAskPanel'
 import { Badge } from '../ui/badge'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '../ui/select'
 import { showSuccess, showError } from '../../utils/toast'
 import {
   X, Send, Lock, Clock, CheckCircle2, Star, ChevronRight,
@@ -550,12 +550,15 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   }
 
   const assignTo = async (atendente_id: string) => {
-    const { error } = await supabase.from('tickets').update({ atendente_id }).eq('id', ticket.id)
-    if (error) { showError('Erro ao atribuir.'); return }
+    const { data, error } = await supabase.from('tickets').update({ atendente_id }).eq('id', ticket.id).select('id')
+    if (error || !data?.length) { showError('Erro ao atribuir.'); return }
     qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
     qc.invalidateQueries({ queryKey: ['tickets'] })
-    showSuccess('Atendente atribuído.')
+    showSuccess(`Chamado atribuído a ${atendentes.find((a: any) => a.id === atendente_id)?.full_name ?? 'atendente'}.`)
   }
+  // seletor único de transferência: 'q:<fila>' muda a fila, 'a:<perfil>' entrega pra um agente
+  // (o agente enxerga o chamado mesmo fora da fila dele — ticket_visible libera por atendente_id)
+  const transferTo = (v: string) => { if (v.startsWith('a:')) assignTo(v.slice(2)); else changeQueue(v.slice(2)) }
 
   const canEvaluate = !isStaff && (t.status === 'resolvido') && !t.avaliado
   // aluno encerra o próprio chamado: Tutor sai ANTES da mensagem (senão ele responderia a ela),
@@ -614,12 +617,21 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
             {/* Staff controls */}
             {isStaff && (
               <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
-                <Select value={(t as any).queue_id ? String((t as any).queue_id) : ''} onValueChange={changeQueue}>
-                  <SelectTrigger className="h-8 text-xs w-44 bg-[var(--bg-main)] border-[var(--border)]" title="Fila do chamado">
+                <Select value={(t as any).queue_id ? `q:${(t as any).queue_id}` : ''} onValueChange={transferTo}>
+                  <SelectTrigger className="h-8 text-xs w-44 bg-[var(--bg-main)] border-[var(--border)]" title="Fila do chamado — abra pra transferir pra outra fila ou pra um agente">
                     <SelectValue placeholder="Fila" />
                   </SelectTrigger>
                   <SelectContent>
-                    {queues.map(q => <SelectItem key={q.id} value={String(q.id)}>{q.nome}</SelectItem>)}
+                    <SelectGroup>
+                      <SelectLabel>Transferir para a fila</SelectLabel>
+                      {queues.map(q => <SelectItem key={q.id} value={`q:${q.id}`}>{q.nome}</SelectItem>)}
+                    </SelectGroup>
+                    <SelectGroup>
+                      <SelectLabel>Transferir para o agente</SelectLabel>
+                      {[...atendentes].sort((x: any, y: any) => (x.full_name ?? '').localeCompare(y.full_name ?? '', 'pt-BR')).map((a: any) => (
+                        <SelectItem key={a.id} value={`a:${a.id}`}>{a.full_name}</SelectItem>
+                      ))}
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
                 <Select value={t.status} onValueChange={(v) => changeStatus(v as TicketStatus)}>
@@ -637,7 +649,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                 </Select>
 
                 <Select value={t.atendente_id ?? ''} onValueChange={assignTo}>
-                  <SelectTrigger className="h-8 text-xs w-36 bg-[var(--bg-main)] border-[var(--border)]">
+                  <SelectTrigger className="h-8 text-xs w-36 bg-[var(--bg-main)] border-[var(--border)]" title="Agente responsável">
                     <SelectValue placeholder="Atribuir" />
                   </SelectTrigger>
                   <SelectContent>
