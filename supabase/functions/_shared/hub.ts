@@ -8,16 +8,23 @@ import { fillTemplate, firstName, onlyDigits } from "./vivaconnect.ts";
 export type HubDest = {
     id: number; nome: string; emoji: string; assuntos: string; is_self: boolean; numero: string | null;
     channel_id: number | null; avisar_destino: boolean; mensagem_redirect: string; mensagem_destino: string;
-    ativo: boolean; ordem: number;
+    ativo: boolean; ordem: number; mensagem_sem_numero?: string | null;
 };
+export const temNumero = (d: HubDest) => onlyDigits(d.numero).length >= 10;
 export type HubMsg = { de: "contato" | "hub"; texto: string; em: string };
 export type Classificacao = { destino: HubDest | null; confianca: number; motivo: string; metodo: "ia" | "menu" };
 
-/** Destinos que podem receber gente: a Faculdade + empresas com número cadastrado. */
+/**
+ * Empresas na triagem = todas as ATIVAS, com ou sem número novo (28/09: a IA sempre
+ * classifica — "quero ser membro" nunca pode virar lead da Faculdade só porque a Igreja
+ * ainda não tem número; sem número, a pessoa recebe mensagem_sem_numero).
+ */
 export async function loadDestinations(db: SupabaseClient): Promise<HubDest[]> {
     const { data } = await db.from("vivaconnect_hub_destinations").select("*").eq("ativo", true).order("ordem").order("id");
-    return ((data ?? []) as HubDest[]).filter((d) => d.is_self || onlyDigits(d.numero).length >= 10);
+    return (data ?? []) as HubDest[];
 }
+
+const SEM_NUMERO_PADRAO = "Olá{nome_virgula}! 💙 Este WhatsApp agora é exclusivo da *Faculdade Internacional Cidade Viva*.\nO atendimento da *{empresa}* está mudando de número — por favor, procure a {empresa} pelos canais oficiais (site e Instagram). Obrigado pela compreensão!";
 
 /** "(83) 99999-0000" a partir de 5583999990000 */
 export function formatNumero(raw: string | null): string {
@@ -46,6 +53,7 @@ export function menuText(template: string, dests: HubDest[], nome: string | null
 }
 
 export function redirectText(d: HubDest, nome: string | null | undefined): string {
+    if (!temNumero(d)) return fillTemplate(d.mensagem_sem_numero || SEM_NUMERO_PADRAO, vars(nome, { empresa: d.nome }));
     return fillTemplate(d.mensagem_redirect, vars(nome, { empresa: d.nome, numero: formatNumero(d.numero), link: waLink(d.numero) }));
 }
 export function forwardText(d: HubDest, nome: string | null | undefined, mensagem: string): string {
@@ -75,6 +83,8 @@ export async function classify(db: SupabaseClient, dests: HubDest[], falas: stri
         "Leia o que a pessoa escreveu e diga com QUAL instituição ela quer falar, pela lista abaixo.",
         "Se for só cumprimento, agradecimento ou não der pra saber o assunto, destino = null.",
         "Não chute: na dúvida entre duas, destino = null. Ex.: 'matrícula' sozinho é ambíguo (faculdade ou escola) → null; 'matrícula do meu filho no fundamental' → escola; 'vestibular de teologia' → faculdade; 'quero ser membro' → igreja.",
+        "Regras fixas: 'membro', 'membresia', 'batismo', 'culto', 'célula', 'pastor', 'oração' → IGREJA (a faculdade tem ALUNOS, nunca membros). Educação infantil, fundamental, ensino médio, filho/criança na escola → ESCOLA. Vestibular, graduação, pós, curso superior, EAD da faculdade, diploma → FACULDADE.",
+        "Se o assunto for de uma instituição que NÃO está na lista, destino = null.",
         `INSTITUIÇÕES:\n${lista}`,
         'Responda em JSON: {"destino": <id numérico ou null>, "confianca": 0 a 1, "motivo": "frase curta"}',
     ].join("\n\n");
@@ -111,8 +121,8 @@ export async function planejar(
     const self = dests.find((d) => d.is_self);
     if (!self) return { acao: "ignorar", motivo: "Faculdade (is_self) não cadastrada/ativa no hub" };
     const outras = dests.filter((d) => !d.is_self);
-    // ninguém mais pra onde mandar → tudo é Faculdade (hub sem efeito)
-    if (!outras.length) return { acao: "faculdade", destino: self, metodo: "unico", confianca: 1, motivo: "nenhuma outra empresa com número cadastrado" };
+    // nenhuma outra empresa ATIVA → tudo é Faculdade (hub sem efeito)
+    if (!outras.length) return { acao: "faculdade", destino: self, metodo: "unico", confianca: 1, motivo: "nenhuma outra empresa ativa no hub" };
 
     const falasAnteriores = (sessao?.messages ?? []).filter((m) => m.de === "contato").map((m) => m.texto);
 

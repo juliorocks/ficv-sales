@@ -14,7 +14,7 @@ import { showError, showSuccess } from "@/utils/toast"
 interface Dest {
     id: number; nome: string; emoji: string; assuntos: string; is_self: boolean; numero: string | null
     channel_id: number | null; avisar_destino: boolean; mensagem_redirect: string; mensagem_destino: string
-    ativo: boolean; ordem: number; logo_url: string | null
+    ativo: boolean; ordem: number; logo_url: string | null; mensagem_sem_numero: string
 }
 interface Routing {
     id: number; number: string; contact_name: string | null; status: "perguntando" | "faculdade" | "encaminhado"
@@ -98,12 +98,12 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
 
     const saveDest = async (d: Dest) => {
         if (!d.nome.trim()) return showError("Dê um nome.")
-        if (d.ativo && !d.is_self && digits(d.numero).length < 10) return showError(`${d.nome}: informe o número novo (com DDD) antes de ativar.`)
+        if (!d.is_self && d.numero && digits(d.numero).length < 10) return showError(`${d.nome}: número novo incompleto (inclua o DDD) — ou deixe em branco.`)
         setSaving(d.id)
         const { data, error } = await supabase.from("vivaconnect_hub_destinations").update({
             nome: d.nome.trim(), emoji: d.emoji.trim() || "🏢", assuntos: d.assuntos, numero: digits(d.numero) || null,
             channel_id: d.channel_id, avisar_destino: d.avisar_destino, mensagem_redirect: d.mensagem_redirect,
-            mensagem_destino: d.mensagem_destino, ativo: d.ativo, ordem: Number(d.ordem) || 0, updated_at: new Date().toISOString(),
+            mensagem_destino: d.mensagem_destino, mensagem_sem_numero: d.mensagem_sem_numero, ativo: d.ativo, ordem: Number(d.ordem) || 0, updated_at: new Date().toISOString(),
         }).eq("id", d.id).select("id")
         setSaving(null)
         if (error || !data?.length) return showError(`Não foi possível salvar: ${error?.message ?? "sessão expirada, recarregue."}`)
@@ -182,7 +182,7 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
                         <p className={fieldLabel}>Empresas do grupo (destinos)</p>
                         <Button size="sm" variant="outline" onClick={addDest}><Plus size={14} className="mr-1" /> Empresa</Button>
                     </div>
-                    <p className="text-xs text-muted-foreground">Empresa só entra na triagem <b>ativa e com número novo</b>. Os <b>assuntos</b> são o que a IA lê pra decidir — seja específico.</p>
+                    <p className="text-xs text-muted-foreground">Toda empresa <b>ativa</b> entra na triagem. Com número novo, a pessoa recebe o número; <b>sem número ainda</b>, recebe a mensagem de “sem número” (e nunca vira lead da Faculdade). Os <b>assuntos</b> são o que a IA lê pra decidir — seja específico.</p>
                     {draft.map((d) => {
                         const aberto = open === d.id
                         const pronto = d.is_self || digits(d.numero).length >= 10
@@ -193,8 +193,8 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
                                     <Logo d={d} />
                                     <span className="font-semibold text-sm text-[var(--text-main)] flex-1">{d.nome}{d.is_self && <span className="ml-2 text-[11px] font-normal text-muted-foreground">fica neste número</span>}</span>
                                     <span className="text-xs text-muted-foreground font-mono">{d.is_self ? "" : d.numero ? digits(d.numero) : "sem número"}</span>
-                                    <span className={`text-[11px] px-2 py-0.5 rounded-full ${d.ativo && pronto ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "bg-muted text-muted-foreground"}`}>
-                                        {d.ativo && pronto ? "na triagem" : !pronto ? "falta número" : "desligada"}
+                                    <span className={`text-[11px] px-2 py-0.5 rounded-full ${d.ativo ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "bg-muted text-muted-foreground"}`}>
+                                        {d.ativo ? (pronto ? "na triagem" : "na triagem · sem número") : "desligada"}
                                     </span>
                                 </button>
                                 {aberto && (
@@ -217,7 +217,10 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
                                             <textarea className={textareaCls} value={d.assuntos} onChange={(e) => set(d.id, { assuntos: e.target.value })} /></div>
                                         {!d.is_self && (
                                             <>
-                                                <div className="space-y-1"><p className={fieldLabel}>Mensagem enviada pelo número antigo</p>
+                                                <div className="space-y-1"><p className={fieldLabel}>Mensagem enquanto a empresa não tem número novo</p>
+                                                    <textarea className={textareaCls} value={d.mensagem_sem_numero} onChange={(e) => set(d.id, { mensagem_sem_numero: e.target.value })} />
+                                                    <p className="text-[11px] text-muted-foreground">Usada {pronto ? "se o número for apagado" : <b>agora</b>}. Variáveis: {"{primeiro_nome}"}, {"{nome_virgula}"}, {"{empresa}"}. Dica: inclua o site ou o Instagram da empresa.</p></div>
+                                                <div className="space-y-1"><p className={fieldLabel}>Mensagem com o número novo</p>
                                                     <textarea className={textareaCls} value={d.mensagem_redirect} onChange={(e) => set(d.id, { mensagem_redirect: e.target.value })} />
                                                     <p className="text-[11px] text-muted-foreground">Variáveis: {"{primeiro_nome}"}, {"{nome_virgula}"} (vira ", Maria"), {"{empresa}"}, {"{numero}"}, {"{link}"} (wa.me do número novo).</p></div>
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
