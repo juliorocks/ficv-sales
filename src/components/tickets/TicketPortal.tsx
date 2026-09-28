@@ -13,7 +13,7 @@ import { Textarea } from '../ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog'
 import { TicketDetail } from './TicketDetail'
-import { InstallAppBanner } from './InstallAppBanner'
+import { InstallAppBanner, InstallAppButton } from './InstallAppBanner'
 import { AlunoInicio, AlunoFinanceiro, AlunoNotas, useOverview, type NotasFoco } from './AlunoPainel'
 import { showSuccess, showError } from '../../utils/toast'
 import {
@@ -413,6 +413,7 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, appInstalado, onL
           </div>
         </div>
         <div className="flex items-center gap-4 sm:gap-5">
+        <InstallAppButton />
         <button onClick={refreshAll} disabled={refreshing} aria-label="Atualizar"
           className="flex items-center gap-1.5 text-xs text-[#8A8A9A] hover:text-[#F0EDE8] transition-colors">
           <RefreshCw className={`w-4 h-4 sm:w-3.5 sm:h-3.5 ${refreshing ? 'animate-spin' : ''}`} /> <span className="hidden sm:inline">Atualizar</span>
