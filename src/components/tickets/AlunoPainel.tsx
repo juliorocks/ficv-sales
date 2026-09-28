@@ -57,7 +57,7 @@ export interface NotasFoco { curso: string; turma_id: number | null }
 
 interface CursoAgrupado { nome: string; turmas: Matricula[]; vigente: boolean; ultima: string }
 // curso_base vem do servidor (o Sponte cria um "curso" por ciclo de entrada); cursos vigentes primeiro,
-// períodos em ordem cronológica, e a mesma turma em 2 contratos vira 1 período só (fica a situação melhor)
+// períodos do mais recente pro mais antigo, e a mesma turma em 2 contratos vira 1 período só (fica a situação melhor)
 function agruparCursos(ms: Matricula[]): CursoAgrupado[] {
   const por = new Map<string, CursoAgrupado>()
   for (const m of ms) {
@@ -71,7 +71,7 @@ function agruparCursos(ms: Matricula[]): CursoAgrupado[] {
     por.set(nome, c)
   }
   return [...por.values()]
-    .map((c) => ({ ...c, turmas: c.turmas.sort((x, y) => periodoKey(x.turma) - periodoKey(y.turma) || String(x.data_matricula).localeCompare(String(y.data_matricula))) }))
+    .map((c) => ({ ...c, turmas: c.turmas.sort((x, y) => periodoKey(y.turma) - periodoKey(x.turma) || String(y.data_matricula).localeCompare(String(x.data_matricula))) }))
     .sort((x, y) => Number(y.vigente) - Number(x.vigente) || y.ultima.localeCompare(x.ultima))
 }
 
@@ -91,8 +91,8 @@ function Avatar({ nome, src, size = 56, light = false }: { nome: string; src?: s
   const iniciais = ((partes[0]?.[0] ?? '') + (partes.length > 1 ? partes[partes.length - 1][0] : '')).toUpperCase()
   const box = { width: size, height: size }
   return src && !falhou
-    ? <img src={src} alt={nome} style={box} onError={() => setFalhou(true)} className={`rounded-full object-cover object-top shrink-0 border ${light ? 'border-white/30' : 'border-[var(--border)]'}`} />
-    : <div style={{ ...box, fontSize: size * 0.36 }} aria-label={nome} className={`rounded-full font-bold flex items-center justify-center shrink-0 select-none ${light ? 'bg-white/15 text-white' : 'bg-[var(--primary)]/10 text-[var(--primary)]'}`}>{iniciais || '?'}</div>
+    ? <img src={src} alt={nome} style={box} onError={() => setFalhou(true)} className={`rounded-full object-cover object-top shrink-0 border ${light ? 'border-[#13161D]/15' : 'border-[var(--border)]'}`} />
+    : <div style={{ ...box, fontSize: size * 0.36 }} aria-label={nome} className={`rounded-full font-bold flex items-center justify-center shrink-0 select-none ${light ? 'bg-white/50 text-[#13161D]' : 'bg-[var(--primary)]/10 text-[var(--primary)]'}`}>{iniciais || '?'}</div>
 }
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -128,19 +128,19 @@ export function AlunoInicio({ onGo }: { onGo: (tab: 'financeiro' | 'notas' | 'ch
   const cursos = agruparCursos(matriculas)
   const meuCurso = cursos[0] // vigentes primeiro
   const emAndamento = meuCurso?.turmas.filter((t) => VIGENTE.test(t.situacao ?? '')) ?? []
-  const atual = emAndamento[0] ?? meuCurso?.turmas[meuCurso.turmas.length - 1] // sem vigente: o período mais recente
+  const atual = emAndamento[0] ?? meuCurso?.turmas[0] // sem vigente: o período mais recente (turmas já vêm do mais novo pro mais velho)
 
   return (
     <div className="space-y-4">
-      <div className="-mx-4 sm:-mx-6 -mt-4 sm:-mt-6 px-4 sm:px-6 py-5 sm:py-6 rounded-b-2xl shadow-lg shadow-black/10 bg-gradient-to-br from-[var(--primary)] to-[#3733B0] flex items-center gap-4">
+      <div className="-mx-4 sm:-mx-6 -mt-4 sm:-mt-6 px-4 sm:px-6 py-5 sm:py-6 rounded-b-2xl shadow-lg shadow-black/10 bg-gradient-to-br from-[#E2C878] to-[#C9A84C] flex items-center gap-4">
         <Avatar nome={aluno.nome} src={foto.data} size={64} light />
         <div className="min-w-0 flex-1">
-          <p className="text-xs uppercase tracking-widest text-white/70">Olá,</p>
-          <p className="text-xl font-bold text-white leading-tight">{aluno.nome}</p>
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 mt-2 text-xs text-white/70">
-            {aluno.ra && <span>RA <b className="text-white">{aluno.ra}</b></span>}
+          <p className="text-xs uppercase tracking-widest text-[#13161D]/60">Olá,</p>
+          <p className="text-xl font-bold text-[#13161D] leading-tight">{aluno.nome}</p>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 mt-2 text-xs text-[#13161D]/60">
+            {aluno.ra && <span>RA <b className="text-[#13161D]">{aluno.ra}</b></span>}
             {aluno.situacao && (
-              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${/^ativ/i.test(aluno.situacao.trim()) ? 'bg-emerald-400/20 text-emerald-300' : 'bg-red-400/20 text-red-300'}`}>
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${/^ativ/i.test(aluno.situacao.trim()) ? 'bg-emerald-700/15 text-emerald-900' : 'bg-red-700/15 text-red-900'}`}>
                 {aluno.situacao}
               </span>
             )}
