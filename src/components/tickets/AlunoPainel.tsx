@@ -36,6 +36,42 @@ export function useOverview() {
   return useQuery<Overview>({ queryKey: ['aluno-overview'], queryFn: () => portal<Overview>({ action: 'overview' }), staleTime: 5 * 60_000, retry: 1 })
 }
 
+// ── Cursos: reúne as matrículas de um mesmo curso (períodos P1, P2… / turmas) — Início e Notas usam igual ──
+
+const VIGENTE = /vigente|ativ|cursando/i
+const rankSituacao = (s: string | null) => (VIGENTE.test(s ?? '') ? 0 : /encerr|conclu/i.test(s ?? '') ? 1 : 2)
+
+// "Teologia Ead - 2025.1 - P2" → "P2 · 2025.1" (o nome do curso já aparece em cima)
+function periodoLabel(turma: string | null) {
+  const m = turma?.match(/(\d{4}\.\d)\s*-\s*(.+)$/)
+  return m ? `${m[2]} · ${m[1]}` : turma ?? 'Turma'
+}
+// cronológico: semestre (2025.1) e depois P1, P2… ; sem semestre no nome vai pro começo
+function periodoKey(turma: string | null) {
+  const sem = turma?.match(/(\d{4})\.(\d)/), p = turma?.match(/\bP(\d+)\b/i)
+  return sem ? Number(sem[1]) * 100 + Number(sem[2]) * 10 + (p ? Number(p[1]) / 10 : 0) : 0
+}
+
+interface CursoAgrupado { nome: string; turmas: Matricula[]; vigente: boolean; ultima: string }
+// curso_base vem do servidor (o Sponte cria um "curso" por ciclo de entrada); cursos vigentes primeiro,
+// períodos em ordem cronológica, e a mesma turma em 2 contratos vira 1 período só (fica a situação melhor)
+function agruparCursos(ms: Matricula[]): CursoAgrupado[] {
+  const por = new Map<string, CursoAgrupado>()
+  for (const m of ms) {
+    const nome = m.curso_base ?? m.curso ?? 'Curso'
+    const c = por.get(nome) ?? { nome, turmas: [], vigente: false, ultima: '' }
+    const i = m.turma_id ? c.turmas.findIndex((t) => t.turma_id === m.turma_id) : -1
+    if (i < 0) c.turmas.push(m)
+    else if (rankSituacao(m.situacao) < rankSituacao(c.turmas[i].situacao)) c.turmas[i] = m
+    c.vigente ||= VIGENTE.test(m.situacao ?? '')
+    c.ultima = [c.ultima, m.data_matricula ?? ''].sort().pop()!
+    por.set(nome, c)
+  }
+  return [...por.values()]
+    .map((c) => ({ ...c, turmas: c.turmas.sort((x, y) => periodoKey(x.turma) - periodoKey(y.turma) || String(x.data_matricula).localeCompare(String(y.data_matricula))) }))
+    .sort((x, y) => Number(y.vigente) - Number(x.vigente) || y.ultima.localeCompare(x.ultima))
+}
+
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const dt = (iso: string | null) => (iso ? new Date(`${iso}T12:00:00`).toLocaleDateString('pt-BR') : '—')
 const today = new Date().toISOString().slice(0, 10)
@@ -65,7 +101,10 @@ export function AlunoInicio({ onGo }: { onGo: (tab: 'financeiro' | 'notas' | 'ch
   const { aluno, matriculas, parcelas } = q.data
   const proxima = parcelas.find((p) => !isPaid(p))
   const atrasadas = parcelas.filter(isLate)
-  const vigentes = matriculas.filter((m) => /vigente|ativ|cursando/i.test(m.situacao ?? ''))
+  const cursos = agruparCursos(matriculas)
+  const meuCurso = cursos[0] // vigentes primeiro
+  const emAndamento = meuCurso?.turmas.filter((t) => VIGENTE.test(t.situacao ?? '')) ?? []
+  const atual = emAndamento[0] ?? meuCurso?.turmas[meuCurso.turmas.length - 1] // sem vigente: o período mais recente
 
   return (
     <div className="space-y-4">
@@ -95,27 +134,36 @@ export function AlunoInicio({ onGo }: { onGo: (tab: 'financeiro' | 'notas' | 'ch
         </Box>
         <Box>
           <p className="text-xs text-[var(--text-muted)] flex items-center gap-1.5"><GraduationCap className="w-3.5 h-3.5" /> Meu curso</p>
-          {(vigentes[0] ?? matriculas[0]) ? (
+          {meuCurso ? (
             <>
-              <p className="text-sm font-semibold text-[var(--text-main)] mt-1 leading-snug">{(vigentes[0] ?? matriculas[0]).curso}</p>
-              <p className="text-xs text-[var(--text-muted)] mt-0.5">{(vigentes[0] ?? matriculas[0]).turma} · {(vigentes[0] ?? matriculas[0]).situacao}</p>
+              <p className="text-sm font-semibold text-[var(--text-main)] mt-1 leading-snug">{meuCurso.nome}</p>
+              <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                {emAndamento.length > 1 ? `${emAndamento.length} períodos em andamento` : `${periodoLabel(atual!.turma)} · ${atual!.situacao}`}
+              </p>
             </>
           ) : <p className="text-sm text-[var(--text-muted)] mt-2">Nenhuma matrícula encontrada.</p>}
           <button onClick={() => onGo('notas')} className="text-xs text-[var(--primary)] hover:underline mt-3">Ver notas →</button>
         </Box>
       </div>
 
-      {matriculas.length > 0 && (
+      {cursos.length > 0 && (
         <Box>
           <p className="text-sm font-semibold text-[var(--text-main)] mb-3 flex items-center gap-2"><BookOpen className="w-4 h-4" /> Matrículas</p>
-          <div className="space-y-2">
-            {matriculas.map((m) => (
-              <div key={m.contrato_id} className="flex items-start justify-between gap-3 border-b border-[var(--border)] last:border-0 pb-2 last:pb-0">
-                <div className="min-w-0">
-                  <p className="text-sm text-[var(--text-main)] leading-snug">{m.curso}</p>
-                  <p className="text-xs text-[var(--text-muted)]">{m.turma} · matrícula {dt(m.data_matricula)}{m.data_termino ? ` · término ${dt(m.data_termino)}` : ''}</p>
+          <div className="space-y-4">
+            {cursos.map((c) => (
+              <div key={c.nome}>
+                <p className="text-sm font-semibold text-[var(--text-main)] leading-snug">{c.nome}</p>
+                <div className="mt-1.5 space-y-2 border-l-2 border-[var(--border)] pl-3">
+                  {c.turmas.map((m) => (
+                    <div key={m.contrato_id} className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm text-[var(--text-main)] leading-snug">{periodoLabel(m.turma)}</p>
+                        <p className="text-xs text-[var(--text-muted)]">matrícula {dt(m.data_matricula)}{m.data_termino ? ` · término ${dt(m.data_termino)}` : ''}</p>
+                      </div>
+                      <span className={`text-xs px-2 py-0.5 rounded border shrink-0 ${VIGENTE.test(m.situacao ?? '') ? 'border-emerald-500/40 text-emerald-500' : 'border-[var(--border)] text-[var(--text-muted)]'}`}>{m.situacao}</span>
+                    </div>
+                  ))}
                 </div>
-                <span className="text-xs px-2 py-0.5 rounded border border-[var(--border)] text-[var(--text-muted)] shrink-0">{m.situacao}</span>
               </div>
             ))}
           </div>
@@ -217,40 +265,11 @@ export function AlunoFinanceiro() {
 // ── Notas ────────────────────────────────────────────────────
 
 type Disciplina = { disciplina: string; modulo: number | null; notas: string[]; media: string | null; faltas: string | null; situacao: string | null }
-const VIGENTE = /vigente|ativ|cursando/i
-
-// "Teologia Ead - 2025.1 - P2" → "P2 · 2025.1" (o nome do curso já está no cartão de cima)
-function periodoLabel(turma: string | null) {
-  const m = turma?.match(/(\d{4}\.\d)\s*-\s*(.+)$/)
-  return m ? `${m[2]} · ${m[1]}` : turma ?? 'Turma'
-}
-// cronológico: semestre (2025.1) e depois P1, P2… ; sem semestre no nome vai pro começo
-function periodoKey(turma: string | null) {
-  const sem = turma?.match(/(\d{4})\.(\d)/), p = turma?.match(/\bP(\d+)\b/i)
-  return sem ? Number(sem[1]) * 100 + Number(sem[2]) * 10 + (p ? Number(p[1]) / 10 : 0) : 0
-}
-const rankSituacao = (s: string | null) => (VIGENTE.test(s ?? '') ? 0 : /encerr|conclu/i.test(s ?? '') ? 1 : 2)
 
 export function AlunoNotas() {
   const q = useOverview()
   // um curso (ex.: Bacharelado em Teologia - EAD) reúne todos os períodos/turmas em que o aluno esteve
-  const cursos = useMemo(() => {
-    const por = new Map<string, { nome: string; turmas: Matricula[]; vigente: boolean; ultima: string }>()
-    for (const m of q.data?.matriculas ?? []) {
-      if (!m.turma_id) continue
-      const nome = m.curso_base ?? m.curso ?? 'Curso'
-      const c = por.get(nome) ?? { nome, turmas: [], vigente: false, ultima: '' }
-      const igual = c.turmas.find((t) => t.turma_id === m.turma_id) // mesma turma em 2 contratos → 1 período só
-      if (!igual) c.turmas.push(m)
-      else if (rankSituacao(m.situacao) < rankSituacao(igual.situacao)) c.turmas[c.turmas.indexOf(igual)] = m
-      c.vigente ||= VIGENTE.test(m.situacao ?? '')
-      c.ultima = [c.ultima, m.data_matricula ?? ''].sort().pop()!
-      por.set(nome, c)
-    }
-    return [...por.values()]
-      .map((c) => ({ ...c, turmas: c.turmas.sort((x, y) => periodoKey(x.turma) - periodoKey(y.turma) || String(x.data_matricula).localeCompare(String(y.data_matricula))) }))
-      .sort((x, y) => Number(y.vigente) - Number(x.vigente) || y.ultima.localeCompare(x.ultima))
-  }, [q.data])
+  const cursos = useMemo(() => agruparCursos((q.data?.matriculas ?? []).filter((m) => m.turma_id)), [q.data])
   const [escolhido, setEscolhido] = useState<string | null>(null)
   const curso = cursos.find((c) => c.nome === escolhido) ?? cursos[0] ?? null
   const ids = curso?.turmas.map((t) => t.turma_id!) ?? []
