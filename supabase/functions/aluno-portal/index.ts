@@ -4,10 +4,11 @@
 //
 //   overview                                  → dados, matrículas, parcelas
 //   boletim  { turma_id }                     → notas/faltas por disciplina
+//   boletim  { turma_ids: [...] }             → o mesmo, de vários períodos do curso de uma vez
 //   pagamento { conta_receber_id, numero_parcela } → link Sponte Pay ou linha digitável
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { nivelDoCurso } from "../_shared/sponte.ts";
-import { alunoBoletim, alunoOverview, alunoPagamento } from "../_shared/alunoSponte.ts";
+import { alunoBoletim, alunoBoletins, alunoOverview, alunoPagamento } from "../_shared/alunoSponte.ts";
 
 const cors = {
     "Access-Control-Allow-Origin": "*",
@@ -48,6 +49,14 @@ Deno.serve(async (req) => {
                 aluno: { ...sa, nome: sa.nome ?? aluno.nome, ra: sa.ra ?? aluno.ra, email: sa.email ?? aluno.email, celular: sa.celular ?? aluno.telefone },
                 matriculas, parcelas,
             });
+        }
+
+        if (action === "boletim" && Array.isArray(body.turma_ids)) {
+            const ids = body.turma_ids.map(Number).filter((t: number) => t > 0).slice(0, 20);
+            if (!ids.length) return j({ error: "turma_ids obrigatório." }, 400);
+            const turmas = await alunoBoletins(A, ids);
+            if (!turmas) return j({ error: "Turma não encontrada." }, 404);
+            return j({ turmas });
         }
 
         if (action === "boletim") {

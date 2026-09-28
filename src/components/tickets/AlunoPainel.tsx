@@ -2,7 +2,7 @@
  * AlunoPainel — abas Início / Financeiro / Notas do Portal do Aluno.
  * Dados ao vivo do Sponte via edge function aluno-portal (só o aluno logado).
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { AlertCircle, BookOpen, CalendarDays, CheckCircle2, ChevronsUpDown, Copy, CreditCard, ExternalLink, GraduationCap, Loader2, RefreshCw, Wallet } from 'lucide-react'
@@ -13,7 +13,7 @@ export interface Parcela {
   data_pagamento: string | null; situacao: string | null; forma: string | null; categoria: string | null; bolsa: string | null
 }
 export interface Matricula {
-  contrato_id: number; curso: string | null; turma: string | null; turma_id: number | null; situacao: string | null
+  contrato_id: number; curso: string | null; curso_base?: string | null; turma: string | null; turma_id: number | null; situacao: string | null
   data_matricula: string | null; data_inicio: string | null; data_termino: string | null
 }
 export interface Overview {
@@ -216,68 +216,116 @@ export function AlunoFinanceiro() {
 
 // ── Notas ────────────────────────────────────────────────────
 
+type Disciplina = { disciplina: string; modulo: number | null; notas: string[]; media: string | null; faltas: string | null; situacao: string | null }
+const VIGENTE = /vigente|ativ|cursando/i
+
+// "Teologia Ead - 2025.1 - P2" → "P2 · 2025.1" (o nome do curso já está no cartão de cima)
+function periodoLabel(turma: string | null) {
+  const m = turma?.match(/(\d{4}\.\d)\s*-\s*(.+)$/)
+  return m ? `${m[2]} · ${m[1]}` : turma ?? 'Turma'
+}
+// cronológico: semestre (2025.1) e depois P1, P2… ; sem semestre no nome vai pro começo
+function periodoKey(turma: string | null) {
+  const sem = turma?.match(/(\d{4})\.(\d)/), p = turma?.match(/\bP(\d+)\b/i)
+  return sem ? Number(sem[1]) * 100 + Number(sem[2]) * 10 + (p ? Number(p[1]) / 10 : 0) : 0
+}
+const rankSituacao = (s: string | null) => (VIGENTE.test(s ?? '') ? 0 : /encerr|conclu/i.test(s ?? '') ? 1 : 2)
+
 export function AlunoNotas() {
   const q = useOverview()
-  const turmas = (q.data?.matriculas ?? []).filter((m) => m.turma_id)
-  const [turma, setTurma] = useState<number | null>(null)
-  const sel = turma ?? turmas.find((m) => /vigente|ativ|cursando/i.test(m.situacao ?? ''))?.turma_id ?? turmas[0]?.turma_id ?? null
-  const b = useQuery<{ disciplinas: { disciplina: string; modulo: number | null; notas: string[]; media: string | null; faltas: string | null; situacao: string | null }[] }>({
-    queryKey: ['aluno-boletim', sel],
-    queryFn: () => portal({ action: 'boletim', turma_id: sel }),
-    enabled: !!sel, staleTime: 5 * 60_000, retry: 1,
+  // um curso (ex.: Bacharelado em Teologia - EAD) reúne todos os períodos/turmas em que o aluno esteve
+  const cursos = useMemo(() => {
+    const por = new Map<string, { nome: string; turmas: Matricula[]; vigente: boolean; ultima: string }>()
+    for (const m of q.data?.matriculas ?? []) {
+      if (!m.turma_id) continue
+      const nome = m.curso_base ?? m.curso ?? 'Curso'
+      const c = por.get(nome) ?? { nome, turmas: [], vigente: false, ultima: '' }
+      const igual = c.turmas.find((t) => t.turma_id === m.turma_id) // mesma turma em 2 contratos → 1 período só
+      if (!igual) c.turmas.push(m)
+      else if (rankSituacao(m.situacao) < rankSituacao(igual.situacao)) c.turmas[c.turmas.indexOf(igual)] = m
+      c.vigente ||= VIGENTE.test(m.situacao ?? '')
+      c.ultima = [c.ultima, m.data_matricula ?? ''].sort().pop()!
+      por.set(nome, c)
+    }
+    return [...por.values()]
+      .map((c) => ({ ...c, turmas: c.turmas.sort((x, y) => periodoKey(x.turma) - periodoKey(y.turma) || String(x.data_matricula).localeCompare(String(y.data_matricula))) }))
+      .sort((x, y) => Number(y.vigente) - Number(x.vigente) || y.ultima.localeCompare(x.ultima))
+  }, [q.data])
+  const [escolhido, setEscolhido] = useState<string | null>(null)
+  const curso = cursos.find((c) => c.nome === escolhido) ?? cursos[0] ?? null
+  const ids = curso?.turmas.map((t) => t.turma_id!) ?? []
+  const b = useQuery<{ turmas: { turma_id: number; disciplinas: Disciplina[] }[] }>({
+    queryKey: ['aluno-boletim', ids.join(',')],
+    queryFn: () => portal({ action: 'boletim', turma_ids: ids }),
+    enabled: ids.length > 0, staleTime: 5 * 60_000, retry: 1,
   })
   if (!q.data) return <LoadState isLoading={q.isLoading} error={q.error} refetch={q.refetch} />
-  if (!turmas.length) return <Box className="text-center py-10 text-sm text-[var(--text-muted)]">Nenhuma turma encontrada.</Box>
+  if (!curso) return <Box className="text-center py-10 text-sm text-[var(--text-muted)]">Nenhuma turma encontrada.</Box>
 
+  // só períodos com disciplina lançada viram seção; os vazios (cancelados etc.) entram na contagem no rodapé
+  const secoes = curso.turmas
+    .map((t) => ({ t, disciplinas: b.data?.turmas.find((x) => x.turma_id === t.turma_id)?.disciplinas ?? [] }))
+    .filter((x) => x.disciplinas.length > 0)
   return (
     <div className="space-y-4">
-      {/* Curso: cartão com o nome inteiro (quebra linha, não corta); com mais de 1 turma o cartão
+      {/* Curso: cartão com o nome inteiro (quebra linha, não corta); com mais de 1 curso o cartão
           inteiro vira o seletor (select nativo invisível por cima → picker do celular) */}
-      {(() => {
-        const m = turmas.find((m) => m.turma_id === sel) ?? turmas[0]
-        return (
-          <div className="relative glass-card px-4 py-3 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[var(--primary)]/10 text-[var(--primary)] flex items-center justify-center shrink-0">
-              <GraduationCap className="w-5 h-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-[11px] uppercase tracking-wider text-[var(--text-muted)]">{turmas.length > 1 ? 'Curso · toque para trocar' : 'Curso'}</p>
-              <p className="text-sm font-semibold text-[var(--text-main)] leading-snug">{m.curso}</p>
-              {m.turma && m.turma !== m.curso && <p className="text-xs text-[var(--text-muted)]">{m.turma}{m.situacao ? ` · ${m.situacao}` : ''}</p>}
-            </div>
-            {turmas.length > 1 && (
-              <>
-                <ChevronsUpDown className="w-4 h-4 text-[var(--text-muted)] shrink-0" />
-                <select value={sel ?? ''} onChange={(e) => setTurma(Number(e.target.value))} aria-label="Trocar curso"
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-base">
-                  {turmas.map((t) => <option key={t.contrato_id} value={t.turma_id!}>{t.curso}{t.turma && t.turma !== t.curso ? ` — ${t.turma}` : ''}</option>)}
-                </select>
-              </>
-            )}
-          </div>
-        )
-      })()}
-      {!b.data ? <LoadState isLoading={b.isLoading} error={b.error} refetch={b.refetch} /> : (
-        <Box>
-          {b.data.disciplinas.length === 0 ? <p className="text-sm text-[var(--text-muted)]">Nenhuma disciplina lançada ainda.</p> : (
-            <div className="divide-y divide-[var(--border)]">
-              {b.data.disciplinas.map((d, i) => (
-                <div key={i} className="py-3 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm text-[var(--text-main)] leading-snug">{d.disciplina}</p>
-                    <p className="text-xs text-[var(--text-muted)]">
-                      {d.modulo ? `Módulo ${d.modulo}` : ''}{d.notas.length ? ` · notas ${d.notas.join(' · ')}` : ''}{d.faltas ? ` · ${d.faltas} falta(s)` : ''}
-                    </p>
+      <div className="relative glass-card px-4 py-3 flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-[var(--primary)]/10 text-[var(--primary)] flex items-center justify-center shrink-0">
+          <GraduationCap className="w-5 h-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] uppercase tracking-wider text-[var(--text-muted)]">{cursos.length > 1 ? 'Curso · toque para trocar' : 'Curso'}</p>
+          <p className="text-sm font-semibold text-[var(--text-main)] leading-snug">{curso.nome}</p>
+          <p className="text-xs text-[var(--text-muted)]">{curso.turmas.length} {curso.turmas.length === 1 ? 'período' : 'períodos'}{curso.vigente ? ' · Cursando' : ''}</p>
+        </div>
+        {cursos.length > 1 && (
+          <>
+            <ChevronsUpDown className="w-4 h-4 text-[var(--text-muted)] shrink-0" />
+            <select value={curso.nome} onChange={(e) => setEscolhido(e.target.value)} aria-label="Trocar curso"
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-base">
+              {cursos.map((c) => <option key={c.nome} value={c.nome}>{c.nome}</option>)}
+            </select>
+          </>
+        )}
+      </div>
+      {!b.data ? <LoadState isLoading={b.isLoading} error={b.error} refetch={b.refetch} /> : secoes.length === 0 ? (
+        <Box><p className="text-sm text-[var(--text-muted)]">Nenhuma disciplina lançada ainda.</p></Box>
+      ) : (
+        <>
+          {secoes.map(({ t, disciplinas }) => (
+            <details key={t.turma_id} open className="glass-card group">
+              <summary className="list-none cursor-pointer px-4 py-3 flex items-center gap-2 [&::-webkit-details-marker]:hidden">
+                <p className="text-sm font-semibold text-[var(--text-main)] flex-1 min-w-0 truncate">{periodoLabel(t.turma)}</p>
+                {t.situacao && (
+                  <span className={`text-[11px] px-2 py-0.5 rounded-full shrink-0 ${VIGENTE.test(t.situacao) ? 'bg-emerald-500/15 text-emerald-500' : 'bg-[var(--border)] text-[var(--text-muted)]'}`}>{t.situacao}</span>
+                )}
+                <ChevronsUpDown className="w-4 h-4 text-[var(--text-muted)] shrink-0 group-open:rotate-90 transition-transform" />
+              </summary>
+              <div className="px-4 pb-1 divide-y divide-[var(--border)] border-t border-[var(--border)]">
+                {disciplinas.map((d, i) => (
+                  <div key={i} className="py-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm text-[var(--text-main)] leading-snug">{d.disciplina}</p>
+                      <p className="text-xs text-[var(--text-muted)]">
+                        {d.modulo ? `Módulo ${d.modulo}` : ''}{d.notas.length > 1 ? ` · notas ${d.notas.join(' · ')}` : ''}{d.faltas ? ` · ${d.faltas} falta(s)` : ''}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-lg font-bold text-[var(--text-main)]">{d.media ?? '—'}</p>
+                      <p className="text-[11px] text-[var(--text-muted)]">{d.situacao ?? (d.media ? 'média' : 'sem nota')}</p>
+                    </div>
                   </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-lg font-bold text-[var(--text-main)]">{d.media ?? '—'}</p>
-                    <p className="text-[11px] text-[var(--text-muted)]">{d.situacao ?? (d.media ? 'média' : 'sem nota')}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </details>
+          ))}
+          {curso.turmas.length > secoes.length && (
+            <p className="text-xs text-[var(--text-muted)] text-center">
+              {curso.turmas.length - secoes.length} {curso.turmas.length - secoes.length === 1 ? 'período sem disciplinas lançadas' : 'períodos sem disciplinas lançadas'} no sistema acadêmico.
+            </p>
           )}
-        </Box>
+        </>
       )}
     </div>
   )

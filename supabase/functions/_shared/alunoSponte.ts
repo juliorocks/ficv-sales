@@ -4,6 +4,23 @@ import { brDate, brNum, records, retorno, sponteCall } from "./sponte.ts";
 
 const n = (v?: string) => (v && v.trim() !== "" ? v.trim() : null);
 
+// O Sponte cria um "curso" por ciclo de entrada: "Bacharelado Em Teologia - Ead (Teologia Ead 2026.1)",
+// "Teologia - EAD - 2024.2"… — é tudo o mesmo curso, só muda o período. Nome-base = sem o "(ciclo)" e sem
+// o "- 2024.2" do fim. Cursos com a mesma chave (sem acento/pontuação/ano e sem o "Bacharelado Em" inicial,
+// que os cadastros antigos não têm) são juntados; o nome exibido é o mais completo do grupo.
+const cursoLimpo = (nome: string) => nome.replace(/\s*\([^)]*\)\s*$/, "").replace(/\s*-\s*\d{4}(\.\d)?\s*$/, "").replace(/\s+/g, " ").trim();
+const cursoChave = (nome: string) => cursoLimpo(nome).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/^bacharelado em\s+/, "").replace(/\b(19|20)\d{2}(\.\d)?\b/g, " ").replace(/[^a-z0-9]+/g, " ").trim();
+export function comCursoBase<T extends { curso: string | null; data_matricula: string | null }>(ms: T[]): (T & { curso_base: string | null })[] {
+    const nomes = new Map<string, string>(); // chave → nome mais completo (empate: matrícula mais recente)
+    for (const m of [...ms].sort((a, b) => String(b.data_matricula).localeCompare(String(a.data_matricula)))) {
+        if (!m.curso) continue;
+        const k = cursoChave(m.curso), nome = cursoLimpo(m.curso);
+        if (k && nome.length > (nomes.get(k)?.length ?? 0)) nomes.set(k, nome);
+    }
+    return ms.map((m) => ({ ...m, curso_base: m.curso ? (nomes.get(cursoChave(m.curso)) ?? cursoLimpo(m.curso)) : null }));
+}
+
 export async function alunoOverview(A: number) {
     const [xa, xm, xp] = await Promise.all([
         sponteCall("GetAlunos", { sParametrosBusca: `AlunoID=${A}` }),
@@ -11,10 +28,10 @@ export async function alunoOverview(A: number) {
         sponteCall("GetParcelas", { sParametrosBusca: `AlunoID=${A}` }),
     ]);
     const a = records(xa, "wsAluno").find((r) => Number(r.AlunoID) === A) ?? {};
-    const matriculas = records(xm, "wsMatricula").filter((r) => r.ContratoID && r.ContratoID !== "0").map((r) => ({
+    const matriculas = comCursoBase(records(xm, "wsMatricula").filter((r) => r.ContratoID && r.ContratoID !== "0").map((r) => ({
         contrato_id: Number(r.ContratoID), curso: n(r.NomeCurso), turma: n(r.NomeTurma), turma_id: Number(r.TurmaID) || null,
         situacao: n(r.Situacao), data_matricula: brDate(r.DataMatricula), data_inicio: brDate(r.DataInicio), data_termino: brDate(r.DataTermino),
-    })).sort((x, y) => String(y.data_matricula).localeCompare(String(x.data_matricula)));
+    }))).sort((x, y) => String(y.data_matricula).localeCompare(String(x.data_matricula)));
     const parcelas = records(xp, "wsParcela").filter((r) => r.ContaReceberID && r.ContaReceberID !== "0").map((r) => ({
         conta_receber_id: Number(r.ContaReceberID), numero_parcela: Number(r.NumeroParcela) || 0,
         vencimento: brDate(r.Vencimento), valor: brNum(r.ValorParcela), valor_pago: brNum(r.ValorPago) || null,
@@ -31,19 +48,18 @@ export async function alunoOverview(A: number) {
     };
 }
 
-/** Boletim de uma turma — só se a turma for de uma matrícula do próprio aluno. */
-export async function alunoBoletim(A: number, turma: number) {
-    const xm = await sponteCall("GetMatriculas", { sParametrosBusca: `AlunoID=${A}` });
-    if (!records(xm, "wsMatricula").some((r) => Number(r.TurmaID) === turma)) return null;
+type Disciplina = { disciplina: string; modulo: number | null; notas: string[]; media: string | null; faltas: string | null; situacao: string | null };
+
+// NotaAposRec vem "0" (não vazio) quando NÃO houve recuperação — só vale se Recuperacao foi lançada.
+// Antes o "0" ganhava da Nota real (ex.: Nota1=85,0 aparecia como sem nota).
+const notaDe = (r: Record<string, string>, i: number) => {
+    const apos = n(r[`NotaAposRec${i}`]);
+    return n(r[`Recuperacao${i}`]) && apos && brNum(apos) > 0 ? apos : n(r[`Nota${i}`]);
+};
+async function boletimDaTurma(A: number, turma: number): Promise<Disciplina[]> {
     const xb = await sponteCall("GetBoletim", { nAlunoID: A, nTurmaID: turma, nDisciplinaID: 0, nModulo: 0 });
-    // NotaAposRec vem "0" (não vazio) quando NÃO houve recuperação — só vale se Recuperacao foi lançada.
-    // Antes o "0" ganhava da Nota real (ex.: Nota1=85,0 aparecia como sem nota).
-    const nota = (r: Record<string, string>, i: number) => {
-        const apos = n(r[`NotaAposRec${i}`]);
-        return n(r[`Recuperacao${i}`]) && apos && brNum(apos) > 0 ? apos : n(r[`Nota${i}`]);
-    };
     return records(xb, "NotasBoletim").map((r) => {
-        const notas = [1, 2, 3, 4].map((i) => nota(r, i)).filter((v): v is string => !!v);
+        const notas = [1, 2, 3, 4].map((i) => notaDe(r, i)).filter((v): v is string => !!v);
         return {
             disciplina: r.Disciplina, modulo: Number(r.Modulo) || null, notas,
             // o Sponte da FICV não preenche Media/MediaFinal — com uma nota só, ela é o resultado
@@ -51,6 +67,21 @@ export async function alunoBoletim(A: number, turma: number) {
             faltas: n(r.TotalFaltas), situacao: n(r.SituacaoDidatica),
         };
     });
+}
+
+/** Boletim de uma turma — só se a turma for de uma matrícula do próprio aluno. */
+export async function alunoBoletim(A: number, turma: number): Promise<Disciplina[] | null> {
+    return (await alunoBoletins(A, [turma]))?.[0]?.disciplinas ?? null;
+}
+
+/** Boletins de várias turmas de uma vez (os períodos de um mesmo curso). Só turmas do próprio aluno;
+ *  null se nenhuma for. Uma consulta de matrículas + os boletins em paralelo. */
+export async function alunoBoletins(A: number, turmas: number[]): Promise<{ turma_id: number; disciplinas: Disciplina[] }[] | null> {
+    const xm = await sponteCall("GetMatriculas", { sParametrosBusca: `AlunoID=${A}` });
+    const minhas = new Set(records(xm, "wsMatricula").map((r) => Number(r.TurmaID)));
+    const ids = [...new Set(turmas)].filter((t) => minhas.has(t));
+    if (!ids.length) return null;
+    return await Promise.all(ids.map(async (t) => ({ turma_id: t, disciplinas: await boletimDaTurma(A, t) })));
 }
 
 /** Link Sponte Pay ou linha digitável de uma parcela do próprio aluno. */
