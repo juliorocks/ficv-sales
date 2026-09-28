@@ -147,13 +147,22 @@ export function AlunoInicio({ onGo }: { onGo: (tab: 'financeiro' | 'notas' | 'ch
       </div>
 
       {cursos.length > 0 && (
-        <Box>
-          <p className="text-sm font-semibold text-[var(--text-main)] mb-3 flex items-center gap-2"><BookOpen className="w-4 h-4" /> Matrículas</p>
-          <div className="space-y-4">
-            {cursos.map((c) => (
-              <div key={c.nome}>
-                <p className="text-sm font-semibold text-[var(--text-main)] leading-snug">{c.nome}</p>
-                <div className="mt-1.5 space-y-2 border-l-2 border-[var(--border)] pl-3">
+        <div className="space-y-2">
+          <p className="text-sm font-semibold text-[var(--text-main)] flex items-center gap-2 px-1"><BookOpen className="w-4 h-4" /> Matrículas</p>
+          {/* um bloco por curso, fechado; toque abre os períodos */}
+          {cursos.map((c) => {
+            const melhor = [...c.turmas].sort((x, y) => rankSituacao(x.situacao) - rankSituacao(y.situacao))[0].situacao
+            return (
+              <details key={c.nome} className="glass-card group">
+                <summary className="list-none cursor-pointer px-4 py-3 flex items-center gap-3 [&::-webkit-details-marker]:hidden">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-[var(--text-main)] leading-snug">{c.nome}</p>
+                    <p className="text-xs text-[var(--text-muted)]">{c.turmas.length} {c.turmas.length === 1 ? 'período' : 'períodos'}</p>
+                  </div>
+                  {melhor && <span className={`text-xs px-2 py-0.5 rounded border shrink-0 ${VIGENTE.test(melhor) ? 'border-emerald-500/40 text-emerald-500' : 'border-[var(--border)] text-[var(--text-muted)]'}`}>{melhor}</span>}
+                  <ChevronsUpDown className="w-4 h-4 text-[var(--text-muted)] shrink-0 group-open:rotate-90 transition-transform" />
+                </summary>
+                <div className="px-4 py-3 space-y-3 border-t border-[var(--border)]">
                   {c.turmas.map((m) => (
                     <div key={m.contrato_id} className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -164,10 +173,10 @@ export function AlunoInicio({ onGo }: { onGo: (tab: 'financeiro' | 'notas' | 'ch
                     </div>
                   ))}
                 </div>
-              </div>
-            ))}
-          </div>
-        </Box>
+              </details>
+            )
+          })}
+        </div>
       )}
 
       <Box className="flex items-center justify-between gap-3">
