@@ -33,6 +33,7 @@ export interface Lead {
     widechat_attendance_id?: string | null;
     fonte_lead?: string | null;
     partner_id?: string | null;
+    vivaconnect_channel_id?: number | null;
 }
 
 export type PartnerType = 'influencer' | 'polo' | 'other';

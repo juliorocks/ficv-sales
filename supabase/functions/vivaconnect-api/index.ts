@@ -129,6 +129,15 @@ Deno.serve(async (req) => {
             if (!channelId) return jsonRes({ error: "Nenhum número do VivaConnect disponível (cadastre um canal ativo)." }, 400);
             const { data: ch } = await db.from("vivaconnect_channels").select(CH_COLS).eq("id", channelId).maybeSingle();
             if (!ch?.active) return jsonRes({ error: `Canal ${ch?.name ?? channelId} está desativado.` }, 400);
+            // Gestão > VivaConnect > "Quem atende cada canal": sem nenhuma linha pro agente
+            // = sem restrição; com pelo menos 1 canal marcado, só pode enviar por eles.
+            // Espelha o filtro do Kanban (KanbanBoard.tsx) — aqui é a trava de verdade.
+            if (!isAdmin(caller) && createdBy) {
+                const { data: myChannels } = await db.from("vivaconnect_agent_channels").select("channel_id").eq("profile_id", createdBy);
+                if (myChannels?.length && !myChannels.some((r: { channel_id: number }) => r.channel_id === ch.id)) {
+                    return jsonRes({ error: `Você não está apto a enviar pelo canal "${ch.name}" (Gestão > VivaConnect).` }, 403);
+                }
+            }
             const senderName = createdBy
                 ? ((await db.from("profiles").select("full_name").eq("id", createdBy).maybeSingle()).data?.full_name ?? null)
                 : null;

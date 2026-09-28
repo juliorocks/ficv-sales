@@ -82,6 +82,22 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
         retry: 1,
     })
 
+    // Restrição de canal do VivaConnect (Gestão > VivaConnect > "Quem atende cada
+    // canal"): sem nenhuma linha pro agente logado = sem restrição (vê tudo, como
+    // sempre); com pelo menos 1 canal marcado, só enxerga leads desses canais + leads
+    // sem vivaconnect_channel_id (outras origens, não afetadas por essa tela). Admin
+    // nunca é restrito, mesmo que alguém marque canais pra ele por engano.
+    const { data: myChannels } = useQuery<number[]>({
+        queryKey: ['vivaconnect_my_channels', user?.id],
+        queryFn: async () => {
+            const { data, error } = await supabase.from('vivaconnect_agent_channels').select('channel_id').eq('profile_id', user!.id)
+            if (error) throw error
+            return (data ?? []).map((r: { channel_id: number }) => r.channel_id)
+        },
+        enabled: !isAuthLoading && !!user && user.role !== 'admin',
+        staleTime: 5 * 60 * 1000,
+    })
+
     const { data: users, isLoading: isLoadingUsers } = useQuery<User[]>({
         queryKey: ['users'],
         queryFn: async () => {
@@ -157,6 +173,13 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
         if (!leads) return [];
         let out = leads;
 
+        // canais do VivaConnect em que o agente logado está apto (ver acima) — some do
+        // Kanban dele um lead de canal alheio; leads sem canal (outras origens) ficam.
+        if (myChannels && myChannels.length > 0) {
+            const allowed = new Set(myChannels);
+            out = out.filter(lead => !lead.vivaconnect_channel_id || allowed.has(lead.vivaconnect_channel_id));
+        }
+
         // filtro de atendente — vale pro funil inteiro, em todas as colunas de uma vez.
         // Filtrando por UM agente específico, os leads SEM atendente continuam
         // aparecendo — é a fila compartilhada de Entrada, qualquer agente precisa ver
@@ -199,7 +222,7 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
             });
         }
         return out;
-    }, [leads, searchTerm, assigneeFilter, teamAgentIds]);
+    }, [leads, searchTerm, assigneeFilter, teamAgentIds, myChannels]);
 
     useEffect(() => {
         if (stages) {

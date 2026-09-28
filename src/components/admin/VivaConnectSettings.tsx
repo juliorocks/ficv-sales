@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { showError, showSuccess } from "@/utils/toast"
 import { VivaConnectHub } from "./VivaConnectHub"
+import { VivaConnectAgentChannels } from "./VivaConnectAgentChannels"
 
 interface VcSettings {
     enabled: boolean
@@ -437,6 +438,9 @@ export function VivaConnectSettings() {
                     </CardContent>
                 </Card>
             </div>
+
+            {/* ── Quem atende cada canal ──────────────────────────────────── */}
+            <VivaConnectAgentChannels channels={(channels ?? []).map((c) => ({ id: c.id, name: c.name, purpose: c.purpose, phone: c.phone }))} />
 
             {/* ── Hub do Grupo ────────────────────────────────────────────── */}
             <VivaConnectHub channels={(channels ?? []).map((c) => ({ id: c.id, name: c.name, purpose: c.purpose, phone: c.phone, hub_enabled: c.hub_enabled }))} />
