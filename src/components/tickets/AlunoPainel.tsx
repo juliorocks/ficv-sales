@@ -85,14 +85,14 @@ function useFoto() {
 }
 
 /** Foto redonda; sem foto (ou se ela falhar ao carregar), as iniciais do nome. */
-function Avatar({ nome, src, size = 56 }: { nome: string; src?: string | null; size?: number }) {
+function Avatar({ nome, src, size = 56, light = false }: { nome: string; src?: string | null; size?: number; light?: boolean }) {
   const [falhou, setFalhou] = useState(false)
   const partes = nome.trim().split(/\s+/).filter(Boolean)
   const iniciais = ((partes[0]?.[0] ?? '') + (partes.length > 1 ? partes[partes.length - 1][0] : '')).toUpperCase()
   const box = { width: size, height: size }
   return src && !falhou
-    ? <img src={src} alt={nome} style={box} onError={() => setFalhou(true)} className="rounded-full object-cover object-top shrink-0 border border-[var(--border)]" />
-    : <div style={{ ...box, fontSize: size * 0.36 }} aria-label={nome} className="rounded-full bg-[var(--primary)]/10 text-[var(--primary)] font-bold flex items-center justify-center shrink-0 select-none">{iniciais || '?'}</div>
+    ? <img src={src} alt={nome} style={box} onError={() => setFalhou(true)} className={`rounded-full object-cover object-top shrink-0 border ${light ? 'border-white/30' : 'border-[var(--border)]'}`} />
+    : <div style={{ ...box, fontSize: size * 0.36 }} aria-label={nome} className={`rounded-full font-bold flex items-center justify-center shrink-0 select-none ${light ? 'bg-white/15 text-white' : 'bg-[var(--primary)]/10 text-[var(--primary)]'}`}>{iniciais || '?'}</div>
 }
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -132,18 +132,22 @@ export function AlunoInicio({ onGo }: { onGo: (tab: 'financeiro' | 'notas' | 'ch
 
   return (
     <div className="space-y-4">
-      <Box className="flex items-center gap-4">
-        <Avatar nome={aluno.nome} src={foto.data} size={64} />
+      <div className="-mx-4 sm:-mx-6 -mt-4 sm:-mt-6 px-4 sm:px-6 py-5 sm:py-6 rounded-b-2xl shadow-lg shadow-black/10 bg-gradient-to-br from-[var(--primary)] to-[#3733B0] flex items-center gap-4">
+        <Avatar nome={aluno.nome} src={foto.data} size={64} light />
         <div className="min-w-0 flex-1">
-          <p className="text-xs uppercase tracking-widest text-[var(--text-muted)]">Olá,</p>
-          <p className="text-xl font-bold text-[var(--text-main)] leading-tight">{aluno.nome}</p>
-          <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2 text-xs text-[var(--text-muted)]">
-            {aluno.ra && <span>RA <b className="text-[var(--text-main)]">{aluno.ra}</b></span>}
-            {aluno.situacao && <span>Situação <b className="text-[var(--text-main)]">{aluno.situacao}</b></span>}
+          <p className="text-xs uppercase tracking-widest text-white/70">Olá,</p>
+          <p className="text-xl font-bold text-white leading-tight">{aluno.nome}</p>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 mt-2 text-xs text-white/70">
+            {aluno.ra && <span>RA <b className="text-white">{aluno.ra}</b></span>}
+            {aluno.situacao && (
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${/^ativ/i.test(aluno.situacao.trim()) ? 'bg-emerald-400/20 text-emerald-300' : 'bg-red-400/20 text-red-300'}`}>
+                {aluno.situacao}
+              </span>
+            )}
             {aluno.email && <span className="break-all">{aluno.email}</span>}
           </div>
         </div>
-      </Box>
+      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Box>

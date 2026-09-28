@@ -408,7 +408,6 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, appInstalado, onL
           />
           <div className="border-l border-[#2A2D36] pl-3">
             <p className="text-xs font-semibold text-[#F0EDE8]">Portal do Aluno</p>
-            <p className="text-xs text-[#8A8A9A] truncate max-w-[45vw] sm:max-w-none">{alunoNome}</p>
           </div>
         </div>
         <div className="flex items-center gap-4 sm:gap-5">

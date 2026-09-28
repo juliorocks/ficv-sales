@@ -111,7 +111,7 @@ export function InstallAppButton() {
   return (
     <>
       <button onClick={async () => { if ((await install()) === 'help') setHelp(true) }} aria-label="Instalar app" title="Instalar app"
-        className="flex items-center gap-1.5 text-xs text-[#8A8A9A] hover:text-[#F0EDE8] transition-colors">
+        className="flex items-center gap-1.5 text-xs text-[#C9A84C] hover:text-[#DBC073] transition-colors">
         <Download className="w-4 h-4 sm:w-3.5 sm:h-3.5" /> <span className="hidden sm:inline">Instalar app</span>
       </button>
       {help && <InstallHelp onClose={() => setHelp(false)} />}
