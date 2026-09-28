@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog'
 import { TicketDetail } from './TicketDetail'
 import { InstallAppBanner } from './InstallAppBanner'
-import { AlunoInicio, AlunoFinanceiro, AlunoNotas, useOverview } from './AlunoPainel'
+import { AlunoInicio, AlunoFinanceiro, AlunoNotas, useOverview, type NotasFoco } from './AlunoPainel'
 import { showSuccess, showError } from '../../utils/toast'
 import {
   Plus, Ticket as TicketIcon, Clock, CheckCircle2,
@@ -361,6 +361,8 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, appInstalado, onL
     return () => document.removeEventListener('visibilitychange', onVisible)
   }, [])
   const [tab, setTab] = useState<'inicio' | 'financeiro' | 'notas' | 'chamados'>('inicio')
+  // período tocado no Início → Notas abre já nele (some ao trocar de aba pelo menu)
+  const [notasFoco, setNotasFoco] = useState<NotasFoco | null>(null)
   const [showNew, setShowNew] = useState(false)
   const [selected, setSelected] = useState<Ticket | null>(null)
   const [search, setSearch] = useState('')
@@ -430,7 +432,7 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, appInstalado, onL
       <nav className="hidden sm:block border-b border-[#2A2D36] bg-[#13161D] px-6">
         <div className="max-w-3xl mx-auto flex gap-1">
           {tabs.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)}
+            <button key={t.id} onClick={() => { setNotasFoco(null); setTab(t.id) }}
               className={`relative flex items-center gap-1.5 px-3 py-3 text-sm whitespace-nowrap border-b-2 transition-colors ${tab === t.id ? 'border-[#C9A84C] text-[#F0EDE8] font-semibold' : 'border-transparent text-[#8A8A9A] hover:text-[#F0EDE8]'}`}>
               <t.icon className="w-4 h-4" /> {t.label}
               {'badge' in t && t.badge > 0 && <span className="ml-0.5 text-[10px] bg-purple-500 text-white rounded-full px-1.5">{t.badge}</span>}
@@ -443,9 +445,9 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, appInstalado, onL
 
       {tab !== 'chamados' && (
         <div className="p-4 sm:p-6 pb-28 sm:pb-6 max-w-3xl mx-auto">
-          {tab === 'inicio' && <AlunoInicio onGo={(t) => { setTab(t); if (t === 'chamados') setShowNew(true) }} />}
+          {tab === 'inicio' && <AlunoInicio onGo={(t, foco) => { setNotasFoco(t === 'notas' ? foco ?? null : null); setTab(t); window.scrollTo({ top: 0 }); if (t === 'chamados') setShowNew(true) }} />}
           {tab === 'financeiro' && <AlunoFinanceiro />}
-          {tab === 'notas' && <AlunoNotas />}
+          {tab === 'notas' && <AlunoNotas foco={notasFoco} />}
         </div>
       )}
 
@@ -553,7 +555,7 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, appInstalado, onL
       <nav className="sm:hidden fixed bottom-0 inset-x-0 z-40 border-t border-[#2A2D36] bg-[#13161D]/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
         <div className="grid grid-cols-4">
           {tabs.map(t => (
-            <button key={t.id} onClick={() => { setTab(t.id); window.scrollTo({ top: 0 }) }}
+            <button key={t.id} onClick={() => { setNotasFoco(null); setTab(t.id); window.scrollTo({ top: 0 }) }}
               className={`relative flex flex-col items-center gap-1 pt-2.5 pb-2 text-[11px] transition-colors ${tab === t.id ? 'text-[#C9A84C] font-semibold' : 'text-[#8A8A9A]'}`}>
               {tab === t.id && <span className="absolute top-0 h-0.5 w-8 rounded-full bg-[#C9A84C]" />}
               <span className="relative">

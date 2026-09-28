@@ -2,10 +2,10 @@
  * AlunoPainel — abas Início / Financeiro / Notas do Portal do Aluno.
  * Dados ao vivo do Sponte via edge function aluno-portal (só o aluno logado).
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
-import { AlertCircle, BookOpen, CalendarDays, CheckCircle2, ChevronsUpDown, Copy, CreditCard, ExternalLink, GraduationCap, Loader2, RefreshCw, Wallet } from 'lucide-react'
+import { AlertCircle, BookOpen, CalendarDays, CheckCircle2, ChevronRight, ChevronsUpDown, Copy, CreditCard, ExternalLink, GraduationCap, Loader2, RefreshCw, Wallet } from 'lucide-react'
 import { showError, showSuccess } from '../../utils/toast'
 
 export interface Parcela {
@@ -52,6 +52,9 @@ function periodoKey(turma: string | null) {
   return sem ? Number(sem[1]) * 100 + Number(sem[2]) * 10 + (p ? Number(p[1]) / 10 : 0) : 0
 }
 
+/** Período escolhido no Início: a aba Notas abre nesse curso e rola até o período. */
+export interface NotasFoco { curso: string; turma_id: number | null }
+
 interface CursoAgrupado { nome: string; turmas: Matricula[]; vigente: boolean; ultima: string }
 // curso_base vem do servidor (o Sponte cria um "curso" por ciclo de entrada); cursos vigentes primeiro,
 // períodos em ordem cronológica, e a mesma turma em 2 contratos vira 1 período só (fica a situação melhor)
@@ -95,7 +98,7 @@ function LoadState({ isLoading, error, refetch }: { isLoading: boolean; error: u
 
 // ── Início ───────────────────────────────────────────────────
 
-export function AlunoInicio({ onGo }: { onGo: (tab: 'financeiro' | 'notas' | 'chamados') => void }) {
+export function AlunoInicio({ onGo }: { onGo: (tab: 'financeiro' | 'notas' | 'chamados', foco?: NotasFoco) => void }) {
   const q = useOverview()
   if (!q.data) return <LoadState isLoading={q.isLoading} error={q.error} refetch={q.refetch} />
   const { aluno, matriculas, parcelas } = q.data
@@ -163,15 +166,25 @@ export function AlunoInicio({ onGo }: { onGo: (tab: 'financeiro' | 'notas' | 'ch
                   <ChevronsUpDown className="w-4 h-4 text-[var(--text-muted)] shrink-0 group-open:rotate-90 transition-transform" />
                 </summary>
                 <div className="px-4 py-3 space-y-3 border-t border-[var(--border)]">
-                  {c.turmas.map((m) => (
-                    <div key={m.contrato_id} className="flex items-start justify-between gap-3">
+                  {c.turmas.map((m) => {
+                    const chip = <span className={`text-xs px-2 py-0.5 rounded border shrink-0 ${VIGENTE.test(m.situacao ?? '') ? 'border-emerald-500/40 text-emerald-500' : 'border-[var(--border)] text-[var(--text-muted)]'}`}>{m.situacao}</span>
+                    const info = (
                       <div className="min-w-0">
                         <p className="text-sm text-[var(--text-main)] leading-snug">{periodoLabel(m.turma)}</p>
                         <p className="text-xs text-[var(--text-muted)]">matrícula {dt(m.data_matricula)}{m.data_termino ? ` · término ${dt(m.data_termino)}` : ''}</p>
                       </div>
-                      <span className={`text-xs px-2 py-0.5 rounded border shrink-0 ${VIGENTE.test(m.situacao ?? '') ? 'border-emerald-500/40 text-emerald-500' : 'border-[var(--border)] text-[var(--text-muted)]'}`}>{m.situacao}</span>
-                    </div>
-                  ))}
+                    )
+                    // tocar no período abre as Notas dele (sem turma no Sponte não há boletim → fica só informativo)
+                    return m.turma_id ? (
+                      <button key={m.contrato_id} onClick={() => onGo('notas', { curso: c.nome, turma_id: m.turma_id })} aria-label={`Ver notas de ${periodoLabel(m.turma)}`}
+                        className="w-full text-left flex items-center justify-between gap-2 rounded-lg -mx-2 px-2 py-1.5 hover:bg-[var(--border)]/40 active:bg-[var(--border)]/60 transition-colors">
+                        {info}
+                        <span className="flex items-center gap-1 shrink-0">{chip}<ChevronRight className="w-4 h-4 text-[var(--text-muted)]" /></span>
+                      </button>
+                    ) : (
+                      <div key={m.contrato_id} className="flex items-start justify-between gap-3">{info}{chip}</div>
+                    )
+                  })}
                 </div>
               </details>
             )
@@ -275,11 +288,11 @@ export function AlunoFinanceiro() {
 
 type Disciplina = { disciplina: string; modulo: number | null; notas: string[]; media: string | null; faltas: string | null; situacao: string | null }
 
-export function AlunoNotas() {
+export function AlunoNotas({ foco }: { foco?: NotasFoco | null }) {
   const q = useOverview()
   // um curso (ex.: Bacharelado em Teologia - EAD) reúne todos os períodos/turmas em que o aluno esteve
   const cursos = useMemo(() => agruparCursos((q.data?.matriculas ?? []).filter((m) => m.turma_id)), [q.data])
-  const [escolhido, setEscolhido] = useState<string | null>(null)
+  const [escolhido, setEscolhido] = useState<string | null>(foco?.curso ?? null)
   const curso = cursos.find((c) => c.nome === escolhido) ?? cursos[0] ?? null
   const ids = curso?.turmas.map((t) => t.turma_id!) ?? []
   const b = useQuery<{ turmas: { turma_id: number; disciplinas: Disciplina[] }[] }>({
@@ -287,13 +300,20 @@ export function AlunoNotas() {
     queryFn: () => portal({ action: 'boletim', turma_ids: ids }),
     enabled: ids.length > 0, staleTime: 5 * 60_000, retry: 1,
   })
+  // veio do Início tocando num período: rola até ele quando o boletim carregar (uma vez)
+  const [rolou, setRolou] = useState(false)
+  useEffect(() => {
+    if (!foco?.turma_id || rolou || !b.data) return
+    setRolou(true)
+    requestAnimationFrame(() => document.getElementById(`periodo-${foco.turma_id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }, [foco, rolou, b.data])
   if (!q.data) return <LoadState isLoading={q.isLoading} error={q.error} refetch={q.refetch} />
   if (!curso) return <Box className="text-center py-10 text-sm text-[var(--text-muted)]">Nenhuma turma encontrada.</Box>
 
   // só períodos com disciplina lançada viram seção; os vazios (cancelados etc.) entram na contagem no rodapé
   const secoes = curso.turmas
     .map((t) => ({ t, disciplinas: b.data?.turmas.find((x) => x.turma_id === t.turma_id)?.disciplinas ?? [] }))
-    .filter((x) => x.disciplinas.length > 0)
+    .filter((x) => x.disciplinas.length > 0 || x.t.turma_id === foco?.turma_id) // o período tocado no Início aparece mesmo vazio
   return (
     <div className="space-y-4">
       {/* Curso: cartão com o nome inteiro (quebra linha, não corta); com mais de 1 curso o cartão
@@ -322,7 +342,7 @@ export function AlunoNotas() {
       ) : (
         <>
           {secoes.map(({ t, disciplinas }) => (
-            <details key={t.turma_id} open className="glass-card group">
+            <details key={t.turma_id} id={`periodo-${t.turma_id}`} open className={`glass-card group scroll-mt-20 ${foco?.turma_id === t.turma_id ? 'ring-2 ring-[var(--primary)]/40' : ''}`}>
               <summary className="list-none cursor-pointer px-4 py-3 flex items-center gap-2 [&::-webkit-details-marker]:hidden">
                 <p className="text-sm font-semibold text-[var(--text-main)] flex-1 min-w-0 truncate">{periodoLabel(t.turma)}</p>
                 {t.situacao && (
@@ -331,6 +351,7 @@ export function AlunoNotas() {
                 <ChevronsUpDown className="w-4 h-4 text-[var(--text-muted)] shrink-0 group-open:rotate-90 transition-transform" />
               </summary>
               <div className="px-4 pb-1 divide-y divide-[var(--border)] border-t border-[var(--border)]">
+                {disciplinas.length === 0 && <p className="py-3 text-sm text-[var(--text-muted)]">Nenhuma disciplina lançada neste período.</p>}
                 {disciplinas.map((d, i) => (
                   <div key={i} className="py-3 flex items-center justify-between gap-3">
                     <div className="min-w-0">
