@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../hooks/use-auth'
@@ -8,7 +8,8 @@ import { Button } from '../ui/button'
 import { Textarea } from '../ui/textarea'
 import { KbAskPanel } from '../KbAskPanel'
 import { Badge } from '../ui/badge'
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '../ui/select'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
+import { Combobox } from '../ui/combobox'
 import { showSuccess, showError } from '../../utils/toast'
 import {
   X, Send, Lock, Clock, CheckCircle2, Star, ChevronRight,
@@ -438,6 +439,10 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
     },
     enabled: isStaff,
   })
+  const atendentesOrdenados = useMemo(
+    () => [...atendentes].sort((x: any, y: any) => (x.full_name ?? '').localeCompare(y.full_name ?? '', 'pt-BR')),
+    [atendentes],
+  )
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -617,23 +622,18 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
             {/* Staff controls */}
             {isStaff && (
               <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
-                <Select value={(t as any).queue_id ? `q:${(t as any).queue_id}` : ''} onValueChange={transferTo}>
-                  <SelectTrigger className="h-8 text-xs w-44 bg-[var(--bg-main)] border-[var(--border)]" title="Fila do chamado — abra pra transferir pra outra fila ou pra um agente">
-                    <SelectValue placeholder="Fila" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectLabel>Transferir para a fila</SelectLabel>
-                      {queues.map(q => <SelectItem key={q.id} value={`q:${q.id}`}>{q.nome}</SelectItem>)}
-                    </SelectGroup>
-                    <SelectGroup>
-                      <SelectLabel>Transferir para o agente</SelectLabel>
-                      {[...atendentes].sort((x: any, y: any) => (x.full_name ?? '').localeCompare(y.full_name ?? '', 'pt-BR')).map((a: any) => (
-                        <SelectItem key={a.id} value={`a:${a.id}`}>{a.full_name}</SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
+                <Combobox
+                  value={(t as any).queue_id ? `q:${(t as any).queue_id}` : ''}
+                  onValueChange={transferTo}
+                  placeholder="Fila"
+                  searchPlaceholder="Buscar fila ou agente…"
+                  className="w-44"
+                  title="Fila do chamado — abra pra transferir pra outra fila ou pra um agente"
+                  groups={[
+                    { heading: 'Transferir para a fila', options: queues.map((q) => ({ value: `q:${q.id}`, label: q.nome })) },
+                    { heading: 'Transferir para o agente', options: atendentesOrdenados.map((a: any) => ({ value: `a:${a.id}`, label: a.full_name })) },
+                  ]}
+                />
                 <Select value={t.status} onValueChange={(v) => changeStatus(v as TicketStatus)}>
                   <SelectTrigger className="h-8 text-xs w-40 bg-[var(--bg-main)] border-[var(--border)]">
                     <SelectValue />
@@ -648,16 +648,15 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                   </SelectContent>
                 </Select>
 
-                <Select value={t.atendente_id ?? ''} onValueChange={assignTo}>
-                  <SelectTrigger className="h-8 text-xs w-36 bg-[var(--bg-main)] border-[var(--border)]" title="Agente responsável">
-                    <SelectValue placeholder="Atribuir" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {atendentes.map((a: any) => (
-                      <SelectItem key={a.id} value={a.id}>{a.full_name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Combobox
+                  value={t.atendente_id ?? ''}
+                  onValueChange={assignTo}
+                  placeholder="Atribuir"
+                  searchPlaceholder="Buscar agente…"
+                  className="w-36"
+                  title="Agente responsável"
+                  groups={[{ options: atendentesOrdenados.map((a: any) => ({ value: a.id, label: a.full_name })) }]}
+                />
               </div>
             )}
           </div>
