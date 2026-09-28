@@ -69,8 +69,8 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName }: { tickets: T
   const since15 = Date.now() - 15 * 86400_000
   const visible = useMemo(() => tickets.filter((t) => {
     if (cat !== 'todas' && (t as any).queue_id !== cat) return false
-    if (t.status === 'fechado') return false
-    if (t.status === 'resolvido' && new Date(t.resolved_at ?? t.updated_at).getTime() < since15) return false
+    // resolvido e fechado (finalizado pela avaliação do aluno) caem juntos na coluna Resolvidos
+    if (['resolvido', 'fechado'].includes(t.status) && new Date(t.resolved_at ?? t.updated_at).getTime() < since15) return false
     if (search) {
       const q = search.toLowerCase()
       if (!t.titulo.toLowerCase().includes(q) && !t.protocolo.toLowerCase().includes(q) && !t.aluno_nome.toLowerCase().includes(q)) return false
@@ -128,7 +128,8 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName }: { tickets: T
         <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-4 items-start">
           {COLUMNS.map((col) => {
             const comTutor = (t: Ticket) => (t as any).ai_status === 'active'
-            const items = visible.filter((t) => col.status === TUTOR ? comTutor(t) : !comTutor(t) && t.status === col.status)
+            const items = visible.filter((t) => col.status === TUTOR ? comTutor(t)
+              : !comTutor(t) && (col.status === 'resolvido' ? ['resolvido', 'fechado'].includes(t.status) : t.status === col.status))
               .sort((a, b) => new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime())
             return (
               <div key={col.status} className={`rounded-xl bg-[var(--bg-card)]/60 border border-[var(--border)] border-t-4 ${col.accent}`}>
