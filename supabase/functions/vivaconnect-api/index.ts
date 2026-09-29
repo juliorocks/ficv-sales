@@ -15,6 +15,7 @@
 //   enqueue_first  { lead_id }               (staff)   → força a 1ª mensagem de um lead
 //   process_outbox {}                        (service, cron 1/min)  → esvazia a fila
 //   run_followups  {}                        (service, cron 15/min) → IA reengaja lead quieto após silêncio
+//   run_followup_giveups {}                  (service, cron 15/min) → encerra sozinho quem esgotou tentativas + Xh sem responder
 //   run_lead_followups {}                    (service, cron 5/min)  → dispara follow-up AGENDADO por humano vencido
 //
 // Regras da fila:
@@ -326,6 +327,11 @@ Deno.serve(async (req) => {
             return jsonRes(await runFollowups(db, settings));
         }
 
+        if (action === "run_followup_giveups") {
+            if (caller?.kind !== "service") return jsonRes({ error: "Só o cron." }, 403);
+            return jsonRes(await runFollowupGiveups(db, settings));
+        }
+
         // Follow-up AGENDADO por um humano (checkbox "Enviar mensagem automaticamente",
         // Gestão > lembrete "Retornar em") — pedido do usuário 29/09. Diferente do
         // "run_followups" acima (reengajamento automático da IA por silêncio): aqui é uma
@@ -481,12 +487,20 @@ function spHour(): number {
  *  (SQL — já filtra sessão ativa, silêncio mínimo, limite de tentativas). */
 async function runFollowups(db: any, settings: any) {
     if (!settings.enabled) return { skipped: "integração desligada" };
-    if (!settings.followup_enabled) return { skipped: "follow-up desligado" };
+    // Bug real (achado 29/09): followup_enabled/followup_after_hours/followup_max_count
+    // moram em ai_agent_settings (migration 20260929180000), não em vivaconnect_settings —
+    // `settings` aqui é SEMPRE vivaconnect_settings (`loadSettings`, carregado no topo do
+    // handler). `settings.followup_enabled` dava sempre `undefined`, então esta função
+    // nunca rodou de verdade desde que foi criada (confirmado: followup_count/
+    // last_followup_at zerados/nulos em TODAS as sessões ativas). Carrega ai_agent_settings
+    // à parte, igual runLeadFollowups/scheduled_followup já fazem.
+    const { data: ai } = await db.from("ai_agent_settings").select("*").eq("id", 1).single();
+    if (!ai?.followup_enabled) return { skipped: "follow-up desligado" };
     const hour = spHour();
     if (!(hour >= settings.send_window_start && hour < settings.send_window_end)) return { skipped: "fora da janela de horário" };
 
     const { data: candidates, error: candErr } = await db.rpc("ai_followup_candidates", {
-        p_after_hours: settings.followup_after_hours, p_max_count: settings.followup_max_count,
+        p_after_hours: ai.followup_after_hours, p_max_count: ai.followup_max_count,
     });
     if (candErr) return { error: candErr.message };
     const out = { sent: 0, failed: 0, skipped: 0, details: [] as string[] };
@@ -515,6 +529,54 @@ async function runFollowups(db: any, settings: any) {
         const now = new Date().toISOString();
         await db.from("ai_lead_sessions").update({ followup_count: c.followup_count + 1, last_followup_at: now, updated_at: now }).eq("lead_id", c.lead_id);
         if (sendRes.ok) { out.sent++; } else { out.failed++; out.details.push(`lead #${c.lead_id}: ${sendRes.error}`); }
+    }
+    return out;
+}
+
+/** Pedido do usuário 29/09: depois de esgotar as tentativas de reengajamento
+ * (followup_max_count) e passar followup_giveup_hours (padrão 24h) sem o lead responder,
+ * encerra sozinho — mesma mensagem de despedida padrão do botão "Finalizar" manual
+ * (vivaconnect_settings.farewell_message_*), fecha o ticket no Z-PRO (best-effort, não
+ * bloqueia o resto se falhar), move pra Finalizado e tira a IA do lead (handed_off, pra
+ * não tentar de novo se ele responder dias depois com um "oi" solto). */
+async function runFollowupGiveups(db: any, settings: any) {
+    const { data: ai } = await db.from("ai_agent_settings").select("*").eq("id", 1).single();
+    if (!ai?.followup_giveup_enabled) return { skipped: "encerramento automático desligado" };
+
+    const { data: candidates, error: candErr } = await db.rpc("ai_followup_giveup_candidates", {
+        p_giveup_hours: ai.followup_giveup_hours, p_max_count: ai.followup_max_count,
+    });
+    if (candErr) return { error: candErr.message };
+    const out = { finished: 0, failed: 0, skipped: 0, details: [] as string[] };
+    const { data: fin } = await db.from("stages").select("id").or("name.ilike.%finaliz%,name.ilike.%encerr%").limit(1).maybeSingle();
+
+    for (const c of candidates ?? []) {
+        const now = new Date().toISOString();
+        const chId: number | null = c.vivaconnect_channel_id ?? (await db.rpc("vivaconnect_pick_pool_channel")).data ?? null;
+        const ch = chId ? (await db.from("vivaconnect_channels").select(CH_COLS).eq("id", chId).maybeSingle()).data : null;
+
+        if (ch?.active && c.vivaconnect_ticket_id) {
+            const r = await zpro(settings.base_url, ch, "/updateticketinfo", { ticketId: Number(c.vivaconnect_ticket_id), status: "closed" });
+            if (!r.ok) out.details.push(`lead #${c.lead_id}: fechar ticket falhou (${zproErr(r.status, r.data)}), seguindo assim mesmo`);
+        }
+        if (ch?.active && settings.farewell_message_enabled && String(settings.farewell_message_template ?? "").trim()) {
+            const number = toZproNumber(c.telefone);
+            if (number) {
+                const nome = firstName(c.nome_completo ?? "");
+                const body = fillTemplate(settings.farewell_message_template, { primeiro_nome: nome || "tudo bem", nome_virgula: nome ? `, ${nome}` : "" });
+                const { data: row } = await db.from("vivaconnect_outbox").insert({ lead_id: c.lead_id, channel_id: ch.id, kind: "farewell", number, body }).select("*").single();
+                if (row) await sendRow(db, settings, row, ch);
+            }
+        }
+        await db.from("ai_lead_sessions").update({
+            status: "handed_off", updated_at: now, handed_off_at: now,
+            handoff_reason: `Sem resposta do lead ${ai.followup_giveup_hours}h após a última tentativa de reengajamento — encerrado automaticamente`,
+        }).eq("lead_id", c.lead_id);
+        if (fin) {
+            await db.from("leads").update({ stage_id: fin.id, stage_entry_date: now, updated_at: now }).eq("id", c.lead_id);
+            await db.from("lead_notes").insert({ lead_id: c.lead_id, created_at: now, note: `🔒 Encerrado automaticamente — ${ai.followup_giveup_hours}h sem resposta após ${ai.followup_max_count} tentativa(s) de reengajamento da IA.` });
+        }
+        out.finished++;
     }
     return out;
 }

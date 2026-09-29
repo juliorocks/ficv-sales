@@ -26,6 +26,14 @@ interface AiSettings {
     max_ai_turns: number
     handoff_message: string
     horario_atendimento: string
+    /** reengajamento: lead ficou quieto depois de UMA mensagem nossa → a IA tenta de novo sozinha */
+    followup_enabled: boolean
+    followup_after_hours: number
+    followup_max_count: number
+    /** esgotou as tentativas acima e continuou sem responder → encerra sozinho (usa a
+     * mensagem de despedida configurada em Gestão > VivaConnect > Finalizar) */
+    followup_giveup_enabled: boolean
+    followup_giveup_hours: number
 }
 
 interface ChatMsg {
@@ -125,6 +133,11 @@ export function AiAgentSettings() {
             max_ai_turns: Number(form.max_ai_turns),
             handoff_message: form.handoff_message,
             horario_atendimento: form.horario_atendimento,
+            followup_enabled: form.followup_enabled,
+            followup_after_hours: Number(form.followup_after_hours),
+            followup_max_count: Number(form.followup_max_count),
+            followup_giveup_enabled: form.followup_giveup_enabled,
+            followup_giveup_hours: Number(form.followup_giveup_hours),
             updated_at: new Date().toISOString(),
             updated_by: user?.id ?? null,
         }).eq("id", 1).select("id")
@@ -281,6 +294,44 @@ export function AiAgentSettings() {
                     <div className="space-y-2">
                         <Label className={fieldLabel}>Horário de atendimento humano</Label>
                         <Input value={form.horario_atendimento} onChange={(e) => set("horario_atendimento", e.target.value)} className="bg-muted/20" />
+                    </div>
+
+                    <div className="rounded-xl border border-[var(--border)] p-4 space-y-4">
+                        <div>
+                            <p className="text-sm font-bold text-[var(--text-main)]">Reengajar lead que ficou quieto</p>
+                            <p className="text-xs text-muted-foreground">
+                                Se o lead não responde depois de UMA mensagem nossa, a IA tenta puxar assunto de novo sozinha — escrita na hora, com base no histórico real da conversa.
+                            </p>
+                        </div>
+                        <label className="flex items-center gap-2 cursor-pointer text-sm font-bold">
+                            <input type="checkbox" checked={form.followup_enabled} onChange={(e) => set("followup_enabled", e.target.checked)} className="w-4 h-4 accent-[var(--primary)]" />
+                            {form.followup_enabled ? "Ligado" : "Desligado"}
+                        </label>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label className={fieldLabel} title="Quantas horas de silêncio esperar antes de tentar de novo">Esperar (horas)</Label>
+                                <Input type="number" min="1" step="0.5" value={form.followup_after_hours} onChange={(e) => set("followup_after_hours", Number(e.target.value))} className="bg-muted/20" />
+                            </div>
+                            <div className="space-y-2">
+                                <Label className={fieldLabel} title="Quantas vezes tenta reengajar antes de desistir">Tentativas</Label>
+                                <Input type="number" min="1" value={form.followup_max_count} onChange={(e) => set("followup_max_count", Number(e.target.value))} className="bg-muted/20" />
+                            </div>
+                        </div>
+
+                        <div className="border-t border-[var(--border)] pt-4">
+                            <p className="text-sm font-bold text-[var(--text-main)]">Encerrar sozinho se continuar sem resposta</p>
+                            <p className="text-xs text-muted-foreground">
+                                Esgotadas as tentativas acima, se ainda assim o lead não responder, encerra o atendimento automaticamente (move pra Finalizado e manda a mensagem de despedida configurada em <b>Gestão &gt; VivaConnect &gt; Finalizar</b>).
+                            </p>
+                        </div>
+                        <label className="flex items-center gap-2 cursor-pointer text-sm font-bold">
+                            <input type="checkbox" checked={form.followup_giveup_enabled} onChange={(e) => set("followup_giveup_enabled", e.target.checked)} className="w-4 h-4 accent-[var(--primary)]" />
+                            {form.followup_giveup_enabled ? "Ligado" : "Desligado"}
+                        </label>
+                        <div className="space-y-2 max-w-[200px]">
+                            <Label className={fieldLabel} title="Depois da última tentativa, quantas horas sem resposta até desistir de vez">Sem resposta por (horas)</Label>
+                            <Input type="number" min="1" step="1" value={form.followup_giveup_hours} onChange={(e) => set("followup_giveup_hours", Number(e.target.value))} className="bg-muted/20" />
+                        </div>
                     </div>
 
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
