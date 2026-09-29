@@ -209,7 +209,7 @@ export function VivaConnectSettings() {
         showSuccess("Canal cadastrado. Copie a URL do webhook dele e cole na API do Z-PRO.")
     }
 
-    const updateChannel = async (id: number, patch: Partial<{ active: boolean; daily_limit: number; ai_enabled: boolean; hub_enabled: boolean; zpro_hybrid_mode: string | null; send_via_channel_id: number | null }>) => {
+    const updateChannel = async (id: number, patch: Partial<{ active: boolean; daily_limit: number; ai_enabled: boolean; hub_enabled: boolean; zpro_hybrid_mode: string | null; send_via_channel_id: number | null; purpose: "official" | "pool" | "grupo" }>) => {
         const { data, error } = await supabase.from("vivaconnect_channels").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id).select("id")
         if (error || !data?.length) return showError(`Não foi possível atualizar: ${error?.message ?? "sessão expirada."}`)
         refetchChannels()
@@ -381,9 +381,19 @@ export function VivaConnectSettings() {
                                     <div>
                                         <p className="font-bold text-[var(--text-main)] flex items-center gap-2">
                                             <span className={`w-2 h-2 rounded-full ${!c.active ? "bg-muted-foreground" : c.last_error_at && (!c.last_ok_at || c.last_error_at > c.last_ok_at) ? "bg-red-500" : c.last_ok_at ? "bg-emerald-500" : "bg-amber-500"}`} />
-                                            {c.name} <span className="text-xs font-normal text-muted-foreground">#{c.id} · {c.purpose === "pool" ? "Pool" : c.purpose === "grupo" ? "Outra empresa do grupo" : "Oficial"} · {c.kind}</span>
+                                            {c.name} <span className="text-xs font-normal text-muted-foreground">#{c.id} · {c.kind}</span>
                                         </p>
                                         <p className="text-xs text-muted-foreground font-mono">{c.phone ?? "sem número"} · API {c.api_id}</p>
+                                        {/* 28/09: antes só dava pra escolher "Uso" na hora de cadastrar — não tinha como mudar
+                                            depois. "Outra empresa do grupo" é o jeito de dizer "não cria lead comercial pra esse
+                                            número" (ele fica só pra o Hub avisar, se cadastrado como destino de alguma empresa). */}
+                                        <select value={c.purpose} onChange={(e) => updateChannel(c.id, { purpose: e.target.value as "official" | "pool" | "grupo" })}
+                                            title="Muda o que esse número faz no sistema — 'Outra empresa do grupo' não cria lead comercial"
+                                            className="mt-1 h-6 rounded-md border border-[var(--border)] bg-muted/20 px-1.5 text-[11px]">
+                                            <option value="pool">Pool — contato ativo (1ª mensagem)</option>
+                                            <option value="official">Oficial — entrada (WABA/Híbrido)</option>
+                                            <option value="grupo">Outra empresa do grupo — não vira lead comercial</option>
+                                        </select>
                                         {(() => {
                                             const waba = c.zpro_type ? /waba|official|cloud/i.test(c.zpro_type) : c.kind === "waba" || c.kind === "hybrid"
                                             if (!waba || c.purpose === "grupo") return null
