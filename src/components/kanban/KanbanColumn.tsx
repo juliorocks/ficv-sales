@@ -95,6 +95,21 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, channe
     const priorityOnly = isEntradaStage ? unattendedOnly : waitingReplyOnly;
     const priorityFirst = isEntradaStage ? unattendedFirst : waitingReplyFirst;
 
+    // lead cujo card tem um diálogo aberto (ex.: clicou "Atender") fica garantido na lista
+    // renderizada mesmo que ele deixe de bater com o filtro/ordenação atual — achado ao vivo
+    // (29/09): clicar "Atender" muda `assigned_to_id`, que é exatamente o campo que o filtro
+    // "Não atendidos" (priorityOnly) testa; o lead sumia da lista filtrada na hora, e o
+    // EditLeadDialog (filho do card) desmontava junto — parecendo "abre a conversa e fecha
+    // sozinho, sumindo com o card". Precisa proteger tanto o filtro quanto o corte de
+    // `visibleCount` (ver visibleLeads mais abaixo) — são dois lugares que podem excluir o lead.
+    const [pinnedLeadIds, setPinnedLeadIds] = useState<Set<number>>(new Set());
+    const setPinned = (leadId: number, pinned: boolean) => setPinnedLeadIds((prev) => {
+        if (pinned === prev.has(leadId)) return prev;
+        const next = new Set(prev);
+        if (pinned) next.add(leadId); else next.delete(leadId);
+        return next;
+    });
+
     const locallyFilteredLeads = useMemo(() => {
         let r = leads;
         if (courseFilter != null) r = r.filter(l => l.curso_interesse === courseFilter);
@@ -107,8 +122,13 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, channe
                 (lead.telefone && lead.telefone.toLowerCase().includes(term))
             );
         }
+        if (pinnedLeadIds.size) {
+            const shown = new Set(r.map(l => l.id));
+            const missingPinned = leads.filter(l => pinnedLeadIds.has(l.id) && !shown.has(l.id));
+            if (missingPinned.length) r = [...r, ...missingPinned];
+        }
         return r;
-    }, [leads, debouncedLocalSearchTerm, courseFilter, priorityOnly, isEntradaStage, pendingByLead]);
+    }, [leads, debouncedLocalSearchTerm, courseFilter, priorityOnly, isEntradaStage, pendingByLead, pinnedLeadIds]);
 
     const sortedLeads = useMemo(() => {
         const tempOrder: { [key: string]: number } = { 'quente': 3, 'morno': 2, 'frio': 1 };
@@ -153,21 +173,9 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, channe
 
     // Renderiza a coluna em blocos: cada LeadCard monta hooks pesados, então
     // pintar centenas de uma vez trava o browser. "Mostrar mais" expande.
-    //
-    // "pinned": lead cujo card tem um diálogo aberto (ex.: clicou "Atender") fica garantido
-    // na lista renderizada mesmo que o reordenamento o empurre pra fora do corte de
-    // `visibleCount` — achado ao vivo (29/09): clicar "Atender" muda `assigned_to_id`, o que
-    // tira o lead do grupo "sem atendente" (prioridade no topo da Entrada) e ele pula pra
-    // MUITO depois no array ordenado (ex.: de #1 pra #180 numa coluna com 194); como o card
-    // saía da fatia visível, o React desmontava o LeadCard — e o EditLeadDialog junto, que
-    // é filho dele — parecendo "abre a conversa e fecha sozinho, sumindo com o card".
-    const [pinnedLeadIds, setPinnedLeadIds] = useState<Set<number>>(new Set());
-    const setPinned = (leadId: number, pinned: boolean) => setPinnedLeadIds((prev) => {
-        if (pinned === prev.has(leadId)) return prev;
-        const next = new Set(prev);
-        if (pinned) next.add(leadId); else next.delete(leadId);
-        return next;
-    });
+    // Segunda proteção do pin: sobrevive ao filtro (ver locallyFilteredLeads acima), mas
+    // ainda pode cair fora do corte de `visibleCount` depois do reordenamento (ex.: de #1
+    // pra #180 numa coluna com 194) — resgata de novo aqui.
     const visibleLeads = useMemo(() => {
         const base = sortedLeads.slice(0, visibleCount);
         if (!pinnedLeadIds.size) return base;
