@@ -155,7 +155,16 @@ Deno.serve(async (req) => {
 
         if (lead) {
             const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
-            if (!lead.vivaconnect_channel_id) patch.vivaconnect_channel_id = ch.id;
+            // Segue o canal de CADA mensagem, igual ticket_id/contact_id logo abaixo — não fica
+            // "preso" pro sempre no primeiro canal que falou com esse telefone. Achado ao vivo
+            // (29/09): lead antigo tinha vivaconnect_channel_id=2 (Secretaria, teste de 26/09) e
+            // continuou "dono" da Secretaria mesmo depois de dias de conversa real acontecendo no
+            // canal 5 (FICV 2) — ticket_id/contact_id atualizavam certinho a cada mensagem, só o
+            // canal ficava congelado, quebrando o acesso por canal (Gestão > VivaConnect > "Quem
+            // atende cada canal") e o indicador de canal no card. Comentário antigo ("FIXO no
+            // número que mandou a 1ª mensagem") era sobre a fila de 1ª mensagem automática
+            // (vivaconnect-api, lead ainda sem conversa) — não sobre webhook de mensagem recebida.
+            if (ch.id !== lead.vivaconnect_channel_id) patch.vivaconnect_channel_id = ch.id;
             if (m.ticketId) patch.vivaconnect_ticket_id = m.ticketId;
             if (m.contactId) patch.vivaconnect_contact_id = m.contactId;
 

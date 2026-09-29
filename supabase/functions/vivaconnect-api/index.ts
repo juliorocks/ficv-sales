@@ -17,8 +17,11 @@
 //
 // Regras da fila:
 //   - first_message (contato ativo, número Baileys): só dentro da janela de
-//     horário, respeita intervalo mínimo por número e limite diário; o lead fica
-//     FIXO no número que mandou a 1ª mensagem (leads.vivaconnect_channel_id).
+//     horário, respeita intervalo mínimo por número e limite diário; sai pelo
+//     canal gravado em leads.vivaconnect_channel_id no momento da criação do lead
+//     (não muda durante a fila). DEPOIS que o lead responde, esse campo passa a
+//     acompanhar o canal de CADA mensagem recebida (vivaconnect-webhook) — não fica
+//     mais "preso" no primeiro canal (bug corrigido 29/09, ver comentário lá).
 //   - student_reply / ai_reply / manual: resposta a quem falou com a gente —
 //     sai na hora, sem janela nem limite.
 //   - toda mensagem enviada é gravada em widechat_messages (provider

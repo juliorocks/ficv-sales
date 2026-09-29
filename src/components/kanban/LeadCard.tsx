@@ -1,7 +1,7 @@
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Lead, User, LeadSource, Stage, Course } from "@/types/database"
 import { Button } from "@/components/ui/button"
-import { ArrowRightLeft, Bot, Check, Clock, HandHelping, Mail, MessageCircle, Pencil, Phone, RefreshCw } from "lucide-react"
+import { ArrowRightLeft, Bot, Check, Clock, HandHelping, Mail, MessageCircle, Pencil, Phone, RefreshCw, Smartphone } from "lucide-react"
 import { EditLeadDialog } from "./EditLeadDialog"
 import { LossReasonDialog } from "./LossReasonDialog"
 import { useTimeInStage } from "@/hooks/use-time-in-stage"
@@ -24,13 +24,17 @@ interface LeadCardProps {
     leadSources: LeadSource[]
     stages: Stage[]
     courses: Course[]
+    /** canais (números) do VivaConnect — selo mostrando por qual número esse lead conversa,
+     * sem precisar abrir o chat (pedido do usuário 29/09: só dava pra saber entrando na conversa,
+     * e o campo do lead às vezes ficava desatualizado — ver vivaconnect-webhook/index.ts) */
+    channels?: { id: number; name: string; phone: string | null }[]
     /** nº de mensagens do cliente ainda sem resposta (badge piscante) */
     pending?: number
     /** já teve alguma resposta da IA em algum momento (ai_lead_sessions.ai_turns > 0) */
     aiTouched?: boolean
 }
 
-export function LeadCard({ lead, users, leadSources, stages, courses, pending, aiTouched }: LeadCardProps) {
+export function LeadCard({ lead, users, leadSources, stages, courses, channels, pending, aiTouched }: LeadCardProps) {
     const timeInStage = useTimeInStage(lead.stage_entry_date);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
     const [editTab, setEditTab] = useState<"details" | "chat">("chat");
@@ -41,6 +45,7 @@ export function LeadCard({ lead, users, leadSources, stages, courses, pending, a
 
     const source = lead.source_id ? leadSources.find(s => s.id === lead.source_id) : null;
     const course = lead.curso_interesse ? courses.find(c => c.id === lead.curso_interesse) : null;
+    const channel = lead.vivaconnect_channel_id ? channels?.find(c => c.id === lead.vivaconnect_channel_id) : null;
     const orderedStages = [...stages].sort((a, b) => a.order - b.order);
     const lostStage = stages.find(s => s.name.toLowerCase().includes('perdido'));
     // "Atender" só faz sentido na fila de Entrada — nas outras colunas o lead já foi
@@ -144,6 +149,21 @@ export function LeadCard({ lead, users, leadSources, stages, courses, pending, a
                                         : 'bg-red-500/15 text-red-600 dark:text-red-400'}`}>
                                         {lead.status_wide === 'ok_wide' ? 'OK WIDE' : 'ERRO'}
                                     </span>
+                                )}
+                                {channel && (
+                                    <TooltipProvider>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <span className="flex items-center gap-0.5 text-[10px] font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded truncate min-w-0 flex-shrink-0">
+                                                    <Smartphone className="w-2.5 h-2.5 flex-shrink-0" />
+                                                    {channel.name}
+                                                </span>
+                                            </TooltipTrigger>
+                                            <TooltipContent>
+                                                <p>Conversa pelo canal VivaConnect "{channel.name}"{channel.phone ? ` (${channel.phone})` : ''}.</p>
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    </TooltipProvider>
                                 )}
                             </span>
                         </CardTitle>

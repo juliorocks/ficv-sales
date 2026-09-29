@@ -128,6 +128,20 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
         enabled: !isAuthLoading && !!user,
     })
 
+    // Canal (número) do VivaConnect de cada lead — pro selo no card (29/09: usuário só
+    // conseguia saber por qual número um lead conversou abrindo o chat; e o campo ficava
+    // desatualizado até o fix do webhook, então o selo também serve pra flagrar isso de novo).
+    const { data: vivaconnectChannels } = useQuery<{ id: number; name: string; phone: string | null }[]>({
+        queryKey: ['vivaconnect_channels_lookup'],
+        queryFn: async () => {
+            const { data, error } = await supabase.from('vivaconnect_channels').select('id, name, phone')
+            if (error) throw error
+            return data || []
+        },
+        enabled: !isAuthLoading && !!user,
+        staleTime: 5 * 60_000,
+    })
+
     // Deixa o cache de motivos de perda quente ANTES de qualquer card abrir o
     // LossReasonDialog — a query de lá (mesma queryKey) disparava no mount sem gate
     // de auth e falhava correndo com o refresh de token.
@@ -442,6 +456,7 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
                                     users={users || []}
                                     leadSources={leadSources || []}
                                     courses={courses || []}
+                                    channels={vivaconnectChannels || []}
                                     index={index}
                                     allStages={orderedStages}
                                     pendingByLead={pendingByLead}

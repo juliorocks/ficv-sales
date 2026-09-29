@@ -38,6 +38,8 @@ interface KanbanColumnProps {
     index: number;
     allStages: Stage[];
     courses: Course[];
+    /** canais (números) do VivaConnect, pro selo de canal no card */
+    channels?: { id: number; name: string; phone: string | null }[];
     pendingByLead?: Map<number, number>;
     /** leads que já tiveram alguma resposta da IA (ai_lead_sessions.ai_turns > 0) — selo de robô no card */
     aiTouchedLeads?: Set<number>;
@@ -49,7 +51,7 @@ type SortOption = {
     direction: 'asc' | 'desc';
 };
 
-export function KanbanColumn({ stage, leads, users, leadSources, courses, index, allStages, pendingByLead, aiTouchedLeads }: KanbanColumnProps) {
+export function KanbanColumn({ stage, leads, users, leadSources, courses, channels, index, allStages, pendingByLead, aiTouchedLeads }: KanbanColumnProps) {
     const queryClient = useQueryClient();
     const { user } = useAuth();
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -284,7 +286,7 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
                                                         {...provided.dragHandleProps}
                                                         className={`${snapshot.isDragging ? 'shadow-lg ring-2 ring-primary' : ''}`}
                                                     >
-                                                        <LeadCard lead={lead} users={users} leadSources={leadSources} stages={allStages} courses={courses} pending={pendingByLead?.get(lead.id)} aiTouched={aiTouchedLeads?.has(lead.id)} />
+                                                        <LeadCard lead={lead} users={users} leadSources={leadSources} stages={allStages} courses={courses} channels={channels} pending={pendingByLead?.get(lead.id)} aiTouched={aiTouchedLeads?.has(lead.id)} />
                                                     </div>
                                                 )}
                                             </Draggable>
