@@ -2,7 +2,7 @@
  * TicketDashboard — visão do ADMIN / ATENDENTE
  * Painel completo com métricas, filtros e lista de tickets.
  */
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../hooks/use-auth'
@@ -171,6 +171,16 @@ export function TicketDashboard() {
     try { const v = localStorage.getItem('ficv_tickets_view'); return v === 'kanban' || v === 'nps' ? v : 'painel' } catch { return 'painel' }
   })
   const pickView = (v: View) => { setView(v); try { localStorage.setItem('ficv_tickets_view', v) } catch { /* sem storage */ } }
+  // Agentes (Secretaria/Tutor/Coordenador/Atendente/Biblioteca — só veem Chamados, não têm
+  // Painel de vendas) já caem direto no Kanban ao logar (pedido do usuário 29/09). Só na 1ª
+  // vez, sem preferência salva ainda — se a pessoa trocar pra Painel/NPS depois, isso é
+  // salvo (pickView) e essa escolha é respeitada dali em diante, não força Kanban de novo.
+  useEffect(() => {
+    if (!user) return
+    let jaEscolheu = false
+    try { jaEscolheu = !!localStorage.getItem('ficv_tickets_view') } catch { /* sem storage */ }
+    if (!jaEscolheu && ['secretaria', 'tutor', 'coordenador', 'atendente', 'biblioteca'].includes(String(user.role ?? ''))) setView('kanban')
+  }, [user])
   const [selectedAluno, setSelectedAluno] = useState<{ id: string; nome: string; email: string } | null>(null)
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState<TicketStatus | 'todos'>('todos')
