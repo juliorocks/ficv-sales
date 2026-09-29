@@ -251,12 +251,33 @@ export function ensureLineBreaks(text: string): string {
     return [first, middle, last].filter(Boolean).join("\n\n");
 }
 
+const OFERTA_DETALHAR = /detalh|list(ar|a)\s+(completa|todas|tudo)|grade\s+completa|explicar\s+cada|mostrar\s+todas|ementa/i;
+const CONFIRMACAO_CURTA = /^\s*(sim|quero|pode|claro|manda|vai|com\s*certeza|isso|ok|t[áa]|beleza|show|perfeito|quero\s*sim|pode\s*ser|quero\s*saber)\b/i;
+
 /** Pergunta que pede lista COMPLETA (grade, disciplinas, ementa, módulos) — sinal de que
  *  os poucos trechos da busca por similaridade não bastam, precisa do documento inteiro
  *  (ver findCourseDoc). Frase informal ("quero a grade", "qual as disciplinas" — concordância
- *  errada é comum em português falado) conta igual. */
-export function wantsFullCourseList(text: string): boolean {
-    return /\bgrade\b|\bdisciplinas?\b|\bementa\b|\bm[oó]dulos?\b|curr[íi]culo|conte[uú]do\s+program[áa]tico/i.test(text);
+ *  errada é comum em português falado) conta igual.
+ *
+ *  `prevAssistant`: o(s) bloco(s) que A PRÓPRIA IA escreveu logo antes desta fala do lead
+ *  (ver trailingAssistantText). Cobre o caso em que é a IA quem oferece ("posso detalhar a
+ *  ementa de cada disciplina também?") e o lead só confirma com um "sim quero" — essa fala
+ *  curta sozinha não bate nas palavras-chave acima, mas a intenção de "tudo" já foi
+ *  estabelecida pela OFERTA da IA, não precisa o lead repetir "ementa"/"disciplinas" (achado
+ *  ao vivo 29/09: sem isso, a IA detalhava só 3 das 10 disciplinas e perguntava se quer
+ *  continuar — o lead reclamou "já detalhe todas de uma vez"). */
+export function wantsFullCourseList(text: string, prevAssistant?: string): boolean {
+    if (/\bgrade\b|\bdisciplinas?\b|\bementa\b|\bm[oó]dulos?\b|curr[íi]culo|conte[uú]do\s+program[áa]tico/i.test(text)) return true;
+    return !!prevAssistant && OFERTA_DETALHAR.test(prevAssistant) && CONFIRMACAO_CURTA.test(text.trim());
+}
+
+/** Bloco(s) que a IA escreveu logo ANTES da última fala do lead — pode ser mais de uma
+ *  "bolha" (ver `replies`/multi-bubble) — usado por wantsFullCourseList pra achar uma
+ *  OFERTA da própria IA que o lead só confirmou. */
+export function trailingAssistantText(messages: { role: string; content: string }[]): string {
+    const out: string[] = [];
+    for (let i = messages.length - 2; i >= 0 && messages[i].role === "assistant"; i--) out.unshift(messages[i].content);
+    return out.join("\n");
 }
 
 /**
@@ -286,8 +307,20 @@ export async function findCourseDoc(db: SupabaseClient, hints: (string | null | 
     if (!docs?.length) return null;
     const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
     const stop = new Set(["pos", "graduacao", "curso", "em", "de", "da", "do", "dos", "das", "e", "a", "o", "ead", "presencial", "ppc"]);
+    const esc = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const titled = (docs as { id: string; title: string }[])
-        .map((d) => ({ id: d.id, words: norm(d.title ?? "").split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !stop.has(w)) }))
+        .map((d) => ({
+            id: d.id,
+            words: norm(d.title ?? "").split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !stop.has(w))
+                // \b (palavra inteira), não substring — achado ao vivo 29/09: título curto
+                // "[TEO] PPC - GRADUAÇÃO EM TEOLOGIA" sobra só "teo"+"teologia" depois do
+                // stopword; "teo" batia por SUBSTRING dentro de "teologia", e como uma das
+                // disciplinas da grade de Liderança Cristã se chama "Teologia Bíblica da
+                // Liderança", o texto continha "teologia" → as DUAS palavras do título de
+                // Teologia "batiam" por coincidência, empatando (e às vezes vencendo) com o
+                // curso certo.
+                .map((w) => new RegExp(`\\b${esc(w)}\\b`)),
+        }))
         .filter((d) => d.words.length > 0);
     for (const hint of real) {
         const nh = norm(hint);
@@ -296,7 +329,7 @@ export async function findCourseDoc(db: SupabaseClient, hints: (string | null | 
         // ("Liderança Cristã") vence um título longo só parcialmente coberto por coincidência.
         let best: { id: string; ratio: number } | null = null;
         for (const { id, words } of titled) {
-            const score = words.filter((w) => nh.includes(w)).length;
+            const score = words.filter((re) => re.test(nh)).length;
             const ratio = score / words.length;
             if (score >= Math.ceil(words.length * 0.6) && (!best || ratio > best.ratio)) best = { id, ratio };
         }

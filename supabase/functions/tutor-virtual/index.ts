@@ -9,7 +9,7 @@
 // pagamento, notas). Passa pra fila humana pela ferramenta passar_para_equipe ou ao
 // estourar o limite de respostas. Equipe respondendo → gatilho tira o tutor do chamado.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
-import { chatWithTools, corsHeaders, ensureLineBreaks, expandForFullList, identify, jsonRes, searchKnowledge, wantsFullCourseList } from "../_shared/ai.ts";
+import { chatWithTools, corsHeaders, ensureLineBreaks, expandForFullList, identify, jsonRes, searchKnowledge, trailingAssistantText, wantsFullCourseList } from "../_shared/ai.ts";
 import { alunoBoletim, alunoOverview, alunoPagamento } from "../_shared/alunoSponte.ts";
 import { getSecret } from "../_shared/secrets.ts";
 const PUBLICOS = ["alunos", "ambos"];
@@ -134,7 +134,7 @@ Deno.serve(async (req) => {
         // pedido de lista COMPLETA (grade, disciplinas, ementa, módulos): mesma regra do
         // ai-agent (29/09) — poucos trechos por similaridade não cobrem um PPC inteiro.
         let fullDocUsed: string | null = null;
-        if (wantsFullCourseList(ultimaFala)) {
+        if (wantsFullCourseList(ultimaFala, trailingAssistantText(conversa))) {
             // mesmo fix do ai-agent (29/09): testa as últimas falas da conversa, uma de cada
             // vez (da mais recente pra mais antiga) — não juntas num blob só, porque uma fala
             // que LISTA vários cursos de uma vez (ex.: catálogo) pode confundir o casador de
@@ -174,7 +174,7 @@ Deno.serve(async (req) => {
             // mesmas regras do ai-agent (29/09, achado ao vivo em VÁRIOS chamados de teste):
             `Se já existe QUALQUER mensagem sua nesta conversa, você já se apresentou — NUNCA se apresente de novo, mesmo que a última fala do aluno seja só um cumprimento curto. Trate como continuação natural.`,
             `Você só se comunica por TEXTO — nunca tem arquivo, PDF ou link pra enviar de verdade (link de pagamento é diferente: isso a ferramenta link_pagamento gera de fato). Se o aluno pedir grade/ementa/conteúdo e a base tiver, escreva direto na mensagem; se não tiver, chame passar_para_equipe. NUNCA diga "vou te enviar" ou "vou verificar e te aviso" sem cumprir na mesma resposta — prometer e sumir é pior que admitir que não sabe.`,
-            `Quando o aluno pedir uma LISTA COMPLETA de algo (disciplinas, grade, módulos, ementa) e a base tiver, liste TODOS os itens — nunca corte pra "algumas" quando ele pediu "todas".${fullDocUsed ? ` A base abaixo inclui o documento "${fullDocUsed}" INTEIRO pra isso.` : ""}`,
+            `Quando o aluno pedir uma LISTA COMPLETA de algo (disciplinas, grade, módulos, ementa) e a base tiver, liste TODOS os itens — nunca corte pra "algumas" quando ele pediu "todas". Isso vale IGUAL quando é você mesma quem oferece detalhar tudo e o aluno só confirma com um "sim"/"quero": entregue TODOS os itens nessa resposta, nunca só os primeiros com um "quer que eu continue?".${fullDocUsed ? ` A base abaixo inclui o documento "${fullDocUsed}" INTEIRO pra isso.` : ""}`,
             `BASE DE CONHECIMENTO (única fonte para regras e procedimentos):\n\n${kb}`,
         ].join("\n\n");
 
