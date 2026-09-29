@@ -150,6 +150,32 @@ export async function planejar(
     return { acao: "perguntar", texto: c.resposta || perguntaReserva(dests, nome), motivo: c.motivo || "sem assunto claro" };
 }
 
+/** Pré-filtro barato (regex) pra saber se vale rodar a triagem completa (classify(), que
+ *  chama a OpenAI) — evita gastar uma chamada a mais em toda mensagem normal da Faculdade.
+ *  Mesmas famílias de palavra que o classify() já usa pra reconhecer Igreja/Escola/etc. */
+export function mentionsOtherCompany(text: string): boolean {
+    return /\bmembro\b|\bmembresia\b|\bbatismo\b|\bculto\b|\bc[eé]lula\b|\bpastor\b|\bora[çc][ãa]o\b|\bdiz[íi]mo|\boferta\b|educa[çc][ãa]o infantil|ensino fundamental|ensino m[eé]dio|\bmeu filho\b|\bminha filha\b|matr[íi]cula (dele|dela|do meu filho|da minha filha)/i.test(text);
+}
+
+/**
+ * Verifica se a mensagem é de OUTRA empresa do grupo (não a Faculdade) — usado pelo
+ * ai-agent quando o lead JÁ é da Faculdade mas pergunta algo de Igreja/Escola/Fundação/etc
+ * (29/09, achado ao vivo: a IA da Faculdade tentava responder sozinha um assunto de Igreja,
+ * chutava a empresa errada — "Fundação" em vez de "Igreja" — e ainda fazia handoff pra um
+ * consultor da Faculdade sem sentido nenhum). Só chamar quando o canal tem Hub ligado E a
+ * mensagem bate no pré-filtro acima — não gasta chamada extra em toda mensagem normal.
+ */
+export async function checkOtherCompany(
+    db: SupabaseClient, settings: any, historico: HubMsg[], nome: string | null,
+): Promise<{ destino: HubDest; redirect: string } | null> {
+    const dests = await loadDestinations(db);
+    const self = dests.find((d) => d.is_self);
+    if (!self || !dests.some((d) => !d.is_self)) return null;
+    const c = await classify(db, dests, historico, nome, settings);
+    if (!c.destino || c.destino.id === self.id || c.destino.id === undefined) return null;
+    return { destino: c.destino, redirect: redirectText(c.destino, nome) };
+}
+
 function plano(d: HubDest, metodo: string, confianca: number, motivo: string, self: HubDest, nome: string | null, falas: string[]): HubPlano {
     if (d.id === self.id) return { acao: "faculdade", destino: d, metodo, confianca, motivo };
     const ultima = falas.filter((f) => !/^\W*\d\W*$/.test(f.trim())).slice(-2).join(" / ") || falas[falas.length - 1] || "";

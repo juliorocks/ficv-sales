@@ -371,6 +371,26 @@ async function aiReply(db: any, settings: any, leadId: number, channelId: number
     const blocks: string[] = Array.isArray(out.replies) && out.replies.length ? out.replies : (out.reply ? [out.reply] : []);
     if (!blocks.length) return "ia:resposta vazia";
     const num = toZproNumber(number) ?? number;
+
+    // Assunto de OUTRA empresa do grupo (Igreja/Escola/Fundação/etc), mesmo o lead já sendo
+    // da Faculdade (29/09, achado ao vivo: "como faço pra ser membro?" — a IA da Faculdade
+    // tentava responder sozinha, chutava a empresa errada e ainda fazia handoff pra um
+    // consultor da Faculdade sem sentido). ai-agent já reconheceu e devolveu o redirect
+    // pronto em `replies` — só falta mandar (kind hub_redirect, mesma regra de custo Meta
+    // de um redirect do Hub) e ENCERRAR esse atendimento da Faculdade (não fica pendente
+    // esperando um humano da Faculdade agir em algo que não é da Faculdade).
+    if (out.otherCompany) {
+        for (const body of blocks) await db.from("vivaconnect_outbox").insert({ lead_id: leadId, channel_id: channelId, kind: "hub_redirect", number: num, body });
+        await kickOutbox();
+        const { data: fin } = await db.from("stages").select("id").or("name.ilike.%finaliz%,name.ilike.%encerr%").limit(1).maybeSingle();
+        const now = new Date().toISOString();
+        const note = `🔀 Transferência de setor — assunto de "${out.otherCompany.nome}", não da Faculdade. Encaminhado com o contato deles.`;
+        if (fin) await db.from("leads").update({ stage_id: fin.id, stage_entry_date: now, updated_at: now }).eq("id", leadId);
+        await db.from("lead_notes").insert({ lead_id: leadId, note, created_at: now });
+        await db.from("ai_lead_sessions").delete().eq("lead_id", leadId);
+        return `ia:transferência de setor → ${out.otherCompany.nome}`;
+    }
+
     for (const body of blocks) {
         await db.from("vivaconnect_outbox").insert({ lead_id: leadId, channel_id: channelId, kind: "ai_reply", number: num, body });
     }

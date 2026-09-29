@@ -18,7 +18,8 @@
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { chatJSON, corsHeaders, ensureLineBreaks, expandForFullList, identify, isAdmin, isStaff, jsonRes, searchKnowledge, wantsFullCourseList } from "../_shared/ai.ts";
 import { mirror, sv } from "../_shared/db.ts";
-import { fillTemplate, firstName } from "../_shared/vivaconnect.ts";
+import { fillTemplate, firstName, loadSettings as loadVivaSettings } from "../_shared/vivaconnect.ts";
+import { checkOtherCompany, mentionsOtherCompany, type HubMsg } from "../_shared/hub.ts";
 
 type Msg = { role: "user" | "assistant"; content: string };
 const PUBLICOS = ["vendas", "ambos"];
@@ -108,11 +109,39 @@ Deno.serve(async (req) => {
 
         // ── contexto do lead ────────────────────────────────────────────────
         let lead = body.lead ?? null;
-        if (leadId && !lead) {
+        let leadChannelId: number | null = null;
+        if (leadId) {
             const { data: l } = await db.from("leads")
-                .select("nome_completo, curso_interesse, courses:curso_interesse(name)")
+                .select("nome_completo, curso_interesse, vivaconnect_channel_id, courses:curso_interesse(name)")
                 .eq("id", leadId).maybeSingle();
-            if (l) lead = { nome: l.nome_completo, curso: (l as any).courses?.name ?? null };
+            if (l) {
+                leadChannelId = l.vivaconnect_channel_id ?? null;
+                if (!lead) lead = { nome: l.nome_completo, curso: (l as any).courses?.name ?? null };
+            }
+        }
+
+        // ── assunto de OUTRA empresa do grupo (Igreja/Escola/Fundação/etc) ──────
+        // O lead já é da Faculdade (tem lead_id), mas a fala dele é de outro assunto do
+        // grupo — achado ao vivo 29/09: a IA da Faculdade tentava responder sozinha
+        // ("virar membro" → chutou "Fundação" em vez de "Igreja") e ainda fazia handoff pra
+        // um consultor da Faculdade sem sentido. Só roda em canal com Hub ligado (só ele
+        // atende o grupo todo) e quando a fala bate no pré-filtro — não gasta uma chamada
+        // extra em toda mensagem normal.
+        if (leadId && leadChannelId && mentionsOtherCompany(messages[messages.length - 1].content)) {
+            const { data: ch } = await db.from("vivaconnect_channels").select("hub_enabled").eq("id", leadChannelId).maybeSingle();
+            if (ch?.hub_enabled) {
+                const vcSettings = await loadVivaSettings(db);
+                const historico: HubMsg[] = messages.map((m) => ({ de: m.role === "user" ? "contato" : "hub", texto: m.content, em: new Date().toISOString() }));
+                const other = await checkOtherCompany(db, vcSettings, historico, lead?.nome ?? null);
+                if (other) {
+                    return jsonRes({
+                        replies: [other.redirect], reply: other.redirect,
+                        handoff: false, handoff_reason: null, summary: null, sources: [],
+                        otherCompany: { id: other.destino.id, nome: other.destino.nome },
+                        dry_run: dryRun,
+                    });
+                }
+            }
         }
 
         // ── busca na base: últimas falas do lead viram a consulta ───────────
