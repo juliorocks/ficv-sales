@@ -104,8 +104,9 @@ Se a base de conhecimento citar uma data que JÁ PASSOU (início de aulas, prazo
             s.handoff_instructions,
             leadCtx,
             `BASE DE CONHECIMENTO (use só isto como fonte de fatos):\n\n${knowledge}`,
+            `Formate a "reply" como uma mensagem de WhatsApp de verdade, não um bloco único de texto corrido: frases curtas, e pule uma linha (\\n\\n) entre ideias diferentes (ex.: a saudação numa linha, o assunto principal em outra, a pergunta de fechamento em outra) — é assim que uma pessoa escreve no WhatsApp, nunca um parágrafo gigante.`,
             `Responda SEMPRE em JSON com as chaves:
-{"reply": "mensagem para enviar ao lead",
+{"reply": "mensagem para enviar ao lead — já com as quebras de linha (\\n) formatadas",
  "handoff": true|false,
  "handoff_reason": "motivo curto quando handoff=true, senão null",
  "summary": "quando handoff=true: resumo para o consultor (curso, modalidade, objeções, o que o lead pediu); senão null"}
