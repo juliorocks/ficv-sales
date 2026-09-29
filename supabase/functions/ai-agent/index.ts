@@ -83,6 +83,39 @@ Deno.serve(async (req) => {
         const action = body.action ?? "reply";
         const leadId: number | null = body.lead_id ? Number(body.lead_id) : null;
 
+        // ── follow-up (chamado pelo cron vivaconnect-ai-followups) ──────────
+        // Lead ficou quieto depois da última mensagem NOSSA: escreve UMA mensagem de
+        // reengajamento com base no histórico de verdade da conversa, não um texto fixo
+        // ("com base no histórico, nas últimas interações" — pedido do usuário 29/09).
+        if (action === "followup") {
+            if (!leadId) return jsonRes({ error: "lead_id obrigatório." }, 400);
+            const { data: s } = await db.from("ai_agent_settings").select("*").eq("id", 1).single();
+            if (!s) return jsonRes({ error: "Configuração da IA não encontrada." }, 500);
+            if (!s.enabled || !s.followup_enabled) return jsonRes({ skipped: true, reason: "follow-up desligado" });
+            const { data: hist } = await db.from("widechat_messages").select("origin, message")
+                .eq("lead_id", leadId).eq("provider", "vivaconnect").order("created_at", { ascending: false }).limit(20);
+            const histMsgs: Msg[] = (hist ?? []).reverse().filter((h: any) => h.message)
+                .map((h: any) => ({ role: h.origin === "channel" ? "user" : "assistant", content: h.message }));
+            if (!histMsgs.length) return jsonRes({ skipped: true, reason: "sem histórico" });
+            const { data: l } = await db.from("leads")
+                .select("nome_completo, courses:curso_interesse(name)").eq("id", leadId).maybeSingle();
+            const nome = firstName(l?.nome_completo ?? "");
+            const curso = (l as any)?.courses?.name as string | undefined;
+            const agora = new Date().toLocaleString("pt-BR", {
+                timeZone: "America/Sao_Paulo", weekday: "long", day: "2-digit", month: "long", year: "numeric",
+                hour: "2-digit", minute: "2-digit",
+            });
+            const system = [
+                s.system_prompt,
+                `Seu nome é ${s.agent_name}. Agora é ${agora} (horário de Brasília).`,
+                `O lead${nome ? ` (${nome})` : ""}${curso ? `, interessado em ${curso},` : ""} ficou um tempo sem responder depois da sua última mensagem na conversa abaixo. Escreva UMA mensagem curta e natural de reengajamento — NUNCA um "oi, tudo bem?" genérico. Retome o assunto específico de vocês (o curso, a dúvida, a condição que estavam discutindo) com leveza, como quem lembrou de continuar uma conversa, não como cobrança. Se fizer sentido, ofereça ajudar com o próximo passo (ex.: valores, matrícula, tirar mais dúvidas). NÃO se apresente de novo (você já se apresentou nesta conversa). NÃO diga explicitamente "faz um tempo que você não responde" nem nada que soe como pressão.`,
+                `Responda em JSON: {"reply": "a mensagem de follow-up — pule uma linha (\\n\\n) se precisar de mais de uma ideia, senão 1 frase só já resolve"}`,
+            ].join("\n\n");
+            const { json } = await chatJSON(s.chat_model, Number(s.temperature), [{ role: "system", content: system }, ...histMsgs]);
+            const reply = ensureLineBreaks(String(json.reply ?? "").trim());
+            return jsonRes({ reply: reply || null });
+        }
+
         if (action === "takeover" || action === "reactivate") {
             if (!leadId) return jsonRes({ error: "lead_id obrigatório." }, 400);
             if (action === "reactivate" && !isAdmin(caller)) return jsonRes({ error: "Só admin reativa a IA." }, 403);
@@ -226,7 +259,10 @@ Quando handoff=true, não precisa mencionar consultor/horário em nenhum item de
         if (leadId && !dryRun) {
             const now = new Date().toISOString();
             await db.from("ai_lead_sessions").upsert({
-                lead_id: leadId, ai_turns: turns, updated_at: now,
+                // lead respondeu de verdade → zera follow-up (achado ao vivo 29/09: sem isso,
+                // depois de 1 follow-up o lead nunca mais recebia outro, mesmo ficando quieto
+                // de novo dias depois numa conversa nova)
+                lead_id: leadId, ai_turns: turns, followup_count: 0, updated_at: now,
                 ...(handoff
                     ? { status: "handed_off", handoff_reason: reason, handoff_summary: json.summary ?? null, handed_off_at: now }
                     : { status: "active" }),

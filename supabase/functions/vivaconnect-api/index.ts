@@ -319,6 +319,11 @@ Deno.serve(async (req) => {
             return jsonRes(await processOutbox(db, settings));
         }
 
+        if (action === "run_followups") {
+            if (caller?.kind !== "service") return jsonRes({ error: "Só o cron." }, 403);
+            return jsonRes(await runFollowups(db, settings));
+        }
+
         return jsonRes({ error: `Ação desconhecida: ${action}` }, 400);
     } catch (e) {
         console.error("vivaconnect-api:", e);
@@ -451,6 +456,51 @@ async function discover(baseUrl: string, ch: { api_id: string; api_token: string
 
 function spHour(): number {
     return Number(new Intl.DateTimeFormat("en-US", { hour: "numeric", hourCycle: "h23", timeZone: "America/Sao_Paulo" }).format(new Date()));
+}
+
+/** Follow-up automático (29/09, cron vivaconnect-ai-followups, a cada 15 min): lead que ficou
+ *  quieto depois da IA falar algo recebe UMA mensagem de reengajamento, escrita na hora
+ *  pelo ai-agent com base no histórico — não um texto fixo. Mesma janela de horário do
+ *  outbox (nunca manda fora do expediente); candidatos vêm de ai_followup_candidates()
+ *  (SQL — já filtra sessão ativa, silêncio mínimo, limite de tentativas). */
+async function runFollowups(db: any, settings: any) {
+    if (!settings.enabled) return { skipped: "integração desligada" };
+    if (!settings.followup_enabled) return { skipped: "follow-up desligado" };
+    const hour = spHour();
+    if (!(hour >= settings.send_window_start && hour < settings.send_window_end)) return { skipped: "fora da janela de horário" };
+
+    const { data: candidates, error: candErr } = await db.rpc("ai_followup_candidates", {
+        p_after_hours: settings.followup_after_hours, p_max_count: settings.followup_max_count,
+    });
+    if (candErr) return { error: candErr.message };
+    const out = { sent: 0, failed: 0, skipped: 0, details: [] as string[] };
+
+    for (const c of candidates ?? []) {
+        const number = toZproNumber(c.telefone);
+        let chId: number | null = c.vivaconnect_channel_id;
+        if (!chId) chId = (await db.rpc("vivaconnect_pick_pool_channel")).data ?? null;
+        if (!number || !chId) { out.skipped++; out.details.push(`lead #${c.lead_id}: sem número/canal`); continue; }
+        const { data: ch } = await db.from("vivaconnect_channels").select(CH_COLS).eq("id", chId).maybeSingle();
+        if (!ch?.active) { out.skipped++; out.details.push(`lead #${c.lead_id}: canal inativo`); continue; }
+
+        const r = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-agent`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` },
+            body: JSON.stringify({ action: "followup", lead_id: c.lead_id }),
+            signal: AbortSignal.timeout(30000),
+        });
+        const res = await r.json().catch(() => ({}));
+        if (!r.ok || res.skipped || !res.reply) { out.skipped++; out.details.push(`lead #${c.lead_id}: ${res.reason ?? res.error ?? "sem resposta"}`); continue; }
+
+        const { data: row } = await db.from("vivaconnect_outbox").insert({
+            lead_id: c.lead_id, channel_id: ch.id, kind: "ai_reply", number, body: res.reply,
+        }).select("*").single();
+        const sendRes = row ? await sendRow(db, settings, row, ch) : { ok: false, error: "falha ao enfileirar" };
+        const now = new Date().toISOString();
+        await db.from("ai_lead_sessions").update({ followup_count: c.followup_count + 1, last_followup_at: now, updated_at: now }).eq("lead_id", c.lead_id);
+        if (sendRes.ok) { out.sent++; } else { out.failed++; out.details.push(`lead #${c.lead_id}: ${sendRes.error}`); }
+    }
+    return out;
 }
 
 async function processOutbox(db: any, settings: any) {
