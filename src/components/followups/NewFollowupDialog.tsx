@@ -39,6 +39,10 @@ export function NewFollowupDialog({ isOpen, onOpenChange, users, fixedLead }: Pr
     const [note, setNote] = useState("")
     const [dueAt, setDueAt] = useState(defaultDue())
     const [assignedTo, setAssignedTo] = useState<string>(user?.id || "")
+    // default LIGADO (ver LeadFollowupPanel.tsx) — só faz sentido com lead vinculado (é ele
+    // que tem telefone pra mandar mensagem; tarefa solta não manda nada mesmo marcado)
+    const [autoSend, setAutoSend] = useState(true)
+    const hasLead = !!(pickedLead ?? fixedLead)
 
     const { searchTerm, setSearchTerm, data: leadResults, isFetching } = useSupabaseSearch(
         "leads",
@@ -50,7 +54,7 @@ export function NewFollowupDialog({ isOpen, onOpenChange, users, fixedLead }: Pr
     const reset = () => {
         setPickedLead(fixedLead ?? null)
         setTitle(""); setNote(""); setDueAt(defaultDue()); setAssignedTo(user?.id || "")
-        setSearchTerm("")
+        setSearchTerm(""); setAutoSend(true)
     }
 
     const submit = (e: React.FormEvent) => {
@@ -63,6 +67,7 @@ export function NewFollowupDialog({ isOpen, onOpenChange, users, fixedLead }: Pr
                 note: note.trim() || null,
                 due_at: new Date(dueAt).toISOString(),
                 assigned_to: assignedTo || null,
+                auto_send: hasLead ? autoSend : false,
             },
             {
                 onSuccess: () => { showSuccess("Tarefa criada."); reset(); onOpenChange(false) },
@@ -158,6 +163,21 @@ export function NewFollowupDialog({ isOpen, onOpenChange, users, fixedLead }: Pr
                             </select>
                         </div>
                     </div>
+
+                    {hasLead && (
+                        <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer">
+                            <input
+                                type="checkbox"
+                                className="mt-0.5 accent-primary"
+                                checked={autoSend}
+                                onChange={(e) => setAutoSend(e.target.checked)}
+                            />
+                            <span>
+                                Enviar mensagem automaticamente no horário — a Vivi escreve com base nas observações e manda sozinha pro lead.
+                                {" "}Desmarque se preferir voltar a falar você mesmo.
+                            </span>
+                        </label>
+                    )}
 
                     <DialogFooter>
                         <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancelar</Button>

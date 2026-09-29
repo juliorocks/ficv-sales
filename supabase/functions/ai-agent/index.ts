@@ -13,6 +13,10 @@
 // action "takeover"   { lead_id, reason? } → agente humano assumiu: IA sai de vez.
 // action "reactivate" { lead_id }          → admin devolve o lead pra IA.
 // action "followup"   { lead_id }          → cron de reengajamento (ver cron_ai_followups).
+// action "scheduled_followup" { lead_id, note } → cron do follow-up AGENDADO por um humano
+//   (Gestão > lembrete "Retornar em"), diferente do "followup" acima: aqui é o ATENDENTE que
+//   marcou "voltar a falar com este lead em X" com uma nota — a IA escreve a retomada com base
+//   nessa nota + no histórico de verdade, não é a IA reengajando sozinha por silêncio.
 //
 // Quem chama em produção (futuro vivaconnect-webhook) usa a service role key.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
@@ -66,6 +70,49 @@ Deno.serve(async (req) => {
                 `Responda em JSON: {"reply": "a mensagem de follow-up — pule uma linha (\\n\\n) se precisar de mais de uma ideia, senão 1 frase só já resolve"}`,
             ].join("\n\n");
             const { json } = await chatJSON(s.chat_model, Number(s.temperature), [{ role: "system", content: system }, ...histMsgs]);
+            const reply = ensureLineBreaks(String(json.reply ?? "").trim());
+            return jsonRes({ reply: reply || null });
+        }
+
+        // ── follow-up AGENDADO por um humano (Gestão > lembrete "Retornar em") ──────
+        // Pedido do usuário 29/09: o atendente marca "voltar a falar com este lead amanhã,
+        // sobre a bolsa" e a Vivi escreve a retomada sozinha na hora certa — com base na NOTA
+        // do atendente (não é texto livre da IA, tem um motivo concreto) + o histórico de
+        // verdade da conversa. Diferente do "followup" acima (reengajamento por silêncio,
+        // sem nota nenhuma). Usa a mesma busca na base (a nota pode falar de "bolsa",
+        // "matrícula" etc.) e o mesmo prompt-base (s.system_prompt), só troca a instrução.
+        if (action === "scheduled_followup") {
+            if (!leadId) return jsonRes({ error: "lead_id obrigatório." }, 400);
+            const note = String(body.note ?? "").trim();
+            const { data: s } = await db.from("ai_agent_settings").select("*").eq("id", 1).single();
+            if (!s) return jsonRes({ error: "Configuração da IA não encontrada." }, 500);
+            const { data: hist } = await db.from("widechat_messages").select("origin, message")
+                .eq("lead_id", leadId).order("created_at", { ascending: false }).limit(20);
+            const histMsgs: Msg[] = (hist ?? []).reverse().filter((h: any) => h.message)
+                .map((h: any) => ({ role: h.origin === "channel" ? "user" : "assistant", content: h.message }));
+            const { data: l } = await db.from("leads")
+                .select("nome_completo, curso_interesse, courses:curso_interesse(name)").eq("id", leadId).maybeSingle();
+            const nome = firstName(l?.nome_completo ?? "");
+            const curso = (l as any)?.courses?.name as string | undefined;
+            const hits = await searchKnowledge(db, note || curso || "retomar contato", {
+                publico: "vendas", embeddingModel: s.embedding_model, count: s.match_count, minSimilarity: Number(s.min_similarity),
+            });
+            const knowledge = (hits ?? []).length ? (hits as any[]).map((h, i) => `[${i + 1}] ${h.content}`).join("\n\n---\n\n") : "(nenhum trecho relevante)";
+            const agora = new Date().toLocaleString("pt-BR", {
+                timeZone: "America/Sao_Paulo", weekday: "long", day: "2-digit", month: "long", year: "numeric",
+                hour: "2-digit", minute: "2-digit",
+            });
+            const system = [
+                s.system_prompt,
+                `Agora é ${agora} (horário de Brasília).`,
+                `Um atendente humano${nome ? ` (que está conversando com ${nome}${curso ? `, interessado em ${curso}` : ""})` : ""} marcou pra retomar contato com este lead agora, com esta nota interna dele mesmo (não mostre a nota ao lead, é só contexto seu): "${note || "retomar o contato"}".`,
+                `Escreva UMA mensagem curta e natural de retomada, como se fosse o PRÓPRIO atendente continuando a conversa de onde parou (veja o histórico abaixo) — não se apresente como assistente virtual/IA, não diga "sou a Vivi". Vá direto ao que a nota pede, com a mesma naturalidade de quem lembrou de voltar a falar com alguém. Termine com uma pergunta que avance.`,
+                `BASE DE CONHECIMENTO (use se a nota mencionar curso/valores/prazo — nunca invente o que não estiver aqui):\n\n${knowledge}`,
+                `Responda em JSON: {"reply": "a mensagem — pule uma linha (\\n\\n) se precisar de mais de uma ideia, senão 1 frase já resolve"}`,
+            ].join("\n\n");
+            const { json } = await chatJSON(s.chat_model, Number(s.temperature), [
+                { role: "system", content: system }, ...histMsgs,
+            ]);
             const reply = ensureLineBreaks(String(json.reply ?? "").trim());
             return jsonRes({ reply: reply || null });
         }

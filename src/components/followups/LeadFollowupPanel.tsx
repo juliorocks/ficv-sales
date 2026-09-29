@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react"
-import { CalendarClock, Check, Loader2, RotateCcw, Trash2 } from "lucide-react"
+import { Bot, CalendarClock, Check, Loader2, RotateCcw, Trash2 } from "lucide-react"
 import { Lead, User, LeadFollowup } from "@/types/database"
 import { Button } from "@/components/ui/button"
 import { showError, showSuccess } from "@/utils/toast"
@@ -42,7 +42,17 @@ function FollowupRow({ f, users, onDone, onReopen, onDelete, busy }: {
                     <CalendarClock className="h-3.5 w-3.5 shrink-0" />
                     {fmtDue(f.due_at)}
                     <span className="text-muted-foreground">· {who}</span>
-                    {f.status === "done" && <span className="text-green-600 dark:text-green-400">· concluído</span>}
+                    {f.auto_sent_at ? (
+                        <span className="flex items-center gap-0.5 text-primary" title="A Vivi mandou essa mensagem sozinha, no horário marcado.">
+                            <Bot className="h-3 w-3" /> enviado automático
+                        </span>
+                    ) : f.status === "done" ? (
+                        <span className="text-green-600 dark:text-green-400">· concluído</span>
+                    ) : f.auto_send ? (
+                        <span className="flex items-center gap-0.5" title="No horário marcado, a Vivi escreve e manda uma mensagem sozinha pra esse lead.">
+                            <Bot className="h-3 w-3" /> envio automático
+                        </span>
+                    ) : null}
                 </div>
                 {f.note && <p className={`mt-0.5 whitespace-pre-wrap ${f.status === "done" ? "text-muted-foreground line-through" : ""}`}>{f.note}</p>}
             </div>
@@ -76,6 +86,11 @@ export function LeadFollowupPanel({ lead, users }: { lead: Lead; users: User[] }
     const [dueAt, setDueAt] = useState(defaultDue())
     const [assignedTo, setAssignedTo] = useState<string>(lead.assigned_to_id || user?.id || "")
     const [showDone, setShowDone] = useState(false)
+    // Default LIGADO (pedido do usuário 29/09: "check pra desmarcar caso não queira", não o
+    // contrário) — a Vivi escreve a retomada com base na nota e manda sozinha no horário
+    // marcado. Só funciona pra lead do VivaConnect por enquanto (WideChat precisa do login
+    // pessoal de quem manda — sem isso só deixa um aviso no lead, não silencia o follow-up).
+    const [autoSend, setAutoSend] = useState(true)
 
     const pending = useMemo(() => (followups || []).filter((f) => f.status !== "done"), [followups])
     const done = useMemo(() => (followups || []).filter((f) => f.status === "done"), [followups])
@@ -91,10 +106,11 @@ export function LeadFollowupPanel({ lead, users }: { lead: Lead; users: User[] }
                 note: note.trim() || null,
                 due_at: new Date(dueAt).toISOString(),
                 assigned_to: assignedTo || null,
+                auto_send: autoSend,
             },
             {
                 onSuccess: () => {
-                    showSuccess("Follow-up agendado.")
+                    showSuccess(autoSend ? "Follow-up agendado — a Vivi manda sozinha no horário." : "Follow-up agendado.")
                     setNote("")
                     setDueAt(defaultDue())
                 },
@@ -142,6 +158,18 @@ export function LeadFollowupPanel({ lead, users }: { lead: Lead; users: User[] }
                         </select>
                     </div>
                 </div>
+                <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer">
+                    <input
+                        type="checkbox"
+                        className="mt-0.5 accent-primary"
+                        checked={autoSend}
+                        onChange={(e) => setAutoSend(e.target.checked)}
+                    />
+                    <span>
+                        Enviar mensagem automaticamente no horário — a Vivi escreve com base na nota acima e manda sozinha pro lead.
+                        {" "}Desmarque se preferir voltar a falar você mesmo.
+                    </span>
+                </label>
                 <Button type="submit" size="sm" disabled={busy}>
                     {createMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Agendar follow-up"}
                 </Button>

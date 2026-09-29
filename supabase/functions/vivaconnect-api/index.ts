@@ -13,7 +13,9 @@
 //   finish         { lead_id }               (staff)   → fecha o ticket no Z-PRO + lead → Finalizado
 //   transfer       { lead_id, profile_id }   (staff)   → passa o lead pra outro agente do CRM
 //   enqueue_first  { lead_id }               (staff)   → força a 1ª mensagem de um lead
-//   process_outbox {}                        (service, cron 1/min) → esvazia a fila
+//   process_outbox {}                        (service, cron 1/min)  → esvazia a fila
+//   run_followups  {}                        (service, cron 15/min) → IA reengaja lead quieto após silêncio
+//   run_lead_followups {}                    (service, cron 5/min)  → dispara follow-up AGENDADO por humano vencido
 //
 // Regras da fila:
 //   - first_message (contato ativo, número Baileys): só dentro da janela de
@@ -324,6 +326,17 @@ Deno.serve(async (req) => {
             return jsonRes(await runFollowups(db, settings));
         }
 
+        // Follow-up AGENDADO por um humano (checkbox "Enviar mensagem automaticamente",
+        // Gestão > lembrete "Retornar em") — pedido do usuário 29/09. Diferente do
+        // "run_followups" acima (reengajamento automático da IA por silêncio): aqui é uma
+        // tarefa que o próprio atendente marcou, com nota. Só dispara pra lead do VivaConnect
+        // (WideChat depende de credencial pessoal do agente logado — não dá pra automatizar
+        // sem alguém logado, ver comentário em runLeadFollowups); WideChat só ganha um aviso.
+        if (action === "run_lead_followups") {
+            if (caller?.kind !== "service") return jsonRes({ error: "Só o cron." }, 403);
+            return jsonRes(await runLeadFollowups(db, settings));
+        }
+
         return jsonRes({ error: `Ação desconhecida: ${action}` }, 400);
     } catch (e) {
         console.error("vivaconnect-api:", e);
@@ -367,15 +380,18 @@ async function sendRow(db: any, settings: any, row: any, ch: any) {
     if (!claimed) return { ok: false, error: "linha já processada por outro worker" };
 
     const base = { number: row.number, externalKey: row.external_key };
-    // Mensagem de agente humano (kind=manual, sender_name conhecido) sai ASSINADA pro
-    // cliente — mesmo padrão que o painel nativo do Z-PRO já usa sozinho quando alguém
-    // responde por lá ("*Administrador*:\n texto"); só que com o nome de quem realmente
-    // respondeu pelo NOSSO painel (pedido do usuário 29/09: no WhatsApp do cliente as
-    // respostas da equipe apareciam sem nome nenhum, só o texto puro). Só o texto que sai
-    // pro Z-PRO leva a assinatura — o histórico interno (`widechat_messages.message` logo
-    // abaixo) continua com `row.body` puro, porque a tela já mostra o nome separado.
-    // ai_reply/hub_*/student_reply/first_message (sem sender_name) nunca são assinadas.
-    const signedBody = row.kind === "manual" && row.sender_name && row.body
+    // Mensagem com `sender_name` conhecido sai ASSINADA pro cliente — mesmo padrão que o
+    // painel nativo do Z-PRO já usa sozinho quando alguém responde por lá ("*Administrador*:\n
+    // texto"); só que com o nome de quem realmente "assina" essa mensagem (pedido do usuário
+    // 29/09: no WhatsApp do cliente as respostas da equipe apareciam sem nome nenhum, só o
+    // texto puro). Não trava em kind='manual': o follow-up agendado por um humano (kind=
+    // 'ai_reply', pra respeitar hybridBlock/AUTO_KINDS igual qualquer envio automático) também
+    // grava `sender_name` do atendente responsável e precisa sair assinado como se fosse ele
+    // continuando a conversa, mesmo sendo a IA quem escreveu o texto. `sender_name` só é
+    // gravado de propósito nesses casos — nunca por acidente. Só o texto que sai pro Z-PRO
+    // leva a assinatura — o histórico interno (`widechat_messages.message` logo abaixo)
+    // continua com `row.body` puro, porque a tela já mostra o nome separado.
+    const signedBody = row.sender_name && row.body
         ? `*${row.sender_name}:*\n${row.body}`
         : row.body;
     const r = row.media_type === "sounds" && row.media_url
@@ -499,6 +515,73 @@ async function runFollowups(db: any, settings: any) {
         const now = new Date().toISOString();
         await db.from("ai_lead_sessions").update({ followup_count: c.followup_count + 1, last_followup_at: now, updated_at: now }).eq("lead_id", c.lead_id);
         if (sendRes.ok) { out.sent++; } else { out.failed++; out.details.push(`lead #${c.lead_id}: ${sendRes.error}`); }
+    }
+    return out;
+}
+
+/** Follow-up AGENDADO por um humano ("Retornar em", checkbox "Enviar mensagem
+ * automaticamente") — pedido do usuário 29/09. A Vivi escreve a retomada com base na nota
+ * do atendente (ação "scheduled_followup" do ai-agent) e o texto sai ASSINADO com o nome do
+ * responsável (sendRow assina qualquer envio com `sender_name`, não só kind='manual') —
+ * pro cliente parecer que é o próprio atendente continuando a conversa, não um robô.
+ * kind='ai_reply' de propósito (não 'manual'): respeita hybridBlock/AUTO_KINDS e a
+ * delegação "Enviar automáticos por" igual qualquer outro envio automático — isto é um
+ * disparo do CRON, não um humano de verdade clicando enviar, mesmo saindo assinado como um. */
+async function runLeadFollowups(db: any, settings: any) {
+    const { data: dues, error } = await db.from("lead_followups")
+        .select("id, lead_id, note, assigned_to, assignee:profiles!lead_followups_assigned_to_fkey(full_name)")
+        .eq("status", "pending").eq("auto_send", true).not("lead_id", "is", null)
+        .lte("due_at", new Date().toISOString()).limit(20);
+    if (error) return { error: error.message };
+    const out = { sent: 0, skipped: 0, failed: 0, details: [] as string[] };
+    const now = () => new Date().toISOString();
+
+    for (const f of dues ?? []) {
+        const { data: lead } = await db.from("leads").select("id, telefone, vivaconnect_channel_id").eq("id", f.lead_id).maybeSingle();
+        if (!lead) { out.skipped++; continue; }
+        // WideChat depende de login PESSOAL do agente que está mandando (widechat-api resolve
+        // a credencial pelo `who.id` de quem chamou) — um cron sem ninguém logado não tem como
+        // autenticar como o responsável. Só avisa no lead, não marca como enviado, deixa
+        // pendente pro humano mandar na mão (não silencia o follow-up).
+        if (!lead.vivaconnect_channel_id) {
+            await db.from("lead_notes").insert({
+                lead_id: f.lead_id, created_at: now(),
+                note: `⏰ Follow-up venceu${f.note ? ` ("${f.note}")` : ""}, mas este lead é do WideChat — envio automático ainda não dá aqui (depende do login do atendente). Responda manualmente, por favor.`,
+            });
+            out.skipped++; out.details.push(`followup #${f.id}: lead WideChat, avisado`);
+            continue;
+        }
+        const number = toZproNumber(lead.telefone);
+        if (!number) { out.skipped++; out.details.push(`followup #${f.id}: lead sem telefone válido`); continue; }
+        const { data: ch } = await db.from("vivaconnect_channels").select(CH_COLS).eq("id", lead.vivaconnect_channel_id).maybeSingle();
+        if (!ch?.active) { out.skipped++; out.details.push(`followup #${f.id}: canal inativo`); continue; }
+
+        const r = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-agent`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` },
+            body: JSON.stringify({ action: "scheduled_followup", lead_id: f.lead_id, note: f.note }),
+            signal: AbortSignal.timeout(30000),
+        });
+        const res = await r.json().catch(() => ({}));
+        if (!r.ok || !res.reply) { out.failed++; out.details.push(`followup #${f.id}: ${res.error ?? res.reason ?? "sem resposta"}`); continue; }
+
+        const senderName = (f.assignee as any)?.full_name ?? null;
+        const { data: row } = await db.from("vivaconnect_outbox").insert({
+            lead_id: f.lead_id, channel_id: ch.id, kind: "ai_reply", number, body: res.reply,
+            sender_name: senderName, created_by: f.assigned_to ?? null,
+        }).select("*").single();
+        const sendRes = row ? await sendRow(db, settings, row, ch) : { ok: false, error: "falha ao enfileirar" };
+        if (sendRes.ok) {
+            const ts = now();
+            await db.from("lead_followups").update({ status: "done", completed_at: ts, auto_sent_at: ts }).eq("id", f.id);
+            await db.from("lead_notes").insert({
+                lead_id: f.lead_id, created_at: ts,
+                note: `🔔 Follow-up automático enviado${senderName ? ` (assinado como ${senderName})` : ""}: "${res.reply}"`,
+            });
+            out.sent++;
+        } else {
+            out.failed++; out.details.push(`followup #${f.id}: ${sendRes.error}`);
+        }
     }
     return out;
 }

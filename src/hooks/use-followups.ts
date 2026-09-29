@@ -91,6 +91,8 @@ export interface NewFollowupInput {
     note?: string | null
     due_at: string
     assigned_to?: string | null
+    /** dispara a mensagem sozinha no horário (default true — tem checkbox pra desmarcar) */
+    auto_send?: boolean
 }
 
 export function useCreateFollowup() {
@@ -105,6 +107,7 @@ export function useCreateFollowup() {
                 due_at: input.due_at,
                 assigned_to: input.assigned_to ?? u.user?.id ?? null,
                 created_by: u.user?.id ?? null,
+                auto_send: input.auto_send ?? true,
             })
             if (error) throw error
         },

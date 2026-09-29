@@ -214,6 +214,12 @@ export interface LeadFollowup {
     created_at: string;
     completed_at: string | null;
     completed_by: string | null;
+    /** dispara a mensagem sozinha no horário marcado (a Vivi escreve com base na `note`) —
+     * vem TRUE por padrão, tem checkbox pra desmarcar. Só funciona pra lead do VivaConnect
+     * por enquanto (WideChat depende do login pessoal do atendente). */
+    auto_send: boolean;
+    /** quando o envio automático de fato saiu (null = ainda não, ou foi concluído na mão) */
+    auto_sent_at: string | null;
     // joins opcionais
     lead?: { id: number; nome_completo: string; telefone: string | null } | null;
     assignee?: { full_name: string | null; avatar_url: string | null } | null;
