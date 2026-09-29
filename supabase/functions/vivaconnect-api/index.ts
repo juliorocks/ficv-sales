@@ -28,7 +28,7 @@
 //     'vivaconnect'); o webhook ignora o eco.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { corsHeaders, identify, isAdmin, isStaff, jsonRes } from "../_shared/ai.ts";
-import { asList, loadSettings, markHumanReplied, parseApiRef, toDiscovered, toZproNumber, zpro, zproErr } from "../_shared/vivaconnect.ts";
+import { asList, fillTemplate, firstName, loadSettings, markHumanReplied, parseApiRef, toDiscovered, toZproNumber, zpro, zproErr } from "../_shared/vivaconnect.ts";
 import { mirror, sv } from "../_shared/db.ts";
 import { type HubMsg, loadDestinations, planejar } from "../_shared/hub.ts";
 
@@ -166,7 +166,7 @@ Deno.serve(async (req) => {
                 if (msgRow.media_url) return jsonRes({ url: msgRow.media_url });
                 leadId = msgRow.lead_id;
             }
-            const { data: lead } = await db.from("leads").select("id, telefone, vivaconnect_channel_id, vivaconnect_ticket_id").eq("id", leadId).maybeSingle();
+            const { data: lead } = await db.from("leads").select("id, nome_completo, telefone, vivaconnect_channel_id, vivaconnect_ticket_id").eq("id", leadId).maybeSingle();
             if (!lead) return jsonRes({ error: "Lead não encontrado." }, 404);
             const chId = msgRow?.channel_id ?? lead.vivaconnect_channel_id;
             const { data: ch } = chId ? await db.from("vivaconnect_channels").select(CH_COLS).eq("id", chId).maybeSingle() : { data: null };
@@ -177,6 +177,19 @@ Deno.serve(async (req) => {
                 if (ticketId) {
                     const r = await zpro(settings.base_url, ch, "/updateticketinfo", { ticketId: Number(ticketId), status: "closed" });
                     if (!r.ok) return jsonRes({ error: zproErr(r.status, r.data) }, 502);
+                }
+                // mensagem de despedida (opcional, Gestão > VivaConnect) — sai igual um envio
+                // manual: na hora, sem trava de janela/Meta (é a equipe finalizando de propósito).
+                if (settings.farewell_message_enabled && String(settings.farewell_message_template ?? "").trim()) {
+                    const number = toZproNumber(lead.telefone);
+                    if (number) {
+                        const nome = firstName(lead.nome_completo ?? "");
+                        const body = fillTemplate(settings.farewell_message_template, { primeiro_nome: nome || "tudo bem", nome_virgula: nome ? `, ${nome}` : "" });
+                        const { data: row } = await db.from("vivaconnect_outbox").insert({
+                            lead_id: lead.id, channel_id: ch.id, kind: "farewell", number, body, created_by: createdBy,
+                        }).select("*").single();
+                        if (row) await sendRow(db, settings, row, ch);
+                    }
                 }
                 const { data: fin } = await db.from("stages").select("id").or("name.ilike.%finaliz%,name.ilike.%encerr%").limit(1).maybeSingle();
                 const now = new Date().toISOString();

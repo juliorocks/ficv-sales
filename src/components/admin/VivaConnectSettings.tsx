@@ -28,6 +28,8 @@ interface VcSettings {
     min_interval_seconds: number
     student_reply_enabled: boolean
     student_reply_template: string
+    farewell_message_enabled: boolean
+    farewell_message_template: string
 }
 
 interface ChannelHealth {
@@ -160,6 +162,8 @@ export function VivaConnectSettings() {
             min_interval_seconds: Number(form.min_interval_seconds),
             student_reply_enabled: form.student_reply_enabled,
             student_reply_template: form.student_reply_template,
+            farewell_message_enabled: form.farewell_message_enabled,
+            farewell_message_template: form.farewell_message_template,
             updated_at: new Date().toISOString(),
             updated_by: user?.id ?? null,
         }).eq("id", 1).select("id")
@@ -296,6 +300,13 @@ export function VivaConnectSettings() {
                         <Toggle checked={form.student_reply_enabled} onChange={(v) => set("student_reply_enabled", v)} label="Aluno no número oficial → link do portal"
                             hint="Telefone com matrícula ativa no Sponte recebe o texto abaixo (1x a cada 24h) e não vira lead." />
                         <textarea className={textareaCls} value={form.student_reply_template} onChange={(e) => set("student_reply_template", e.target.value)} />
+
+                        <Toggle checked={form.farewell_message_enabled} onChange={(v) => set("farewell_message_enabled", v)} label="Mensagem de despedida ao Finalizar"
+                            hint="Ao clicar em Finalizar na conversa, manda o texto abaixo pro lead antes de encerrar — na hora, sem trava de janela." />
+                        <div className="space-y-2">
+                            <textarea className={textareaCls} value={form.farewell_message_template} onChange={(e) => set("farewell_message_template", e.target.value)} />
+                            <p className="text-[11px] text-muted-foreground">Variáveis: {"{primeiro_nome}"}, {"{nome_virgula}"} (vira ", Maria" ou nada).</p>
+                        </div>
 
                         <p className="text-xs text-muted-foreground rounded-xl border border-dashed border-[var(--border)] p-3">
                             🤖 <b>IA</b>: marque <b>“IA responde”</b> em cada número (ao lado) para a IA atender automaticamente quem escrever nele. Também precisa estar ligada em <b>IA de Atendimento</b>.
