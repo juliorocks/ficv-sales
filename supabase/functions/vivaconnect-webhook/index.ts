@@ -231,13 +231,25 @@ Deno.serve(async (req) => {
             }
             if (hubRoutingId) await db.from("vivaconnect_hub_routings").update({ lead_id: lead.id }).eq("id", hubRoutingId);
 
-            await db.from("widechat_messages").insert({
+            const { error: msgInsertErr } = await db.from("widechat_messages").insert({
                 lead_id: lead.id, provider: "vivaconnect", channel_id: ch.id,
                 session_id: m.ticketId, message_id: m.messageId,
                 type: m.mediaType && m.mediaType !== "chat" && m.mediaType !== "conversation" ? m.mediaType : "text",
                 message: m.body, media_url: m.mediaUrl, origin,
                 sender_name: m.fromMe ? null : m.contactName, raw_data: payload, created_at: m.sentAt,
             });
+            // 29/09, achado ao vivo: resposta de handoff saiu DUPLICADA pro cliente. A checagem
+            // de duplicado lá em cima ("olha antes, grava depois") tem uma janela de corrida —
+            // Z-PRO reentrega o webhook se a resposta demorar (e demora: só respondemos depois
+            // da IA terminar), e a 2ª entrega passava pela checagem ANTES da 1ª acabar de gravar
+            // (lead lookup + reabertura no meio do caminho), chamando a IA e mandando a mesma
+            // resposta 2x. `widechat_messages_provider_message_id_key` (unique) pega isso de
+            // verdade: 23505 aqui = a OUTRA entrega já processou esta mensagem — para tudo, sem
+            // tocar em handoff/IA de novo.
+            if (msgInsertErr) {
+                if (msgInsertErr.code === "23505") return await done("ignored:duplicada (concorrência)", lead.id);
+                throw new Error(`gravar mensagem: ${msgInsertErr.message}`);
+            }
 
             // agente respondeu de verdade → IA sai de vez + sobe pra "Em Contato" (só aqui existe
             // conversa humana em andamento). Só ASSUMIU o ticket sem falar nada ainda → IA sai
