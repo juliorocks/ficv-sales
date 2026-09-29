@@ -284,7 +284,7 @@ Deno.serve(async (req) => {
         // respondia nem 1x, mesmo com o canal "IA responde" ligado — card ficava preso em
         // Entrada pra sempre porque advanceAiStage nunca era chamado.
         if (ch.ai_enabled && lead && !(isStudent && ch.purpose === "official") && !m.agentUserId) {
-            const outcome = await aiReply(db, lead.id, ch.id, m.number);
+            const outcome = await aiReply(db, settings, lead.id, ch.id, m.number);
             return await done(`stored:${outcome}`, lead.id);
         }
 
@@ -295,13 +295,45 @@ Deno.serve(async (req) => {
     }
 });
 
-async function aiReply(db: any, leadId: number, channelId: number, number: string): Promise<string> {
+async function aiReply(db: any, settings: any, leadId: number, channelId: number, number: string): Promise<string> {
     const { data: hist } = await db.from("widechat_messages").select("origin, message, created_at")
         .eq("lead_id", leadId).eq("provider", "vivaconnect").order("created_at", { ascending: false }).limit(20);
     const messages = (hist ?? []).reverse()
         .filter((h: any) => h.message)
         .map((h: any) => ({ role: h.origin === "channel" ? "user" : "assistant", content: h.message }));
     if (!messages.length || messages[messages.length - 1].role !== "user") return "ia:sem fala do lead";
+
+    // 1º turno da IA com esse lead (nunca teve ai_lead_sessions: é lead novo, ou reabriu
+    // depois de Finalizado/Perdido — o reopen já apaga a sessão antiga): manda o texto FIXO
+    // de "1ª mensagem" (Gestão > VivaConnect), não uma saudação inventada pela OpenAI —
+    // pedido do usuário 29/09: "você não está respeitando o texto cadastrado". Da 2ª
+    // mensagem em diante a conversa segue livre, pela IA de verdade.
+    const { data: sess } = await db.from("ai_lead_sessions").select("lead_id").eq("lead_id", leadId).maybeSingle();
+    if (!sess && settings.first_message_enabled && String(settings.first_message_template ?? "").trim()) {
+        // lead literalmente recém-criado nesta mesma request já pode ter o gatilho do banco
+        // (vivaconnect_enqueue_first_message) enfileirado o mesmo texto — não manda 2x.
+        const { data: already } = await db.from("vivaconnect_outbox").select("id")
+            .eq("lead_id", leadId).eq("kind", "first_message")
+            .gte("created_at", new Date(Date.now() - 60_000).toISOString()).limit(1).maybeSingle();
+        if (!already) {
+            const { data: leadRow } = await db.from("leads")
+                .select("nome_completo, courses:curso_interesse(name)").eq("id", leadId).maybeSingle();
+            const curso = (leadRow as any)?.courses?.name as string | undefined;
+            const nome = firstName(leadRow?.nome_completo ?? "");
+            const msg = fillTemplate(settings.first_message_template, {
+                primeiro_nome: nome || "tudo bem", curso: curso ?? "",
+                curso_trecho: curso ? ` no curso de ${curso}` : "",
+            });
+            await db.from("vivaconnect_outbox").insert({
+                lead_id: leadId, channel_id: channelId, kind: "first_message",
+                number: toZproNumber(number) ?? number, body: msg,
+            });
+            await kickOutbox();
+        }
+        await db.from("ai_lead_sessions").upsert({ lead_id: leadId, status: "active", ai_turns: 0, updated_at: new Date().toISOString() });
+        await advanceAiStage(db, leadId, false);
+        return "ia:1ª mensagem (texto configurado)";
+    }
 
     const r = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-agent`, {
         method: "POST",
