@@ -17,6 +17,26 @@ import { mirror, sv } from "../_shared/db.ts";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
+/**
+ * Rede de segurança: o prompt já pede pra formatar como WhatsApp (\n\n entre ideias),
+ * mas numa conversa longa e cheia de respostas antigas sem quebra o modelo tende a
+ * imitar o próprio histórico e ignora a instrução (achado ao vivo 29/09). Se ainda
+ * assim vier tudo num parágrafo só, quebra por frase aqui — nunca manda bloco corrido.
+ */
+function ensureLineBreaks(text: string): string {
+    if (!text || text.includes("\n")) return text;
+    // .split() nunca perde conteúdo (ao contrário de .match(/g), que ignora trechos sem
+    // bater no padrão) — achado ao vivo: ".sjc" de "jcs.sjc" batia como fim de frase e
+    // comia o resto. Só corta depois de .!? seguido de espaço + maiúscula/dígito (início
+    // de frase nova de verdade), nunca no meio de um e-mail/username/decimal.
+    const sentences = text.split(/(?<=[.!?])\s+(?=[A-ZÀ-Ý0-9])/).map((s) => s.trim()).filter(Boolean);
+    if (sentences.length < 2) return text;
+    const first = sentences[0];
+    const last = sentences[sentences.length - 1];
+    const middle = sentences.slice(1, -1).join(" ");
+    return [first, middle, last].filter(Boolean).join("\n\n");
+}
+
 Deno.serve(async (req) => {
     if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
     const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -147,7 +167,7 @@ Quando handoff=true, a "reply" deve avisar com naturalidade que um consultor vai
         }
 
         return jsonRes({
-            reply: String(json.reply ?? "").trim(),
+            reply: ensureLineBreaks(String(json.reply ?? "").trim()),
             handoff,
             handoff_reason: reason,
             summary: handoff ? (json.summary ?? null) : null,
