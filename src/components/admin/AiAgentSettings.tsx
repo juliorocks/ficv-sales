@@ -24,6 +24,8 @@ interface AiSettings {
     match_count: number
     min_similarity: number
     max_ai_turns: number
+    handoff_message: string
+    horario_atendimento: string
 }
 
 interface ChatMsg {
@@ -92,6 +94,8 @@ export function AiAgentSettings() {
             match_count: Number(form.match_count),
             min_similarity: Number(form.min_similarity),
             max_ai_turns: Number(form.max_ai_turns),
+            handoff_message: form.handoff_message,
+            horario_atendimento: form.horario_atendimento,
             updated_at: new Date().toISOString(),
             updated_by: user?.id ?? null,
         }).eq("id", 1).select("id")
@@ -196,6 +200,19 @@ export function AiAgentSettings() {
                     <div className="space-y-2">
                         <Label className={fieldLabel}>Quando passar para um consultor (handoff)</Label>
                         <textarea className={`${textareaCls} min-h-[130px]`} value={form.handoff_instructions} onChange={(e) => set("handoff_instructions", e.target.value)} />
+                    </div>
+
+                    <div className="space-y-2">
+                        <Label className={fieldLabel}>Aviso de transferência (sempre enviado ao passar pra consultor)</Label>
+                        <textarea className={textareaCls} value={form.handoff_message} onChange={(e) => set("handoff_message", e.target.value)} />
+                        <p className="text-[11px] text-muted-foreground">
+                            Entra sempre logo depois da resposta da IA quando ela decide transferir — não depende do modelo lembrar de avisar.
+                            Variáveis: {"{primeiro_nome}"}, {"{nome_virgula}"} (vira ", Maria" ou nada), {"{horario}"}.
+                        </p>
+                    </div>
+                    <div className="space-y-2">
+                        <Label className={fieldLabel}>Horário de atendimento humano</Label>
+                        <Input value={form.horario_atendimento} onChange={(e) => set("horario_atendimento", e.target.value)} className="bg-muted/20" />
                     </div>
 
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

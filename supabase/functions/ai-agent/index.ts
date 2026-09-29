@@ -14,6 +14,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { chatJSON, corsHeaders, identify, isAdmin, isStaff, jsonRes, searchKnowledge } from "../_shared/ai.ts";
 import { mirror, sv } from "../_shared/db.ts";
+import { fillTemplate, firstName } from "../_shared/vivaconnect.ts";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -130,7 +131,7 @@ Se a base de conhecimento citar uma data que JÁ PASSOU (início de aulas, prazo
  "handoff": true|false,
  "handoff_reason": "motivo curto quando handoff=true, senão null",
  "summary": "quando handoff=true: resumo para o consultor (curso, modalidade, objeções, o que o lead pediu); senão null"}
-Quando handoff=true, a "reply" deve avisar com naturalidade que um consultor vai continuar o atendimento.`,
+Quando handoff=true, escreva a "reply" reconhecendo com naturalidade o que o lead pediu/decidiu (não precisa avisar sobre o consultor — o sistema já acrescenta esse aviso automaticamente depois da sua resposta).`,
         ].join("\n\n");
 
         const { json, usage } = await chatJSON(s.chat_model, Number(s.temperature), [
@@ -166,8 +167,21 @@ Quando handoff=true, a "reply" deve avisar com naturalidade que um consultor vai
             }
         }
 
+        // Aviso de transferência GARANTIDO quando handoff=true — não depende só do modelo
+        // lembrar de avisar (achado ao vivo 29/09: às vezes ele marcava handoff=true mas a
+        // "reply" ficava só uma pergunta tipo "posso te explicar como funciona a matrícula?",
+        // nunca dizendo que um consultor ia assumir; a trava então bloqueava a próxima
+        // mensagem do lead — silêncio total). O texto (Gestão > IA de Atendimento) entra
+        // sempre DEPOIS da resposta da IA, preenchido com {primeiro_nome}/{horario}.
+        let reply = ensureLineBreaks(String(json.reply ?? "").trim());
+        if (handoff) {
+            const nome = firstName(lead?.nome ?? "");
+            const aviso = fillTemplate(s.handoff_message, { primeiro_nome: nome || "", nome_virgula: nome ? `, ${nome}` : "", horario: s.horario_atendimento ?? "" });
+            reply = reply ? `${reply}\n\n${aviso}` : aviso;
+        }
+
         return jsonRes({
-            reply: ensureLineBreaks(String(json.reply ?? "").trim()),
+            reply,
             handoff,
             handoff_reason: reason,
             summary: handoff ? (json.summary ?? null) : null,
