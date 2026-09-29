@@ -204,13 +204,19 @@ Deno.serve(async (req) => {
             ...(isStaleReentry ? { data_entrada: nowIso, stage_entry_date: nowIso } : {}),
             ...(form.course_id != null && (isStaleReentry || hit.curso == null) ? { curso_interesse: form.course_id, curso_interesse_nome: cursoNome } : {}),
             ...(!hit.email && email ? { email } : {}),
+            // 29/09: faltava aqui — lead JÁ existente reenviando o formulário nunca disparava a
+            // 1ª mensagem (o gatilho é "UPDATE OF preferred_contact"; sem incluir a coluna no
+            // UPDATE, ele nunca roda pra reentrada, só pra lead novo). Sempre grava a preferência
+            // que a PESSOA acabou de escolher agora.
+            ...(preferredContact ? { preferred_contact: preferredContact } : {}),
         }).eq("id", hit.id);
         await db.from("lead_notes").insert({ lead_id: hit.id, note: nota, created_at: nowIso });
         await mirror(
             `UPDATE leads:⟨${hit.id}⟩ SET contact_count = (contact_count ?? 0) + 1, updated_at = time::now()` +
             (isStaleReentry ? `, data_entrada = d${sv(nowIso)}, stage_entry_date = d${sv(nowIso)}` : "") +
             (form.course_id != null && (isStaleReentry || hit.curso == null) ? `, curso_interesse = courses:⟨${form.course_id}⟩` : "") +
-            (!hit.email && email ? `, email = ${sv(email)}` : "") + `;\n` +
+            (!hit.email && email ? `, email = ${sv(email)}` : "") +
+            (preferredContact ? `, preferred_contact = ${sv(preferredContact)}` : "") + `;\n` +
             `INSERT INTO lead_notes [{ lead_id: leads:⟨${hit.id}⟩, note: ${sv(nota)}, created_at: d${sv(nowIso)} }] RETURN NONE;`
         );
         leadId = hit.id;
