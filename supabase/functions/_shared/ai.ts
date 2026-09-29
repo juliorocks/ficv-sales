@@ -260,31 +260,49 @@ export function wantsFullCourseList(text: string): boolean {
 }
 
 /**
- * Acha o documento (PPC) da base que corresponde ao curso, comparando o NOME do curso
- * contra os TÍTULOS da base — não usa embedding aqui de propósito: com poucos documentos
- * (~15-20 por público), comparar palavra a palavra em memória é mais confiável do que
- * confiar na busca por similaridade pra decidir QUAL documento é (achado ao vivo 29/09,
- * ai-agent: pra uma pergunta curta tipo "qual as disciplinas?", a busca vetorial trouxe o
- * PPC de outro curso como resultado nº1).
+ * Acha o documento (PPC) da base que corresponde ao curso, comparando as PALAVRAS
+ * SIGNIFICATIVAS DO TÍTULO de cada documento contra um texto de referência — não usa
+ * embedding aqui de propósito: com poucos documentos (~15-20 por público), comparar
+ * palavra a palavra em memória é mais confiável do que confiar na busca por similaridade
+ * pra decidir QUAL documento é (achado ao vivo 29/09, ai-agent: pra uma pergunta curta tipo
+ * "qual as disciplinas?", a busca vetorial trouxe o PPC de outro curso como resultado nº1).
+ *
+ * `hints`: candidatos em ORDEM DE PRIORIDADE (mais confiável/recente primeiro) — testados
+ * UM DE CADA VEZ, isolado, parando no primeiro que bater. Por quê não juntar tudo num texto
+ * só: o campo `curso` do lead/ticket costuma estar vazio ou desatualizado (achado ao vivo
+ * 29/09, lead Thayanne Sales: `curso_interesse` nulo mesmo com a conversa deixando claro,
+ * várias vezes, que o assunto era "Liderança Cristã"), então a pista real vem das ÚLTIMAS
+ * falas da conversa — só que juntar várias falas num blob só quebra quando UMA delas lista
+ * VÁRIOS cursos ao mesmo tempo (ex.: "temos Psicoteologia, Liderança Cristã, Teologia
+ * Bíblica do Novo Testamento..."): o nome de um curso errado entra no mesmo blob e pode
+ * empatar ou vencer o curso certo na contagem de palavras batidas. Testando cada fala
+ * ISOLADA, da mais recente pra mais antiga, essa mistura não acontece.
  */
-export async function findCourseDoc(db: SupabaseClient, curso: string | null | undefined, publicos: string[]): Promise<string | null> {
-    if (!curso) return null;
+export async function findCourseDoc(db: SupabaseClient, hints: (string | null | undefined)[], publicos: string[]): Promise<string | null> {
+    const real = hints.filter((h): h is string => !!h && h.trim().length > 0);
+    if (!real.length) return null;
     const { data: docs } = await db.from("knowledge_base").select("id, title")
         .in("publico", publicos).eq("index_status", "ready").eq("ai_enabled", true);
     if (!docs?.length) return null;
     const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-    const stop = new Set(["pos", "graduacao", "curso", "em", "de", "da", "do", "dos", "das", "e", "a", "o", "ead", "presencial"]);
-    const words = norm(curso).split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !stop.has(w));
-    if (!words.length) return null;
-    let best: { id: string; score: number } | null = null;
-    for (const d of docs as { id: string; title: string }[]) {
-        const t = norm(d.title ?? "");
-        const score = words.filter((w) => t.includes(w)).length;
-        if (score > 0 && (!best || score > best.score)) best = { id: d.id, score };
+    const stop = new Set(["pos", "graduacao", "curso", "em", "de", "da", "do", "dos", "das", "e", "a", "o", "ead", "presencial", "ppc"]);
+    const titled = (docs as { id: string; title: string }[])
+        .map((d) => ({ id: d.id, words: norm(d.title ?? "").split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !stop.has(w)) }))
+        .filter((d) => d.words.length > 0);
+    for (const hint of real) {
+        const nh = norm(hint);
+        // entre os que batem o mínimo de 60%, fica com a MAIOR proporção de palavras do
+        // título batidas (não só a maior contagem bruta) — um título curto e 100% coberto
+        // ("Liderança Cristã") vence um título longo só parcialmente coberto por coincidência.
+        let best: { id: string; ratio: number } | null = null;
+        for (const { id, words } of titled) {
+            const score = words.filter((w) => nh.includes(w)).length;
+            const ratio = score / words.length;
+            if (score >= Math.ceil(words.length * 0.6) && (!best || ratio > best.ratio)) best = { id, ratio };
+        }
+        if (best) return best.id;
     }
-    // exige bater a MAIORIA das palavras significativas do nome do curso — evita pegar
-    // um PPC qualquer só porque uma palavra genérica coincidiu
-    return best && best.score >= Math.ceil(words.length * 0.6) ? best.id : null;
+    return null;
 }
 
 /**
@@ -297,9 +315,20 @@ export async function findCourseDoc(db: SupabaseClient, curso: string | null | u
  */
 export async function expandForFullList(
     db: SupabaseClient, hits: { document_id: string; title: string; category: string; content: string; similarity: number }[],
-    curso: string | null | undefined, publicos: string[],
+    hints: (string | null | undefined)[], publicos: string[],
 ): Promise<{ hits: typeof hits; fullDocUsed: string | null }> {
-    const docId = await findCourseDoc(db, curso, publicos) ?? hits[0]?.document_id ?? null;
+    let docId = await findCourseDoc(db, hints, publicos);
+    if (!docId) {
+        // Último recurso, sem NENHUM nome de curso reconhecível: pega o 1º hit que não seja
+        // um documento "essencial" (Catálogo Completo, Orientações Gerais — ver
+        // essentialChunks) — esses sempre entram primeiro em `hits`, mas não são o PPC de um
+        // curso específico; expandir eles não ajuda o pedido de "grade completa" (achado ao
+        // vivo 29/09: sem esse filtro, o fallback pegava sempre "Catálogo Completo de
+        // Cursos" como se fosse o PPC do curso perguntado).
+        const { data: essentialDocs } = await db.from("knowledge_base").select("id").eq("essencial", true);
+        const essentialIds = new Set((essentialDocs ?? []).map((d: any) => d.id));
+        docId = hits.find((h) => !essentialIds.has(h.document_id))?.document_id ?? null;
+    }
     if (!docId) return { hits, fullDocUsed: null };
     const { data: allChunks } = await db.from("knowledge_chunks")
         .select("content, chunk_index").eq("document_id", docId).order("chunk_index").limit(80);

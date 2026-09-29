@@ -135,7 +135,12 @@ Deno.serve(async (req) => {
         // ai-agent (29/09) — poucos trechos por similaridade não cobrem um PPC inteiro.
         let fullDocUsed: string | null = null;
         if (wantsFullCourseList(ultimaFala)) {
-            const r = await expandForFullList(db, hits, (t as any).curso?.name ?? null, PUBLICOS);
+            // mesmo fix do ai-agent (29/09): testa as últimas falas da conversa, uma de cada
+            // vez (da mais recente pra mais antiga) — não juntas num blob só, porque uma fala
+            // que LISTA vários cursos de uma vez (ex.: catálogo) pode confundir o casador de
+            // palavras com o curso errado — só depois cai pro campo estruturado do ticket.
+            const courseHints = [...conversa.slice(-6).map((m) => m.content).reverse(), (t as any).curso?.name];
+            const r = await expandForFullList(db, hits, courseHints, PUBLICOS);
             hits = r.hits; fullDocUsed = r.fullDocUsed;
         }
         const kb = (hits ?? []).length ? (hits as any[]).map((h, i) => `[${i + 1}] (${h.title}) ${h.content}`).join("\n\n---\n\n")

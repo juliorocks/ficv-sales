@@ -209,7 +209,13 @@ Deno.serve(async (req) => {
         let fullDocUsed: string | null = null;
         let knowledgeHits = hits ?? [];
         if (wantsFullCourseList(lastMsg)) {
-            const r = await expandForFullList(db, knowledgeHits, lead?.curso, PUBLICOS);
+            // `lead.curso` (curso_interesse do formulário) costuma vir vazio ou desatualizado
+            // (achado ao vivo 29/09, lead Thayanne Sales: null mesmo com a conversa deixando
+            // claríssimo — várias vezes — que o assunto era "Liderança Cristã") — testa as
+            // últimas falas da conversa, da mais recente pra mais antiga, ANTES do campo
+            // estruturado (mais confiável que um campo que pode nunca ter sido preenchido).
+            const courseHints = [...messages.slice(-6).map((m) => m.content).reverse(), lead?.curso];
+            const r = await expandForFullList(db, knowledgeHits, courseHints, PUBLICOS);
             knowledgeHits = r.hits;
             fullDocUsed = r.fullDocUsed;
         }
