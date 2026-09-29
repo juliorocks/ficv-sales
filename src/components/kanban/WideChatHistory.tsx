@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabase"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
-import { AlertCircle, MessageSquare, Send, Loader2, FileText, Zap, Plus, Smile, Paperclip, Mic, Square, X, Image as ImageIcon, FileAudio, BookOpen } from "lucide-react"
+import { AlertCircle, MessageSquare, Send, Loader2, FileText, Smile, Paperclip, Mic, Square, X, Image as ImageIcon, FileAudio, BookOpen } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label"
 import { showError, showSuccess } from "@/utils/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { KbAskPanel } from "@/components/KbAskPanel"
+import { QuickRepliesMenu } from "@/components/QuickReplies"
 
 // ── Templates HSM: variáveis ────────────────────────────────────────────────
 // Um template pode ter variáveis no corpo — numeradas ({{1}}, {{2}}) ou nomeadas
@@ -674,33 +675,6 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
         retry: 2,
     })
 
-    // Mensagens rápidas (atalhos nossos, não dependem do WideChat)
-    const { data: quickReplies } = useQuery<{ id: number; title: string; content: string }[]>({
-        queryKey: ['quick-replies'],
-        queryFn: async () => {
-            const { data, error } = await supabase.from('quick_replies').select('id, title, content').order('title')
-            if (error) throw error
-            return data || []
-        },
-        staleTime: 5 * 60_000,
-    })
-
-    const addQuickReplyMutation = useMutation({
-        mutationFn: async () => {
-            const title = window.prompt('Título do atalho (ex: "Pedir documento"):')
-            if (!title) return null
-            const content = window.prompt('Texto da mensagem:')
-            if (!content) return null
-            const { error } = await supabase.from('quick_replies').insert({ title, content })
-            if (error) throw error
-            return true
-        },
-        onSuccess: (created) => {
-            if (created) { showSuccess('Atalho criado.'); queryClient.invalidateQueries({ queryKey: ['quick-replies'] }) }
-        },
-        onError: (e: any) => showError(`Erro ao criar atalho: ${e.message}`),
-    })
-
     // Transferir a conversa pra outro agente ou fila/equipe. Basta ter uma session
     // (conversa real) — o widechat-api resolve o atendimento no servidor. Antes exigia
     // `attendance` (que quase nunca vinha) e o botão nunca aparecia.
@@ -1086,28 +1060,8 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                                 disabled={sendMessageMutation.isPending || recording || convertingAudio} onClick={() => fileInputRef.current?.click()}>
                                 <Paperclip className="h-4 w-4" />
                             </Button>
-                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <Button type="button" variant="outline" size="icon" className="rounded-full h-9 w-9 text-slate-600" title="Mensagens rápidas">
-                                        <Zap className="h-4 w-4" />
-                                    </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="start" className="w-72 max-h-80 overflow-y-auto">
-                                    <DropdownMenuLabel>Mensagens rápidas</DropdownMenuLabel>
-                                    <DropdownMenuSeparator />
-                                    {(!quickReplies || quickReplies.length === 0) && <div className="px-2 py-3 text-xs text-muted-foreground">Nenhum atalho cadastrado ainda.</div>}
-                                    {quickReplies?.map((q) => (
-                                        <DropdownMenuItem key={q.id} onClick={() => insertAtCursor((newMessage && !newMessage.endsWith(' ') ? ' ' : '') + q.content)} className="flex flex-col items-start gap-0.5">
-                                            <span className="font-medium">{q.title}</span>
-                                            <span className="text-[11px] text-muted-foreground line-clamp-2">{q.content}</span>
-                                        </DropdownMenuItem>
-                                    ))}
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem onClick={() => addQuickReplyMutation.mutate()} className="gap-2 text-primary">
-                                        <Plus className="h-3.5 w-3.5" /> Novo atalho
-                                    </DropdownMenuItem>
-                                </DropdownMenuContent>
-                            </DropdownMenu>
+                            <QuickRepliesMenu triggerClassName="rounded-full h-9 w-9 text-slate-600"
+                                onPick={(content) => insertAtCursor((newMessage && !newMessage.endsWith(' ') ? ' ' : '') + content)} />
                             <Popover open={kbOpen} onOpenChange={setKbOpen}>
                                 <PopoverTrigger asChild>
                                     <Button type="button" variant="outline" size="icon" className="rounded-full h-9 w-9 text-slate-600" title="Consultar a Base de Conhecimento">

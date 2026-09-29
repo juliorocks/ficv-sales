@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog'
 import { Button } from '../ui/button'
 import { Textarea } from '../ui/textarea'
 import { KbAskPanel } from '../KbAskPanel'
+import { QuickRepliesMenu } from '../QuickReplies'
 import { Badge } from '../ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { Combobox } from '../ui/combobox'
@@ -918,6 +919,10 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                   }}
                 />
                 <div className="flex flex-col gap-1.5 self-end">
+                  {isStaff && (
+                    <QuickRepliesMenu triggerClassName="h-10 w-10 flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--bg-main)] text-[var(--text-muted)] hover:text-[var(--primary)] hover:border-[var(--primary)] transition-colors"
+                      onPick={(content) => setMsg(prev => (prev && !prev.endsWith(' ') ? prev + ' ' : prev) + content)} />
+                  )}
                   {isStaff && (
                     <button type="button" onClick={() => setKbOpen(o => !o)} title="Consultar a Base de Conhecimento"
                       className={`h-10 w-10 flex items-center justify-center rounded-lg border transition-colors ${kbOpen ? 'border-[var(--primary)] text-[var(--primary)]' : 'border-[var(--border)] bg-[var(--bg-main)] text-[var(--text-muted)] hover:text-[var(--primary)] hover:border-[var(--primary)]'}`}>
