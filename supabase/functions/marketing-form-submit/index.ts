@@ -197,12 +197,14 @@ Deno.serve(async (req) => {
     if (hit) {
         const nota = `📋 Novo formulário: ${form.name}` + (cursoNome ? ` — interesse em ${cursoNome}` : "");
         const isStaleReentry = hit.stage === 1;
-        const courseChanging = isStaleReentry && form.course_id != null && hit.curso != null && hit.curso !== form.course_id;
+        // 29/09, pedido do usuário: o curso de interesse segue o formulário mais RECENTE, sempre
+        // — não importa se antes o lead falou sobre outro curso, nem em que etapa ele estava
+        // (inclusive Perdido: reenviar o formulário é um sinal de interesse novo).
         await db.from("leads").update({
             contact_count: (hit.cc ?? 0) + 1,
             updated_at: nowIso,
             ...(isStaleReentry ? { data_entrada: nowIso, stage_entry_date: nowIso } : {}),
-            ...(form.course_id != null && (isStaleReentry || hit.curso == null) ? { curso_interesse: form.course_id, curso_interesse_nome: cursoNome } : {}),
+            ...(form.course_id != null ? { curso_interesse: form.course_id, curso_interesse_nome: cursoNome } : {}),
             ...(!hit.email && email ? { email } : {}),
             // 29/09: faltava aqui — lead JÁ existente reenviando o formulário nunca disparava a
             // 1ª mensagem (o gatilho é "UPDATE OF preferred_contact"; sem incluir a coluna no
@@ -214,7 +216,7 @@ Deno.serve(async (req) => {
         await mirror(
             `UPDATE leads:⟨${hit.id}⟩ SET contact_count = (contact_count ?? 0) + 1, updated_at = time::now()` +
             (isStaleReentry ? `, data_entrada = d${sv(nowIso)}, stage_entry_date = d${sv(nowIso)}` : "") +
-            (form.course_id != null && (isStaleReentry || hit.curso == null) ? `, curso_interesse = courses:⟨${form.course_id}⟩` : "") +
+            (form.course_id != null ? `, curso_interesse = courses:⟨${form.course_id}⟩` : "") +
             (!hit.email && email ? `, email = ${sv(email)}` : "") +
             (preferredContact ? `, preferred_contact = ${sv(preferredContact)}` : "") + `;\n` +
             `INSERT INTO lead_notes [{ lead_id: leads:⟨${hit.id}⟩, note: ${sv(nota)}, created_at: d${sv(nowIso)} }] RETURN NONE;`
