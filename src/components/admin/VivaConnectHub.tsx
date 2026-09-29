@@ -1,7 +1,8 @@
 // Gestão > VivaConnect > Hub do Grupo Cidade Viva — o número oficial antigo (83 3041-7471)
 // é de todo o grupo. Contato NOVO passa pela triagem (supabase/functions/_shared/hub.ts):
 // Faculdade fica neste número; outra empresa recebe o número novo (e o canal dela, se
-// cadastrado, já chama a pessoa); sem assunto claro → menu numerado.
+// cadastrado, já chama a pessoa); sem assunto claro, a IA pergunta de forma natural — nunca
+// um menu numerado (29/09, pedido do usuário: "parece robótico").
 import { useEffect, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown, ChevronRight, FlaskConical, Loader2, Plus, Shuffle, Trash2, Upload } from "lucide-react"
@@ -38,8 +39,8 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
     const qc = useQueryClient()
     const [draft, setDraft] = useState<Dest[]>([])
     const [open, setOpen] = useState<number | null>(null)
-    const [saving, setSaving] = useState<number | "menu" | null>(null)
-    const [menu, setMenu] = useState<{ hub_menu_template: string; hub_max_menus: number } | null>(null)
+    const [saving, setSaving] = useState<number | "ask" | null>(null)
+    const [ask, setAsk] = useState<{ hub_ask_instructions: string; hub_max_questions: number } | null>(null)
     const [sim, setSim] = useState({ nome: "Maria", texto: "oi\nquero saber como me tornar membro" })
     const [simOut, setSimOut] = useState<any>(null)
     const [simBusy, setSimBusy] = useState(false)
@@ -56,9 +57,9 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
 
     const { data: settings } = useQuery({
         queryKey: ["hub_settings"],
-        queryFn: async () => (await supabase.from("vivaconnect_settings").select("hub_menu_template, hub_max_menus").eq("id", 1).single()).data,
+        queryFn: async () => (await supabase.from("vivaconnect_settings").select("hub_ask_instructions, hub_max_questions").eq("id", 1).single()).data,
     })
-    useEffect(() => { if (settings) setMenu(settings as any) }, [settings])
+    useEffect(() => { if (settings) setAsk({ hub_ask_instructions: (settings as any).hub_ask_instructions ?? "", hub_max_questions: (settings as any).hub_max_questions }) }, [settings])
 
     const { data: routings } = useQuery({
         queryKey: ["hub_routings"],
@@ -121,16 +122,16 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
         if (error) return showError(error.message)
         qc.invalidateQueries({ queryKey: ["hub_destinations"] })
     }
-    const saveMenu = async () => {
-        if (!menu) return
-        setSaving("menu")
+    const saveAsk = async () => {
+        if (!ask) return
+        setSaving("ask")
         const { data, error } = await supabase.from("vivaconnect_settings").update({
-            hub_menu_template: menu.hub_menu_template, hub_max_menus: Math.max(1, Number(menu.hub_max_menus) || 2),
+            hub_ask_instructions: ask.hub_ask_instructions.trim() || null, hub_max_questions: Math.max(1, Number(ask.hub_max_questions) || 2),
         }).eq("id", 1).select("id")
         setSaving(null)
         if (error || !data?.length) return showError(`Não foi possível salvar: ${error?.message ?? "sessão expirada."}`)
         qc.invalidateQueries({ queryKey: ["hub_settings"] })
-        showSuccess("Menu salvo.")
+        showSuccess("Instruções salvas.")
     }
     const simulate = async () => {
         setSimBusy(true); setSimOut(null)
@@ -158,8 +159,8 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
                 <CardDescription className="text-sm">
                     O número oficial antigo é de todo o grupo. Quem escrever nele pela 1ª vez passa por uma triagem: a IA entende o assunto e
                     — se for da <b>Faculdade</b>, segue aqui (Híbrido, sem custo Meta); se for de <b>outra empresa</b>, recebe o número novo dela
-                    (e o canal da empresa, se cadastrado, já chama a pessoa); sem assunto claro, recebe um <b>menu</b>. Alunos e leads que já
-                    conhecemos não passam pela triagem.
+                    (e o canal da empresa, se cadastrado, já chama a pessoa); sem assunto claro, a <b>IA pergunta naturalmente</b> (sem menu
+                    numerado). Alunos e leads que já conhecemos não passam pela triagem.
                 </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -247,7 +248,7 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
                                             <label className="flex items-center gap-2 text-sm cursor-pointer">
                                                 <input type="checkbox" checked={d.ativo} onChange={(e) => set(d.id, { ativo: e.target.checked })} className="accent-[var(--primary)]" /> ativa na triagem
                                             </label>
-                                            <div className="flex items-center gap-2 text-sm"><span className="text-muted-foreground">ordem no menu</span>
+                                            <div className="flex items-center gap-2 text-sm"><span className="text-muted-foreground">ordem na triagem</span>
                                                 <Input type="number" value={d.ordem} onChange={(e) => set(d.id, { ordem: Number(e.target.value) })} className="bg-muted/20 w-20 h-8" /></div>
                                             {!d.is_self && <Button size="icon" variant="ghost" className="ml-auto" onClick={() => removeDest(d)} title="Remover"><Trash2 size={14} /></Button>}
                                             <Button size="sm" onClick={() => saveDest(d)} disabled={saving === d.id} className={d.is_self ? "ml-auto" : ""}>
@@ -261,16 +262,17 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
                     })}
                 </div>
 
-                {/* ── Menu ── */}
-                {menu && (
+                {/* ── Pergunta natural (quando não dá pra saber o assunto) ── */}
+                {ask && (
                     <div className="space-y-1">
-                        <p className={fieldLabel}>Menu (quando não dá pra saber o assunto)</p>
-                        <textarea className={`${textareaCls} min-h-[120px]`} value={menu.hub_menu_template} onChange={(e) => setMenu({ ...menu, hub_menu_template: e.target.value })} />
+                        <p className={fieldLabel}>Instruções extras pra IA perguntar (opcional)</p>
+                        <textarea className={`${textareaCls} min-h-[80px]`} placeholder="Ex.: seja bem informal, use 'vc'... (a IA já escreve a pergunta sozinha; isto só ajusta o tom/estilo, se quiser)"
+                            value={ask.hub_ask_instructions} onChange={(e) => setAsk({ ...ask, hub_ask_instructions: e.target.value })} />
                         <div className="flex items-center gap-3 flex-wrap">
-                            <p className="text-[11px] text-muted-foreground flex-1">Variáveis: {"{nome_virgula}"}, {"{primeiro_nome}"}, {"{opcoes}"} (lista numerada das empresas ativas). A pessoa responde com o número.</p>
-                            <span className="text-xs text-muted-foreground">Menus antes de seguir pra Faculdade</span>
-                            <Input type="number" min={1} value={menu.hub_max_menus} onChange={(e) => setMenu({ ...menu, hub_max_menus: Number(e.target.value) })} className="bg-muted/20 w-16 h-8" />
-                            <Button size="sm" onClick={saveMenu} disabled={saving === "menu"}>{saving === "menu" ? <Loader2 className="animate-spin" size={14} /> : "Salvar menu"}</Button>
+                            <p className="text-[11px] text-muted-foreground flex-1">Não é mais um texto fixo — a IA conversa naturalmente até descobrir a empresa (sem menu numerado). Isto aqui é só uma dica de tom, se quiser.</p>
+                            <span className="text-xs text-muted-foreground">Perguntas antes de seguir pra Faculdade</span>
+                            <Input type="number" min={1} value={ask.hub_max_questions} onChange={(e) => setAsk({ ...ask, hub_max_questions: Number(e.target.value) })} className="bg-muted/20 w-16 h-8" />
+                            <Button size="sm" onClick={saveAsk} disabled={saving === "ask"}>{saving === "ask" ? <Loader2 className="animate-spin" size={14} /> : "Salvar"}</Button>
                         </div>
                     </div>
                 )}
@@ -287,7 +289,7 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
                         <div key={i} className="rounded-lg bg-muted/30 p-3 text-sm space-y-1">
                             <p><span className="text-muted-foreground">Pessoa:</span> “{p.fala}”</p>
                             <p className="font-semibold text-[var(--text-main)]">
-                                → {p.acao === "encaminhar" ? `Encaminha para ${p.destino}` : p.acao === "faculdade" ? `Fica na Faculdade (vira lead${p.metodo === "fallback" ? ", sem assunto claro" : ""})` : p.acao === "menu" ? "Envia o menu" : "Não responde"}
+                                → {p.acao === "encaminhar" ? `Encaminha para ${p.destino}` : p.acao === "faculdade" ? `Fica na Faculdade (vira lead${p.metodo === "fallback" ? ", sem assunto claro" : ""})` : p.acao === "perguntar" ? "Pergunta (natural, sem menu)" : "Não responde"}
                                 {p.confianca != null && <span className="font-normal text-xs text-muted-foreground"> · {p.metodo} · confiança {Math.round(p.confianca * 100)}%</span>}
                             </p>
                             <p className="text-xs text-muted-foreground">{p.motivo}</p>
@@ -304,7 +306,7 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
                     {porDestino.length > 0 && (
                         <div className="flex flex-wrap gap-2 text-xs">
                             {porDestino.map(({ d, n }) => <span key={d.id} className="px-2.5 py-1 rounded-full bg-muted/40 flex items-center gap-1.5"><Logo d={d} size={16} /> {d.nome}: <b>{n}</b></span>)}
-                            {semResposta > 0 && <span className="px-2.5 py-1 rounded-full bg-muted/40">❔ aguardando resposta do menu: <b>{semResposta}</b></span>}
+                            {semResposta > 0 && <span className="px-2.5 py-1 rounded-full bg-muted/40">❔ aguardando resposta: <b>{semResposta}</b></span>}
                             <span className="text-muted-foreground self-center">últimos 30 dias</span>
                         </div>
                     )}
@@ -320,7 +322,7 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
                                 <span className="shrink-0 text-right">
                                     {(() => {
                                         const d = r.status === "encaminhado" ? destOf(r.destination_id) : r.status === "faculdade" ? draft.find((x) => x.is_self) ?? null : null
-                                        return d ? <span className="inline-flex items-center gap-1.5"><Logo d={d} size={16} /> {d.is_self ? "Faculdade" : d.nome}</span> : "❔ menu enviado"
+                                        return d ? <span className="inline-flex items-center gap-1.5"><Logo d={d} size={16} /> {d.is_self ? "Faculdade" : d.nome}</span> : "❔ pergunta enviada"
                                     })()}
                                     <span className="block text-[10px] text-muted-foreground">{r.metodo ?? ""}{r.lead_id ? ` · lead #${r.lead_id}` : ""}</span>
                                 </span>

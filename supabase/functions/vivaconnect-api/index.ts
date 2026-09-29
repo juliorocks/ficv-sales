@@ -36,7 +36,7 @@ const CH_COLS = "id, name, purpose, kind, phone, api_id, api_token, active, dail
 
 // Respostas automáticas (IA / Hub / portal / 1ª mensagem) nunca saem pela API OFICIAL paga
 // da Meta: número WABA só envia automático com o Modo Híbrido ativo no Z-PRO (decisão 26/09).
-const AUTO_KINDS = new Set(["ai_reply", "hub_menu", "hub_redirect", "hub_forward", "student_reply", "first_message"]);
+const AUTO_KINDS = new Set(["ai_reply", "hub_ask", "hub_redirect", "hub_forward", "student_reply", "first_message"]);
 function hybridBlock(ch: any, kind: string): string | null {
     if (!AUTO_KINDS.has(kind)) return null;
     const isWaba = ch.zpro_type ? /waba|official|cloud/i.test(ch.zpro_type) : ch.kind === "waba" || ch.kind === "hybrid";
@@ -285,7 +285,7 @@ Deno.serve(async (req) => {
                 const plano = await planejar(db, { settings, dests, sessao, texto, nome: body.nome ?? null });
                 const now = new Date().toISOString();
                 const msgs: HubMsg[] = [...(sessao?.messages ?? []), { de: "contato", texto, em: now }];
-                if (plano.acao === "menu") { msgs.push({ de: "hub", texto: plano.texto, em: now }); sessao = { status: "perguntando", menus: (sessao?.menus ?? 0) + 1, destination_id: null, redirected_at: null, messages: msgs }; }
+                if (plano.acao === "perguntar") { msgs.push({ de: "hub", texto: plano.texto, em: now }); sessao = { status: "perguntando", menus: (sessao?.menus ?? 0) + 1, destination_id: null, redirected_at: null, messages: msgs }; }
                 else if (plano.acao === "encaminhar") { sessao = { status: "encaminhado", menus: sessao?.menus ?? 0, destination_id: plano.destino.id, redirected_at: now, messages: msgs }; }
                 else if (plano.acao === "faculdade") { sessao = { ...(sessao ?? {}), status: "faculdade", messages: msgs }; }
                 else sessao = { ...(sessao ?? { status: "perguntando", menus: 0, destination_id: null, redirected_at: null }), messages: msgs };
@@ -294,7 +294,7 @@ Deno.serve(async (req) => {
                     destino: "destino" in plano ? `${plano.destino.emoji} ${plano.destino.nome}` : null,
                     confianca: "confianca" in plano ? plano.confianca : null,
                     metodo: "metodo" in plano ? plano.metodo : null,
-                    envia: plano.acao === "menu" ? plano.texto : plano.acao === "encaminhar" ? plano.redirect : null,
+                    envia: plano.acao === "perguntar" ? plano.texto : plano.acao === "encaminhar" ? plano.redirect : null,
                     avisa_empresa: plano.acao === "encaminhar" ? plano.forward : null,
                 });
             }

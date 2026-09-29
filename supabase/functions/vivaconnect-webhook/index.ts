@@ -14,7 +14,8 @@
 //    - não-aluno num canal com "IA responde" marcado (vivaconnect_channels.ai_enabled) → IA responde (fila).
 // 4. Canal com "Hub do Grupo" (vivaconnect_channels.hub_enabled — o número antigo do Grupo
 //    Cidade Viva): contato NOVO (sem lead, não-aluno) passa antes pela triagem (_shared/hub.ts):
-//    Faculdade segue o fluxo acima; outra empresa recebe o número novo; sem assunto → menu.
+//    Faculdade segue o fluxo acima; outra empresa recebe o número novo; sem assunto claro →
+//    a IA pergunta de forma natural (nunca um menu numerado).
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { mirror, sv } from "../_shared/db.ts";
 import { advanceAiStage, fillTemplate, findLeadByPhone, firstName, loadSettings, markAiHandedOff, markHumanReplied, parseWebhook, toZproNumber, zpro, zproErr } from "../_shared/vivaconnect.ts";
@@ -344,7 +345,7 @@ async function hubRouteLocked(db: any, settings: any, ch: any, m: any, logId: nu
 }
 
 /**
- * Triagem do Hub do Grupo. handled=true → o hub respondeu (menu/encaminhou/ignorou) e o
+ * Triagem do Hub do Grupo. handled=true → o hub respondeu (perguntou/encaminhou/ignorou) e o
  * webhook para aqui (não vira lead). handled=false → é da Faculdade: segue o fluxo normal
  * levando as falas anteriores da triagem (backlog) pro chat do lead.
  */
@@ -389,12 +390,12 @@ async function hubRoute(db: any, settings: any, ch: any, m: any, soAcumular = fa
         await kickOutbox();
         return { handled: true, outcome: `hub:encaminhado → ${plano.destino.nome}${plano.forward ? " (+ canal da empresa avisado)" : ""}`, backlog: [], routingId: null };
     }
-    if (plano.acao === "menu") {
-        await enqueue(ch.id, "hub_menu", plano.texto);
+    if (plano.acao === "perguntar") {
+        await enqueue(ch.id, "hub_ask", plano.texto);
         msgs.push({ de: "hub", texto: plano.texto, em: hubEm });
         await save({ status: "perguntando", menus: (sessao?.menus ?? 0) + 1, motivo: plano.motivo });
         await kickOutbox();
-        return { handled: true, outcome: "hub:menu enviado", backlog: [], routingId: null };
+        return { handled: true, outcome: "hub:pergunta enviada", backlog: [], routingId: null };
     }
     await save({});
     return { handled: true, outcome: `hub:ignorado (${plano.motivo})`, backlog: [], routingId: null };
