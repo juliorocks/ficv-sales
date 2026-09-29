@@ -351,10 +351,17 @@ async function aiReply(db: any, settings: any, leadId: number, channelId: number
     const out = await r.json().catch(() => ({}));
     if (!r.ok) return `ia:erro ${out?.error ?? r.status}`;
     if (out.skipped) return `ia:pulou (${out.reason})`;
-    if (!out.reply) return "ia:resposta vazia";
-    await db.from("vivaconnect_outbox").insert({
-        lead_id: leadId, channel_id: channelId, kind: "ai_reply", number: toZproNumber(number) ?? number, body: out.reply,
-    });
+    // `replies` = a resposta quebrada em BLOCOS (ex.: grade numa mensagem, valores em
+    // outra — pedido do usuário 29/09) — cada item vira uma linha própria na fila, todas
+    // com o mesmo scheduled_at (agora), pra sair juntas no mesmo kickOutbox como mensagens
+    // sequenciais de verdade, não só parágrafos emendados numa mensagem só. `reply` (string
+    // única) é fallback se a IA ainda devolver o formato antigo.
+    const blocks: string[] = Array.isArray(out.replies) && out.replies.length ? out.replies : (out.reply ? [out.reply] : []);
+    if (!blocks.length) return "ia:resposta vazia";
+    const num = toZproNumber(number) ?? number;
+    for (const body of blocks) {
+        await db.from("vivaconnect_outbox").insert({ lead_id: leadId, channel_id: channelId, kind: "ai_reply", number: num, body });
+    }
     await kickOutbox();
     await advanceAiStage(db, leadId, !!out.handoff);
     return out.handoff ? "ia:respondeu + handoff" : "ia:respondeu";

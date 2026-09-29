@@ -142,10 +142,14 @@ export function AiAgentSettings() {
             setDraft(text)
             return
         }
-        setChat([...next, {
-            role: "assistant", content: data.reply, handoff: data.handoff,
-            handoff_reason: data.handoff_reason, summary: data.summary, sources: data.sources,
-        }])
+        // `replies` = a resposta em blocos (ex.: grade numa mensagem, valores em outra) —
+        // cada bloco vira uma bolha própria no simulador, igual sairia no WhatsApp de
+        // verdade. Só o ÚLTIMO bloco carrega handoff/summary/sources (é onde termina o turno).
+        const blocks: string[] = Array.isArray(data.replies) && data.replies.length ? data.replies : [data.reply]
+        setChat([...next, ...blocks.map((content, i) => ({
+            role: "assistant" as const, content,
+            ...(i === blocks.length - 1 ? { handoff: data.handoff, handoff_reason: data.handoff_reason, summary: data.summary, sources: data.sources } : {}),
+        }))])
     }
 
     if (isLoading || !form) {
