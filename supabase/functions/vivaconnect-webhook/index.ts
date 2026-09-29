@@ -179,6 +179,10 @@ Deno.serve(async (req) => {
                         patch.stage_id = 1;
                         patch.assigned_to_id = null;
                         reopenNote = "🔁 Reaberto para Entrada (sem agente atribuído) — cliente voltou a escrever pelo VivaConnect após o atendimento ter sido finalizado.";
+                        // ninguém ficou dono desse atendimento → libera a IA de novo (sem isso, o
+                        // handed_off de uma resposta humana antiga travava a IA pra sempre, mesmo
+                        // depois do atendimento finalizado e reaberto do zero; 28/09, pedido do usuário)
+                        await db.from("ai_lead_sessions").delete().eq("lead_id", lead.id);
                     }
                 }
             }

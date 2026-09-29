@@ -167,7 +167,13 @@ export function parseWebhook(p: any): ParsedMsg | null {
 
     const msg = findKey(p, ["msg", "message", "mensagem"]) ?? p;
     const m = typeof msg === "object" ? msg : p;
-    const body = findKey(m, ["body", "text", "conversation", "caption"]) ?? findKey(p, ["body", "text"]);
+    // 28/09: payload WABA real tem `msg.text = { body: "..." }` — findKey acha a CHAVE "text" e
+    // devolve o objeto inteiro, que sem isso virava `{"body":"..."}` stringificado na tela (visto
+    // ao vivo no chat do lead e no Kanban). Só desembrulha um objeto {body|text|caption: string}.
+    const rawBody = findKey(m, ["body", "text", "conversation", "caption"]) ?? findKey(p, ["body", "text"]);
+    const body = rawBody && typeof rawBody === "object" && !Array.isArray(rawBody)
+        ? (rawBody.body ?? rawBody.text ?? rawBody.caption ?? rawBody)
+        : rawBody;
     const ticket = findKey(p, ["ticket"]);
     const contact = findKey(p, ["contact", "contato"]);
     const rawNum = (contact && (contact.number ?? contact.phone)) ?? findKey(p, ["number", "remoteJidAlt", "from", "phone"]);
