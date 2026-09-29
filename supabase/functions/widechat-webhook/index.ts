@@ -362,7 +362,14 @@ serve(async (req) => {
         }
         console.log(`event=${eventName} wh=${webhookEvent} lead=${leadId}(${foundBy}) session=${sessionId} nonComm=${isNonCommercial} q=${queueVal} agent=${agentName}`);
 
-        const { data: stg0 } = await db.from('stages').select('id').order('order', { ascending: true }).limit(1).maybeSingle();
+        // "Entrada" por NOME, não pela `order` mais baixa — `order` é só a posição visual da
+        // coluna no Kanban (o usuário reordena quando quiser, ex.: 29/09, IA Atendendo passou
+        // pra antes de Entrada) e não tem relação com "é a etapa de lead novo/intocado". Bug
+        // real (29/09): essa busca por `order` fazia TODO lead novo do WideChat cair direto em
+        // "IA Atendendo" (que passou a ter `order=1`) — leads que a IA nunca tocou, alguns já
+        // atendidos por humano, ficavam presos lá (nada no WideChat sabe tirar um lead de "IA
+        // Atendendo", essa etapa só existe pro fluxo do VivaConnect).
+        const { data: stg0 } = await db.from('stages').select('id').ilike('name', '%entrada%').limit(1).maybeSingle();
         const firstStageId = stg0?.id ?? 1;
 
         // ── setor não-comercial (RH/Secretaria/Escola/Fundação/Igreja/CV Education) ──
