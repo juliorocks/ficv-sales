@@ -2089,7 +2089,7 @@ const FullApp = () => {
                 <div className="w-20 h-20 border-4 border-primary border-t-transparent rounded-full animate-spin shadow-[0_0_30px_rgba(85,81,255,0.2)]" />
             </div>
             <div className="text-center group">
-                <h2 className="text-[var(--text-main)] text-xl font-bold tracking-[0.2em] mb-3 group-hover:scale-105 transition-transform">SALESPULSE</h2>
+                <h2 className="text-[var(--text-main)] text-xl font-bold tracking-[0.2em] mb-3 group-hover:scale-105 transition-transform">CONNECT FICV</h2>
                 <div className="flex items-center gap-2 justify-center">
                     <div className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.3s]" />
                     <div className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.15s]" />

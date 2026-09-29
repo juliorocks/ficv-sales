@@ -1,6 +1,6 @@
 # Plano de Alimentação da Base de Conhecimento - PPC Psicoteologia
 
-Este plano descreve como processar e inserir as informações do Projeto Pedagógico do Curso (PPC) de Psicoteologia na Base de Conhecimento do SalesPulse.
+Este plano descreve como processar e inserir as informações do Projeto Pedagógico do Curso (PPC) de Psicoteologia na Base de Conhecimento do Connect FICV.
 
 ## Visão Geral
 - **Objetivo**: Formatar o texto bruto do PPC em documentos estruturados para a Base de Conhecimento.

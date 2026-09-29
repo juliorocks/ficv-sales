@@ -107,7 +107,7 @@ async function runTest(id: string, db: any): Promise<{ ok: boolean; message: str
         if (!from) return { ok: false, message: "Falta o Remetente (ex.: FICV <atendimento@email.ficv.edu.br>)." };
         // envio REAL pro endereço de teste da Resend (aceita e descarta): valida chave + remetente +
         // domínio verificado de uma vez — funciona com chave "Sending access" ou "Full access"
-        const sent = await sendEmail("delivered@resend.dev", "Teste de conexão — SalesPulse", "<p>Teste de conexão da integração Resend.</p>");
+        const sent = await sendEmail("delivered@resend.dev", "Teste de conexão — Connect FICV", "<p>Teste de conexão da integração Resend.</p>");
         if (!sent.ok) {
             const dom = (from.match(/@([^>\s]+)/) ?? [])[1];
             return { ok: false, message: `${sent.error}${/domain|not verified|verify/i.test(sent.error ?? "") ? ` — o remetente precisa ser de um domínio verificado na Resend (hoje: ${dom ?? "?"}).` : ""}` };

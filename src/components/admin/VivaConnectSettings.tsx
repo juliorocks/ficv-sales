@@ -240,7 +240,7 @@ export function VivaConnectSettings() {
         if (!testNumber.replace(/\D/g, "")) return showError("Informe um número pra teste.")
         setBusy(`send-${id}`)
         const { data, error } = await supabase.functions.invoke("vivaconnect-api", {
-            body: { action: "send_test", channel_id: id, number: testNumber, body: "Teste de envio do SalesPulse via VivaConnect ✅" },
+            body: { action: "send_test", channel_id: id, number: testNumber, body: "Teste de envio do Connect FICV via VivaConnect ✅" },
         })
         setBusy(null)
         refetchOutbox(); refetchChannels()

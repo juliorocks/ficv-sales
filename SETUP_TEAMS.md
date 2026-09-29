@@ -1,4 +1,4 @@
-# Setup de Equipes (Teams) - SALESPULSE
+# Setup de Equipes (Teams) - CONNECT FICV
 
 ## ✅ Mudanças Realizadas
 

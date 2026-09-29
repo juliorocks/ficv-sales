@@ -1,6 +1,6 @@
-# SalesPulse Implementation Plan
+# Connect FICV Implementation Plan
 
-> **Project:** SalesPulse - Intelligent Sales Support Management System
+> **Project:** Connect FICV (ex-SalesPulse) - Intelligent Sales Support Management System
 > **Goal:** Transform WhatsApp (Widechat) exports into actionable commercial intelligence with a premium glassmorphic UI.
 
 ## 📋 Overview

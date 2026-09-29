@@ -34,7 +34,7 @@ export const Login: React.FC = () => {
                             onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
                         />
                     </div>
-                    <h1 className="text-3xl font-black font-display text-[var(--text-main)] tracking-tight">SalesPulse</h1>
+                    <h1 className="text-3xl font-black font-display text-[var(--text-main)] tracking-tight">Connect FICV</h1>
                     <p className="text-[var(--text-muted)] mt-2 font-medium">Acesse sua conta para continuar</p>
                 </div>
 
