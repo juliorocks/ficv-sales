@@ -27,6 +27,34 @@ import { type HubMsg, loadDestinations, planejar } from "../_shared/hub.ts";
 // Typebot/chatflow (menus) ficam como estão.
 const ZPRO_AI_FLAGS = ["chatgptStatus", "difyStatus", "dialogflowStatus", "n8nStatus"];
 
+// ── trava: evita ping-pong infinito com OUTRO sistema automático do outro lado ──────
+// (pedido do usuário 29/09: "não responder outra IA que entrar em contato com a gente").
+// Dois sinais, cada um já basta sozinho:
+//   1. a ÚLTIMA fala do "lead" bate com frase típica de autoresponder/bot (fora do
+//      horário, "retornaremos em breve", away message, etc.);
+//   2. as 2 últimas respostas do "lead" chegaram em MENOS de 5s depois da NOSSA
+//      mensagem anterior — ninguém lê e digita uma resposta de verdade tão rápido,
+//      2 vezes seguidas; bot sim.
+// Ação: marca handed_off (a IA já sai da conversa) + nota no lead, pra um humano dar
+// uma olhada — nunca apaga o lead nem o histórico, só para de alimentar o loop.
+const AUTORESPONDER_RX = /mensagem\s+autom[aá]tica|resposta\s+autom[aá]tica|fora\s+do\s+hor[aá]rio\s+de\s+atendimento|recebemos\s+(o\s+)?(seu|sua)\s+(contato|mensagem).{0,60}(retornaremos|em\s+breve)|no\s+momento\s+n[aã]o\s+(posso|podemos)\s+(atender|responder)|estou\s+ausente|ausente\s+no\s+momento|away\s+message|out\s+of\s+office|this\s+is\s+an?\s+automat(ed|ic)\s+(reply|response|message)|i.?m\s+currently\s+(away|unavailable)/i;
+function detectAutomatedPeer(hist: { origin: string; message: string | null; created_at: string }[]): string | null {
+    const lastChannel = hist.find((h) => h.origin === "channel" && h.message); // hist vem DESC
+    if (lastChannel?.message && AUTORESPONDER_RX.test(lastChannel.message)) {
+        return "a última mensagem do lead parece resposta automática de outro sistema (texto padrão de autoresponder)";
+    }
+    const asc = [...hist].reverse();
+    let fastStreak = 0;
+    for (let i = 1; i < asc.length; i++) {
+        if (asc[i].origin === "channel" && asc[i - 1].origin !== "channel") {
+            const gapMs = new Date(asc[i].created_at).getTime() - new Date(asc[i - 1].created_at).getTime();
+            fastStreak = gapMs >= 0 && gapMs < 5000 ? fastStreak + 1 : 0;
+            if (fastStreak >= 2) return "as últimas respostas chegaram rápido demais pra ser gente digitando (possível outro bot do outro lado)";
+        }
+    }
+    return null;
+}
+
 const j = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { "Content-Type": "application/json" } });
 const VIVACONNECT_SOURCE = "WhatsApp (VivaConnect)";
 
@@ -314,6 +342,16 @@ async function aiReply(db: any, settings: any, leadId: number, channelId: number
         .filter((h: any) => h.message)
         .map((h: any) => ({ role: h.origin === "channel" ? "user" : "assistant", content: h.message }));
     if (!messages.length || messages[messages.length - 1].role !== "user") return "ia:sem fala do lead";
+
+    const botPeer = detectAutomatedPeer(hist ?? []);
+    if (botPeer) {
+        await markAiHandedOff(db, leadId, `Possível robô do outro lado — ${botPeer}`);
+        await db.from("lead_notes").insert({
+            lead_id: leadId, created_at: new Date().toISOString(),
+            note: `🤖⚠️ IA parou de responder — ${botPeer}. Revise manualmente antes de continuar.`,
+        });
+        return `ia:pulou (${botPeer})`;
+    }
 
     // 1º turno da IA com esse lead (nunca teve ai_lead_sessions: é lead novo, ou reabriu
     // depois de Finalizado/Perdido — o reopen já apaga a sessão antiga): manda o texto FIXO
