@@ -320,8 +320,16 @@ async function aiReply(db: any, settings: any, leadId: number, channelId: number
     // de "1ª mensagem" (Gestão > VivaConnect), não uma saudação inventada pela OpenAI —
     // pedido do usuário 29/09: "você não está respeitando o texto cadastrado". Da 2ª
     // mensagem em diante a conversa segue livre, pela IA de verdade.
+    //
+    // EXCETO se o contato já falou com a gente há pouco (first_message_skip_hours, padrão
+    // 48h) — achado ao vivo: lead pediu contato da Igreja (encerra o atendimento da
+    // Faculdade), 12 min depois voltou perguntando de Direito, e levou a saudação inteira
+    // de novo porque a sessão tinha sido apagada. Contato recente → pula a saudação, a IA já
+    // responde direto ao que foi perguntado (o prompt já instrui a nunca se reapresentar).
     const { data: sess } = await db.from("ai_lead_sessions").select("lead_id").eq("lead_id", leadId).maybeSingle();
-    if (!sess && settings.first_message_enabled && String(settings.first_message_template ?? "").trim()) {
+    const lastAuto = (hist ?? []).find((h: any) => h.origin === "auto" && h.message);
+    const contatoRecente = !!lastAuto && Date.now() - new Date(lastAuto.created_at).getTime() < Number(settings.first_message_skip_hours ?? 48) * 3600_000;
+    if (!sess && !contatoRecente && settings.first_message_enabled && String(settings.first_message_template ?? "").trim()) {
         // lead literalmente recém-criado nesta mesma request já pode ter o gatilho do banco
         // (vivaconnect_enqueue_first_message) enfileirado o mesmo texto — não manda 2x.
         const { data: already } = await db.from("vivaconnect_outbox").select("id")
