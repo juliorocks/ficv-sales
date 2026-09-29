@@ -131,7 +131,7 @@ Se a base de conhecimento citar uma data que JÁ PASSOU (início de aulas, prazo
  "handoff": true|false,
  "handoff_reason": "motivo curto quando handoff=true, senão null",
  "summary": "quando handoff=true: resumo para o consultor (curso, modalidade, objeções, o que o lead pediu); senão null"}
-Quando handoff=true, escreva a "reply" reconhecendo com naturalidade o que o lead pediu/decidiu (não precisa avisar sobre o consultor — o sistema já acrescenta esse aviso automaticamente depois da sua resposta).`,
+Quando handoff=true, a "reply" não é usada (o sistema manda um aviso de transferência próprio no lugar) — escreva ela normalmente mesmo assim, só não precisa mencionar consultor/horário.`,
         ].join("\n\n");
 
         const { json, usage } = await chatJSON(s.chat_model, Number(s.temperature), [
@@ -167,17 +167,19 @@ Quando handoff=true, escreva a "reply" reconhecendo com naturalidade o que o lea
             }
         }
 
-        // Aviso de transferência GARANTIDO quando handoff=true — não depende só do modelo
-        // lembrar de avisar (achado ao vivo 29/09: às vezes ele marcava handoff=true mas a
-        // "reply" ficava só uma pergunta tipo "posso te explicar como funciona a matrícula?",
-        // nunca dizendo que um consultor ia assumir; a trava então bloqueava a próxima
-        // mensagem do lead — silêncio total). O texto (Gestão > IA de Atendimento) entra
-        // sempre DEPOIS da resposta da IA, preenchido com {primeiro_nome}/{horario}.
+        // Aviso de transferência GARANTIDO quando handoff=true — SUBSTITUI a "reply" do
+        // modelo (não concatena): achado ao vivo 29/09 — às vezes a IA marcava handoff=true
+        // mas a "reply" ficava só uma pergunta ("posso te explicar como funciona a
+        // matrícula?"), nunca avisando de verdade, e a trava bloqueava a próxima mensagem do
+        // lead (silêncio total). Corrigido pra sempre avisar — só que aí, quando a IA TAMBÉM
+        // tentava avisar (ela vê a instrução no prompt, às vezes segue), o horário saía 2x na
+        // mesma mensagem (achado ao vivo, 29/09 de novo). Como não dá pra confiar que o
+        // modelo vai ou não mencionar isso sozinho, o texto configurado (Gestão > IA de
+        // Atendimento) passa a ser A mensagem inteira nesse caso — sempre igual, nunca duplicado.
         let reply = ensureLineBreaks(String(json.reply ?? "").trim());
         if (handoff) {
             const nome = firstName(lead?.nome ?? "");
-            const aviso = fillTemplate(s.handoff_message, { primeiro_nome: nome || "", nome_virgula: nome ? `, ${nome}` : "", horario: s.horario_atendimento ?? "" });
-            reply = reply ? `${reply}\n\n${aviso}` : aviso;
+            reply = fillTemplate(s.handoff_message, { primeiro_nome: nome || "", nome_virgula: nome ? `, ${nome}` : "", horario: s.horario_atendimento ?? "" });
         }
 
         return jsonRes({
