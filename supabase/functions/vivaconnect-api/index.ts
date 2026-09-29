@@ -503,6 +503,8 @@ async function runFollowups(db: any, settings: any) {
     return out;
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 async function processOutbox(db: any, settings: any) {
     if (!settings.enabled) return { skipped: "integração desligada" };
     const inWindow = (() => { const h = spHour(); return h >= settings.send_window_start && h < settings.send_window_end; })();
@@ -515,7 +517,16 @@ async function processOutbox(db: any, settings: any) {
     const usedThisRun = new Set<number>(); // no máximo 1 first_message por número por execução
     const out = { sent: 0, failed: 0, waiting: 0, details: [] as string[] };
 
+    // pausa curta entre bolhas da MESMA resposta (mesmo lead, mesma leva de ai_reply) — sem
+    // isso saíam quase simultâneas, parecendo disparo de robô em vez de alguém digitando
+    // (29/09, pedido do usuário: "sistema realmente inteligente"). Só entre mensagens
+    // CONSECUTIVAS do mesmo lead — não atrasa leads diferentes na mesma leva do cron.
+    let prevReplyLeadId: number | null = null;
+
     for (const row of rows ?? []) {
+        if (row.kind === "ai_reply" && row.lead_id && row.lead_id === prevReplyLeadId) await sleep(1500);
+        prevReplyLeadId = row.kind === "ai_reply" ? row.lead_id : null;
+
         const automatic = row.kind === "first_message";
         if (automatic && (!settings.first_message_enabled || !inWindow)) { out.waiting++; continue; }
 
