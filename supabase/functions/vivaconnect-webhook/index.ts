@@ -17,7 +17,7 @@
 //    Faculdade segue o fluxo acima; outra empresa recebe o número novo; sem assunto → menu.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { mirror, sv } from "../_shared/db.ts";
-import { advanceAiStage, fillTemplate, findLeadByPhone, firstName, loadSettings, markHandedOff, parseWebhook, toZproNumber, zpro, zproErr } from "../_shared/vivaconnect.ts";
+import { advanceAiStage, fillTemplate, findLeadByPhone, firstName, loadSettings, markAiHandedOff, markHumanReplied, parseWebhook, toZproNumber, zpro, zproErr } from "../_shared/vivaconnect.ts";
 import { type HubMsg, loadDestinations, planejar } from "../_shared/hub.ts";
 
 // Bots de IA embutidos do Z-PRO que vêm LIGADOS por padrão em ticket novo
@@ -218,10 +218,13 @@ Deno.serve(async (req) => {
                 sender_name: m.fromMe ? null : m.contactName, raw_data: payload, created_at: m.sentAt,
             });
 
-            // agente humano falou (ou pegou o ticket no painel do Z-PRO) → IA sai de vez desse lead
-            // (e, se estava em "IA Atendendo", sobe pra "Em Contato")
-            if (m.fromMe || m.agentUserId) {
-                await markHandedOff(db, lead.id, m.fromMe ? "Agente respondeu pelo VivaConnect" : "Agente assumiu o ticket no VivaConnect");
+            // agente respondeu de verdade → IA sai de vez + sobe pra "Em Contato" (só aqui existe
+            // conversa humana em andamento). Só ASSUMIU o ticket sem falar nada ainda → IA sai
+            // igual, mas o lead volta pra Entrada (fila, botão Atender), não "Em Contato".
+            if (m.fromMe) {
+                await markHumanReplied(db, lead.id, "Agente respondeu pelo VivaConnect");
+            } else if (m.agentUserId) {
+                await markAiHandedOff(db, lead.id, "Agente assumiu o ticket no VivaConnect");
             }
         }
 

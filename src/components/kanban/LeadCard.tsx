@@ -1,7 +1,7 @@
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Lead, User, LeadSource, Stage, Course } from "@/types/database"
 import { Button } from "@/components/ui/button"
-import { ArrowRightLeft, Check, Clock, HandHelping, Mail, MessageCircle, Pencil, Phone, RefreshCw } from "lucide-react"
+import { ArrowRightLeft, Bot, Check, Clock, HandHelping, Mail, MessageCircle, Pencil, Phone, RefreshCw } from "lucide-react"
 import { EditLeadDialog } from "./EditLeadDialog"
 import { LossReasonDialog } from "./LossReasonDialog"
 import { useTimeInStage } from "@/hooks/use-time-in-stage"
@@ -26,9 +26,11 @@ interface LeadCardProps {
     courses: Course[]
     /** nº de mensagens do cliente ainda sem resposta (badge piscante) */
     pending?: number
+    /** já teve alguma resposta da IA em algum momento (ai_lead_sessions.ai_turns > 0) */
+    aiTouched?: boolean
 }
 
-export function LeadCard({ lead, users, leadSources, stages, courses, pending }: LeadCardProps) {
+export function LeadCard({ lead, users, leadSources, stages, courses, pending, aiTouched }: LeadCardProps) {
     const timeInStage = useTimeInStage(lead.stage_entry_date);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
     const [editTab, setEditTab] = useState<"details" | "chat">("chat");
@@ -108,6 +110,18 @@ export function LeadCard({ lead, users, leadSources, stages, courses, pending }:
                 <CardHeader className="p-4 pb-2 flex flex-row justify-between items-start">
                     <div className="flex items-center gap-2 flex-1 overflow-hidden">
                         <AssignedUser userId={lead.assigned_to_id} users={users} />
+                        {aiTouched && (
+                            <TooltipProvider>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <span className="flex items-center justify-center w-5 h-5 rounded-full bg-primary/10 text-primary shrink-0">
+                                            <Bot className="w-3 h-3" />
+                                        </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Já foi atendido pela IA</TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
+                        )}
                         <CardTitle className="text-base font-semibold flex flex-col min-w-0" title={lead.nome_completo}>
                             <span className="truncate">{lead.nome_completo}</span>
                             {/* nowrap + truncate em cada badge: nome de curso longo ("História do

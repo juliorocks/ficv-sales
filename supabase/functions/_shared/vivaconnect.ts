@@ -8,49 +8,63 @@ export type Channel = {
     phone: string | null; api_id: string; api_token: string; active: boolean; daily_limit: number;
 };
 
-// ── Etapa "IA Atendendo" (28/09) ───────────────────────────────────────────
-// Entrada → IA Atendendo (1ª resposta de verdade da IA) → Em Contato (humano confirmado, ou a
-// própria IA decide fazer handoff). Só entra/sai dessas etapas — Em Contato/Matriculado/Perdido/
+// ── Etapa "IA Atendendo" (28/09, ajustado 29/09) ────────────────────────────
+// Entrada (1) → IA Atendendo (1ª resposta de verdade da IA) → de volta pra Entrada quando a IA
+// para de atender sem ninguém ter respondido ainda (handoff da própria IA, ou agente só ASSUMIU
+// o ticket sem falar nada) — fica na fila normal, com o botão Atender. "Em Contato" é reservado
+// pra quando um agente de verdade MANDA uma mensagem (pedido explícito do usuário 29/09: "Em
+// Contato é somente quando um agente nosso já respondeu alguma coisa"). Matriculado/Perdido/
 // Finalizado nunca são tocados por essas funções.
 
-/** Sai da etapa "IA Atendendo" (se estiver nela) → "Em Contato". Não mexe em nenhuma outra etapa
- *  (não força quem ainda está em Entrada — só quem a IA já estava atendendo). */
-export async function moveOutOfAiAttending(db: SupabaseClient, leadId: number) {
+/** Sai da etapa "IA Atendendo" (se estiver nela) → volta pra "Entrada" (fila de humano, com o
+ *  botão Atender). Não mexe em nenhuma outra etapa. */
+export async function moveToEntradaFromAiAttending(db: SupabaseClient, leadId: number) {
     const { data: lead } = await db.from("leads").select("stage_id").eq("id", leadId).maybeSingle();
-    if (!lead?.stage_id) return;
+    if (!lead?.stage_id || lead.stage_id === 1) return;
     const { data: st } = await db.from("stages").select("name").eq("id", lead.stage_id).maybeSingle();
     if (!st?.name || !/ia atend/i.test(st.name)) return;
-    const { data: ec } = await db.from("stages").select("id").ilike("name", "%contato%").order("order", { ascending: true }).limit(1).maybeSingle();
-    if (ec) await db.from("leads").update({ stage_id: ec.id, stage_entry_date: new Date().toISOString() }).eq("id", leadId);
+    await db.from("leads").update({ stage_id: 1, stage_entry_date: new Date().toISOString() }).eq("id", leadId);
 }
 
-/** Humano confirmado no atendimento (respondeu ou assumiu o ticket no Z-PRO/CRM) → a IA sai desse
- *  lead até ele ser reaberto (reabertura no webhook cuida de liberar de novo). Idempotente: não
- *  regrava nem reprocessa a etapa se já estava handed_off. */
-export async function markHandedOff(db: SupabaseClient, leadId: number, reason: string) {
+/** Agente ASSUMIU o ticket no Z-PRO (ainda não respondeu nada) → a IA já não deve mais responder,
+ *  mas o lead continua esperando alguém falar de verdade: sai de "IA Atendendo" de volta pra
+ *  Entrada, não "Em Contato". Idempotente. */
+export async function markAiHandedOff(db: SupabaseClient, leadId: number, reason: string) {
     const { data: sess } = await db.from("ai_lead_sessions").select("status").eq("lead_id", leadId).maybeSingle();
     if (sess?.status === "handed_off") return;
     await db.from("ai_lead_sessions").upsert({
         lead_id: leadId, status: "handed_off", handoff_reason: reason,
         handed_off_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     });
-    await moveOutOfAiAttending(db, leadId);
+    await moveToEntradaFromAiAttending(db, leadId);
+}
+
+/** Agente respondeu DE VERDADE (mensagem enviada por nós, pelo VivaConnect ou pelo CRM) → a IA
+ *  sai desse lead E, se estava em Entrada ou "IA Atendendo", sobe pra "Em Contato" — só aqui, que
+ *  é onde de fato existe conversa humana em andamento. */
+export async function markHumanReplied(db: SupabaseClient, leadId: number, reason: string) {
+    const { data: sess } = await db.from("ai_lead_sessions").select("status").eq("lead_id", leadId).maybeSingle();
+    if (sess?.status !== "handed_off") {
+        await db.from("ai_lead_sessions").upsert({
+            lead_id: leadId, status: "handed_off", handoff_reason: reason,
+            handed_off_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        });
+    }
+    const { data: lead } = await db.from("leads").select("stage_id").eq("id", leadId).maybeSingle();
+    if (!lead?.stage_id) return;
+    const { data: st } = await db.from("stages").select("name").eq("id", lead.stage_id).maybeSingle();
+    if (lead.stage_id !== 1 && !/ia atend/i.test(st?.name ?? "")) return;
+    const { data: ec } = await db.from("stages").select("id").ilike("name", "%contato%").order("order", { ascending: true }).limit(1).maybeSingle();
+    if (ec) await db.from("leads").update({ stage_id: ec.id, stage_entry_date: new Date().toISOString() }).eq("id", leadId);
 }
 
 /** Depois de uma resposta da IA: sem handoff, 1ª resposta (lead ainda em Entrada) → "IA
- *  Atendendo". Com handoff (a própria IA decidiu passar pra um humano), sai de Entrada OU "IA
- *  Atendendo" direto pra "Em Contato" — cobre o caso raro de handoff já na 1ª resposta. */
+ *  Atendendo". Com handoff (a própria IA decidiu passar pra um humano — ela mesma avisou o lead
+ *  que um consultor vai continuar), volta pra "Entrada" — ninguém respondeu de verdade ainda. */
 export async function advanceAiStage(db: SupabaseClient, leadId: number, handoff: boolean) {
+    if (handoff) return moveToEntradaFromAiAttending(db, leadId);
     const { data: lead } = await db.from("leads").select("stage_id").eq("id", leadId).maybeSingle();
-    if (!lead?.stage_id) return;
-    if (handoff) {
-        const { data: st } = await db.from("stages").select("name").eq("id", lead.stage_id).maybeSingle();
-        if (lead.stage_id !== 1 && !/ia atend/i.test(st?.name ?? "")) return;
-        const { data: ec } = await db.from("stages").select("id").ilike("name", "%contato%").order("order", { ascending: true }).limit(1).maybeSingle();
-        if (ec) await db.from("leads").update({ stage_id: ec.id, stage_entry_date: new Date().toISOString() }).eq("id", leadId);
-        return;
-    }
-    if (lead.stage_id === 1) {
+    if (lead?.stage_id === 1) {
         const { data: ia } = await db.from("stages").select("id").ilike("name", "%ia atend%").maybeSingle();
         if (ia) await db.from("leads").update({ stage_id: ia.id, stage_entry_date: new Date().toISOString() }).eq("id", leadId);
     }

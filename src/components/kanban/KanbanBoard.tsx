@@ -169,6 +169,20 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
         return m
     }, [pendingReplies])
 
+    // Leads que já tiveram alguma resposta da IA (VivaConnect) — selo de robô no card, pra
+    // diferenciar "IA já tentou, agente assumiu sem responder" de um lead que nunca foi tocado.
+    const { data: aiSessions } = useQuery<{ lead_id: number }[]>({
+        queryKey: ['ai_lead_sessions_touched'],
+        queryFn: async () => {
+            const { data, error } = await supabase.from('ai_lead_sessions').select('lead_id').gt('ai_turns', 0)
+            if (error) throw error
+            return data || []
+        },
+        enabled: !isAuthLoading && !!user,
+        staleTime: 60 * 1000,
+    })
+    const aiTouchedLeads = useMemo(() => new Set((aiSessions || []).map(r => r.lead_id)), [aiSessions])
+
     const filteredLeads = useMemo(() => {
         if (!leads) return [];
         let out = leads;
@@ -431,6 +445,7 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
                                     index={index}
                                     allStages={orderedStages}
                                     pendingByLead={pendingByLead}
+                                    aiTouchedLeads={aiTouchedLeads}
                                 />
                             ))}
                             {provided.placeholder}

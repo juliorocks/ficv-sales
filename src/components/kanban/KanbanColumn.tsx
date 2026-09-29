@@ -39,6 +39,8 @@ interface KanbanColumnProps {
     allStages: Stage[];
     courses: Course[];
     pendingByLead?: Map<number, number>;
+    /** leads que já tiveram alguma resposta da IA (ai_lead_sessions.ai_turns > 0) — selo de robô no card */
+    aiTouchedLeads?: Set<number>;
 }
 
 type SortOption = {
@@ -47,7 +49,7 @@ type SortOption = {
     direction: 'asc' | 'desc';
 };
 
-export function KanbanColumn({ stage, leads, users, leadSources, courses, index, allStages, pendingByLead }: KanbanColumnProps) {
+export function KanbanColumn({ stage, leads, users, leadSources, courses, index, allStages, pendingByLead, aiTouchedLeads }: KanbanColumnProps) {
     const queryClient = useQueryClient();
     const { user } = useAuth();
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -282,7 +284,7 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, index,
                                                         {...provided.dragHandleProps}
                                                         className={`${snapshot.isDragging ? 'shadow-lg ring-2 ring-primary' : ''}`}
                                                     >
-                                                        <LeadCard lead={lead} users={users} leadSources={leadSources} stages={allStages} courses={courses} pending={pendingByLead?.get(lead.id)} />
+                                                        <LeadCard lead={lead} users={users} leadSources={leadSources} stages={allStages} courses={courses} pending={pendingByLead?.get(lead.id)} aiTouched={aiTouchedLeads?.has(lead.id)} />
                                                     </div>
                                                 )}
                                             </Draggable>
