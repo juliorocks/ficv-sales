@@ -5,7 +5,7 @@ import { ArrowRightLeft, Bot, Check, Clock, HandHelping, Mail, MessageCircle, Pe
 import { EditLeadDialog } from "./EditLeadDialog"
 import { LossReasonDialog } from "./LossReasonDialog"
 import { useTimeInStage } from "@/hooks/use-time-in-stage"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { LeadTemperature } from "./LeadTemperature"
 import { AssignedUser } from "./AssignedUser"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -32,9 +32,13 @@ interface LeadCardProps {
     pending?: number
     /** já teve alguma resposta da IA em algum momento (ai_lead_sessions.ai_turns > 0) */
     aiTouched?: boolean
+    /** avisa a coluna quando o diálogo deste card abre/fecha, pra ela manter o card
+     * renderizado mesmo se o reordenamento (ex.: "Atender" tira o lead do topo dos "sem
+     * atendente") empurrar ele pra fora do corte de `visibleCount` — ver KanbanColumn.tsx */
+    onDialogOpenChange?: (open: boolean) => void
 }
 
-export function LeadCard({ lead, users, leadSources, stages, courses, channels, pending, aiTouched }: LeadCardProps) {
+export function LeadCard({ lead, users, leadSources, stages, courses, channels, pending, aiTouched, onDialogOpenChange }: LeadCardProps) {
     const timeInStage = useTimeInStage(lead.stage_entry_date);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
     const [editTab, setEditTab] = useState<"details" | "chat">("chat");
@@ -42,6 +46,12 @@ export function LeadCard({ lead, users, leadSources, stages, courses, channels, 
     const openEdit = (tab: "details" | "chat") => { setEditTab(tab); setIsEditDialogOpen(true); };
     const { user } = useAuth();
     const queryClient = useQueryClient();
+
+    useEffect(() => {
+        onDialogOpenChange?.(isEditDialogOpen);
+        return () => onDialogOpenChange?.(false); // desmontou (saiu da lista de verdade) → libera o pin
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isEditDialogOpen]);
 
     const source = lead.source_id ? leadSources.find(s => s.id === lead.source_id) : null;
     const course = lead.curso_interesse ? courses.find(c => c.id === lead.curso_interesse) : null;
