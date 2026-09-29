@@ -4,7 +4,7 @@
 // antes de ligar a IA no WhatsApp.
 import { useEffect, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Bot, Loader2, RotateCcw, Send, UserRound, ArrowRightLeft, BookOpen } from "lucide-react"
+import { Activity, Bot, Loader2, RotateCcw, Send, UserRound, ArrowRightLeft, BookOpen } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -66,6 +66,35 @@ export function AiAgentSettings() {
                 chunks: inAi.reduce((s, d) => s + (d.chunk_count ?? 0), 0),
             }
         },
+    })
+
+    // Acompanhamento (29/09, pedido do usuário) — em especial o "leadsSemSessao": leads na
+    // etapa "IA Atendendo" que NÃO têm sessão ativa de verdade em ai_lead_sessions. É
+    // exatamente o sinal do bug achado ao vivo hoje (cron externo jogou ~210 leads nessa
+    // etapa sem a IA ter feito nada) — com isso visível aqui, dá pra notar sem precisar
+    // reparar sozinho no Kanban.
+    const { data: health } = useQuery({
+        queryKey: ["ai_health"],
+        queryFn: async () => {
+            const hojeInicio = new Date(); hojeInicio.setHours(0, 0, 0, 0)
+            const [{ data: stage }, { count: ativas }, { count: handoffsHoje }, { count: followupsHoje }] = await Promise.all([
+                supabase.from("stages").select("id").ilike("name", "%ia atend%").maybeSingle(),
+                supabase.from("ai_lead_sessions").select("*", { count: "exact", head: true }).eq("status", "active"),
+                supabase.from("ai_lead_sessions").select("*", { count: "exact", head: true }).gte("handed_off_at", hojeInicio.toISOString()),
+                supabase.from("ai_lead_sessions").select("*", { count: "exact", head: true }).gte("last_followup_at", hojeInicio.toISOString()),
+            ])
+            let leadsSemSessao = 0
+            if (stage?.id) {
+                const [{ data: leadsNaEtapa }, { data: sessoesAtivas }] = await Promise.all([
+                    supabase.from("leads").select("id").eq("stage_id", stage.id),
+                    supabase.from("ai_lead_sessions").select("lead_id").eq("status", "active"),
+                ])
+                const comSessao = new Set((sessoesAtivas ?? []).map((s) => s.lead_id))
+                leadsSemSessao = (leadsNaEtapa ?? []).filter((l) => !comSessao.has(l.id)).length
+            }
+            return { ativas: ativas ?? 0, handoffsHoje: handoffsHoje ?? 0, followupsHoje: followupsHoje ?? 0, leadsSemSessao }
+        },
+        refetchInterval: 60_000,
     })
 
     const { data: courses } = useQuery({
@@ -157,7 +186,42 @@ export function AiAgentSettings() {
     }
 
     return (
-        <div className="max-w-6xl mx-auto grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <div className="max-w-6xl mx-auto space-y-6">
+            {/* ── Acompanhamento ───────────────────────────────────────── */}
+            <Card className="border-none shadow-xl bg-card/60 backdrop-blur-md">
+                <CardHeader className="pb-3">
+                    <CardTitle className="text-base font-bold flex items-center gap-2"><Activity size={16} className="text-primary" /> Acompanhamento</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div className="rounded-xl border border-[var(--border)] p-3">
+                            <p className="text-2xl font-bold">{health?.ativas ?? "—"}</p>
+                            <p className="text-xs text-muted-foreground">Sessões ativas agora</p>
+                        </div>
+                        <div className="rounded-xl border border-[var(--border)] p-3">
+                            <p className="text-2xl font-bold">{health?.handoffsHoje ?? "—"}</p>
+                            <p className="text-xs text-muted-foreground">Handoffs hoje</p>
+                        </div>
+                        <div className="rounded-xl border border-[var(--border)] p-3">
+                            <p className="text-2xl font-bold">{health?.followupsHoje ?? "—"}</p>
+                            <p className="text-xs text-muted-foreground">Follow-ups hoje</p>
+                        </div>
+                        <div className={`rounded-xl border p-3 ${health && health.leadsSemSessao > 0 ? "border-amber-500/50 bg-amber-500/10" : "border-[var(--border)]"}`}>
+                            <p className={`text-2xl font-bold ${health && health.leadsSemSessao > 0 ? "text-amber-500" : ""}`}>{health?.leadsSemSessao ?? "—"}</p>
+                            <p className="text-xs text-muted-foreground">
+                                {health && health.leadsSemSessao > 0 ? "⚠️ Em IA Atendendo sem sessão real" : "Em IA Atendendo sem sessão real"}
+                            </p>
+                        </div>
+                    </div>
+                    {health && health.leadsSemSessao > 0 && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400 mt-3">
+                            Tem lead na coluna "IA Atendendo" do Funil que a IA não está atendendo de verdade — pode ser um bug parecido com o de 29/09 (cron externo movendo leads sem a IA ter feito nada). Vale conferir o Funil de Leads.
+                        </p>
+                    )}
+                </CardContent>
+            </Card>
+
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
             {/* ── Configuração ─────────────────────────────────────────── */}
             <Card className="border-none shadow-xl bg-card/60 backdrop-blur-md">
                 <CardHeader>
@@ -326,6 +390,7 @@ export function AiAgentSettings() {
                     </form>
                 </CardContent>
             </Card>
+            </div>
         </div>
     )
 }
