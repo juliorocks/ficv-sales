@@ -324,8 +324,15 @@ async function aiReply(db: any, settings: any, leadId: number, channelId: number
                 primeiro_nome: nome || "tudo bem", curso: curso ?? "",
                 curso_trecho: curso ? ` no curso de ${curso}` : "",
             });
+            // kind 'ai_reply', não 'first_message': isto é RESPOSTA a uma mensagem que o
+            // lead acabou de mandar (reabriu a conversa, ou é lead novo sem o gatilho ainda
+            // ter enfileirado) — não é disparo proativo/frio. 'first_message' tem janela de
+            // horário + intervalo mínimo por número (proteção contra número cair por disparo
+            // em masso pra quem nunca falou com a gente); 'ai_reply' sai na hora, sem essa
+            // trava — mesmo risco de responder rápido que já existe pra qualquer outra
+            // resposta da IA. 29/09, pedido do usuário: 1ª resposta em ~5s.
             await db.from("vivaconnect_outbox").insert({
-                lead_id: leadId, channel_id: channelId, kind: "first_message",
+                lead_id: leadId, channel_id: channelId, kind: "ai_reply",
                 number: toZproNumber(number) ?? number, body: msg,
             });
             await kickOutbox();
