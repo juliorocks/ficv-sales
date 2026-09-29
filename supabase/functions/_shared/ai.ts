@@ -166,6 +166,31 @@ async function searchOnce(
     return [...strong, ...((vec as any).data ?? [])];
 }
 
+// Documentos marcados "essencial" (Gestão > Base de Conhecimento) sempre entram no
+// contexto, sem depender de bater similaridade/palavra-chave nenhuma. Achado ao vivo
+// (29/09): "teria outros pós?" só trazia 6 chunks do MESMO PPC (Psicoteologia) — cada
+// PPC tem dezenas/centenas de chunks, então um catálogo curto listando os 10 cursos de
+// pós perdia a disputa de similaridade pura contra qualquer PPC específico, mesmo com
+// min_similarity=0 (o teto é o `match_count`, não o `min_similarity`). Pra informação
+// que não pode depender de sorte de embedding (catálogo completo, horário de
+// atendimento) a garantia tem que ser estrutural, não estatística — daí sempre incluir,
+// fora do teto de `count`. Uso esperado: poucos documentos curtos, não uma muleta geral.
+async function essentialChunks(db: SupabaseClient, publico: string): Promise<any[]> {
+    const { data: docs } = await db.from("knowledge_base")
+        .select("id, title, category")
+        .eq("essencial", true).eq("ai_enabled", true)
+        .in("publico", [publico, "ambos"]);
+    if (!docs?.length) return [];
+    const byId = new Map(docs.map((d: any) => [d.id, d]));
+    const { data: chunks } = await db.from("knowledge_chunks")
+        .select("document_id, content")
+        .in("document_id", docs.map((d: any) => d.id));
+    return (chunks ?? []).map((c: any) => ({
+        document_id: c.document_id, title: byId.get(c.document_id)?.title,
+        category: byId.get(c.document_id)?.category, content: c.content, similarity: 1,
+    }));
+}
+
 /**
  * Busca na base. `focus` = a pergunta que precisa de resposta AGORA (última mensagem):
  * ela é buscada sozinha e os trechos dela vêm primeiro; `text` (contexto da conversa)
@@ -178,17 +203,26 @@ export async function searchKnowledge(
 ): Promise<{ document_id: string; title: string; category: string; content: string; similarity: number }[]> {
     const count = opts.count ?? 6;
     const focus = (opts.focus ?? "").trim();
-    const runs = await Promise.all([
-        focus ? searchOnce(db, focus, { ...opts, count }) : Promise.resolve([]),
-        !focus || focus !== text.trim() ? searchOnce(db, text, { ...opts, count }) : Promise.resolve([]),
+    const [runs, essential] = await Promise.all([
+        Promise.all([
+            focus ? searchOnce(db, focus, { ...opts, count }) : Promise.resolve([]),
+            !focus || focus !== text.trim() ? searchOnce(db, text, { ...opts, count }) : Promise.resolve([]),
+        ]),
+        essentialChunks(db, opts.publico),
     ]);
     const out: any[] = [];
     const seen = new Set<string>();
-    for (const h of [...runs[0], ...runs[1]]) {
+    for (const h of essential) {
         const k = String(h.content).slice(0, 120);
         if (seen.has(k)) continue;
         seen.add(k); out.push(h);
-        if (out.length >= count + 3) break;
+    }
+    let added = 0;
+    for (const h of [...runs[0], ...runs[1]]) {
+        const k = String(h.content).slice(0, 120);
+        if (seen.has(k)) continue;
+        seen.add(k); out.push(h); added++;
+        if (added >= count + 3) break;
     }
     return out;
 }
