@@ -264,10 +264,15 @@ Deno.serve(async (req) => {
             return await done("stored:aluno → link do portal enfileirado", lead?.id ?? null);
         }
 
-        // ── canal com "IA responde" marcado: não-aluno → IA ─────────────────
-        // (aluno no oficial já saiu acima com o link do portal; a trava de handoff
-        //  e a chave geral da IA ficam no ai-agent)
-        if (ch.ai_enabled && lead && !isStudent && !m.agentUserId) {
+        // ── canal com "IA responde" marcado: IA de vendas ────────────────────
+        // isStudent só bloqueia a IA de vendas no canal OFICIAL (ali quem é aluno já saiu
+        // acima com o link do portal). Em canal de vendas (pool/marketing), um match de
+        // aluno não deve travar a IA: 29/09, achado ao vivo — dois leads de teste (telefones
+        // reaproveitados de alunos de teste no Sponte, "Teste Thayanne"/"karina canciano")
+        // batiam em match_aluno_by_phone (só últimos 8 dígitos, colisão fácil) e a IA nunca
+        // respondia nem 1x, mesmo com o canal "IA responde" ligado — card ficava preso em
+        // Entrada pra sempre porque advanceAiStage nunca era chamado.
+        if (ch.ai_enabled && lead && !(isStudent && ch.purpose === "official") && !m.agentUserId) {
             const outcome = await aiReply(db, lead.id, ch.id, m.number);
             return await done(`stored:${outcome}`, lead.id);
         }
