@@ -349,11 +349,22 @@ async function sendRow(db: any, settings: any, row: any, ch: any) {
     if (!claimed) return { ok: false, error: "linha já processada por outro worker" };
 
     const base = { number: row.number, externalKey: row.external_key };
+    // Mensagem de agente humano (kind=manual, sender_name conhecido) sai ASSINADA pro
+    // cliente — mesmo padrão que o painel nativo do Z-PRO já usa sozinho quando alguém
+    // responde por lá ("*Administrador*:\n texto"); só que com o nome de quem realmente
+    // respondeu pelo NOSSO painel (pedido do usuário 29/09: no WhatsApp do cliente as
+    // respostas da equipe apareciam sem nome nenhum, só o texto puro). Só o texto que sai
+    // pro Z-PRO leva a assinatura — o histórico interno (`widechat_messages.message` logo
+    // abaixo) continua com `row.body` puro, porque a tela já mostra o nome separado.
+    // ai_reply/hub_*/student_reply/first_message (sem sender_name) nunca são assinadas.
+    const signedBody = row.kind === "manual" && row.sender_name && row.body
+        ? `*${row.sender_name}:*\n${row.body}`
+        : row.body;
     const r = row.media_type === "sounds" && row.media_url
         ? await zpro(settings.base_url, execCh, "/voice", { ...base, audio: row.media_url })
         : row.media_url
-            ? await zpro(settings.base_url, execCh, "/url", { ...base, mediaUrl: row.media_url, body: row.body || row.file_name || "" })
-            : await zpro(settings.base_url, execCh, "", { ...base, body: row.body });
+            ? await zpro(settings.base_url, execCh, "/url", { ...base, mediaUrl: row.media_url, body: signedBody || row.file_name || "" })
+            : await zpro(settings.base_url, execCh, "", { ...base, body: signedBody });
     const now = new Date().toISOString();
     if (!r.ok) {
         const err = zproErr(r.status, r.data);

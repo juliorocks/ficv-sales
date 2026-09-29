@@ -131,10 +131,13 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
     // Canal (número) do VivaConnect de cada lead — pro selo no card (29/09: usuário só
     // conseguia saber por qual número um lead conversou abrindo o chat; e o campo ficava
     // desatualizado até o fix do webhook, então o selo também serve pra flagrar isso de novo).
+    // RPC, não a tabela direto: vivaconnect_channels tem RLS admin-only (guarda api_token em
+    // texto puro na mesma linha, [[feedback_no_secret_columns]]) — agente comum não pode
+    // fazer SELECT nela, mesmo pedindo só id/name/phone (RLS é por LINHA, não por coluna).
     const { data: vivaconnectChannels } = useQuery<{ id: number; name: string; phone: string | null }[]>({
         queryKey: ['vivaconnect_channels_lookup'],
         queryFn: async () => {
-            const { data, error } = await supabase.from('vivaconnect_channels').select('id, name, phone')
+            const { data, error } = await supabase.rpc('vivaconnect_channels_lookup')
             if (error) throw error
             return data || []
         },
