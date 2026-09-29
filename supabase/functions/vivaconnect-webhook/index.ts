@@ -189,13 +189,24 @@ Deno.serve(async (req) => {
                         patch.stage_id = ec?.id ?? 1;
                         reopenNote = `🔁 Reaberto para Em Contato (agente mantido) — cliente retomou a conversa pelo VivaConnect após o atendimento ter sido ${eraPerdido ? "marcado como perdido" : "finalizado"}.`;
                     } else {
-                        patch.stage_id = 1;
                         patch.assigned_to_id = null;
-                        reopenNote = `🔁 Reaberto para Entrada (sem agente atribuído) — cliente voltou a escrever pelo VivaConnect após o atendimento ter sido ${eraPerdido ? "marcado como perdido" : "finalizado"}.`;
                         // ninguém ficou dono desse atendimento → libera a IA de novo (sem isso, o
                         // handed_off de uma resposta humana antiga travava a IA pra sempre, mesmo
                         // depois do atendimento finalizado/perdido e reaberto do zero; 28/09)
                         await db.from("ai_lead_sessions").delete().eq("lead_id", lead.id);
+                        // sem agente e o canal tem "IA responde" ligado → já cai direto em "IA
+                        // Atendendo" (mesma condição de baixo que decide se a IA vai responder
+                        // de verdade); nunca mais passa visualmente por Entrada nesse caso —
+                        // pedido do usuário 29/09: "já pode cair diretamente na coluna IA, primeiro".
+                        const willAi = ch.ai_enabled && !((!!aluno || lead.perfil === "aluno") && ch.purpose === "official") && !m.agentUserId;
+                        if (willAi) {
+                            const { data: ia } = await db.from("stages").select("id").ilike("name", "%ia atend%").maybeSingle();
+                            patch.stage_id = ia?.id ?? 1;
+                            reopenNote = `🔁 Reaberto — a IA volta a atender (${eraPerdido ? "estava marcado como perdido" : "estava finalizado"}).`;
+                        } else {
+                            patch.stage_id = 1;
+                            reopenNote = `🔁 Reaberto para Entrada (sem agente atribuído) — cliente voltou a escrever pelo VivaConnect após o atendimento ter sido ${eraPerdido ? "marcado como perdido" : "finalizado"}.`;
+                        }
                     }
                 }
             }
