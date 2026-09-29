@@ -25,7 +25,7 @@
 //     'vivaconnect'); o webhook ignora o eco.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { corsHeaders, identify, isAdmin, isStaff, jsonRes } from "../_shared/ai.ts";
-import { asList, loadSettings, parseApiRef, toDiscovered, toZproNumber, zpro, zproErr } from "../_shared/vivaconnect.ts";
+import { asList, loadSettings, markHandedOff, parseApiRef, toDiscovered, toZproNumber, zpro, zproErr } from "../_shared/vivaconnect.ts";
 import { mirror, sv } from "../_shared/db.ts";
 import { type HubMsg, loadDestinations, planejar } from "../_shared/hub.ts";
 
@@ -148,13 +148,9 @@ Deno.serve(async (req) => {
             }).select("*").single();
             if (error) return jsonRes({ error: error.message }, 500);
             const res = await sendRow(db, settings, row, ch);
-            // agente humano falou pelo CRM → IA sai desse lead
-            if (res.ok && createdBy) {
-                await db.from("ai_lead_sessions").upsert({
-                    lead_id: leadId, status: "handed_off", handoff_reason: "Agente respondeu pelo CRM",
-                    handed_off_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-                });
-            }
+            // agente humano falou pelo CRM → IA sai desse lead (e, se estava em "IA Atendendo",
+            // sobe pra "Em Contato")
+            if (res.ok && createdBy) await markHandedOff(db, leadId, "Agente respondeu pelo CRM");
             return jsonRes(res, res.ok ? 200 : 502);
         }
 

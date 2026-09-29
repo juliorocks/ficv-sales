@@ -17,7 +17,7 @@
 //    Faculdade segue o fluxo acima; outra empresa recebe o número novo; sem assunto → menu.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { mirror, sv } from "../_shared/db.ts";
-import { fillTemplate, findLeadByPhone, firstName, loadSettings, parseWebhook, toZproNumber, zpro, zproErr } from "../_shared/vivaconnect.ts";
+import { advanceAiStage, fillTemplate, findLeadByPhone, firstName, loadSettings, markHandedOff, parseWebhook, toZproNumber, zpro, zproErr } from "../_shared/vivaconnect.ts";
 import { type HubMsg, loadDestinations, planejar } from "../_shared/hub.ts";
 
 // Bots de IA embutidos do Z-PRO que vêm LIGADOS por padrão em ticket novo
@@ -159,29 +159,32 @@ Deno.serve(async (req) => {
             if (m.ticketId) patch.vivaconnect_ticket_id = m.ticketId;
             if (m.contactId) patch.vivaconnect_contact_id = m.contactId;
 
-            // ── reabertura: mesma regra do widechat-webhook (decisão do usuário 17/09) ──
-            // cliente escreveu num lead Finalizado → volta pra Entrada sem agente; se a fala
-            // anterior era de agente (conversa humana em andamento) → Em Contato, mantém o agente.
+            // ── reabertura: mesma regra do widechat-webhook (decisão do usuário 17/09), agora
+            // cobrindo Perdido também (28/09, pedido do usuário) ── cliente escreveu num lead
+            // Finalizado/Perdido → volta pra Entrada sem agente; se a fala anterior era de agente
+            // (conversa humana em andamento) → Em Contato, mantém o agente.
             let reopenNote: string | null = null;
             if (leadExisted && !m.fromMe && lead.stage_id) {
                 const { data: st } = await db.from("stages").select("name").eq("id", lead.stage_id).maybeSingle();
-                if (st?.name && /finaliz|encerr|conclu/i.test(st.name)) {
+                const eraPerdido = st?.name ? /perdid/i.test(st.name) : false;
+                if (st?.name && /finaliz|encerr|conclu/i.test(st.name) || eraPerdido) {
                     const { data: last } = await db.from("widechat_messages").select("origin")
                         .eq("lead_id", lead.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
                     const now = new Date().toISOString();
                     patch.stage_entry_date = now;
+                    if (eraPerdido) patch.motivo_perda_id = null; // não é mais um lead perdido
                     if (last?.origin === "agent") {
                         const { data: ec } = await db.from("stages").select("id").ilike("name", "%contato%")
                             .order("order", { ascending: true }).limit(1).maybeSingle();
                         patch.stage_id = ec?.id ?? 1;
-                        reopenNote = "🔁 Reaberto para Em Contato (agente mantido) — cliente retomou a conversa pelo VivaConnect após o atendimento ter sido finalizado.";
+                        reopenNote = `🔁 Reaberto para Em Contato (agente mantido) — cliente retomou a conversa pelo VivaConnect após o atendimento ter sido ${eraPerdido ? "marcado como perdido" : "finalizado"}.`;
                     } else {
                         patch.stage_id = 1;
                         patch.assigned_to_id = null;
-                        reopenNote = "🔁 Reaberto para Entrada (sem agente atribuído) — cliente voltou a escrever pelo VivaConnect após o atendimento ter sido finalizado.";
+                        reopenNote = `🔁 Reaberto para Entrada (sem agente atribuído) — cliente voltou a escrever pelo VivaConnect após o atendimento ter sido ${eraPerdido ? "marcado como perdido" : "finalizado"}.`;
                         // ninguém ficou dono desse atendimento → libera a IA de novo (sem isso, o
                         // handed_off de uma resposta humana antiga travava a IA pra sempre, mesmo
-                        // depois do atendimento finalizado e reaberto do zero; 28/09, pedido do usuário)
+                        // depois do atendimento finalizado/perdido e reaberto do zero; 28/09)
                         await db.from("ai_lead_sessions").delete().eq("lead_id", lead.id);
                     }
                 }
@@ -216,12 +219,9 @@ Deno.serve(async (req) => {
             });
 
             // agente humano falou (ou pegou o ticket no painel do Z-PRO) → IA sai de vez desse lead
-            const { data: sess } = await db.from("ai_lead_sessions").select("status").eq("lead_id", lead.id).maybeSingle();
-            if ((m.fromMe || m.agentUserId) && sess?.status !== "handed_off") {
-                await db.from("ai_lead_sessions").upsert({
-                    lead_id: lead.id, status: "handed_off", handoff_reason: m.fromMe ? "Agente respondeu pelo VivaConnect" : "Agente assumiu o ticket no VivaConnect",
-                    handed_off_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-                });
+            // (e, se estava em "IA Atendendo", sobe pra "Em Contato")
+            if (m.fromMe || m.agentUserId) {
+                await markHandedOff(db, lead.id, m.fromMe ? "Agente respondeu pelo VivaConnect" : "Agente assumiu o ticket no VivaConnect");
             }
         }
 
@@ -288,6 +288,7 @@ async function aiReply(db: any, leadId: number, channelId: number, number: strin
         lead_id: leadId, channel_id: channelId, kind: "ai_reply", number: toZproNumber(number) ?? number, body: out.reply,
     });
     await kickOutbox();
+    await advanceAiStage(db, leadId, !!out.handoff);
     return out.handoff ? "ia:respondeu + handoff" : "ia:respondeu";
 }
 
