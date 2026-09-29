@@ -9,9 +9,10 @@
 // pagamento, notas). Passa pra fila humana pela ferramenta passar_para_equipe ou ao
 // estourar o limite de respostas. Equipe respondendo → gatilho tira o tutor do chamado.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
-import { chatWithTools, corsHeaders, identify, jsonRes, searchKnowledge } from "../_shared/ai.ts";
+import { chatWithTools, corsHeaders, ensureLineBreaks, expandForFullList, identify, jsonRes, searchKnowledge, wantsFullCourseList } from "../_shared/ai.ts";
 import { alunoBoletim, alunoOverview, alunoPagamento } from "../_shared/alunoSponte.ts";
 import { getSecret } from "../_shared/secrets.ts";
+const PUBLICOS = ["alunos", "ambos"];
 
 const hoje = () => new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", weekday: "long", day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
 const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -124,11 +125,19 @@ Deno.serve(async (req) => {
         // base de conhecimento dos alunos
         const { data: ai } = await db.from("ai_agent_settings").select("embedding_model, match_count, min_similarity").eq("id", 1).single();
         const pergunta = [t.titulo, ...conversa.filter((m) => m.role === "user").slice(-3).map((m) => m.content)].join("\n");
-        const hits = await searchKnowledge(db, pergunta, {
+        const ultimaFala = String(conversa[conversa.length - 1]?.content ?? "");
+        let hits = await searchKnowledge(db, pergunta, {
             publico: "alunos", embeddingModel: ai?.embedding_model ?? "text-embedding-3-small",
-            focus: conversa[conversa.length - 1]?.content,
+            focus: ultimaFala,
             count: ai?.match_count ?? 6, minSimilarity: Number(ai?.min_similarity ?? 0.25),
         });
+        // pedido de lista COMPLETA (grade, disciplinas, ementa, módulos): mesma regra do
+        // ai-agent (29/09) — poucos trechos por similaridade não cobrem um PPC inteiro.
+        let fullDocUsed: string | null = null;
+        if (wantsFullCourseList(ultimaFala)) {
+            const r = await expandForFullList(db, hits, (t as any).curso?.name ?? null, PUBLICOS);
+            hits = r.hits; fullDocUsed = r.fullDocUsed;
+        }
         const kb = (hits ?? []).length ? (hits as any[]).map((h, i) => `[${i + 1}] (${h.title}) ${h.content}`).join("\n\n---\n\n")
             : "(nenhum trecho relevante na base de conhecimento)";
 
@@ -156,11 +165,16 @@ Deno.serve(async (req) => {
             s.handoff_instructions + `\nPara passar para a equipe, chame a ferramenta passar_para_equipe (o sistema envia ao aluno o aviso padrão com horário de atendimento e e-mail — você não precisa escrever esse aviso).`,
             `Chamado ${t.protocolo} — assunto: ${t.titulo} (categoria: ${t.categoria}${t.nivel ? `, ${t.nivel === "pos" ? "Pós-graduação" : "Graduação"}` : ""}${(t as any).curso?.name ? `, curso: ${(t as any).curso.name}` : ""}).`,
             `Aluno: ${al?.nome ?? t.aluno_nome}${A ? "" : " (sem vínculo com o sistema acadêmico — ferramentas de consulta indisponíveis)"}.`,
-            `Formatação: texto simples, sem markdown de títulos; valores em R$; datas no formato dd/mm/aaaa.`,
+            `Formatação: texto simples, sem markdown de títulos, mas pule uma linha (\\n\\n) entre ideias diferentes — nunca um parágrafo gigante. Valores em R$; datas no formato dd/mm/aaaa.`,
+            // mesmas regras do ai-agent (29/09, achado ao vivo em VÁRIOS chamados de teste):
+            `Se já existe QUALQUER mensagem sua nesta conversa, você já se apresentou — NUNCA se apresente de novo, mesmo que a última fala do aluno seja só um cumprimento curto. Trate como continuação natural.`,
+            `Você só se comunica por TEXTO — nunca tem arquivo, PDF ou link pra enviar de verdade (link de pagamento é diferente: isso a ferramenta link_pagamento gera de fato). Se o aluno pedir grade/ementa/conteúdo e a base tiver, escreva direto na mensagem; se não tiver, chame passar_para_equipe. NUNCA diga "vou te enviar" ou "vou verificar e te aviso" sem cumprir na mesma resposta — prometer e sumir é pior que admitir que não sabe.`,
+            `Quando o aluno pedir uma LISTA COMPLETA de algo (disciplinas, grade, módulos, ementa) e a base tiver, liste TODOS os itens — nunca corte pra "algumas" quando ele pediu "todas".${fullDocUsed ? ` A base abaixo inclui o documento "${fullDocUsed}" INTEIRO pra isso.` : ""}`,
             `BASE DE CONHECIMENTO (única fonte para regras e procedimentos):\n\n${kb}`,
         ].join("\n\n");
 
-        const { text, toolsUsed } = await chatWithTools(s.chat_model, Number(s.temperature), [{ role: "system", content: system }, ...conversa], TOOLS, run);
+        const { text: rawText, toolsUsed } = await chatWithTools(s.chat_model, Number(s.temperature), [{ role: "system", content: system }, ...conversa], TOOLS, run);
+        const text = ensureLineBreaks(rawText);
         // passou pra equipe: no lugar do texto da IA vai a mensagem padrão (horário, e-mail, protocolo)
         const vaiPraEquipe = !!handoffCall || !text;
         const reply = vaiPraEquipe ? await mensagemPassagem() : text;
