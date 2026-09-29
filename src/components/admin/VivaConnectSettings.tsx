@@ -213,7 +213,7 @@ export function VivaConnectSettings() {
         showSuccess("Canal cadastrado. Copie a URL do webhook dele e cole na API do Z-PRO.")
     }
 
-    const updateChannel = async (id: number, patch: Partial<{ active: boolean; daily_limit: number; ai_enabled: boolean; hub_enabled: boolean; zpro_hybrid_mode: string | null; send_via_channel_id: number | null; purpose: "official" | "pool" | "grupo" }>) => {
+    const updateChannel = async (id: number, patch: Partial<{ active: boolean; daily_limit: number; ai_enabled: boolean; hub_enabled: boolean; zpro_hybrid_mode: string | null; send_via_channel_id: number | null; purpose: "official" | "pool" | "grupo"; name: string; phone: string | null }>) => {
         const { data, error } = await supabase.from("vivaconnect_channels").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id).select("id")
         if (error || !data?.length) return showError(`Não foi possível atualizar: ${error?.message ?? "sessão expirada."}`)
         refetchChannels()
@@ -388,13 +388,26 @@ export function VivaConnectSettings() {
 
                         {channels?.map((c) => (
                             <div key={c.id} className="rounded-xl border border-[var(--border)] p-4 space-y-3">
-                                <div className="flex items-start justify-between gap-3">
-                                    <div>
-                                        <p className="font-bold text-[var(--text-main)] flex items-center gap-2">
-                                            <span className={`w-2 h-2 rounded-full ${!c.active ? "bg-muted-foreground" : c.last_error_at && (!c.last_ok_at || c.last_error_at > c.last_ok_at) ? "bg-red-500" : c.last_ok_at ? "bg-emerald-500" : "bg-amber-500"}`} />
-                                            {c.name} <span className="text-xs font-normal text-muted-foreground">#{c.id} · {c.kind}</span>
+                                <div className="flex items-start justify-between gap-3 flex-wrap">
+                                    <div className="min-w-0">
+                                        <p className="font-bold text-[var(--text-main)] flex items-center gap-2 flex-wrap">
+                                            <span className={`w-2 h-2 rounded-full shrink-0 ${!c.active ? "bg-muted-foreground" : c.last_error_at && (!c.last_ok_at || c.last_error_at > c.last_ok_at) ? "bg-red-500" : c.last_ok_at ? "bg-emerald-500" : "bg-amber-500"}`} />
+                                            {/* nome editável — antes só dava pra definir no cadastro, sem jeito de renomear
+                                                depois (pedido do usuário 29/09) */}
+                                            <input defaultValue={c.name} key={`name-${c.id}-${c.name}`}
+                                                onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== c.name) updateChannel(c.id, { name: v }) }}
+                                                onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+                                                className="bg-transparent border border-transparent hover:border-[var(--border)] focus:border-primary focus:bg-muted/20 rounded px-1 -mx-1 outline-none font-bold min-w-0 w-40" />
+                                            <span className="text-xs font-normal text-muted-foreground shrink-0">#{c.id} · {c.kind}</span>
                                         </p>
-                                        <p className="text-xs text-muted-foreground font-mono">{c.phone ?? "sem número"} · API {c.api_id}</p>
+                                        <div className="text-xs text-muted-foreground font-mono flex items-center gap-1">
+                                            {/* número editável — mesmo pedido: dava só pra ver, não pra corrigir depois */}
+                                            <input defaultValue={c.phone ?? ""} key={`phone-${c.id}-${c.phone}`} placeholder="sem número"
+                                                onBlur={(e) => { const v = e.target.value.trim(); if (v !== (c.phone ?? "")) updateChannel(c.id, { phone: v || null }) }}
+                                                onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+                                                className="bg-transparent border border-transparent hover:border-[var(--border)] focus:border-primary focus:bg-muted/20 rounded px-1 -mx-1 outline-none font-mono w-32" />
+                                            <span>· API {c.api_id}</span>
+                                        </div>
                                         {/* 28/09: antes só dava pra escolher "Uso" na hora de cadastrar — não tinha como mudar
                                             depois. "Outra empresa do grupo" é o jeito de dizer "não cria lead comercial pra esse
                                             número" (ele fica só pra o Hub avisar, se cadastrado como destino de alguma empresa). */}
@@ -450,7 +463,7 @@ export function VivaConnectSettings() {
                                             </select>
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-1">
+                                    <div className="flex items-center gap-1 flex-wrap shrink-0">
                                         {c.purpose !== "grupo" && (
                                             <label className="flex items-center gap-1 text-xs cursor-pointer mr-2" title="Contato novo neste número passa pela triagem do Hub (Faculdade fica; outras empresas recebem o número novo). Normalmente só o número oficial do Grupo, mas dá pra ligar em qualquer número pra testar antes de trocar.">
                                                 <input type="checkbox" checked={c.hub_enabled} onChange={(e) => updateChannel(c.id, e.target.checked ? { hub_enabled: true, ai_enabled: true } : { hub_enabled: false })} className="accent-[var(--primary)]" /> 🔀 Hub do Grupo
@@ -469,7 +482,19 @@ export function VivaConnectSettings() {
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-4 gap-2 text-center">
-                                    <div className="rounded-lg bg-muted/30 p-2"><p className="text-lg font-bold">{c.first_sent_today}/{c.daily_limit}</p><p className="text-[10px] uppercase text-muted-foreground">1ªs hoje</p></div>
+                                    <div className="rounded-lg bg-muted/30 p-2">
+                                        <p className="text-lg font-bold flex items-center justify-center gap-0.5">
+                                            {c.first_sent_today}/
+                                            {/* limite editável — antes só dava pra definir no cadastro (pedido do usuário 29/09:
+                                                "aumentar ou diminuir os 1ºs") */}
+                                            <input type="number" min={1} defaultValue={c.daily_limit} key={`limit-${c.id}-${c.daily_limit}`}
+                                                onBlur={(e) => { const v = Math.max(1, Number(e.target.value) || 1); if (v !== c.daily_limit) updateChannel(c.id, { daily_limit: v }) }}
+                                                onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+                                                title="Limite de 1ªs mensagens por dia neste número"
+                                                className="bg-transparent border border-transparent hover:border-[var(--border)] focus:border-primary focus:bg-muted/20 rounded outline-none text-lg font-bold w-10 text-center" />
+                                        </p>
+                                        <p className="text-[10px] uppercase text-muted-foreground">1ªs hoje</p>
+                                    </div>
                                     <div className="rounded-lg bg-muted/30 p-2"><p className="text-lg font-bold">{c.leads_fixed}</p><p className="text-[10px] uppercase text-muted-foreground">leads fixos</p></div>
                                     <div className="rounded-lg bg-muted/30 p-2"><p className={`text-lg font-bold ${c.failed_24h ? "text-red-500" : ""}`}>{c.failed_24h}</p><p className="text-[10px] uppercase text-muted-foreground">falhas 24h</p></div>
                                     <div className="rounded-lg bg-muted/30 p-2"><p className="text-xs font-bold pt-1">{fmt(c.last_sent_at)}</p><p className="text-[10px] uppercase text-muted-foreground">último envio</p></div>
