@@ -126,6 +126,7 @@ Se a base de conhecimento citar uma data que JÁ PASSOU (início de aulas, prazo
             leadCtx,
             `BASE DE CONHECIMENTO (use só isto como fonte de fatos):\n\n${knowledge}`,
             `Formate a "reply" como uma mensagem de WhatsApp de verdade, não um bloco único de texto corrido: frases curtas, e pule uma linha (\\n\\n) entre ideias diferentes (ex.: a saudação numa linha, o assunto principal em outra, a pergunta de fechamento em outra) — é assim que uma pessoa escreve no WhatsApp, nunca um parágrafo gigante.`,
+            `Se já existe QUALQUER mensagem sua (role "assistant") no histórico abaixo, você já se apresentou antes nesta conversa — NUNCA se apresente de novo ("Oi, aqui é a ${s.agent_name}...") nem repita a saudação de abertura, mesmo que a última fala do lead seja só um cumprimento curto ("oi", "olá", "bom dia"). Isso vale mesmo que pareça que a conversa "recomeçou" (ex.: o lead sumiu e voltou) — é a MESMA pessoa, você já a conhece. Trate como continuação natural: responda ao que ele disse ou pergunte no que pode ajudar agora, direto ao ponto, sem se reapresentar.`,
             `Responda SEMPRE em JSON com as chaves:
 {"reply": "mensagem para enviar ao lead — já com as quebras de linha (\\n) formatadas",
  "handoff": true|false,
