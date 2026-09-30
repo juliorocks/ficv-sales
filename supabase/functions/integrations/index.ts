@@ -140,7 +140,11 @@ async function runTest(id: string, db: any): Promise<{ ok: boolean; message: str
         return { ok: true, message: `Conectado — workflows: ${names || "nenhum"}. (Confirme que o token tem Actions: write pra conseguir disparar.)` };
     }
     if (id === "moodle") {
-        const url = (await getSecret("MOODLE_URL")).replace(/\/+$/, "");
+        // aceita tanto o endereço base (https://moodle.exemplo.org) quanto já com o caminho
+        // do webservice colado (https://moodle.exemplo.org/webservice/rest/server.php) —
+        // usuário colou do 2º jeito na prática, 30/09.
+        const raw = (await getSecret("MOODLE_URL")).replace(/\/+$/, "");
+        const url = raw.replace(/\/webservice\/rest\/server\.php$/i, "");
         const token = await getSecret("MOODLE_TOKEN");
         if (!url) return { ok: false, message: "Endereço do Moodle não configurado." };
         if (!token) return { ok: false, message: "Token não configurado." };
@@ -151,7 +155,15 @@ async function runTest(id: string, db: any): Promise<{ ok: boolean; message: str
         const r = await fetch(`${url}/webservice/rest/server.php?${params}`, { signal: timeout });
         const d = await r.json().catch(() => null);
         if (!r.ok) return { ok: false, message: `HTTP ${r.status}` };
-        if (d?.exception) return { ok: false, message: `${d.errorcode ?? "erro"}: ${d.message ?? "sem detalhe"}` };
+        if (d?.exception) {
+            // "accessexception" com token reconhecido geralmente é o serviço externo do token
+            // sem a função core_webservice_get_site_info habilitada (ou desativado, ou
+            // restrição de IP) — não é o token errado (esse dá "invalidtoken").
+            const dica = d.errorcode === "accessexception"
+                ? " — confira em Administração do site → Serviços web → Serviços externos: o serviço ligado a este token precisa estar Ativado e incluir a função core_webservice_get_site_info (e sem restrição de IP)."
+                : "";
+            return { ok: false, message: `${d.errorcode ?? "erro"}: ${d.message ?? "sem detalhe"}${dica}` };
+        }
         if (!d?.sitename) return { ok: false, message: "Resposta inesperada do Moodle (confira o endereço)." };
         return { ok: true, message: `Conectado — ${d.sitename} (usuário do token: ${d.username ?? d.userid ?? "?"}, versão ${d.release ?? "?"}).` };
     }
