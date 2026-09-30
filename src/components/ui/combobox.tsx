@@ -26,17 +26,30 @@ interface ComboboxProps {
     emptyText?: string;
     className?: string;
     title?: string;
+    /** deixa usar um valor que não está em nenhum grupo (ex.: a lista veio de uma API
+     * externa e pode não cobrir tudo) — aparece como uma opção extra "Usar '<texto>'"
+     * quando o que foi digitado não bate com nenhuma opção existente. */
+    allowCustomValue?: boolean;
 }
 
 export function Combobox({
     value, onValueChange, groups, placeholder = "Selecionar…",
     searchPlaceholder = "Buscar…", emptyText = "Nada encontrado.", className, title,
+    allowCustomValue = false,
 }: ComboboxProps) {
     const [open, setOpen] = React.useState(false);
-    const selected = groups.flatMap((g) => g.options).find((o) => o.value === value);
+    // busca CONTROLADA (não deixada pro cmdk sozinho): reseta pra vazia toda vez que o
+    // popover abre, pra sempre mostrar a lista INTEIRA de novo — sem isso (ex.: um
+    // <datalist> nativo, ou o cmdk com o valor atual pré-preenchido) reabrir já filtrava
+    // só pelo texto que já estava selecionado, escondendo quase tudo (achado ao vivo 29/09).
+    const [search, setSearch] = React.useState("");
+    const allOptions = React.useMemo(() => groups.flatMap((g) => g.options), [groups]);
+    const selected = allOptions.find((o) => o.value === value);
+    const normalizedSearch = search.trim();
+    const hasExactMatch = allOptions.some((o) => o.value.toLowerCase() === normalizedSearch.toLowerCase());
 
     return (
-        <Popover open={open} onOpenChange={setOpen}>
+        <Popover open={open} onOpenChange={(o) => { setOpen(o); if (o) setSearch(""); }}>
             <PopoverTrigger asChild>
                 <button
                     type="button"
@@ -46,32 +59,51 @@ export function Combobox({
                         className,
                     )}
                 >
-                    <span className={cn("truncate", !selected && "text-[var(--text-muted)]")}>
-                        {selected?.label ?? placeholder}
+                    <span className={cn("truncate", !selected && !value && "text-[var(--text-muted)]")}>
+                        {selected?.label ?? value ?? placeholder}
                     </span>
                     <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
                 </button>
             </PopoverTrigger>
             <PopoverContent className="w-56 p-0 bg-[var(--bg-card)] border-[var(--border)]" align="start">
-                <Command className="bg-transparent">
-                    <CommandInput placeholder={searchPlaceholder} className="h-9 text-xs" />
+                <Command className="bg-transparent" shouldFilter={!allowCustomValue}>
+                    <CommandInput placeholder={searchPlaceholder} className="h-9 text-xs" value={search} onValueChange={setSearch} />
                     <CommandList>
                         <CommandEmpty className="py-4 text-center text-xs text-[var(--text-muted)]">{emptyText}</CommandEmpty>
-                        {groups.map((g, i) => (
-                            <CommandGroup key={g.heading ?? i} heading={g.heading} className="[&_[cmdk-group-heading]]:text-[var(--text-muted)]">
-                                {g.options.map((o) => (
-                                    <CommandItem
-                                        key={o.value}
-                                        value={o.label}
-                                        onSelect={() => { onValueChange(o.value); setOpen(false); }}
-                                        className="cursor-pointer text-xs text-[var(--text-main)] data-[selected=true]:bg-[var(--bg-card-hover)]"
-                                    >
-                                        <Check className={cn("mr-2 h-3.5 w-3.5", value === o.value ? "opacity-100" : "opacity-0")} />
-                                        {o.label}
-                                    </CommandItem>
-                                ))}
+                        {allowCustomValue && normalizedSearch && !hasExactMatch && (
+                            <CommandGroup>
+                                <CommandItem
+                                    value={`__custom__${normalizedSearch}`}
+                                    onSelect={() => { onValueChange(normalizedSearch); setOpen(false); }}
+                                    className="cursor-pointer text-xs italic text-[var(--text-main)] data-[selected=true]:bg-[var(--bg-card-hover)]"
+                                >
+                                    Usar "{normalizedSearch}"
+                                </CommandItem>
                             </CommandGroup>
-                        ))}
+                        )}
+                        {groups.map((g, i) => {
+                            // allowCustomValue desliga o filtro embutido do cmdk (shouldFilter=false,
+                            // porque o item extra acima não pode ser filtrado por ele) — filtra na mão.
+                            const opts = allowCustomValue && normalizedSearch
+                                ? g.options.filter((o) => o.label.toLowerCase().includes(normalizedSearch.toLowerCase()))
+                                : g.options;
+                            if (!opts.length) return null;
+                            return (
+                                <CommandGroup key={g.heading ?? i} heading={g.heading} className="[&_[cmdk-group-heading]]:text-[var(--text-muted)]">
+                                    {opts.map((o) => (
+                                        <CommandItem
+                                            key={o.value}
+                                            value={o.label}
+                                            onSelect={() => { onValueChange(o.value); setOpen(false); }}
+                                            className="cursor-pointer text-xs text-[var(--text-main)] data-[selected=true]:bg-[var(--bg-card-hover)]"
+                                        >
+                                            <Check className={cn("mr-2 h-3.5 w-3.5", value === o.value ? "opacity-100" : "opacity-0")} />
+                                            {o.label}
+                                        </CommandItem>
+                                    ))}
+                                </CommandGroup>
+                            );
+                        })}
                     </CommandList>
                 </Command>
             </PopoverContent>

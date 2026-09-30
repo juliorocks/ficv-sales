@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Combobox } from "@/components/ui/combobox"
 import { showError, showSuccess } from "@/utils/toast"
 import { Skeleton } from "@/components/ui/skeleton"
 
@@ -292,19 +293,22 @@ export function AiAgentSettings() {
                                     <RotateCcw size={12} className={loadingModels ? "animate-spin" : ""} />
                                 </button>
                             </div>
-                            {/* input com sugestões (datalist), não <select>: mostra os modelos de chat
-                                da conta OpenAI pra escolher, mas continua aceitando texto livre — pro
-                                caso da lista não carregar (API Key não configurada) ou um modelo mais
-                                novo que o filtro daqui ainda não reconheça */}
-                            <Input
-                                list="openai-chat-models"
+                            {/* Combobox (Popover+busca), não <select> nem <datalist>: o datalist nativo
+                                só sugere o que bate com o texto JÁ digitado no campo — abrir com
+                                "gpt-4.1-mini" preenchido mostrava só 2 de 69 modelos (achado ao vivo
+                                29/09). O combobox sempre abre com a lista INTEIRA (zera a busca ao
+                                abrir) e ainda aceita valor customizado (allowCustomValue) pro caso da
+                                API Key não estar configurada ou um modelo novo que o filtro não pegue. */}
+                            <Combobox
                                 value={form.chat_model}
-                                onChange={(e) => set("chat_model", e.target.value)}
-                                className="bg-muted/20 font-mono text-sm"
+                                onValueChange={(v) => set("chat_model", v)}
+                                allowCustomValue
+                                placeholder="gpt-4.1-mini"
+                                searchPlaceholder="Buscar modelo…"
+                                emptyText={loadingModels ? "Carregando…" : "Nenhum modelo encontrado."}
+                                className="h-10 w-full font-mono"
+                                groups={[{ options: (openaiModels ?? []).map((m) => ({ value: m.id, label: m.id })) }]}
                             />
-                            <datalist id="openai-chat-models">
-                                {(openaiModels ?? []).map((m) => <option key={m.id} value={m.id} />)}
-                            </datalist>
                             {!loadingModels && !openaiModels?.length && (
                                 <p className="text-[11px] text-amber-600 dark:text-amber-400">
                                     Não consegui puxar a lista da OpenAI (confira a API Key em Gestão &gt; Integrações) — o campo continua funcionando, só sem sugestões.
