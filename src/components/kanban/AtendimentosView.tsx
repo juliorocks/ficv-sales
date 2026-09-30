@@ -4,17 +4,21 @@
  * chat do lead à direita (o mesmo WideChatHistory do card: VivaConnect/WideChat,
  * 📖 Base, → Secretaria, Finalizar, Transferir). Dados: RPC inbox_leads (respeita a RLS
  * e os mesmos filtros de Atendente/Departamento do quadro).
+ *
+ * Abas = as MESMAS etapas do Kanban (pedido do usuário 30/09, "mesma nomenclatura pra
+ * facilitar") — lidas de `stages` dinamicamente, igual o KanbanBoard já faz, em vez de
+ * hardcoded: se uma etapa for renomeada/reordenada/criada, esta tela acompanha sozinha.
  */
 import { useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { formatDistanceToNowStrict } from "date-fns"
 import { ptBR } from "date-fns/locale"
-import { CheckCircle2, Clock, Loader2, MessageSquare, PencilLine, Search } from "lucide-react"
+import { Loader2, MessageSquare, PencilLine, Search } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { WideChatHistory } from "./WideChatHistory"
 import { ContactDetailsPanel } from "./ContactDetailsPanel"
 
-type Tab = "abertos" | "pendentes" | "finalizados"
+interface Stage { id: number; name: string; order: number }
 interface Row {
     lead_id: number; nome: string; telefone: string | null; email: string | null; stage_id: number; stage_name: string
     assigned_to_id: string | null; atendente: string | null; perfil: string | null; widechat_contact_id: string | null
@@ -32,7 +36,23 @@ const preview = (r: Row) => {
 const ago = (iso: string) => formatDistanceToNowStrict(new Date(iso), { locale: ptBR }).replace(/ (minutos?|horas?|dias?|segundos?|meses|mês)/, (m) => ({ " minuto": "min", " minutos": "min", " hora": "h", " horas": "h", " dia": "d", " dias": "d", " segundo": "s", " segundos": "s", " mês": "m", " meses": "m" } as Record<string, string>)[m] ?? m)
 
 export function AtendimentosView({ assigneeFilter = "all", teamAgentIds }: { assigneeFilter?: string; teamAgentIds?: string[] }) {
-    const [tab, setTab] = useState<Tab>("abertos")
+    const { data: stages = [] } = useQuery<Stage[]>({
+        queryKey: ["stages"],
+        queryFn: async () => {
+            const { data, error } = await supabase.from("stages").select("id, name, order").order("order")
+            if (error) throw error
+            return data ?? []
+        },
+        staleTime: 5 * 60_000,
+    })
+    const [tab, setTab] = useState<number | null>(null)
+    // 1ª etapa carregada vira a aba inicial — de preferência "Entrada" (fila de trabalho do
+    // dia a dia), senão a primeira na ordem do Kanban. Só define uma vez.
+    useEffect(() => {
+        if (tab != null || !stages.length) return
+        setTab((stages.find((s) => /entrada/i.test(s.name)) ?? stages[0]).id)
+    }, [stages, tab])
+
     const [search, setSearch] = useState("")
     const [q, setQ] = useState("")
     const [selected, setSelected] = useState<number | null>(null)
@@ -44,28 +64,29 @@ export function AtendimentosView({ assigneeFilter = "all", teamAgentIds }: { ass
     const agents = teamAgentIds?.filter((id) => id !== "__unassigned__")
     // buscando: procura em todas as conversas (ignora filtros de atendente/departamento)
     const semFiltro = !!q
-    const params = {
-        p_tab: tab, p_search: q || null,
+    const filtros = {
+        p_search: q || null,
         p_assignee: !semFiltro && assigneeFilter !== "all" && assigneeFilter !== "unassigned" ? assigneeFilter : null,
         p_agents: !semFiltro && teamAgentIds ? agents : null,
         p_no_owner: !!teamAgentIds?.includes("__unassigned__"),
-        p_limit: 200,
     }
     const { data: rows = [], isLoading, isFetching } = useQuery<Row[]>({
-        queryKey: ["inbox-leads", params],
+        queryKey: ["inbox-leads", tab, filtros],
         queryFn: async () => {
-            const { data, error } = await supabase.rpc("inbox_leads", params)
+            const { data, error } = await supabase.rpc("inbox_leads", { p_stage_id: tab, ...filtros, p_limit: 200 })
             if (error) throw error
             return (data ?? []) as Row[]
         },
+        enabled: tab != null,
         refetchInterval: 15000,
     })
-    // contagem de pendentes pro selo da aba (independente da aba aberta)
-    const { data: pendentes = 0 } = useQuery<number>({
-        queryKey: ["inbox-leads-pending", params.p_assignee, params.p_agents, params.p_no_owner],
+    // total por etapa, pro selo numérico em CADA aba (igual o Kanban) — independe da aba aberta
+    const { data: counts = {} } = useQuery<Record<number, number>>({
+        queryKey: ["inbox-leads-counts", filtros],
         queryFn: async () => {
-            const { data } = await supabase.rpc("inbox_leads", { ...params, p_tab: "pendentes", p_search: null })
-            return (data ?? []).length
+            const { data, error } = await supabase.rpc("inbox_leads_counts", filtros)
+            if (error) throw error
+            return Object.fromEntries(((data ?? []) as { stage_id: number; total: number }[]).map((r) => [r.stage_id, r.total]))
         },
         refetchInterval: 15000,
     })
@@ -77,12 +98,15 @@ export function AtendimentosView({ assigneeFilter = "all", teamAgentIds }: { ass
             {/* ── conversas ─────────────────────────────────────── */}
             <aside className="w-[340px] shrink-0 border-r border-[var(--border)] flex flex-col">
                 <div className="p-3 space-y-2 border-b border-[var(--border)]">
-                    <div className="flex rounded-lg bg-[var(--bg-main)] p-0.5 text-xs">
-                        {([["abertos", "Abertos", MessageSquare], ["pendentes", "Pendentes", Clock], ["finalizados", "Finalizados", CheckCircle2]] as const).map(([v, l, I]) => (
-                            <button key={v} onClick={() => setTab(v)}
-                                className={`relative flex-1 flex items-center justify-center gap-1 py-1.5 rounded-md transition-colors ${tab === v ? "bg-[var(--bg-card)] text-[var(--text-main)] font-semibold shadow-sm" : "text-[var(--text-muted)]"}`}>
-                                <I className="h-3.5 w-3.5" /> {l}
-                                {v === "pendentes" && pendentes > 0 && <span className="ml-0.5 rounded-full bg-orange-500 text-white text-[10px] px-1.5">{pendentes}</span>}
+                    {/* abas = etapas do Kanban (mesma nomenclatura, pedido do usuário 30/09) —
+                        largura por conteúdo + rolagem horizontal, "Em Contato"/"Matriculado" não
+                        cabem 5 em largura igual como os 3 rótulos curtos de antes */}
+                    <div className="flex gap-1 rounded-lg bg-[var(--bg-main)] p-0.5 text-xs overflow-x-auto custom-scrollbar">
+                        {stages.map((s) => (
+                            <button key={s.id} onClick={() => setTab(s.id)}
+                                className={`relative flex shrink-0 items-center justify-center gap-1 px-2.5 py-1.5 rounded-md whitespace-nowrap transition-colors ${tab === s.id ? "bg-[var(--bg-card)] text-[var(--text-main)] font-semibold shadow-sm" : "text-[var(--text-muted)] hover:text-[var(--text-main)]"}`}>
+                                {s.name}
+                                {!!counts[s.id] && <span className="ml-0.5 rounded-full bg-primary/15 text-primary text-[10px] px-1.5">{counts[s.id]}</span>}
                             </button>
                         ))}
                     </div>
