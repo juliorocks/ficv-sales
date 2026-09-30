@@ -58,6 +58,13 @@ const REGISTRY: Integration[] = [
         description: `Dispara os syncs de Meta Ads, Google Ads e Sponte no repositório ${GITHUB_REPO}.`,
         fields: [{ key: "GITHUB_DISPATCH_TOKEN", label: "Token (fine-grained, Actions: read & write)", placeholder: "github_pat_..." }],
     },
+    {
+        id: "moodle", name: "Moodle", description: "API REST do Moodle (ainda sem uso automático no sistema — só guarda a chave por enquanto).",
+        fields: [
+            { plain: true, key: "MOODLE_URL", label: "Endereço do Moodle", placeholder: "https://moodle.ficv.edu.br", help: "Sem barra no final." },
+            { key: "MOODLE_TOKEN", label: "Token da API (Web Services)", help: "Moodle → Administração do site → Serviços web → Gerenciar tokens" },
+        ],
+    },
 ];
 
 async function runTest(id: string, db: any): Promise<{ ok: boolean; message: string }> {
@@ -131,6 +138,22 @@ async function runTest(id: string, db: any): Promise<{ ok: boolean; message: str
         if (!r.ok) return { ok: false, message: `HTTP ${r.status}: ${d?.message ?? "sem detalhe"} (o token precisa acessar ${GITHUB_REPO})` };
         const names = (d?.workflows ?? []).map((w: any) => w.path.split("/").pop()).join(", ");
         return { ok: true, message: `Conectado — workflows: ${names || "nenhum"}. (Confirme que o token tem Actions: write pra conseguir disparar.)` };
+    }
+    if (id === "moodle") {
+        const url = (await getSecret("MOODLE_URL")).replace(/\/+$/, "");
+        const token = await getSecret("MOODLE_TOKEN");
+        if (!url) return { ok: false, message: "Endereço do Moodle não configurado." };
+        if (!token) return { ok: false, message: "Token não configurado." };
+        // core_webservice_get_site_info é a chamada padrão do Moodle pra validar um token —
+        // devolve dados do site se ok, ou {exception,errorcode,message} se o token/serviço
+        // estiver errado (a API sempre responde HTTP 200, o erro vem no corpo).
+        const params = new URLSearchParams({ wstoken: token, wsfunction: "core_webservice_get_site_info", moodlewsrestformat: "json" });
+        const r = await fetch(`${url}/webservice/rest/server.php?${params}`, { signal: timeout });
+        const d = await r.json().catch(() => null);
+        if (!r.ok) return { ok: false, message: `HTTP ${r.status}` };
+        if (d?.exception) return { ok: false, message: `${d.errorcode ?? "erro"}: ${d.message ?? "sem detalhe"}` };
+        if (!d?.sitename) return { ok: false, message: "Resposta inesperada do Moodle (confira o endereço)." };
+        return { ok: true, message: `Conectado — ${d.sitename} (usuário do token: ${d.username ?? d.userid ?? "?"}, versão ${d.release ?? "?"}).` };
     }
     if (id === "vivaconnect") {
         const settings = await loadSettings(db);
