@@ -213,7 +213,7 @@ Deno.serve(async (req) => {
                 const eraPerdido = st?.name ? /perdid/i.test(st.name) : false;
                 if (st?.name && /finaliz|encerr|conclu/i.test(st.name) || eraPerdido) {
                     const { data: last } = await db.from("widechat_messages").select("origin")
-                        .eq("lead_id", lead.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+                        .eq("lead_id", lead.id).eq("interno", false).order("created_at", { ascending: false }).limit(1).maybeSingle();
                     const now = new Date().toISOString();
                     patch.stage_entry_date = now;
                     if (eraPerdido) patch.motivo_perda_id = null; // não é mais um lead perdido
@@ -343,7 +343,7 @@ Deno.serve(async (req) => {
 
 async function aiReply(db: any, settings: any, leadId: number, channelId: number, number: string): Promise<string> {
     const { data: hist } = await db.from("widechat_messages").select("origin, message, created_at")
-        .eq("lead_id", leadId).eq("provider", "vivaconnect").order("created_at", { ascending: false }).limit(20);
+        .eq("lead_id", leadId).eq("provider", "vivaconnect").eq("interno", false).order("created_at", { ascending: false }).limit(20);
     const messages = (hist ?? []).reverse()
         .filter((h: any) => h.message)
         .map((h: any) => ({ role: h.origin === "channel" ? "user" : "assistant", content: h.message }));

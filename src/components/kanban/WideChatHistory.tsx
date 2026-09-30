@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabase"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
-import { AlertCircle, MessageSquare, Send, Loader2, FileText, Smile, Paperclip, Mic, Square, X, Image as ImageIcon, FileAudio, BookOpen } from "lucide-react"
+import { AlertCircle, MessageSquare, Send, Loader2, FileText, Smile, Paperclip, Mic, Square, X, Image as ImageIcon, FileAudio, BookOpen, Lock } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -152,6 +152,7 @@ interface WideChatMessage {
     sender_name?: string
     media_url?: string | null
     provider?: string
+    interno?: boolean
 }
 
 // emojis mais usados no atendimento — sem dependência de lib
@@ -165,6 +166,10 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
     const [emojiOpen, setEmojiOpen] = useState(false)
     const [kbOpen, setKbOpen] = useState(false)
     const [newMessage, setNewMessage] = useState("")
+    // nota interna (30/09, pedido do usuário) — mesmo padrão dos Tickets: mesma caixa de
+    // mensagem, um alternador; nunca sai pelo WhatsApp, fica só pra equipe ver.
+    const [interno, setInterno] = useState(false)
+    const [noteText, setNoteText] = useState("")
     // anexo (arquivo escolhido, aguardando confirmação/legenda antes de enviar)
     const fileInputRef = useRef<HTMLInputElement>(null)
     const [pendingFile, setPendingFile] = useState<File | null>(null)
@@ -537,6 +542,25 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
             }
             window.setTimeout(() => checkDelivery(3), 6000)
         },
+    })
+
+    // Nota interna: grava direto na mesma conversa (widechat_messages, interno=true), sem
+    // passar pelo Z-PRO/WideChat — nunca sai pro WhatsApp. Mesmo padrão de ticket_messages.
+    const addNoteMutation = useMutation({
+        mutationFn: async (note: string) => {
+            const { error } = await supabase.from('widechat_messages').insert({
+                lead_id: leadId, provider: isViva ? 'vivaconnect' : 'widechat',
+                type: 'text', message: note, origin: 'agent', interno: true,
+                sender_name: user?.full_name || 'Você', created_at: new Date().toISOString(),
+            })
+            if (error) throw error
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: msgKey })
+            setNoteText("")
+            showSuccess('Nota interna adicionada.')
+        },
+        onError: (e: any) => showError(`Erro ao salvar nota: ${e.message}`),
     })
 
     const doSend = () => {
@@ -961,6 +985,22 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                             const isUser = msg.origin === 'channel'
                             const isBot = msg.origin === 'auto'
                             const isAgent = msg.origin === 'agent' || (!isUser && !isBot)
+                            // nota interna: nunca saiu pelo WhatsApp, destaque próprio (âmbar,
+                            // igual aos Tickets) pra não confundir com mensagem de verdade
+                            if (msg.interno) {
+                                return (
+                                    <div key={msg.id} className="flex flex-col max-w-[85%] self-end items-end">
+                                        <div className="px-4 py-2 text-sm shadow-sm bg-amber-100 text-amber-900 border border-amber-300 rounded-2xl rounded-tr-md">
+                                            <span className="block text-[10px] font-semibold uppercase tracking-wide opacity-70 mb-0.5">📌 Nota interna</span>
+                                            <p className="whitespace-pre-wrap leading-relaxed">{msg.message}</p>
+                                        </div>
+                                        <span className="text-[10px] text-slate-500 mt-1 px-1">
+                                            {msg.sender_name && <span className="mr-1 font-medium">{msg.sender_name} •</span>}
+                                            {fmtHora(msg.created_at)}
+                                        </span>
+                                    </div>
+                                )
+                            }
                             return (
                                 <div key={msg.id} className={`flex flex-col max-w-[85%] ${isUser ? "self-start" : "self-end items-end"}`}>
                                     <div className={`px-4 py-2 text-sm shadow-sm ${isUser
@@ -1025,7 +1065,32 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
             </ScrollArea>
 
             <div className="p-3 border-t border-slate-200 bg-slate-50 space-y-2">
-                {canSendText ? (
+                <div className="flex items-center gap-2">
+                    <button type="button" onClick={() => setInterno(false)}
+                        className={`flex items-center gap-1 text-xs px-2 py-1 rounded transition-all ${!interno ? 'bg-[#2563eb] text-white' : 'text-slate-500 hover:text-slate-800'}`}>
+                        <MessageSquare className="w-3 h-3" /> Mensagem
+                    </button>
+                    <button type="button" onClick={() => setInterno(true)}
+                        className={`flex items-center gap-1 text-xs px-2 py-1 rounded transition-all ${interno ? 'bg-amber-500 text-white' : 'text-slate-500 hover:text-slate-800'}`}>
+                        <Lock className="w-3 h-3" /> Nota interna
+                    </button>
+                </div>
+                {interno ? (
+                    // nota interna não depende da janela de 24h nem de template — é nossa,
+                    // nunca sai pelo WhatsApp, então sempre pode ser adicionada
+                    <form onSubmit={(e) => { e.preventDefault(); if (noteText.trim() && !addNoteMutation.isPending) addNoteMutation.mutate(noteText.trim()) }}
+                        className="flex gap-2 items-end">
+                        <textarea value={noteText} onChange={(e) => setNoteText(e.target.value)}
+                            placeholder="Nota interna (não é enviada ao cliente)..." rows={2}
+                            disabled={addNoteMutation.isPending}
+                            className="flex-1 resize-none rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 placeholder:text-amber-700/50 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey) { e.preventDefault(); if (noteText.trim() && !addNoteMutation.isPending) addNoteMutation.mutate(noteText.trim()) } }} />
+                        <Button type="submit" size="icon" className="rounded-full h-9 w-9 shrink-0 bg-amber-500 hover:bg-amber-600"
+                            disabled={addNoteMutation.isPending || !noteText.trim()}>
+                            {addNoteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}
+                        </Button>
+                    </form>
+                ) : canSendText ? (
                     <form onSubmit={handleSend} className="flex flex-col gap-2">
                         {pendingFile && (
                             <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm">
