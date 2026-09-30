@@ -177,11 +177,15 @@ export function keywordTerms(text: string): string[] {
         if (!group.some((t) => text.toLowerCase().includes(t))) continue;
         for (const t of group) if (!terms.includes(t)) terms.push(t);
     }
-    // "titulação" é a palavra que aparece exatamente no cabeçalho da tabela de nomes ("Docente
-    // Área de Formação Titulação...") em todo PPC — sem ela, o trecho genérico "o corpo docente
-    // é formado por doutores e mestres" (sem nome nenhum) empata em termos com a tabela de
-    // verdade, e o match_knowledge_keywords só devolve 1 trecho por documento (o outro perde).
-    if (/professor|docente/i.test(text) && !terms.includes("titulação")) terms.push("titulação");
+    // "titulação" sozinha não bastou (30/09): o PPC de Teologia/Teologia EAD tem VÁRIOS trechos
+    // que citam "titulação" só como política genérica ("o corpo docente é formado por doutores e
+    // mestres", sem nome nenhum), e empatavam com a tabela de nomes de verdade. O sinal que só a
+    // tabela de verdade tem é a titulação JUNTO do nome de cada docente, no formato de currículo
+    // ("Mestre em Ciências das Religiões", "Doutor em Políticas Públicas") — conferido nos
+    // chunks reais: só o trecho com os nomes tinha as duas frases, nenhum dos genéricos tinha.
+    if (/professor|docente/i.test(text)) {
+        for (const t of ["titulação", "mestre em", "doutor em"]) if (!terms.includes(t)) terms.push(t);
+    }
     return terms;
 }
 async function searchOnce(
