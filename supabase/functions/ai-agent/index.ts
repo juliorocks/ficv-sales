@@ -20,7 +20,7 @@
 //
 // Quem chama em produção (futuro vivaconnect-webhook) usa a service role key.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
-import { chatJSON, corsHeaders, ensureLineBreaks, expandForFullList, identify, isAdmin, isStaff, jsonRes, searchKnowledge, trailingAssistantText, wantsFullCourseList } from "../_shared/ai.ts";
+import { chatJSON, corsHeaders, ensureLineBreaks, expandForFullList, identify, isAdmin, isStaff, jsonRes, listAlreadySentIn, searchKnowledge, trailingAssistantText, wantsFullCourseList } from "../_shared/ai.ts";
 import { mirror, sv } from "../_shared/db.ts";
 import { fillTemplate, firstName, loadSettings as loadVivaSettings } from "../_shared/vivaconnect.ts";
 import { checkOtherCompany, mentionsOtherCompany, type HubMsg } from "../_shared/hub.ts";
@@ -66,7 +66,10 @@ Deno.serve(async (req) => {
             const system = [
                 s.system_prompt,
                 `Seu nome é ${s.agent_name}. Agora é ${agora} (horário de Brasília).`,
-                `O lead${nome ? ` (${nome})` : ""}${curso ? `, interessado em ${curso},` : ""} ficou um tempo sem responder depois da sua última mensagem na conversa abaixo. Escreva UMA mensagem curta e natural de reengajamento — NUNCA um "oi, tudo bem?" genérico. Retome o assunto específico de vocês (o curso, a dúvida, a condição que estavam discutindo) com leveza, como quem lembrou de continuar uma conversa, não como cobrança. Se fizer sentido, ofereça ajudar com o próximo passo (ex.: valores, matrícula, tirar mais dúvidas). NÃO se apresente de novo (você já se apresentou nesta conversa). NÃO diga explicitamente "faz um tempo que você não responde" nem nada que soe como pressão.`,
+                `O lead${nome ? ` (${nome})` : ""}${curso ? `, interessado em ${curso},` : ""} ficou um tempo sem responder depois da sua última mensagem na conversa abaixo. Releia o histórico INTEIRO com atenção antes de escrever: NUNCA repita nem pergunte se pode enviar algo que JÁ foi enviado ou respondido nesta conversa (ex.: se a grade/ementa/valores já foram mandados, não pergunte "posso te enviar a grade?" de novo — isso prova que você não leu a conversa, é o pior erro possível aqui). Escreva UMA mensagem curta e natural de reengajamento — NUNCA um "oi, tudo bem?" genérico. Retome o assunto específico de vocês (o curso, a dúvida, a condição que estavam discutindo) com leveza, como quem lembrou de continuar uma conversa, não como cobrança. Ofereça o PRÓXIMO passo que AINDA NÃO foi dado (ex.: uma dúvida que ficou em aberto, valores se ainda não foram ditos, matrícula). NÃO se apresente de novo (você já se apresentou nesta conversa). NÃO diga explicitamente "faz um tempo que você não responde" nem nada que soe como pressão.`,
+                ...(listAlreadySentIn(histMsgs)
+                    ? [`ATENÇÃO: o histórico abaixo já tem uma lista/grade numerada que você (ou a equipe) mandou nesta conversa — ela JÁ foi entregue. Não ofereça mandar de novo, não pergunte "quer receber?"; se for mencionar o curso, vá direto pro próximo passo (valores, matrícula, ou uma dúvida específica ainda sem resposta).`]
+                    : []),
                 `Responda em JSON: {"reply": "a mensagem de follow-up — pule uma linha (\\n\\n) se precisar de mais de uma ideia, senão 1 frase só já resolve"}`,
             ].join("\n\n");
             const { json } = await chatJSON(s.chat_model, Number(s.temperature), [{ role: "system", content: system }, ...histMsgs]);
@@ -106,7 +109,10 @@ Deno.serve(async (req) => {
                 s.system_prompt,
                 `Agora é ${agora} (horário de Brasília).`,
                 `Um atendente humano${nome ? ` (que está conversando com ${nome}${curso ? `, interessado em ${curso}` : ""})` : ""} marcou pra retomar contato com este lead agora, com esta nota interna dele mesmo (não mostre a nota ao lead, é só contexto seu): "${note || "retomar o contato"}".`,
-                `Escreva UMA mensagem curta e natural de retomada, como se fosse o PRÓPRIO atendente continuando a conversa de onde parou (veja o histórico abaixo) — não se apresente como assistente virtual/IA, não diga "sou a Vivi". Vá direto ao que a nota pede, com a mesma naturalidade de quem lembrou de voltar a falar com alguém. Termine com uma pergunta que avance.`,
+                `Escreva UMA mensagem curta e natural de retomada, como se fosse o PRÓPRIO atendente continuando a conversa de onde parou (veja o histórico abaixo) — não se apresente como assistente virtual/IA, não diga "sou a Vivi". Releia o histórico com atenção: NUNCA ofereça mandar de novo algo que JÁ foi enviado nesta conversa (ex.: grade, ementa, valores já ditos). Vá direto ao que a nota pede, com a mesma naturalidade de quem lembrou de voltar a falar com alguém. Termine com uma pergunta que avance.`,
+                ...(listAlreadySentIn(histMsgs)
+                    ? [`ATENÇÃO: o histórico abaixo já tem uma lista/grade numerada enviada nesta conversa — não ofereça mandar de novo.`]
+                    : []),
                 `BASE DE CONHECIMENTO (use se a nota mencionar curso/valores/prazo — nunca invente o que não estiver aqui):\n\n${knowledge}`,
                 `Responda em JSON: {"reply": "a mensagem — pule uma linha (\\n\\n) se precisar de mais de uma ideia, senão 1 frase já resolve"}`,
             ].join("\n\n");

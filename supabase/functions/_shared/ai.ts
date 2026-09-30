@@ -254,6 +254,22 @@ export function ensureLineBreaks(text: string): string {
 const OFERTA_DETALHAR = /detalh|list(ar|a)\s+(completa|todas|tudo)|grade\s+completa|explicar\s+cada|mostrar\s+todas|ementa/i;
 const CONFIRMACAO_CURTA = /^\s*(sim|quero|pode|claro|manda|vai|com\s*certeza|isso|ok|t[áa]|beleza|show|perfeito|quero\s*sim|pode\s*ser|quero\s*saber)\b/i;
 
+/** Detecta se algum trecho já tem uma lista numerada (item "1)"/"1." seguido, em algum
+ *  ponto do mesmo texto, de um item "2)"/"2.") — sinal de que uma grade/lista estruturada
+ *  JÁ foi mandada antes. Usado pelo follow-up (achado ao vivo 29/09: a mensagem de
+ *  reengajamento perguntou "posso te enviar a grade completa?" MESMO com a grade completa
+ *  já mandada 4h antes, na mesma conversa, visível no histórico — o modelo tinha a
+ *  informação no contexto mas não "prestou atenção"; aqui a checagem é estrutural, não só
+ *  uma instrução no prompt pra "ler com atenção"). */
+function hasNumberedList(text: string): boolean {
+    const nums = new Set<number>();
+    for (const m of text.matchAll(/(?:^|\n)\s*(\d{1,2})[.)]\s/g)) nums.add(Number(m[1]));
+    return nums.has(1) && nums.has(2);
+}
+export function listAlreadySentIn(histMsgs: { role: string; content: string }[]): boolean {
+    return histMsgs.some((m) => m.role === "assistant" && hasNumberedList(m.content));
+}
+
 /** Pergunta que pede lista COMPLETA (grade, disciplinas, ementa, módulos) — sinal de que
  *  os poucos trechos da busca por similaridade não bastam, precisa do documento inteiro
  *  (ver findCourseDoc). Frase informal ("quero a grade", "qual as disciplinas" — concordância
