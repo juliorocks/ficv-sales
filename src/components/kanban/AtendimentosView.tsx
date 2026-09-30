@@ -19,17 +19,28 @@ import { useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { formatDistanceToNowStrict } from "date-fns"
 import { ptBR } from "date-fns/locale"
-import { Loader2, MessageSquare, PencilLine, Search } from "lucide-react"
+import { Check, ChevronDown, GraduationCap, Loader2, MessageSquare, PencilLine, Search } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { Button } from "@/components/ui/button"
 import { WideChatHistory } from "./WideChatHistory"
 import { ContactDetailsPanel } from "./ContactDetailsPanel"
+import { KanbanSort } from "./KanbanSort"
+import {
+    DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+
+// mesmo shape do KanbanColumn.tsx/KanbanSort.tsx (não exportado de lá, copiado igual)
+type SortOption = { key: string; label: string; direction: "asc" | "desc" }
 
 interface Stage { id: number; name: string; order: number }
+interface Course { id: number; name: string }
 interface Row {
     lead_id: number; nome: string; telefone: string | null; email: string | null; stage_id: number; stage_name: string
     assigned_to_id: string | null; atendente: string | null; perfil: string | null; widechat_contact_id: string | null
     last_at: string; last_message: string | null; last_origin: string | null; last_type: string | null; last_provider: string | null
     pending_count: number
+    curso_interesse: number | null; valor_oportunidade: number | null; temperatura: string | null
+    stage_entry_date: string | null; data_entrada: string; updated_at: string
 }
 
 const initials = (n: string) => n.trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "").join("") || "?"
@@ -104,7 +115,66 @@ export function AtendimentosView({ assigneeFilter = "all", teamAgentIds }: { ass
         },
         refetchInterval: 15000,
     })
-    const list = useMemo(() => !semFiltro && assigneeFilter === "unassigned" ? rows.filter((r) => !r.assigned_to_id) : rows, [rows, assigneeFilter, semFiltro])
+    const baseList = useMemo(() => !semFiltro && assigneeFilter === "unassigned" ? rows.filter((r) => !r.assigned_to_id) : rows, [rows, assigneeFilter, semFiltro])
+
+    const { data: courses = [] } = useQuery<Course[]>({
+        queryKey: ["courses_min"],
+        queryFn: async () => {
+            const { data, error } = await supabase.from("courses").select("id, name").order("name")
+            if (error) throw error
+            return data ?? []
+        },
+        staleTime: 5 * 60_000,
+    })
+
+    // Mesmos filtros/ordenação de cada coluna do Kanban (pedido do usuário 30/09), aplicados
+    // na lista única desta tela — reaproveita o componente KanbanSort tal como está lá.
+    const stageName = stages.find((s) => s.id === tab)?.name ?? ""
+    const isEntradaStage = /entrada/i.test(stageName)
+    const [courseFilter, setCourseFilter] = useState<number | null>(null)
+    const [unattendedOnly, setUnattendedOnly] = useState(false)
+    const [unattendedFirst, setUnattendedFirst] = useState(true)
+    const [waitingReplyOnly, setWaitingReplyOnly] = useState(false)
+    const [waitingReplyFirst, setWaitingReplyFirst] = useState(true)
+    const [sortBy, setSortBy] = useState<SortOption>({ key: "updated_at", label: "Última Atividade", direction: "desc" })
+
+    const listCourses = useMemo(() => {
+        const ids = new Set(baseList.map((r) => r.curso_interesse).filter((x): x is number => x != null))
+        return courses.filter((c) => ids.has(c.id)).sort((a, b) => a.name.localeCompare(b.name))
+    }, [baseList, courses])
+
+    const isPriorityRow = (r: Row) => (isEntradaStage ? !r.assigned_to_id : r.pending_count > 0)
+    const priorityOnly = isEntradaStage ? unattendedOnly : waitingReplyOnly
+    const priorityFirst = isEntradaStage ? unattendedFirst : waitingReplyFirst
+
+    const list = useMemo(() => {
+        let r = baseList
+        if (courseFilter != null) r = r.filter((x) => x.curso_interesse === courseFilter)
+        if (priorityOnly) r = r.filter(isPriorityRow)
+        const tempOrder: Record<string, number> = { quente: 3, morno: 2, frio: 1 }
+        return [...r].sort((a, b) => {
+            if (priorityFirst) {
+                const ap = isPriorityRow(a), bp = isPriorityRow(b)
+                if (ap !== bp) return ap ? -1 : 1
+            }
+            const key = sortBy.key
+            let av: any, bv: any
+            if (key === "temperatura") { av = tempOrder[a.temperatura || ""] || 0; bv = tempOrder[b.temperatura || ""] || 0 }
+            else if (key === "stage_entry_date" || key === "data_entrada" || key === "updated_at") {
+                const k = key as "stage_entry_date" | "data_entrada" | "updated_at"
+                av = a[k] ? new Date(a[k] as string).getTime() : 0; bv = b[k] ? new Date(b[k] as string).getTime() : 0
+            } else if (key === "nome_completo") { av = a.nome; bv = b.nome }
+            else if (key === "valor_oportunidade") { av = a.valor_oportunidade; bv = b.valor_oportunidade }
+            else { av = null; bv = null }
+            if (av == null) av = sortBy.direction === "asc" ? Infinity : -Infinity
+            if (bv == null) bv = sortBy.direction === "asc" ? Infinity : -Infinity
+            if (typeof av === "string" && typeof bv === "string") return sortBy.direction === "asc" ? av.localeCompare(bv) : bv.localeCompare(av)
+            if (av < bv) return sortBy.direction === "asc" ? -1 : 1
+            if (av > bv) return sortBy.direction === "asc" ? 1 : -1
+            return 0
+        })
+    }, [baseList, courseFilter, priorityOnly, priorityFirst, sortBy, isEntradaStage])
+
     const current = list.find((r) => r.lead_id === selected) ?? null
 
     return (
@@ -129,6 +199,42 @@ export function AtendimentosView({ assigneeFilter = "all", teamAgentIds }: { ass
                         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar nome ou telefone"
                             className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-main)] pl-8 pr-3 py-2 text-sm text-[var(--text-main)] outline-none focus:border-primary" />
                         {isFetching && <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-[var(--text-muted)]" />}
+                    </div>
+                    {/* mesmos filtros de cada coluna do Kanban (pedido do usuário 30/09) —
+                        curso + ordenar/filtrar (Não atendidos/Esperando Resposta conforme a aba) */}
+                    <div className="flex gap-1.5">
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="outline" size="sm" className="flex-1 justify-between h-8 text-xs font-normal min-w-0">
+                                    <span className="flex items-center gap-1.5 truncate">
+                                        <GraduationCap className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                        <span className="truncate">{courseFilter == null ? "Todos os cursos" : (courses.find((c) => c.id === courseFilter)?.name ?? "Curso")}</span>
+                                    </span>
+                                    <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start" className="w-56 max-h-72 overflow-y-auto">
+                                <DropdownMenuItem onClick={() => setCourseFilter(null)} className="flex justify-between">
+                                    <span>Todos os cursos</span>
+                                    {courseFilter == null && <Check className="h-4 w-4 ml-2 shrink-0" />}
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                {listCourses.map((c) => (
+                                    <DropdownMenuItem key={c.id} onClick={() => setCourseFilter(c.id)} className="flex justify-between">
+                                        <span className="truncate">{c.name}</span>
+                                        {courseFilter === c.id && <Check className="h-4 w-4 ml-2 shrink-0" />}
+                                    </DropdownMenuItem>
+                                ))}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                        <KanbanSort
+                            sortBy={sortBy} onSortChange={setSortBy}
+                            mode={isEntradaStage ? "unattended" : "waitingReply"}
+                            priorityOnly={priorityOnly}
+                            onPriorityOnlyChange={isEntradaStage ? setUnattendedOnly : setWaitingReplyOnly}
+                            priorityFirst={priorityFirst}
+                            onPriorityFirstChange={isEntradaStage ? setUnattendedFirst : setWaitingReplyFirst}
+                        />
                     </div>
                 </div>
                 <div className="flex-1 overflow-y-auto custom-scrollbar">
