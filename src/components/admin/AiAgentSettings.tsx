@@ -113,6 +113,20 @@ export function AiAgentSettings() {
         },
     })
 
+    // Modelos de chat da conta OpenAI configurada — dropdown em vez de digitar o id na mão
+    // (pedido do usuário 29/09). Cacheia 1h: a lista quase não muda de um dia pro outro.
+    const { data: openaiModels, isFetching: loadingModels, refetch: refetchModels } = useQuery({
+        queryKey: ["openai_models"],
+        queryFn: async () => {
+            const { data, error } = await supabase.functions.invoke("openai-models")
+            if (error) throw error
+            if (data?.error) throw new Error(data.error)
+            return (data?.models ?? []) as { id: string; created: number }[]
+        },
+        staleTime: 60 * 60_000,
+        retry: false,
+    })
+
     useEffect(() => { if (settings) setForm(settings) }, [settings])
 
     const set = <K extends keyof AiSettings>(k: K, v: AiSettings[K]) => setForm((f) => (f ? { ...f, [k]: v } : f))
@@ -268,8 +282,34 @@ export function AiAgentSettings() {
                             <Input value={form.agent_name} onChange={(e) => set("agent_name", e.target.value)} className="bg-muted/20" />
                         </div>
                         <div className="space-y-2">
-                            <Label className={fieldLabel}>Modelo (OpenAI)</Label>
-                            <Input value={form.chat_model} onChange={(e) => set("chat_model", e.target.value)} className="bg-muted/20 font-mono text-sm" />
+                            <div className="flex items-center justify-between">
+                                <Label className={fieldLabel}>Modelo (OpenAI)</Label>
+                                <button
+                                    type="button" onClick={() => refetchModels()} disabled={loadingModels}
+                                    className="text-muted-foreground hover:text-[var(--text-main)] disabled:opacity-50"
+                                    title="Atualizar lista de modelos"
+                                >
+                                    <RotateCcw size={12} className={loadingModels ? "animate-spin" : ""} />
+                                </button>
+                            </div>
+                            {/* input com sugestões (datalist), não <select>: mostra os modelos de chat
+                                da conta OpenAI pra escolher, mas continua aceitando texto livre — pro
+                                caso da lista não carregar (API Key não configurada) ou um modelo mais
+                                novo que o filtro daqui ainda não reconheça */}
+                            <Input
+                                list="openai-chat-models"
+                                value={form.chat_model}
+                                onChange={(e) => set("chat_model", e.target.value)}
+                                className="bg-muted/20 font-mono text-sm"
+                            />
+                            <datalist id="openai-chat-models">
+                                {(openaiModels ?? []).map((m) => <option key={m.id} value={m.id} />)}
+                            </datalist>
+                            {!loadingModels && !openaiModels?.length && (
+                                <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                                    Não consegui puxar a lista da OpenAI (confira a API Key em Gestão &gt; Integrações) — o campo continua funcionando, só sem sugestões.
+                                </p>
+                            )}
                         </div>
                     </div>
 
