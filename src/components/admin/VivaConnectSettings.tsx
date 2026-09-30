@@ -88,7 +88,16 @@ const emptyChannel = {
     found: false, name: "", purpose: "pool" as "official" | "pool" | "grupo", kind: "baileys", phone: "", api_id: "",
     zpro_whatsapp_id: "", daily_limit: 40, zpro_info: null as unknown,
     options: [] as { id: string; name: string; number: string | null; type: string | null; status: string | null }[],
+    // canal do Z-PRO que não é WhatsApp (ex.: Instagram) — guarda o `type` bruto pra avisar e
+    // travar o salvamento (ver isWhatsAppType). Achado ao vivo 30/09: sem essa checagem,
+    // kindFromType caía no "baileys" por padrão pra QUALQUER tipo não reconhecido — cadastrava
+    // silenciosamente um canal Instagram como se fosse WhatsApp Baileys.
+    unsupportedType: null as string | null,
 }
+// tipos de canal que o VivaConnect sabe falar (todos WhatsApp) — qualquer coisa fora disso
+// (instagram, messenger, telegram...) ainda não tem suporte aqui: o parser do webhook nunca
+// viu o formato real desses payloads, e não tem número de telefone pra casar o lead.
+const isWhatsAppType = (t: string | null) => !t || /baileys|whatsapp|waba|hybrid|hibrid|cloud|meta/i.test(t)
 const kindFromType = (t: string | null) => {
     const v = String(t ?? "").toLowerCase()
     return v.includes("hybrid") || v.includes("hibrid") ? "hybrid" : v.includes("waba") || v.includes("cloud") || v.includes("meta") ? "waba" : "baileys"
@@ -175,7 +184,11 @@ export function VivaConnectSettings() {
 
     const pickOption = (ch: typeof emptyChannel, id: string) => {
         const o = ch.options.find((x) => x.id === id)
-        return o ? { ...ch, zpro_whatsapp_id: o.id, name: o.name, phone: o.number ?? "", kind: kindFromType(o.type) } : { ...ch, zpro_whatsapp_id: id }
+        if (!o) return { ...ch, zpro_whatsapp_id: id }
+        return {
+            ...ch, zpro_whatsapp_id: o.id, name: o.name, phone: o.number ?? "", kind: kindFromType(o.type),
+            unsupportedType: isWhatsAppType(o.type) ? null : o.type,
+        }
     }
 
     const discover = async () => {
@@ -199,6 +212,7 @@ export function VivaConnectSettings() {
     const addChannel = async () => {
         if (!newCh?.found) return
         if (!newCh.name.trim()) return showError("Informe um nome.")
+        if (newCh.unsupportedType) return showError(`Canal do tipo "${newCh.unsupportedType}" ainda não é suportado — o VivaConnect só fala WhatsApp.`)
         setBusy("add")
         const { data, error } = await supabase.from("vivaconnect_channels").insert({
             name: newCh.name.trim(), purpose: newCh.purpose, kind: newCh.kind,
@@ -349,6 +363,11 @@ export function VivaConnectSettings() {
                                                     {newCh.options.map((o) => <option key={o.id} value={o.id}>{o.name} · {o.number ?? "sem número"} · {o.type ?? "?"}{o.status ? ` · ${o.status}` : ""}</option>)}
                                                 </select></div>
                                         )}
+                                        {newCh.unsupportedType && (
+                                            <p className="col-span-2 text-xs text-amber-500 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">
+                                                ⚠️ Este canal é do tipo <b>{newCh.unsupportedType}</b> — o VivaConnect ainda só sabe falar WhatsApp (Baileys/WABA/Híbrido). Não tem número de telefone pra casar o lead e o formato da mensagem nunca foi testado aqui; salvar assim não vai funcionar. Peça pra construir suporte a esse canal antes de cadastrar.
+                                            </p>
+                                        )}
                                         <div className="space-y-1"><Label className={fieldLabel}>Nome</Label>
                                             <Input value={newCh.name} onChange={(e) => setNewCh({ ...newCh, name: e.target.value })} className="bg-muted/20" /></div>
                                         <div className="space-y-1"><Label className={fieldLabel}>Número</Label>
@@ -377,7 +396,7 @@ export function VivaConnectSettings() {
                                     {newCh.found && <Button variant="ghost" size="sm" onClick={() => setNewCh({ ...newCh, found: false })}>Trocar token</Button>}
                                     {!newCh.found
                                         ? <Button size="sm" onClick={discover} disabled={busy === "discover"}>{busy === "discover" ? <Loader2 className="animate-spin" size={14} /> : "Buscar no Z-PRO"}</Button>
-                                        : <Button size="sm" onClick={addChannel} disabled={busy === "add"}>{busy === "add" ? <Loader2 className="animate-spin" size={14} /> : "Salvar número"}</Button>}
+                                        : <Button size="sm" onClick={addChannel} disabled={busy === "add" || !!newCh.unsupportedType}>{busy === "add" ? <Loader2 className="animate-spin" size={14} /> : "Salvar número"}</Button>}
                                 </div>
                             </div>
                         )}
