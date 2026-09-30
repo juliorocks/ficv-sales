@@ -59,16 +59,28 @@ async function openaiKey(): Promise<string> {
     return k;
 }
 
-async function openai(path: string, body: unknown): Promise<any> {
-    const r = await fetch(`https://api.openai.com/v1${path}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${await openaiKey()}` },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(60000),
-    });
-    const data = await r.json().catch(() => null);
-    if (!r.ok) throw new Error(`OpenAI ${path} HTTP ${r.status}: ${data?.error?.message ?? "sem detalhe"}`);
-    return data;
+async function openai(path: string, body: Record<string, unknown>): Promise<any> {
+    const call = async (b: Record<string, unknown>) => {
+        const r = await fetch(`https://api.openai.com/v1${path}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${await openaiKey()}` },
+            body: JSON.stringify(b),
+            signal: AbortSignal.timeout(60000),
+        });
+        return { ok: r.ok, status: r.status, data: await r.json().catch(() => null) };
+    };
+    let res = await call(body);
+    // Alguns modelos mais novos (achado ao vivo 29/09, trocando pra gpt-5.6-luna pelo painel)
+    // só aceitam o "temperature" DEFAULT (1) — mandar o valor configurado (Gestão > IA de
+    // Atendimento) dá 400. Em vez de manter uma lista de nomes de modelo que fica
+    // desatualizada a cada lançamento novo da OpenAI, detecta pelo texto do próprio erro e
+    // tenta de novo sem o parâmetro (fica no default 1 da API).
+    if (!res.ok && "temperature" in body && /temperature['"]?\s+does not support|unsupported.{0,20}temperature/i.test(res.data?.error?.message ?? "")) {
+        const { temperature: _drop, ...rest } = body;
+        res = await call(rest);
+    }
+    if (!res.ok) throw new Error(`OpenAI ${path} HTTP ${res.status}: ${res.data?.error?.message ?? "sem detalhe"}`);
+    return res.data;
 }
 
 /** Embeddings em lote (a API aceita até 2048 entradas; mandamos de 64 em 64). */
