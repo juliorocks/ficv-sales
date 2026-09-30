@@ -153,6 +153,19 @@ const STOP = new Set(("quanto quantos quanta quais qual sobre curso cursos valor
     "sobre para pelo pela pelos pelas esse essa isso este esta isto aqui agora mesmo muito mais menos todas todos " +
     "fazer sendo estou estão estao boa bom dia tarde noite olá ola consigo consegue conseguir preciso precisa " +
     "gostar existe existem voces falar falou poderiam seria teria tenho entrar começar comecar posso").split(/\s+/));
+// Sinônimos do nosso domínio (jeito que a PESSOA pergunta ↔ palavra que o documento/PPC usa de
+// verdade) — cada grupo é bidirecional: a pergunta batendo em QUALQUER termo do grupo soma todos
+// os outros à busca. Não é geral/generativo (decisão do usuário 30/09: sem chamada extra de IA
+// pra manter a busca rápida e sem custo a mais) — é uma lista que a gente vai crescendo conforme
+// aparecer caso real, um item por linha, sem precisar mexer no resto do código.
+const SYNONYM_GROUPS: string[][] = [
+    // achado ao vivo 30/09: PPC nomeia a tabela do corpo docente "Docente", nunca "professor"
+    ["professor", "professores", "docente", "docentes"],
+    ["aluno", "alunos", "discente", "discentes", "estudante", "estudantes"],
+    ["disciplina", "disciplinas", "matéria", "matérias"],
+    ["faculdade", "instituição", "ies"],
+];
+
 export function keywordTerms(text: string): string[] {
     const words = String(text).toLowerCase().match(/[a-zà-ú0-9]{5,}/gi) ?? [];
     const terms = [...new Set(words.filter((w) => !STOP.has(w)).map((w) => (w.length >= 8 ? w.slice(0, w.length - 2) : w)))].slice(0, 6);
@@ -160,12 +173,10 @@ export function keywordTerms(text: string): string[] {
     if (/pre[çc]o|valor|mensalidade|parcela|custa|custo|investimento|desconto|pagar|pagamento/i.test(text)) {
         for (const t of ["parcela", "desconto"]) if (!terms.includes(t)) terms.push(t);
     }
-    // "professor" e "docente" são sinônimos que a pessoa usa pra perguntar, mas o PPC de
-    // TODO curso nomeia a tabela do corpo docente como "Docente" (nunca "professor") — sem
-    // isso, a pergunta "quem são os professores?" nunca batia com a tabela de nomes reais,
-    // mesmo ela existindo na base (achado ao vivo 30/09, PPC de Teologia EAD).
-    if (/professor/i.test(text)) for (const t of ["docente", "docentes"]) if (!terms.includes(t)) terms.push(t);
-    if (/docente/i.test(text)) for (const t of ["professor", "professores"]) if (!terms.includes(t)) terms.push(t);
+    for (const group of SYNONYM_GROUPS) {
+        if (!group.some((t) => text.toLowerCase().includes(t))) continue;
+        for (const t of group) if (!terms.includes(t)) terms.push(t);
+    }
     // "titulação" é a palavra que aparece exatamente no cabeçalho da tabela de nomes ("Docente
     // Área de Formação Titulação...") em todo PPC — sem ela, o trecho genérico "o corpo docente
     // é formado por doutores e mestres" (sem nome nenhum) empata em termos com a tabela de
