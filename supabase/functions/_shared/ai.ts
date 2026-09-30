@@ -160,6 +160,17 @@ export function keywordTerms(text: string): string[] {
     if (/pre[çc]o|valor|mensalidade|parcela|custa|custo|investimento|desconto|pagar|pagamento/i.test(text)) {
         for (const t of ["parcela", "desconto"]) if (!terms.includes(t)) terms.push(t);
     }
+    // "professor" e "docente" são sinônimos que a pessoa usa pra perguntar, mas o PPC de
+    // TODO curso nomeia a tabela do corpo docente como "Docente" (nunca "professor") — sem
+    // isso, a pergunta "quem são os professores?" nunca batia com a tabela de nomes reais,
+    // mesmo ela existindo na base (achado ao vivo 30/09, PPC de Teologia EAD).
+    if (/professor/i.test(text)) for (const t of ["docente", "docentes"]) if (!terms.includes(t)) terms.push(t);
+    if (/docente/i.test(text)) for (const t of ["professor", "professores"]) if (!terms.includes(t)) terms.push(t);
+    // "titulação" é a palavra que aparece exatamente no cabeçalho da tabela de nomes ("Docente
+    // Área de Formação Titulação...") em todo PPC — sem ela, o trecho genérico "o corpo docente
+    // é formado por doutores e mestres" (sem nome nenhum) empata em termos com a tabela de
+    // verdade, e o match_knowledge_keywords só devolve 1 trecho por documento (o outro perde).
+    if (/professor|docente/i.test(text) && !terms.includes("titulação")) terms.push("titulação");
     return terms;
 }
 async function searchOnce(
