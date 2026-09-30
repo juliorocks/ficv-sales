@@ -35,6 +35,10 @@ interface AiSettings {
      * mensagem de despedida configurada em Gestão > VivaConnect > Finalizar) */
     followup_giveup_enabled: boolean
     followup_giveup_hours: number
+    /** janela de horário (0-23, América/São Paulo) em que reengajar/encerrar podem disparar —
+     * pedido do usuário 30/09: estava indo de madrugada (03:30, 07:45) */
+    followup_window_start: number
+    followup_window_end: number
 }
 
 interface ChatMsg {
@@ -153,6 +157,8 @@ export function AiAgentSettings() {
             followup_max_count: Number(form.followup_max_count),
             followup_giveup_enabled: form.followup_giveup_enabled,
             followup_giveup_hours: Number(form.followup_giveup_hours),
+            followup_window_start: Number(form.followup_window_start),
+            followup_window_end: Number(form.followup_window_end),
             updated_at: new Date().toISOString(),
             updated_by: user?.id ?? null,
         }).eq("id", 1).select("id")
@@ -375,6 +381,23 @@ export function AiAgentSettings() {
                         <div className="space-y-2 max-w-[200px]">
                             <Label className={fieldLabel} title="Depois da última tentativa, quantas horas sem resposta até desistir de vez">Sem resposta por (horas)</Label>
                             <Input type="number" min="1" step="1" value={form.followup_giveup_hours} onChange={(e) => set("followup_giveup_hours", Number(e.target.value))} className="bg-muted/20" />
+                        </div>
+
+                        <div className="border-t border-[var(--border)] pt-4">
+                            <p className="text-sm font-bold text-[var(--text-main)]">Horário permitido pra disparar</p>
+                            <p className="text-xs text-muted-foreground">
+                                Vale para os dois de cima (reengajar e encerrar sozinho) — fora desse horário, a IA espera até abrir a janela de novo em vez de mandar mensagem. Padrão: horário comercial.
+                            </p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4 max-w-[300px]">
+                            <div className="space-y-2">
+                                <Label className={fieldLabel} title="Hora em que passa a poder disparar (0-23, horário de Brasília)">De (hora)</Label>
+                                <Input type="number" min="0" max="23" step="1" value={form.followup_window_start} onChange={(e) => set("followup_window_start", Number(e.target.value))} className="bg-muted/20" />
+                            </div>
+                            <div className="space-y-2">
+                                <Label className={fieldLabel} title="Hora até quando pode disparar (1-24, horário de Brasília) — ex.: 20 = até 19h59">Até (hora)</Label>
+                                <Input type="number" min="1" max="24" step="1" value={form.followup_window_end} onChange={(e) => set("followup_window_end", Number(e.target.value))} className="bg-muted/20" />
+                            </div>
                         </div>
                     </div>
 

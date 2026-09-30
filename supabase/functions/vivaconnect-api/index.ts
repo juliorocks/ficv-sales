@@ -482,9 +482,12 @@ function spHour(): number {
 
 /** Follow-up automático (29/09, cron vivaconnect-ai-followups, a cada 15 min): lead que ficou
  *  quieto depois da IA falar algo recebe UMA mensagem de reengajamento, escrita na hora
- *  pelo ai-agent com base no histórico — não um texto fixo. Mesma janela de horário do
- *  outbox (nunca manda fora do expediente); candidatos vêm de ai_followup_candidates()
- *  (SQL — já filtra sessão ativa, silêncio mínimo, limite de tentativas). */
+ *  pelo ai-agent com base no histórico — não um texto fixo. Janela de horário PRÓPRIA
+ *  (ai_agent_settings.followup_window_*, ajustável em Gestão > IA de Atendimento — pedido do
+ *  usuário 30/09: mensagens saindo de madrugada, 03:30/07:45; o gate antigo usava
+ *  vivaconnect_settings.send_window_start/end, que está 0-24 = sem restrição nenhuma, então
+ *  não segurava nada de verdade). Candidatos vêm de ai_followup_candidates() (SQL — já filtra
+ *  sessão ativa, silêncio mínimo, limite de tentativas). */
 async function runFollowups(db: any, settings: any) {
     if (!settings.enabled) return { skipped: "integração desligada" };
     // Bug real (achado 29/09): followup_enabled/followup_after_hours/followup_max_count
@@ -497,7 +500,7 @@ async function runFollowups(db: any, settings: any) {
     const { data: ai } = await db.from("ai_agent_settings").select("*").eq("id", 1).single();
     if (!ai?.followup_enabled) return { skipped: "follow-up desligado" };
     const hour = spHour();
-    if (!(hour >= settings.send_window_start && hour < settings.send_window_end)) return { skipped: "fora da janela de horário" };
+    if (!(hour >= ai.followup_window_start && hour < ai.followup_window_end)) return { skipped: "fora da janela de horário do follow-up" };
 
     const { data: candidates, error: candErr } = await db.rpc("ai_followup_candidates", {
         p_after_hours: ai.followup_after_hours, p_max_count: ai.followup_max_count,
@@ -542,6 +545,11 @@ async function runFollowups(db: any, settings: any) {
 async function runFollowupGiveups(db: any, settings: any) {
     const { data: ai } = await db.from("ai_agent_settings").select("*").eq("id", 1).single();
     if (!ai?.followup_giveup_enabled) return { skipped: "encerramento automático desligado" };
+    // mesma janela do reengajamento (ver runFollowups) — a despedida também é uma mensagem
+    // de verdade pro WhatsApp do lead, não é só um "encerrar por dentro" (achado ao vivo
+    // 30/09: essa função não tinha NENHUM gate de horário, mandava a qualquer hora).
+    const hour = spHour();
+    if (!(hour >= ai.followup_window_start && hour < ai.followup_window_end)) return { skipped: "fora da janela de horário do follow-up" };
 
     const { data: candidates, error: candErr } = await db.rpc("ai_followup_giveup_candidates", {
         p_giveup_hours: ai.followup_giveup_hours, p_max_count: ai.followup_max_count,
