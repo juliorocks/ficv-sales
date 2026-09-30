@@ -88,18 +88,26 @@ const emptyChannel = {
     found: false, name: "", purpose: "pool" as "official" | "pool" | "grupo", kind: "baileys", phone: "", api_id: "",
     zpro_whatsapp_id: "", daily_limit: 40, zpro_info: null as unknown,
     options: [] as { id: string; name: string; number: string | null; type: string | null; status: string | null }[],
-    // canal do Z-PRO que não é WhatsApp (ex.: Instagram) — guarda o `type` bruto pra avisar e
-    // travar o salvamento (ver isWhatsAppType). Achado ao vivo 30/09: sem essa checagem,
-    // kindFromType caía no "baileys" por padrão pra QUALQUER tipo não reconhecido — cadastrava
-    // silenciosamente um canal Instagram como se fosse WhatsApp Baileys.
+    // canal do Z-PRO de um tipo desconhecido (nem WhatsApp, nem um dos "modo captura" abaixo)
+    // — guarda o `type` bruto pra avisar e travar o salvamento (ver isKnownType). Achado ao
+    // vivo 30/09: sem essa checagem, kindFromType caía no "baileys" por padrão pra QUALQUER
+    // tipo não reconhecido — cadastrava silenciosamente um canal Instagram como se fosse
+    // WhatsApp Baileys.
     unsupportedType: null as string | null,
 }
-// tipos de canal que o VivaConnect sabe falar (todos WhatsApp) — qualquer coisa fora disso
-// (instagram, messenger, telegram...) ainda não tem suporte aqui: o parser do webhook nunca
-// viu o formato real desses payloads, e não tem número de telefone pra casar o lead.
+// tipos de canal que o VivaConnect sabe FALAR de verdade (todos WhatsApp).
 const isWhatsAppType = (t: string | null) => !t || /baileys|whatsapp|waba|hybrid|hibrid|cloud|meta/i.test(t)
+// tipos reconhecidos mas só em "modo captura" (30/09, pedido do usuário: "claro que eu quero
+// o Instagram também") — o canal grava o payload bruto (vivaconnect_webhook_logs) sem tentar
+// responder nada: o formato real da mensagem do Instagram no Z-PRO nunca foi visto (não tem
+// número de telefone pra casar lead), então o primeiro passo é COLETAR um payload de verdade
+// pra então adaptar o parser (mesmo método já usado pra outros formatos novos neste projeto).
+const CAPTURE_TYPES = ["instagram"]
+const isKnownType = (t: string | null) => isWhatsAppType(t) || CAPTURE_TYPES.some((c) => String(t ?? "").toLowerCase().includes(c))
 const kindFromType = (t: string | null) => {
     const v = String(t ?? "").toLowerCase()
+    const capture = CAPTURE_TYPES.find((c) => v.includes(c))
+    if (capture) return capture
     return v.includes("hybrid") || v.includes("hibrid") ? "hybrid" : v.includes("waba") || v.includes("cloud") || v.includes("meta") ? "waba" : "baileys"
 }
 
@@ -187,7 +195,7 @@ export function VivaConnectSettings() {
         if (!o) return { ...ch, zpro_whatsapp_id: id }
         return {
             ...ch, zpro_whatsapp_id: o.id, name: o.name, phone: o.number ?? "", kind: kindFromType(o.type),
-            unsupportedType: isWhatsAppType(o.type) ? null : o.type,
+            unsupportedType: isKnownType(o.type) ? null : o.type,
         }
     }
 
@@ -365,7 +373,12 @@ export function VivaConnectSettings() {
                                         )}
                                         {newCh.unsupportedType && (
                                             <p className="col-span-2 text-xs text-amber-500 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">
-                                                ⚠️ Este canal é do tipo <b>{newCh.unsupportedType}</b> — o VivaConnect ainda só sabe falar WhatsApp (Baileys/WABA/Híbrido). Não tem número de telefone pra casar o lead e o formato da mensagem nunca foi testado aqui; salvar assim não vai funcionar. Peça pra construir suporte a esse canal antes de cadastrar.
+                                                ⚠️ Este canal é do tipo <b>{newCh.unsupportedType}</b> — o VivaConnect ainda só sabe falar WhatsApp (Baileys/WABA/Híbrido) ou capturar Instagram (ver abaixo). Peça pra construir suporte a esse canal antes de cadastrar.
+                                            </p>
+                                        )}
+                                        {newCh.kind === "instagram" && (
+                                            <p className="col-span-2 text-xs text-sky-400 bg-sky-400/10 border border-sky-400/30 rounded-md px-3 py-2">
+                                                🧪 Modo captura: esse canal só vai GRAVAR as mensagens brutas recebidas (pra dar pra montar o suporte de verdade depois) — não responde nada, não vira lead ainda. IA/Hub já nascem desligados aqui.
                                             </p>
                                         )}
                                         <div className="space-y-1"><Label className={fieldLabel}>Nome</Label>
@@ -385,6 +398,7 @@ export function VivaConnectSettings() {
                                                 <option value="baileys">Baileys</option>
                                                 <option value="waba">WABA</option>
                                                 <option value="hybrid">Híbrido</option>
+                                                <option value="instagram">Instagram (captura)</option>
                                             </select></div>
                                         <div className="space-y-1"><Label className={fieldLabel}>Limite de 1ªs mensagens/dia</Label>
                                             <Input type="number" value={newCh.daily_limit} onChange={(e) => setNewCh({ ...newCh, daily_limit: Number(e.target.value) })} className="bg-muted/20" /></div>

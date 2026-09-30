@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
 
     const reqChannel = Number(url.searchParams.get("channel")) || null;
     const { data: ch } = reqChannel
-        ? await db.from("vivaconnect_channels").select("id, name, purpose, zpro_whatsapp_id, ai_enabled, hub_enabled, zpro_type, zpro_hybrid_mode").eq("id", reqChannel).maybeSingle()
+        ? await db.from("vivaconnect_channels").select("id, name, purpose, kind, zpro_whatsapp_id, ai_enabled, hub_enabled, zpro_type, zpro_hybrid_mode").eq("id", reqChannel).maybeSingle()
         : { data: null };
     const raw = await req.text();
     let payload: any;
@@ -87,6 +87,12 @@ Deno.serve(async (req) => {
         if (!settings.enabled) return await done(ch ? "logged:integração desligada" : `logged:integração desligada; canal desconhecido (?channel=${reqChannel ?? "faltando"})`);
 
         if (!ch) return await done(`ignored:canal desconhecido (?channel=${reqChannel ?? "faltando"})`);
+        // canal "modo captura" (Instagram, 30/09) — o payload bruto já foi gravado acima
+        // (vivaconnect_webhook_logs); NÃO tenta processar como WhatsApp: o formato real da
+        // mensagem do Instagram no Z-PRO nunca foi visto (não tem número de telefone pra
+        // casar/criar lead), então parseWebhook/findLeadByPhone/etc. daria resultado
+        // imprevisível. Este log bruto é justamente o material pra adaptar o parser depois.
+        if (ch.kind === "instagram") return await done("logged:instagram (modo captura — parser ainda não suporta)");
         // número de OUTRA empresa do grupo (só usado pelo Hub pra avisar): nunca vira lead da Faculdade
         if (ch.purpose === "grupo") return await done("ignored:canal de outra empresa do grupo");
 
