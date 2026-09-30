@@ -316,6 +316,15 @@ export function AlunoFinanceiro() {
 
 type Disciplina = { disciplina: string; modulo: number | null; notas: string[]; media: string | null; faltas: string | null; situacao: string | null }
 
+// Aprovado em verde, reprovado em vermelho, em recuperação/cursando em âmbar — pedido do usuário
+// 29/09. Reprovado primeiro na checagem: "reprovado por falta" também bate em /aprovado/ se fosse
+// checado depois (contém "provado").
+const situacaoCor = (s: string | null) =>
+  s && /reprovad/i.test(s) ? 'text-red-500 dark:text-red-400'
+    : s && /aprovad/i.test(s) ? 'text-green-600 dark:text-green-400'
+    : s && /recupera|cursando/i.test(s) ? 'text-amber-600 dark:text-amber-400'
+    : 'text-[var(--text-main)]'
+
 export function AlunoNotas({ foco }: { foco?: NotasFoco | null }) {
   const q = useOverview()
   // um curso (ex.: Bacharelado em Teologia - EAD) reúne todos os períodos/turmas em que o aluno esteve
@@ -389,8 +398,8 @@ export function AlunoNotas({ foco }: { foco?: NotasFoco | null }) {
                       </p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="text-lg font-bold text-[var(--text-main)]">{d.media ?? '—'}</p>
-                      <p className="text-[11px] text-[var(--text-muted)]">{d.situacao ?? (d.media ? 'média' : 'sem nota')}</p>
+                      <p className={`text-lg font-bold ${situacaoCor(d.situacao)}`}>{d.media ?? '—'}</p>
+                      <p className={`text-[11px] ${d.situacao ? situacaoCor(d.situacao) : 'text-[var(--text-muted)]'}`}>{d.situacao ?? (d.media ? 'média' : 'sem nota')}</p>
                     </div>
                   </div>
                 ))}

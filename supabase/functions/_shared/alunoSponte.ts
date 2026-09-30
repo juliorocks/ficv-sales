@@ -61,14 +61,26 @@ const notaDe = (r: Record<string, string>, i: number) => {
     const apos = n(r[`NotaAposRec${i}`]);
     return n(r[`Recuperacao${i}`]) && apos && brNum(apos) > 0 ? apos : n(r[`Nota${i}`]);
 };
+// O Sponte lança nota em escala diferente conforme o curso/turma (achado ao vivo 29/09: turma
+// presencial vinha 0–100 — "85,0" —, turma EAD já vinha 0–10 — "5,9"). Nota válida em 0–10 NUNCA
+// passa de 10 — qualquer valor MAIOR só pode estar na escala 0–100, então normaliza dividindo por
+// 10, sem precisar saber de antemão qual curso usa qual escala.
+function escala10(v: string | null): string | null {
+    if (!v) return v;
+    const num = brNum(v);
+    if (!num && v.trim() !== "0" && !/^0([.,]0*)?$/.test(v.trim())) return v; // não parseou — devolve cru
+    const ajustado = num > 10 ? num / 10 : num;
+    return ajustado.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
 async function boletimDaTurma(A: number, turma: number): Promise<Disciplina[]> {
     const xb = await sponteCall("GetBoletim", { nAlunoID: A, nTurmaID: turma, nDisciplinaID: 0, nModulo: 0 });
     return records(xb, "NotasBoletim").map((r) => {
-        const notas = [1, 2, 3, 4].map((i) => notaDe(r, i)).filter((v): v is string => !!v);
+        const notasRaw = [1, 2, 3, 4].map((i) => notaDe(r, i)).filter((v): v is string => !!v);
+        // o Sponte da FICV não preenche Media/MediaFinal — com uma nota só, ela é o resultado
+        const mediaRaw = n(r.MediaFinal) ?? n(r.Media) ?? (notasRaw.length === 1 ? notasRaw[0] : null);
         return {
-            disciplina: r.Disciplina, modulo: Number(r.Modulo) || null, notas,
-            // o Sponte da FICV não preenche Media/MediaFinal — com uma nota só, ela é o resultado
-            media: n(r.MediaFinal) ?? n(r.Media) ?? (notas.length === 1 ? notas[0] : null),
+            disciplina: r.Disciplina, modulo: Number(r.Modulo) || null,
+            notas: notasRaw.map((v) => escala10(v)!), media: escala10(mediaRaw),
             faltas: n(r.TotalFaltas), situacao: n(r.SituacaoDidatica),
         };
     });
