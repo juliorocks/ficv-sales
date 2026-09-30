@@ -8,6 +8,12 @@
  * Abas = as MESMAS etapas do Kanban (pedido do usuário 30/09, "mesma nomenclatura pra
  * facilitar") — lidas de `stages` dinamicamente, igual o KanbanBoard já faz, em vez de
  * hardcoded: se uma etapa for renomeada/reordenada/criada, esta tela acompanha sozinha.
+ *
+ * Contagem por etapa = leads_stage_counts, a MESMA function que alimenta o selo do Kanban
+ * (pedido explícito do usuário 30/09: "tem que ser iguais, sempre" — sendo a mesma query,
+ * os dois números ficam estruturalmente impossíveis de divergir). A lista também traz TODO
+ * lead da etapa agora, com ou sem conversa (antes só entrava quem tinha mensagem nos
+ * últimos 60 dias — por isso os números batiam diferente do Kanban).
  */
 import { useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
@@ -22,12 +28,15 @@ interface Stage { id: number; name: string; order: number }
 interface Row {
     lead_id: number; nome: string; telefone: string | null; email: string | null; stage_id: number; stage_name: string
     assigned_to_id: string | null; atendente: string | null; perfil: string | null; widechat_contact_id: string | null
-    last_at: string; last_message: string | null; last_origin: string; last_type: string; last_provider: string | null
+    last_at: string; last_message: string | null; last_origin: string | null; last_type: string | null; last_provider: string | null
     pending_count: number
 }
 
 const initials = (n: string) => n.trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "").join("") || "?"
+// lead sem NENHUMA mensagem ainda (agora entra na lista também — pedido do usuário 30/09,
+// "puxar todos os leads, igual no kanban") não tem last_message/last_origin nenhum
 const preview = (r: Row) => {
+    if (!r.last_message && !r.last_type) return "Sem mensagens ainda"
     const t = r.last_type && r.last_type !== "text" && r.last_type !== "template"
         ? ({ images: "📷 Imagem", sounds: "🎤 Áudio", videos: "🎬 Vídeo", files: "📎 Arquivo" } as Record<string, string>)[r.last_type] ?? `[${r.last_type}]`
         : (r.last_message ?? "")
@@ -80,11 +89,16 @@ export function AtendimentosView({ assigneeFilter = "all", teamAgentIds }: { ass
         enabled: tab != null,
         refetchInterval: 15000,
     })
-    // total por etapa, pro selo numérico em CADA aba (igual o Kanban) — independe da aba aberta
+    // total por etapa, pro selo numérico em CADA aba — MESMA function que alimenta o selo do
+    // Kanban (leads_stage_counts), não uma versão própria: garante que os dois números nunca
+    // divergem, por construção (pedido explícito do usuário 30/09, "tem que ser sempre iguais").
+    // Não leva p_search — o Kanban também não recalcula o selo durante busca de texto.
     const { data: counts = {} } = useQuery<Record<number, number>>({
-        queryKey: ["inbox-leads-counts", filtros],
+        queryKey: ["leads-stage-counts", filtros.p_assignee, filtros.p_agents, filtros.p_no_owner],
         queryFn: async () => {
-            const { data, error } = await supabase.rpc("inbox_leads_counts", filtros)
+            const { data, error } = await supabase.rpc("leads_stage_counts", {
+                p_assignee: filtros.p_assignee, p_agents: filtros.p_agents, p_no_owner: filtros.p_no_owner,
+            })
             if (error) throw error
             return Object.fromEntries(((data ?? []) as { stage_id: number; total: number }[]).map((r) => [r.stage_id, r.total]))
         },
@@ -127,8 +141,12 @@ export function AtendimentosView({ assigneeFilter = "all", teamAgentIds }: { ass
                                 className={`w-full text-left flex gap-3 px-3 py-3 border-b border-[var(--border)]/60 transition-colors ${on ? "bg-primary/10 border-l-4 border-l-primary" : "hover:bg-[var(--bg-card-hover)] border-l-4 border-l-transparent"}`}>
                                 <div className="relative shrink-0">
                                     <div className="h-10 w-10 rounded-full bg-primary/15 text-primary flex items-center justify-center text-sm font-bold">{initials(r.nome)}</div>
-                                    <span title={r.last_provider === "vivaconnect" ? "VivaConnect" : "WideChat"}
-                                        className={`absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-[var(--bg-card)] ${r.last_provider === "vivaconnect" ? "bg-violet-500" : "bg-green-500"}`} />
+                                    {/* lead sem mensagem nenhuma ainda (agora entra na lista, pedido 30/09) não tem
+                                        provider — ponto cinza em vez de "adivinhar" um canal que não existe */}
+                                    {r.last_provider && (
+                                        <span title={r.last_provider === "vivaconnect" ? "VivaConnect" : "WideChat"}
+                                            className={`absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-[var(--bg-card)] ${r.last_provider === "vivaconnect" ? "bg-violet-500" : "bg-green-500"}`} />
+                                    )}
                                 </div>
                                 <div className="min-w-0 flex-1">
                                     <div className="flex items-center justify-between gap-2">
