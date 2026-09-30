@@ -40,6 +40,10 @@ interface KanbanColumnProps {
     courses: Course[];
     /** canais (números) do VivaConnect, pro selo de canal no card */
     channels?: { id: number; name: string; phone: string | null }[];
+    /** total de VERDADE da etapa (COUNT no banco, sem o limite de busca de 300/1000 linhas)
+     * — usado no selo do cabeçalho quando não há filtro local ativo nesta coluna; undefined =
+     * não calculado agora (busca de texto ativa, etc.), cai pro tamanho do array já buscado. */
+    stageTotal?: number;
     pendingByLead?: Map<number, number>;
     /** leads que já tiveram alguma resposta da IA (ai_lead_sessions.ai_turns > 0) — selo de robô no card */
     aiTouchedLeads?: Set<number>;
@@ -51,7 +55,7 @@ type SortOption = {
     direction: 'asc' | 'desc';
 };
 
-export function KanbanColumn({ stage, leads, users, leadSources, courses, channels, index, allStages, pendingByLead, aiTouchedLeads }: KanbanColumnProps) {
+export function KanbanColumn({ stage, leads, users, leadSources, courses, channels, stageTotal, index, allStages, pendingByLead, aiTouchedLeads }: KanbanColumnProps) {
     const queryClient = useQueryClient();
     const { user } = useAuth();
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -222,7 +226,11 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, channe
                                     <p className="text-sm font-semibold text-green-600 dark:text-green-400">{formattedValue}</p>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    <span className="text-sm font-medium bg-primary/10 text-primary px-2 py-1 rounded-full">{sortedLeads.length}</span>
+                                    <span className="text-sm font-medium bg-primary/10 text-primary px-2 py-1 rounded-full">
+                                        {/* sem filtro local nesta coluna → total de VERDADE (COUNT no banco); com filtro
+                                            (curso/busca/prioridade) → o que sobrou depois de filtrar, igual sempre foi */}
+                                        {stageTotal != null && courseFilter == null && !debouncedLocalSearchTerm && !priorityOnly ? stageTotal : sortedLeads.length}
+                                    </span>
                                     {user?.role === 'admin' && (
                                         <DropdownMenu>
                                             <DropdownMenuTrigger asChild>

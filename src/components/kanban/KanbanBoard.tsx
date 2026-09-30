@@ -82,6 +82,29 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
         retry: 1,
     })
 
+    // Contagem de VERDADE por etapa (achado ao vivo 30/09: o selo "Finalizado 300" não era
+    // o total real — era o limite de busca de 300 linhas das etapas fechadas reaparecendo
+    // como se fosse contagem; tinha 2131 de verdade). Mesma lógica de atendente/departamento
+    // do filtro client-side abaixo, mas via COUNT no banco — não trava no limite de busca.
+    // Não calcula durante busca de texto nem no modo "sem atendente" (semânticas que o filtro
+    // client-side trata diferente do parâmetro da RPC) — nesses casos o selo cai de volta pro
+    // tamanho do array já buscado, como sempre foi.
+    const stageCountsAgents = teamAgentIds?.filter((id) => id !== '__unassigned__');
+    const { data: stageCounts } = useQuery<Record<number, number>>({
+        queryKey: ['leads_stage_counts', assigneeFilter, teamAgentIds],
+        queryFn: async () => {
+            const { data, error } = await supabase.rpc('leads_stage_counts', {
+                p_assignee: assigneeFilter !== 'all' && assigneeFilter !== 'unassigned' ? assigneeFilter : null,
+                p_agents: teamAgentIds ? stageCountsAgents : null,
+                p_no_owner: !!teamAgentIds?.includes('__unassigned__'),
+            });
+            if (error) throw error;
+            return Object.fromEntries(((data ?? []) as { stage_id: number; total: number }[]).map((r) => [r.stage_id, r.total]));
+        },
+        enabled: !isAuthLoading && !!user && !searchTerm.trim() && assigneeFilter !== 'unassigned',
+        staleTime: 30 * 1000,
+    });
+
     // Restrição de canal do VivaConnect (Gestão > VivaConnect > "Quem atende cada
     // canal"): sem nenhuma linha pro agente logado = sem restrição (vê tudo, como
     // sempre); com pelo menos 1 canal marcado, só enxerga leads desses canais + leads
@@ -460,6 +483,7 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
                                     leadSources={leadSources || []}
                                     courses={courses || []}
                                     channels={vivaconnectChannels || []}
+                                    stageTotal={stageCounts?.[stage.id]}
                                     index={index}
                                     allStages={orderedStages}
                                     pendingByLead={pendingByLead}
