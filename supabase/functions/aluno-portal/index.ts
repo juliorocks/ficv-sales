@@ -10,6 +10,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { nivelDoCurso } from "../_shared/sponte.ts";
 import { alunoBoletim, alunoBoletins, alunoFoto, alunoOverview, alunoPagamento } from "../_shared/alunoSponte.ts";
+import { moodleAvaliacoes, moodleCourses, moodleUserId } from "../_shared/alunoMoodle.ts";
 
 const cors = {
     "Access-Control-Allow-Origin": "*",
@@ -17,6 +18,32 @@ const cors = {
 };
 const j = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
 const n = (v?: string) => (v && v.trim() !== "" ? v.trim() : null);
+
+// Completa com o Moodle as disciplinas que o Sponte NÃO lança em detalhe (turma EAD — ver
+// _shared/alunoMoodle.ts) — pedido do usuário 01/10: "casar" as duas fontes pra o painel de
+// notas ficar 100% completo. Só mexe em disciplina sem `avaliacoes` (turma presencial já vem
+// cheia do Sponte, nunca é sobrescrita). Só entra no Moodle se precisar — aluno 100%
+// presencial não gasta a chamada à toa. Nunca derruba a tela: qualquer falha no Moodle
+// (fora do ar, aluno sem conta lá, disciplina sem correspondente) deixa a disciplina como
+// já estava, só com o que o Sponte tinha.
+async function completarComMoodle(turmas: { turma_id: number; disciplinas: { avaliacoes: unknown[] | null; media: string | null; disciplina: string }[] }[], email: string | null) {
+    const precisa = turmas.some((t) => t.disciplinas.some((d) => !d.avaliacoes?.length));
+    if (!precisa) return;
+    const uid = await moodleUserId(email);
+    if (!uid) return;
+    const cursos = await moodleCourses(uid);
+    if (!cursos.length) return;
+    for (const t of turmas) {
+        for (const d of t.disciplinas) {
+            if (d.avaliacoes?.length) continue;
+            const m = await moodleAvaliacoes(uid, cursos, d.disciplina);
+            if (m?.avaliacoes.length) {
+                (d as any).avaliacoes = m.avaliacoes;
+                if (!d.media && m.media) (d as any).media = m.media;
+            }
+        }
+    }
+}
 
 Deno.serve(async (req) => {
     if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -57,6 +84,7 @@ Deno.serve(async (req) => {
             if (!ids.length) return j({ error: "turma_ids obrigatório." }, 400);
             const turmas = await alunoBoletins(A, ids);
             if (!turmas) return j({ error: "Turma não encontrada." }, 404);
+            await completarComMoodle(turmas, aluno.email ?? null);
             return j({ turmas });
         }
 
@@ -65,6 +93,7 @@ Deno.serve(async (req) => {
             if (!turma) return j({ error: "turma_id obrigatório." }, 400);
             const disciplinas = await alunoBoletim(A, turma);
             if (!disciplinas) return j({ error: "Turma não encontrada." }, 404);
+            await completarComMoodle([{ turma_id: turma, disciplinas }], aluno.email ?? null);
             return j({ disciplinas });
         }
 

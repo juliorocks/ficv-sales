@@ -239,6 +239,38 @@ Deno.serve(async (req) => {
             return jsonRes(t);
         }
 
+        // moodle_call — proxy genérico pra QUALQUER wsfunction liberada no token (admin-only,
+        // nunca devolve o token). Criado 01/10 pra validar na prática quais das funções que o
+        // desenvolvedor do Moodle liberou realmente respondem (o Moodle não expõe uma lista de
+        // "o que esse token pode chamar" — só testando função por função dá pra saber) e, depois,
+        // pra qualquer chamada pontual sem precisar escrever uma rota nova cada vez.
+        if (action === "moodle_call") {
+            const fn = String(body.function ?? "").trim();
+            if (!fn) return jsonRes({ error: "Informe a função (wsfunction)." }, 400);
+            const raw = (await getSecret("MOODLE_URL")).replace(/\/+$/, "");
+            const url = raw.replace(/\/webservice\/rest\/server\.php$/i, "");
+            const token = await getSecret("MOODLE_TOKEN");
+            if (!url) return jsonRes({ error: "Endereço do Moodle não configurado." }, 400);
+            if (!token) return jsonRes({ error: "Token do Moodle não configurado." }, 400);
+            const params = new URLSearchParams({ wstoken: token, wsfunction: fn, moodlewsrestformat: "json" });
+            // Moodle espera PHP-style: lista vira chave[0]=x&chave[1]=y, objeto vira
+            // chave[campo]=x (não JSON) — e os dois se aninham (ex.: criteria[0][key]=email),
+            // por isso recursivo (achado ao vivo 01/10: o 1º jeito, só pra array de valor
+            // simples, virava "[object Object]" pra array de objeto, tipo `criteria`).
+            const appendParam = (key: string, v: unknown): void => {
+                if (v == null) return;
+                if (Array.isArray(v)) v.forEach((vv, i) => appendParam(`${key}[${i}]`, vv));
+                else if (typeof v === "object") Object.entries(v as Record<string, unknown>).forEach(([k2, v2]) => appendParam(`${key}[${k2}]`, v2));
+                else params.append(key, String(v));
+            };
+            for (const [k, v] of Object.entries(body.params ?? {})) {
+                appendParam(k, v);
+            }
+            const r = await fetch(`${url}/webservice/rest/server.php?${params}`, { signal: AbortSignal.timeout(20000) });
+            const d = await r.json().catch(() => null);
+            return jsonRes({ ok: r.ok && !d?.exception, status: r.status, function: fn, data: d });
+        }
+
         if (action === "list") {
             const { data: st } = await db.from("integration_status").select("*");
             const inboundKey = (await db.from("app_internal").select("value").eq("key", "inbound_key").maybeSingle()).data?.value;
