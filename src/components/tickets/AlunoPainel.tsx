@@ -314,7 +314,14 @@ export function AlunoFinanceiro() {
 
 // ── Notas ────────────────────────────────────────────────────
 
-type Disciplina = { disciplina: string; modulo: number | null; notas: string[]; media: string | null; faltas: string | null; situacao: string | null }
+type Avaliacao = { nome: string; nota: string }
+type Disciplina = {
+  disciplina: string; modulo: number | null; notas: string[]; media: string | null; faltas: string | null; situacao: string | null
+  // 01/10: AV1/AV2 nomeados (só turma presencial lança assim no Sponte; achado ao vivo
+  // comparando print do Sponte com o do Moodle) e Exame Final (só quando a disciplina tem
+  // exame e a nota já foi lançada) — ver alunoSponte.ts
+  avaliacoes: Avaliacao[] | null; exame_final: string | null
+}
 
 // Aprovado em verde, reprovado em vermelho, em recuperação/cursando em âmbar — pedido do usuário
 // 29/09. Reprovado primeiro na checagem: "reprovado por falta" também bate em /aprovado/ se fosse
@@ -389,20 +396,30 @@ export function AlunoNotas({ foco }: { foco?: NotasFoco | null }) {
               </summary>
               <div className="px-4 pb-1 divide-y divide-[var(--border)] border-t border-[var(--border)]">
                 {disciplinas.length === 0 && <p className="py-3 text-sm text-[var(--text-muted)]">Nenhuma disciplina lançada neste período.</p>}
-                {disciplinas.map((d, i) => (
+                {disciplinas.map((d, i) => {
+                  // AV1/AV2 nomeados (só presencial lança assim) ganham prioridade sobre a
+                  // lista genérica de notas — é o mesmo detalhe que o Sponte mostra pro
+                  // professor, só que sem precisar abrir o sistema acadêmico
+                  const detalhe = [
+                    d.modulo ? `Módulo ${d.modulo}` : null,
+                    d.avaliacoes?.length ? d.avaliacoes.map((a) => `${a.nome} ${a.nota}`).join(' · ')
+                      : d.notas.length > 1 ? `notas ${d.notas.join(' · ')}` : null,
+                    d.exame_final ? `Exame Final ${d.exame_final}` : null,
+                    d.faltas ? `${d.faltas} falta(s)` : null,
+                  ].filter(Boolean).join(' · ')
+                  return (
                   <div key={i} className="py-3 flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-sm text-[var(--text-main)] leading-snug">{d.disciplina}</p>
-                      <p className="text-xs text-[var(--text-muted)]">
-                        {d.modulo ? `Módulo ${d.modulo}` : ''}{d.notas.length > 1 ? ` · notas ${d.notas.join(' · ')}` : ''}{d.faltas ? ` · ${d.faltas} falta(s)` : ''}
-                      </p>
+                      {detalhe && <p className="text-xs text-[var(--text-muted)]">{detalhe}</p>}
                     </div>
                     <div className="text-right shrink-0">
                       <p className={`text-lg font-bold ${situacaoCor(d.situacao)}`}>{d.media ?? '—'}</p>
                       <p className={`text-[11px] ${d.situacao ? situacaoCor(d.situacao) : 'text-[var(--text-muted)]'}`}>{d.situacao ?? (d.media ? 'média' : 'sem nota')}</p>
                     </div>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             </details>
           ))}

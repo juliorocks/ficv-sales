@@ -53,7 +53,15 @@ export async function alunoOverview(A: number) {
     };
 }
 
-type Disciplina = { disciplina: string; modulo: number | null; notas: string[]; media: string | null; faltas: string | null; situacao: string | null };
+type Avaliacao = { nome: string; nota: string };
+type Disciplina = {
+    disciplina: string; modulo: number | null; notas: string[]; media: string | null; faltas: string | null; situacao: string | null;
+    // 01/10: achado ao vivo com os prints que o usuário trouxe (Sponte "Lançamento de notas" +
+    // Moodle) — ver avaliacoesPorDisciplina() logo abaixo pra entender por que só turma
+    // presencial preenche isto.
+    avaliacoes: Avaliacao[] | null;
+    exame_final: string | null;
+};
 
 // NotaAposRec vem "0" (não vazio) quando NÃO houve recuperação — só vale se Recuperacao foi lançada.
 // Antes o "0" ganhava da Nota real (ex.: Nota1=85,0 aparecia como sem nota).
@@ -72,16 +80,58 @@ function escala10(v: string | null): string | null {
     const ajustado = num > 10 ? num / 10 : num;
     return ajustado.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 }
+// GetNotaParcial — descoberto ao vivo 01/10 (o usuário trouxe o print do Sponte "Lançamento de
+// notas", com colunas AV1/AV2/Média prevista, pra comparar com o Moodle). O GetBoletim normal só
+// devolve a nota JÁ CONSOLIDADA (Nota1 = a média de AV1+AV2, sem abrir os dois valores) — é por
+// isso que turma presencial sempre aparecia com "uma nota só" aqui, mesmo tendo lançamento em
+// duas partes lá no painel do professor. Esta chamada traz o detalhe por avaliação (AV1, AV2…,
+// cada uma com o nome que o próprio Sponte usa) — mas só existe pra quem usa esse sistema de
+// "Avaliação Parcial": testado ao vivo com turma EAD real (mesma disciplina do print do Moodle)
+// e não veio nada — EAD não lança por aqui, o detalhe por avaliação do EAD mora só dentro do
+// Moodle (integração ainda não está no ar, ver Gestão > Integrações).
+// Pegadinha de parâmetro (achada testando, não documentada): sParametrosBusca PRECISA ir
+// presente mesmo vazio, e SEM DisciplinaID — com DisciplinaID=0 a API devolve erro "02"; só
+// manda numa disciplina específica (DisciplinaID=X) se quiser UMA; vazio devolve TODAS as
+// disciplinas da turma de uma vez, uma chamada só (sem precisar de N chamadas por disciplina).
+async function avaliacoesPorDisciplina(A: number, turma: number): Promise<Map<number, Avaliacao[]>> {
+    const map = new Map<number, Avaliacao[]>();
+    let x: string;
+    try {
+        x = await sponteCall("GetNotaParcial", { nCursoID: 0, nTurmaID: turma, nAlunoID: A, sParametrosBusca: "" });
+    } catch {
+        return map; // melhor mostrar só a média (como sempre foi) do que quebrar o boletim inteiro
+    }
+    for (const bloco of x.matchAll(/<wsDisciplinasNotasParciais>([\s\S]*?)<\/wsDisciplinasNotasParciais>/g)) {
+        const discId = Number((bloco[1].match(/<DisciplinaID>([^<]*)</) ?? [])[1]);
+        if (!discId) continue;
+        const avaliacoes = [...bloco[1].matchAll(/<wsNotaParcial>([\s\S]*?)<\/wsNotaParcial>/g)].map((a) => ({
+            nome: (a[1].match(/<NomeAvaliacao>([^<]*)</) ?? [])[1] ?? "",
+            nota: escala10((a[1].match(/<Nota>([^<]*)</) ?? [])[1] ?? null) ?? "",
+        })).filter((a) => a.nome && a.nota);
+        if (avaliacoes.length) map.set(discId, avaliacoes);
+    }
+    return map;
+}
+
 async function boletimDaTurma(A: number, turma: number): Promise<Disciplina[]> {
-    const xb = await sponteCall("GetBoletim", { nAlunoID: A, nTurmaID: turma, nDisciplinaID: 0, nModulo: 0 });
+    const [xb, porDisciplina] = await Promise.all([
+        sponteCall("GetBoletim", { nAlunoID: A, nTurmaID: turma, nDisciplinaID: 0, nModulo: 0 }),
+        avaliacoesPorDisciplina(A, turma),
+    ]);
     return records(xb, "NotasBoletim").map((r) => {
         const notasRaw = [1, 2, 3, 4].map((i) => notaDe(r, i)).filter((v): v is string => !!v);
         // o Sponte da FICV não preenche Media/MediaFinal — com uma nota só, ela é o resultado
         const mediaRaw = n(r.MediaFinal) ?? n(r.Media) ?? (notasRaw.length === 1 ? notasRaw[0] : null);
+        // Exame Final: campo próprio (ExameFinal), separado de Nota1-4 — só existe de verdade
+        // quando a disciplina tem exame (TemExame) e a nota já foi lançada (>0); "0,0" com
+        // TemExame=Sim é só "ainda não fez", não é zero de verdade.
+        const exameRaw = /^sim$/i.test(r.TemExame ?? "") ? escala10(n(r.ExameFinal)) : null;
         return {
             disciplina: r.Disciplina, modulo: Number(r.Modulo) || null,
             notas: notasRaw.map((v) => escala10(v)!), media: escala10(mediaRaw),
             faltas: n(r.TotalFaltas), situacao: n(r.SituacaoDidatica),
+            avaliacoes: porDisciplina.get(Number(r.DisciplinaID)) ?? null,
+            exame_final: exameRaw && brNum(exameRaw) > 0 ? exameRaw : null,
         };
     });
 }
