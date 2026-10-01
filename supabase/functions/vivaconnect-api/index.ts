@@ -648,6 +648,20 @@ async function runLeadFollowups(db: any, settings: any) {
                 lead_id: f.lead_id, created_at: ts,
                 note: `🔔 Follow-up automático enviado${senderName ? ` (assinado como ${senderName})` : ""}: "${res.reply}"`,
             });
+            // Nota interna NA PRÓPRIA CONVERSA (pedido do usuário 01/10: "com o tempo a gente
+            // esquece dos atendimentos" — quer a referência ali, não só na aba Histórico onde o
+            // lead_notes acima já cai). Mesmo mecanismo da nota manual (widechat_messages.
+            // interno=true, ver [[project_lead_internal_notes]]) — nunca sai pro cliente, fica
+            // intercalada logo depois da mensagem de verdade (created_at > ts do sendRow, que já
+            // rodou e gravou a mensagem real antes desta linha). raw_data.followup_id é o que a
+            // tela usa pra virar um link clicável até o card do follow-up (ver LeadFollowupPanel).
+            await db.from("widechat_messages").insert({
+                lead_id: f.lead_id, provider: "vivaconnect", channel_id: ch.id,
+                type: "text", origin: "agent", interno: true,
+                message: `🤖📅 Mensagem enviada automaticamente pelo Follow-up agendado${f.note ? ` — "${f.note}"` : ""}${senderName ? ` (responsável: ${senderName})` : ""}.`,
+                raw_data: { kind: "followup_auto", followup_id: f.id },
+                created_at: ts,
+            });
             out.sent++;
         } else {
             out.failed++; out.details.push(`followup #${f.id}: ${sendRes.error}`);

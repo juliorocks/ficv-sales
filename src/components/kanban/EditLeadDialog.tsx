@@ -63,6 +63,9 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
     const queryClient = useQueryClient()
     const { user, isLoading: isAuthLoading } = useAuth()
     const [isLossReasonOpen, setIsLossReasonOpen] = useState(false)
+    // "Ver follow-up →" na nota automática (01/10) — rola até o card do follow-up logo abaixo,
+    // na mesma aba (ver LeadFollowupPanel.highlightFollowupId)
+    const [highlightFollowupId, setHighlightFollowupId] = useState<number | null>(null)
 
     const { data: users, isLoading: isLoadingUsers } = useQuery<User[]>({
         queryKey: ['users'],
@@ -438,8 +441,8 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
                         </TabsContent>
                         <TabsContent value="chat">
                             <div className="py-2 max-h-[78vh] overflow-y-auto pr-2 space-y-4">
-                                <WideChatHistory widechatContactId={lead.widechat_contact_id || ""} leadId={lead.id} telefone={lead.telefone} leadName={lead.nome_completo} />
-                                <LeadFollowupPanel lead={lead} users={users || []} />
+                                <WideChatHistory widechatContactId={lead.widechat_contact_id || ""} leadId={lead.id} telefone={lead.telefone} leadName={lead.nome_completo} onOpenFollowup={setHighlightFollowupId} />
+                                <LeadFollowupPanel lead={lead} users={users || []} highlightFollowupId={highlightFollowupId} />
                             </div>
                         </TabsContent>
                         <TabsContent value="history">

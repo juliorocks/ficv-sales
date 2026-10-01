@@ -4,7 +4,7 @@
  * componentes do card (LeadHistoryFeed, AddLeadNoteForm, LeadFollowupPanel).
  * Etapa e atendente mudam aqui mesmo; o resto em "Editar contato" (ficha completa).
  */
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { CalendarDays, GraduationCap, Loader2, Mail, Megaphone, Phone, PencilLine, Thermometer, UserRound, Wallet, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
@@ -30,11 +30,14 @@ function Row({ icon: I, label, children }: { icon: any; label: string; children:
     )
 }
 
-export function ContactDetailsPanel({ leadId, onClose }: { leadId: number; onClose: () => void }) {
+export function ContactDetailsPanel({ leadId, onClose, highlightFollowupId }: { leadId: number; onClose: () => void; highlightFollowupId?: number | null }) {
     const qc = useQueryClient()
     const [tab, setTab] = useState<"perfil" | "historico" | "followup">("perfil")
     const [editOpen, setEditOpen] = useState(false)
     const [saving, setSaving] = useState<string | null>(null)
+    // "Ver follow-up →" na nota automática do chat (01/10) — este painel abre direto na aba
+    // Follow-up quando chega um id pra destacar (ver LeadFollowupPanel.highlightFollowupId)
+    useEffect(() => { if (highlightFollowupId) setTab("followup") }, [highlightFollowupId])
 
     const { data: lead, isLoading } = useQuery<Lead>({
         queryKey: ["lead", leadId],
@@ -150,7 +153,7 @@ export function ContactDetailsPanel({ leadId, onClose }: { leadId: number; onClo
                                 <LeadHistoryFeed lead={lead} stages={stages} users={users} courses={courses} leadSources={sources} />
                             </div>
                         )}
-                        {tab === "followup" && <LeadFollowupPanel lead={lead} users={users} />}
+                        {tab === "followup" && <LeadFollowupPanel lead={lead} users={users} highlightFollowupId={highlightFollowupId} />}
                     </>
                 )}
             </div>

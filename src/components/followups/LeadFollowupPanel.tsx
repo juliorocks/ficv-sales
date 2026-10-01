@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Bot, CalendarClock, Check, Loader2, RotateCcw, Trash2 } from "lucide-react"
 import { Lead, User, LeadFollowup } from "@/types/database"
 import { Button } from "@/components/ui/button"
@@ -25,18 +25,20 @@ const defaultDue = () => {
 const fmtDue = (iso: string) =>
     new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
 
-function FollowupRow({ f, users, onDone, onReopen, onDelete, busy }: {
+function FollowupRow({ f, users, onDone, onReopen, onDelete, busy, highlighted }: {
     f: LeadFollowup
     users: User[]
     onDone: () => void
     onReopen: () => void
     onDelete: () => void
     busy: boolean
+    highlighted?: boolean
 }) {
     const who = users.find((u) => u.id === f.assigned_to)?.full_name || f.assignee?.full_name || "—"
     const overdue = f.status === "pending" && new Date(f.due_at) <= new Date()
     return (
-        <div className={`flex items-start gap-2 rounded-lg border p-2 text-sm ${overdue ? "border-amber-400/60 bg-amber-500/5" : "border-border"}`}>
+        <div id={`followup-${f.id}`}
+            className={`flex items-start gap-2 rounded-lg border p-2 text-sm transition-shadow ${highlighted ? "border-primary ring-2 ring-primary/50" : overdue ? "border-amber-400/60 bg-amber-500/5" : "border-border"}`}>
             <div className="flex-1 min-w-0">
                 <div className={`flex items-center gap-1.5 text-xs font-medium ${overdue ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
                     <CalendarClock className="h-3.5 w-3.5 shrink-0" />
@@ -74,7 +76,7 @@ function FollowupRow({ f, users, onDone, onReopen, onDelete, busy }: {
     )
 }
 
-export function LeadFollowupPanel({ lead, users }: { lead: Lead; users: User[] }) {
+export function LeadFollowupPanel({ lead, users, highlightFollowupId }: { lead: Lead; users: User[]; highlightFollowupId?: number | null }) {
     const { user } = useAuth()
     const { data: followups, isLoading } = useLeadFollowups(lead.id)
     const createMut = useCreateFollowup()
@@ -94,6 +96,18 @@ export function LeadFollowupPanel({ lead, users }: { lead: Lead; users: User[] }
 
     const pending = useMemo(() => (followups || []).filter((f) => f.status !== "done"), [followups])
     const done = useMemo(() => (followups || []).filter((f) => f.status === "done"), [followups])
+
+    // Veio de um clique em "Ver follow-up →" na nota automática da conversa (01/10) — se o
+    // item estiver escondido atrás de "Ver concluídos", abre sozinho, e rola até ele (o anel
+    // de destaque já é só CSS, via highlighted===f.id em FollowupRow, soma/some sozinho).
+    useEffect(() => {
+        if (!highlightFollowupId) return
+        if (done.some((f) => f.id === highlightFollowupId)) setShowDone(true)
+        const t = setTimeout(() => {
+            document.getElementById(`followup-${highlightFollowupId}`)?.scrollIntoView({ behavior: "smooth", block: "center" })
+        }, 50)
+        return () => clearTimeout(t)
+    }, [highlightFollowupId, done])
 
     const agents = users.filter((u) => u.role === "admin" || u.role === "agent")
 
@@ -186,6 +200,7 @@ export function LeadFollowupPanel({ lead, users }: { lead: Lead; users: User[] }
                             f={f}
                             users={users}
                             busy={busy}
+                            highlighted={f.id === highlightFollowupId}
                             onDone={() => statusMut.mutate({ ids: [f.id], status: "done" })}
                             onReopen={() => statusMut.mutate({ ids: [f.id], status: "pending" })}
                             onDelete={() => deleteMut.mutate([f.id])}
@@ -202,6 +217,7 @@ export function LeadFollowupPanel({ lead, users }: { lead: Lead; users: User[] }
                             f={f}
                             users={users}
                             busy={busy}
+                            highlighted={f.id === highlightFollowupId}
                             onDone={() => statusMut.mutate({ ids: [f.id], status: "done" })}
                             onReopen={() => statusMut.mutate({ ids: [f.id], status: "pending" })}
                             onDelete={() => deleteMut.mutate([f.id])}

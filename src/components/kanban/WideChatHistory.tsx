@@ -85,6 +85,11 @@ interface WideChatHistoryProps {
     telefone?: string | null // usado p/ achar conversas ligadas a outro registro do mesmo lead
     leadName?: string // p/ preencher {{NOME}} nos templates
     scrollClassName?: string // altura da área de mensagens (a visão Atendimentos usa a tela toda)
+    // nota interna automática de follow-up agendado (01/10, raw_data.kind==='followup_auto')
+    // tem um link "Ver follow-up" — quem renderiza decide pra onde isso leva (ex.: abrir/rolar
+    // até o card do follow-up no painel ao lado, ver LeadFollowupPanel). Sem essa prop, o link
+    // não aparece (não quebra quem usa este componente sem o painel de follow-up por perto).
+    onOpenFollowup?: (followupId: number) => void
 }
 
 // O WideChat mandava a hora em horário de Brasília SEM fuso e o webhook gravava
@@ -153,12 +158,13 @@ interface WideChatMessage {
     media_url?: string | null
     provider?: string
     interno?: boolean
+    raw_data?: { kind?: string; followup_id?: number } | null
 }
 
 // emojis mais usados no atendimento — sem dependência de lib
 const EMOJIS = "😀 😅 😊 🙂 😉 😍 🥰 🤩 😎 🤔 🙌 👏 👍 🙏 💪 ✅ ❌ ⚠️ ℹ️ 📌 📎 📄 📅 ⏰ 💰 💸 🎓 📚 ✏️ 📝 📞 📲 💬 ✨ 🎉 🔥 ❤️ 🧡 💛 💚 💙 💜 🤝 👋 😢 😔 🥳".split(" ")
 
-export function WideChatHistory({ widechatContactId, leadId, telefone, leadName, scrollClassName }: WideChatHistoryProps) {
+export function WideChatHistory({ widechatContactId, leadId, telefone, leadName, scrollClassName, onOpenFollowup }: WideChatHistoryProps) {
     const queryClient = useQueryClient()
     const { user } = useAuth()
     const scrollRef = useRef<HTMLDivElement>(null)
@@ -988,11 +994,23 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                             // nota interna: nunca saiu pelo WhatsApp, destaque próprio (âmbar,
                             // igual aos Tickets) pra não confundir com mensagem de verdade
                             if (msg.interno) {
+                                // nota automática de follow-up agendado (01/10, pedido do usuário:
+                                // "com o tempo a gente esquece dos atendimentos") — mesma bolha
+                                // âmbar, só com rótulo/ícone diferentes + link pro card do follow-up.
+                                const followupId = msg.raw_data?.kind === 'followup_auto' ? msg.raw_data.followup_id : null
                                 return (
                                     <div key={msg.id} className="flex flex-col max-w-[85%] self-end items-end">
                                         <div className="px-4 py-2 text-sm shadow-sm bg-amber-100 text-amber-900 border border-amber-300 rounded-2xl rounded-tr-md">
-                                            <span className="block text-[10px] font-semibold uppercase tracking-wide opacity-70 mb-0.5">📌 Nota interna</span>
+                                            <span className="block text-[10px] font-semibold uppercase tracking-wide opacity-70 mb-0.5">
+                                                {followupId ? '🤖📅 Follow-up automático' : '📌 Nota interna'}
+                                            </span>
                                             <p className="whitespace-pre-wrap leading-relaxed">{msg.message}</p>
+                                            {followupId && onOpenFollowup && (
+                                                <button type="button" onClick={() => onOpenFollowup(followupId)}
+                                                    className="mt-1 text-xs font-medium text-amber-800 underline underline-offset-2 hover:text-amber-950">
+                                                    Ver follow-up →
+                                                </button>
+                                            )}
                                         </div>
                                         <span className="text-[10px] text-slate-500 mt-1 px-1">
                                             {msg.sender_name && <span className="mr-1 font-medium">{msg.sender_name} •</span>}

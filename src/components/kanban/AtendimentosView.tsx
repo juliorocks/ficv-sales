@@ -78,6 +78,10 @@ export function AtendimentosView({ searchTerm = "", assigneeFilter = "all", team
     // painel "Detalhes do contato" à direita (lembrado no navegador)
     const [details, setDetails] = useState<boolean>(() => { try { return localStorage.getItem("ficv_inbox_details") === "1" } catch { return false } })
     const toggleDetails = (v: boolean) => { setDetails(v); try { localStorage.setItem("ficv_inbox_details", v ? "1" : "0") } catch { /* sem storage */ } }
+    // "Ver follow-up →" na nota automática do chat (01/10) — abre o painel de Detalhes (se
+    // estiver fechado) direto na aba Follow-up, já destacando o card certo.
+    const [highlightFollowupId, setHighlightFollowupId] = useState<number | null>(null)
+    const openFollowup = (id: number) => { setHighlightFollowupId(id); toggleDetails(true) }
     // busca = a MESMA caixa "Pesquisar leads..." do topo da página (searchTerm), igual o
     // Kanban já usa — antes esta tela tinha uma caixa de busca própria aqui dentro, que não
     // tinha ligação nenhuma com a de cima (o usuário digitava lá em cima e nada acontecia,
@@ -295,13 +299,13 @@ export function AtendimentosView({ searchTerm = "", assigneeFilter = "all", team
                         </header>
                         <div className="flex-1 overflow-y-auto p-3">
                             <WideChatHistory key={current.lead_id} widechatContactId={current.widechat_contact_id ?? ""} leadId={current.lead_id}
-                                telefone={current.telefone} leadName={current.nome} scrollClassName="h-[calc(100vh-420px)] min-h-[300px]" />
+                                telefone={current.telefone} leadName={current.nome} scrollClassName="h-[calc(100vh-420px)] min-h-[300px]" onOpenFollowup={openFollowup} />
                         </div>
                     </>
                 )}
             </section>
 
-            {current && details && <ContactDetailsPanel key={current.lead_id} leadId={current.lead_id} onClose={() => toggleDetails(false)} />}
+            {current && details && <ContactDetailsPanel key={current.lead_id} leadId={current.lead_id} onClose={() => toggleDetails(false)} highlightFollowupId={highlightFollowupId} />}
         </div>
     )
 }
