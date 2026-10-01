@@ -104,5 +104,23 @@ export async function moodleAvaliacoes(userid: number, courses: { id: number; fu
             if (cat?.graderaw != null) avaliacoes.push({ nome, nota: fmt(cat.graderaw) });
         }
     }
-    return { avaliacoes, media: itemCurso?.graderaw != null ? fmt(itemCurso.graderaw) : null };
+    return { avaliacoes: semPrefixoComum(avaliacoes), media: itemCurso?.graderaw != null ? fmt(itemCurso.graderaw) : null };
+}
+
+// Vários itens avaliados SEM estar na mesma categoria do Moodle (por isso não entraram no
+// agrupamento acima) às vezes compartilham um prefixo (ex.: "Declaração de Leitura - Fase 1",
+// "... - Fase 2", "... - Fase 3"...) — achado ao vivo 01/10, pedido do usuário pra ficar mais
+// legível na tela. Se TODOS os nomes começam com o mesmo trecho antes de " - ", tira esse
+// trecho de todos (sobra só "Fase 1", "Fase 2"...); nunca tira a parte final (não esvazia o nome).
+function semPrefixoComum(avaliacoes: Avaliacao[]): Avaliacao[] {
+    if (avaliacoes.length < 2) return avaliacoes;
+    const partes = avaliacoes.map((a) => a.nome.split(" - "));
+    const minLen = Math.min(...partes.map((p) => p.length));
+    let comum = 0;
+    for (let i = 0; i < minLen - 1; i++) {
+        if (partes.every((p) => p[i] === partes[0][i])) comum = i + 1;
+        else break;
+    }
+    if (!comum) return avaliacoes;
+    return avaliacoes.map((a, i) => ({ ...a, nome: partes[i].slice(comum).join(" - ") }));
 }

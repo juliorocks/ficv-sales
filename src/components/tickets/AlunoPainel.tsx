@@ -397,21 +397,32 @@ export function AlunoNotas({ foco }: { foco?: NotasFoco | null }) {
               <div className="px-4 pb-1 divide-y divide-[var(--border)] border-t border-[var(--border)]">
                 {disciplinas.length === 0 && <p className="py-3 text-sm text-[var(--text-muted)]">Nenhuma disciplina lançada neste período.</p>}
                 {disciplinas.map((d, i) => {
-                  // AV1/AV2 nomeados (só presencial lança assim) ganham prioridade sobre a
-                  // lista genérica de notas — é o mesmo detalhe que o Sponte mostra pro
-                  // professor, só que sem precisar abrir o sistema acadêmico
-                  const detalhe = [
+                  // Módulo/Exame Final/faltas seguem numa linha só (são informação avulsa);
+                  // AV1/AV2/Fase 1... (só presencial e EAD lançam assim — ver avaliacoes em
+                  // alunoSponte.ts/alunoMoodle.ts) ganham cada um a PRÓPRIA linha (pedido do
+                  // usuário 01/10: "deixar melhor diagramado" — antes vinha tudo espremido
+                  // numa linha só, separado por "·", difícil de ler com mais de 2 itens)
+                  const meta = [
                     d.modulo ? `Módulo ${d.modulo}` : null,
-                    d.avaliacoes?.length ? d.avaliacoes.map((a) => `${a.nome} ${a.nota}`).join(' · ')
-                      : d.notas.length > 1 ? `notas ${d.notas.join(' · ')}` : null,
+                    !d.avaliacoes?.length && d.notas.length > 1 ? `notas ${d.notas.join(' · ')}` : null,
                     d.exame_final ? `Exame Final ${d.exame_final}` : null,
                     d.faltas ? `${d.faltas} falta(s)` : null,
                   ].filter(Boolean).join(' · ')
                   return (
-                  <div key={i} className="py-3 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
+                  <div key={i} className="py-3 flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
                       <p className="text-sm text-[var(--text-main)] leading-snug">{d.disciplina}</p>
-                      {detalhe && <p className="text-xs text-[var(--text-muted)]">{detalhe}</p>}
+                      {meta && <p className="text-xs text-[var(--text-muted)] mt-0.5">{meta}</p>}
+                      {!!d.avaliacoes?.length && (
+                        <div className="mt-1 space-y-0.5 max-w-[240px]">
+                          {d.avaliacoes.map((a, j) => (
+                            <p key={j} className="text-xs text-[var(--text-muted)] flex items-baseline justify-between gap-3">
+                              <span className="truncate">{a.nome}</span>
+                              <span className="shrink-0 font-medium text-[var(--text-main)]">{a.nota}</span>
+                            </p>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     <div className="text-right shrink-0">
                       <p className={`text-lg font-bold ${situacaoCor(d.situacao)}`}>{d.media ?? '—'}</p>
