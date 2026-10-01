@@ -2,15 +2,18 @@
 // Só enxerga o próprio aluno: o AlunoID vem de alunos.sponte_aluno_id do usuário
 // do JWT, nunca do corpo da requisição.
 //
-//   overview                                  → dados, matrículas, parcelas
+//   overview                                  → dados, matrículas (+ períodos só-Moodle, ver
+//                                                abaixo), parcelas
 //   boletim  { turma_id }                     → notas/faltas por disciplina
-//   boletim  { turma_ids: [...] }             → o mesmo, de vários períodos do curso de uma vez
+//   boletim  { turmas: [{turma_id, turma}] }  → o mesmo, de vários períodos de uma vez
+//                                                (turma_id negativo = período só-Moodle, ver
+//                                                periodosExtrasDoMoodle)
 //   foto                                      → foto do aluno (data URL) ou null
 //   pagamento { conta_receber_id, numero_parcela } → link Sponte Pay ou linha digitável
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { nivelDoCurso } from "../_shared/sponte.ts";
 import { alunoBoletins, alunoFoto, alunoOverview, alunoPagamento } from "../_shared/alunoSponte.ts";
-import { moodleAvaliacoes, moodleCourses, moodleDisciplinasDoPeriodo, moodleUserId } from "../_shared/alunoMoodle.ts";
+import { moodleAvaliacoes, moodleCourses, moodleDisciplinasDoPeriodo, moodleUserId, periodosExtrasDoMoodle } from "../_shared/alunoMoodle.ts";
 
 const cors = {
     "Access-Control-Allow-Origin": "*",
@@ -19,26 +22,17 @@ const cors = {
 const j = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
 const n = (v?: string) => (v && v.trim() !== "" ? v.trim() : null);
 
-// Completa com o Moodle as notas que o Sponte NÃO tem (turma EAD — ver _shared/alunoMoodle.ts)
-// — pedido do usuário 01/10: "casar" as duas fontes pra o painel de notas ficar 100% completo.
-// Dois casos, nunca sobrescreve o que o Sponte já tem (presencial sempre vem de lá):
+type TurmaBoletim = { turma_id: number; turma?: string | null; disciplinas: { avaliacoes: unknown[] | null; media: string | null; disciplina: string }[] };
+
+// Completa com o Moodle as disciplinas das turmas (dadas uid/cursos JÁ resolvidos — pra não
+// repetir a busca de usuário/cursos quando o chamador já tem os dois à mão, ex.: junto com as
+// turmas "sintéticas" só-Moodle). Dois casos, nunca sobrescreve o que o Sponte já tem
+// (presencial sempre vem de lá):
 //   1. Sponte tem a disciplina lançada mas sem o detalhe (AV1/AV2) → completa só isso.
 //   2. Sponte não lançou NENHUMA disciplina pro período inteiro (comum em turma EAD encerrada
 //      — achado ao vivo 01/10, print do usuário: Moodle tinha nota completa pra um período que
 //      sumia do portal) → monta a lista de disciplinas inteira a partir do Moodle.
-// Só entra no Moodle se precisar — aluno 100% presencial não gasta a chamada à toa. Nunca
-// derruba a tela: qualquer falha no Moodle deixa a turma como já estava.
-async function completarComMoodle(
-    turmas: { turma_id: number; turma?: string | null; disciplinas: { avaliacoes: unknown[] | null; media: string | null; disciplina: string }[] }[],
-    email: string | null,
-) {
-    const precisaCompletar = turmas.some((t) => t.disciplinas.some((d) => !d.avaliacoes?.length));
-    const precisaSintetizar = turmas.some((t) => t.disciplinas.length === 0 && t.turma);
-    if (!precisaCompletar && !precisaSintetizar) return;
-    const uid = await moodleUserId(email);
-    if (!uid) return;
-    const cursos = await moodleCourses(uid);
-    if (!cursos.length) return;
+async function completarTurmasComMoodle(turmas: TurmaBoletim[], uid: number, cursos: { id: number; fullname: string }[]) {
     for (const t of turmas) {
         if (t.disciplinas.length === 0 && t.turma) {
             const sintetizadas = await moodleDisciplinasDoPeriodo(uid, cursos, t.turma);
@@ -54,6 +48,19 @@ async function completarComMoodle(
             }
         }
     }
+}
+
+// Pedido do usuário 01/10: "casar" as duas fontes pra o painel de notas ficar 100% completo —
+// só entra no Moodle se precisar (aluno 100% presencial não gasta a chamada à toa). Nunca
+// derruba a tela: qualquer falha no Moodle deixa a turma como já estava.
+async function completarComMoodle(turmas: TurmaBoletim[], email: string | null) {
+    const precisa = turmas.some((t) => t.disciplinas.some((d) => !d.avaliacoes?.length) || (t.disciplinas.length === 0 && t.turma));
+    if (!precisa) return;
+    const uid = await moodleUserId(email);
+    if (!uid) return;
+    const cursos = await moodleCourses(uid);
+    if (!cursos.length) return;
+    await completarTurmasComMoodle(turmas, uid, cursos);
 }
 
 Deno.serve(async (req) => {
@@ -84,20 +91,57 @@ Deno.serve(async (req) => {
             if (nivel && nivel !== aluno.nivel) patch.nivel = nivel;
             if (Object.keys(patch).length) await db.from("alunos").update(patch).eq("id", aluno.id);
 
+            // Períodos que só existem no Moodle (retake/reposição sem matrícula própria no
+            // Sponte — achado ao vivo 01/10, ver periodosExtrasDoMoodle em _shared/
+            // alunoMoodle.ts). Nunca derruba a tela: Moodle fora do ar/aluno sem conta lá →
+            // matriculas segue só com o que o Sponte tem, igual sempre foi.
+            const email = sa.email ?? aluno.email ?? null;
+            let matriculasCompletas = matriculas;
+            const uidOverview = await moodleUserId(email);
+            if (uidOverview) {
+                const cursosOverview = await moodleCourses(uidOverview);
+                if (cursosOverview.length) {
+                    const extras = periodosExtrasDoMoodle(cursosOverview, matriculas.map((m) => ({ turma: m.turma, curso: m.curso, curso_base: m.curso_base })));
+                    if (extras.length) matriculasCompletas = [...matriculas, ...extras];
+                }
+            }
+
             return j({
                 // cpf vem só do nosso cadastro (é o que já usamos pra login) — o Sponte não
                 // devolve isso em GetAlunos; usado na Declaração de Matrícula.
                 aluno: { ...sa, nome: sa.nome ?? aluno.nome, ra: sa.ra ?? aluno.ra, email: sa.email ?? aluno.email, celular: sa.celular ?? aluno.telefone, cpf: aluno.cpf ?? null },
-                matriculas, parcelas,
+                matriculas: matriculasCompletas, parcelas,
             });
         }
 
-        if (action === "boletim" && Array.isArray(body.turma_ids)) {
-            const ids = body.turma_ids.map(Number).filter((t: number) => t > 0).slice(0, 20);
-            if (!ids.length) return j({ error: "turma_ids obrigatório." }, 400);
-            const turmas = await alunoBoletins(A, ids);
-            if (!turmas) return j({ error: "Turma não encontrada." }, 404);
-            await completarComMoodle(turmas, aluno.email ?? null);
+        if (action === "boletim" && (Array.isArray(body.turmas) || Array.isArray(body.turma_ids))) {
+            // `turmas` (novo, com o nome do período junto) é o formato de verdade — `turma_ids`
+            // (só números) continua aceito por compatibilidade, mas não reconhece período
+            // sintético (turma_id negativo) por não ter como saber o nome do período dele.
+            const pedidos: { turma_id: number; turma: string | null }[] = Array.isArray(body.turmas)
+                ? body.turmas.map((t: any) => ({ turma_id: Number(t?.turma_id), turma: t?.turma ? String(t.turma) : null }))
+                : body.turma_ids.map((id: unknown) => ({ turma_id: Number(id), turma: null }));
+            const validos = pedidos.filter((p) => Number.isFinite(p.turma_id) && p.turma_id !== 0).slice(0, 20);
+            if (!validos.length) return j({ error: "turmas obrigatório." }, 400);
+
+            const idsReais = validos.filter((p) => p.turma_id > 0).map((p) => p.turma_id);
+            const sinteticas = validos.filter((p) => p.turma_id < 0 && p.turma);
+
+            const turmasReais = idsReais.length ? await alunoBoletins(A, idsReais) : [];
+            if (idsReais.length && !turmasReais) return j({ error: "Turma não encontrada." }, 404);
+
+            const turmas: TurmaBoletim[] = [...(turmasReais ?? [])];
+            const precisaMoodle = sinteticas.length > 0 || turmas.some((t) => t.disciplinas.some((d) => !d.avaliacoes?.length) || t.disciplinas.length === 0);
+            if (precisaMoodle) {
+                const uid = await moodleUserId(aluno.email ?? null);
+                const cursos = uid ? await moodleCourses(uid) : [];
+                if (uid && cursos.length) {
+                    if (turmasReais?.length) await completarTurmasComMoodle(turmasReais, uid, cursos);
+                    for (const s of sinteticas) turmas.push({ turma_id: s.turma_id, turma: s.turma, disciplinas: await moodleDisciplinasDoPeriodo(uid, cursos, s.turma!) });
+                } else {
+                    for (const s of sinteticas) turmas.push({ turma_id: s.turma_id, turma: s.turma, disciplinas: [] });
+                }
+            }
             return j({ turmas });
         }
 

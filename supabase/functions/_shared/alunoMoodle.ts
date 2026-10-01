@@ -136,13 +136,100 @@ export async function moodleDisciplinasDoPeriodo(userid: number, courses: { id: 
     const doPeriodo = courses.filter((c) => norm(c.fullname).startsWith(`${prefixo} - `));
     const out: DisciplinaSintetizada[] = [];
     for (const c of doPeriodo) {
-        const partes = c.fullname.split(" - ");
-        const disciplina = partes[partes.length - 1].trim();
+        // a disciplina é tudo DEPOIS do período (ver periodoDoCurso, calculado em cima do
+        // PRÓPRIO nome do curso — evita qualquer mismatch de grafia/acentuação com turmaNome)
+        // — nunca "o último trecho depois do último hífen", que quebra ao meio um nome de
+        // disciplina que por si só já tem um hífen (ex.: "Projeto Integrador IV - Liderança";
+        // achado ao vivo 01/10: virava período fantasma "... - P4 - Projeto Integrador Iv").
+        const periodoReal = periodoDoCurso(c.fullname);
+        const disciplina = c.fullname.slice(periodoReal.length).replace(/^\s*-\s*/, "").trim();
         if (!disciplina) continue;
         const items = await gradeItemsDoCurso(userid, c.id);
         if (!items.length) continue;
         const { avaliacoes, media } = extrairAvaliacoes(items);
         out.push({ disciplina, modulo: null, notas: [], media, faltas: null, situacao: null, avaliacoes: avaliacoes.length ? avaliacoes : null });
+    }
+    return out;
+}
+
+// "TEOLOGIA EAD - 2026.1 - P3 - HEBRAICO BÍBLICO I" → período = "TEOLOGIA EAD - 2026.1 - P3".
+// O período SEMPRE termina em "- P<número>" ou "- Modular" (todo padrão visto até agora) —
+// corta exatamente ALI, não no último "-" qualquer: uma disciplina que por si só tem um "-"
+// no nome (ex.: "Projeto Integrador IV - Liderança") faria "o último trecho" cortar no hífen
+// ERRADO, no meio do nome da disciplina (achado ao vivo 01/10).
+const PERIODO_RE = /^(.*?-\s*(?:P\d+|Modular))\b/i;
+const periodoDoCurso = (fullname: string): string => {
+    const m = fullname.match(PERIODO_RE);
+    if (m) return m[1].trim();
+    // sem "- P#"/"Modular" reconhecível (curso avulso, tipo seminário) — cai pro antigo "tudo
+    // menos o último trecho"; esses já são descartados depois por não terem ano.semestre
+    const partes = fullname.split(" - ");
+    return partes.length > 1 ? partes.slice(0, -1).join(" - ") : fullname;
+};
+
+/** Hash simples e ESTÁVEL (mesmo texto → sempre o mesmo número) pra servir de turma_id
+ *  "sintético" de um período que só existe no Moodle — nunca colide com turma_id de verdade
+ *  do Sponte (sempre positivo); não precisa guardar em lugar nenhum, só recalcular igual toda
+ *  vez que for preciso (ver resolverTurmaSintetica no aluno-portal). */
+export function periodoSinteticoId(periodo: string): number {
+    let h = 0;
+    for (let i = 0; i < periodo.length; i++) h = (Math.imul(h, 31) + periodo.charCodeAt(i)) | 0;
+    return -(Math.abs(h) % 900000 + 100000);
+}
+
+/** Períodos que existem no Moodle mas NÃO em nenhuma matrícula do Sponte — achado ao vivo
+ *  01/10, aluno real: reprovou "Hebraico Bíblico I" em 2025.2-P3, refez em 2026.1-P3 e passou
+ *  — só que esse "2026.1-P3" NUNCA virou uma matrícula separada no Sponte (não é bug nosso, é
+ *  assim que a secretaria registra reposição/adaptação por lá), então o aluno não tinha como
+ *  ver a nota da refeita, só a da reprovação antiga. Devolve um "pseudo-período" por período
+ *  extra, no MESMO formato de matrícula que o resto da tela já usa — a tela nem precisa saber
+ *  que é diferente, só entra no agrupamento por curso normalmente (ver agruparCursos no
+ *  front). `turma_id` negativo/estável funciona como id sintético: boletim() reconhece pelo
+ *  sinal e não tenta buscar no Sponte.
+ */
+// "programa" = as 2 primeiras palavras do período ("teologia ead", "pos ead"...) — bom o
+// suficiente pra distinguir Graduação de Pós (ou outro curso qualquer) sem precisar de uma
+// lista fixa: o aluno pode ter MAIS de um curso, e cada período extra precisa herdar o curso
+// certo, não um "curso modelo" único pra tudo (achado ao vivo 01/10: período extra de Pós
+// estava sendo colocado junto da Graduação só porque usei o curso vigente como padrão geral).
+// tira o "ano.semestre" (2024.1) e o "- P<número>"/"- Modular" do período, sobra só o que
+// distingue o PROGRAMA de verdade — ex.: "TEOLOGIA EAD - 2026.1 - P3" → "teologia ead";
+// "PÓS EAD - 2024.1 - POSLC/T1" → "pos ead poslc t1". Só as 2 primeiras palavras não bastava:
+// "PÓS EAD - 2024.1 - POSLC/T1" e "PÓS EAD - 2024.1 - POSECC/T4" têm as mesmas 2 primeiras
+// palavras ("pos ead") mas são PROGRAMAS diferentes (Liderança Cristã × Educação Cristã
+// Clássica) — achado ao vivo 01/10, period extra de um ia pro curso do outro.
+const programaDoPeriodo = (periodo: string) =>
+    norm(periodo).replace(/\b20\d{2}\.\d\b/g, "").replace(/-\s*(?:p\d+|modular)\b/gi, "").replace(/[^a-z0-9]+/g, " ").trim();
+
+export function periodosExtrasDoMoodle(
+    courses: { id: number; fullname: string }[],
+    matriculasConhecidas: { turma: string | null; curso: string | null; curso_base?: string | null }[],
+): { turma_id: number; turma: string; curso: string | null; curso_base: string | null; situacao: null; data_matricula: null; data_inicio: null; data_termino: null; contrato_id: number }[] {
+    const conhecidos = new Set(matriculasConhecidas.map((m) => norm(m.turma ?? "")).filter(Boolean));
+    // 1º matrícula de cada programa vira o "modelo" de curso pros períodos extras daquele
+    // mesmo programa — e a 1ª de TODAS vira o modelo padrão (fallback) se nada bater.
+    const porPrograma = new Map<string, { curso: string | null; curso_base: string | null }>();
+    for (const m of matriculasConhecidas) {
+        if (!m.turma) continue;
+        const p = programaDoPeriodo(m.turma);
+        if (!porPrograma.has(p)) porPrograma.set(p, { curso: m.curso ?? null, curso_base: m.curso_base ?? m.curso ?? null });
+    }
+    const padrao = matriculasConhecidas[0] ? { curso: matriculasConhecidas[0].curso ?? null, curso_base: matriculasConhecidas[0].curso_base ?? matriculasConhecidas[0].curso ?? null } : { curso: null, curso_base: null };
+
+    const vistos = new Set<string>();
+    const out: ReturnType<typeof periodosExtrasDoMoodle> = [];
+    for (const c of courses) {
+        const periodo = periodoDoCurso(c.fullname);
+        const chave = norm(periodo);
+        if (!chave || conhecidos.has(chave) || vistos.has(chave)) continue;
+        // só período que "parece" período acadêmico de verdade (tem ano.semestre, tipo
+        // "2026.1") — sem isso juntaria curso avulso tipo "SEMINÁRIO VOCACIONAL: ..." que não
+        // é período nenhum, é só uma atividade extra sem relação com boletim/matrícula.
+        if (!/\b20\d{2}\.\d\b/.test(periodo)) continue;
+        vistos.add(chave);
+        const alvo = porPrograma.get(programaDoPeriodo(periodo)) ?? padrao;
+        const id = periodoSinteticoId(periodo);
+        out.push({ turma_id: id, turma: periodo, curso: alvo.curso, curso_base: alvo.curso_base, situacao: null, data_matricula: null, data_inicio: null, data_termino: null, contrato_id: id });
     }
     return out;
 }

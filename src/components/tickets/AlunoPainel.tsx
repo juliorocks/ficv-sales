@@ -350,10 +350,15 @@ export function AlunoNotas({ foco }: { foco?: NotasFoco | null }) {
   const cursos = useMemo(() => agruparCursos((q.data?.matriculas ?? []).filter((m) => m.turma_id)), [q.data])
   const [escolhido, setEscolhido] = useState<string | null>(foco?.curso ?? null)
   const curso = cursos.find((c) => c.nome === escolhido) ?? cursos[0] ?? null
-  const ids = curso?.turmas.map((t) => t.turma_id!) ?? []
+  // manda o NOME do período junto (não só o id) — turma_id negativo = período que só existe
+  // no Moodle (retake sem matrícula própria no Sponte, ver periodosExtrasDoMoodle); sem o
+  // nome, o backend não tem como saber qual período buscar lá (achado ao vivo 01/10, caso
+  // real: aluno refez "Hebraico Bíblico I" num período que o Sponte nunca registrou).
+  const pedidos = curso?.turmas.map((t) => ({ turma_id: t.turma_id!, turma: t.turma })) ?? []
+  const ids = pedidos.map((p) => p.turma_id)
   const b = useQuery<{ turmas: { turma_id: number; disciplinas: Disciplina[] }[] }>({
     queryKey: ['aluno-boletim', ids.join(',')],
-    queryFn: () => portal({ action: 'boletim', turma_ids: ids }),
+    queryFn: () => portal({ action: 'boletim', turmas: pedidos }),
     enabled: ids.length > 0, staleTime: 5 * 60_000, retry: 1,
   })
   // veio do Início tocando num período: rola até ele quando o boletim carregar (uma vez)
