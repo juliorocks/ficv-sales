@@ -9,6 +9,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { showSuccess, showError } from '@/utils/toast';
 import { periodToDates, AutoWidthSelect, PERIOD_OPTIONS } from '@/utils/dashboardFilters';
+import { normalizeName, extractContactPhone, normalizeStudentPhone, daysDiff } from '@/utils/sponteMatch';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface SponteMatricula {
@@ -62,34 +63,8 @@ interface MatriculasPorAgenteResult {
     jaExistente: number;
 }
 
-// ─── Agent attribution helpers ────────────────────────────────────────────────
-
-function normalizeName(name: string): string {
-    if (!name) return '';
-    return name
-        .normalize('NFD').replace(/[̀-ͯ]/g, '')
-        .toLowerCase()
-        .replace(/[^a-z0-9 ]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
-
-function extractContactPhone(contact: string): string | null {
-    const m = contact.match(/\((\d{8,15})\)/);
-    if (!m) return null;
-    const digits = m[1].replace(/[^0-9]/g, '');
-    return digits.length >= 8 ? digits.slice(-11) : null;
-}
-
-function normalizeStudentPhone(celular: string | null | undefined): string | null {
-    if (!celular) return null;
-    const digits = celular.replace(/[^0-9]/g, '');
-    return digits.length >= 8 ? digits.slice(-11) : null;
-}
-
-function daysDiff(from: string, to: string): number {
-    return Math.floor((new Date(to + 'T00:00:00').getTime() - new Date(from + 'T00:00:00').getTime()) / 86400000);
-}
+// ─── Agent attribution helpers (normalizeName/extractContactPhone/normalizeStudentPhone/
+// daysDiff agora em @/utils/sponteMatch, reusados também pelo recálculo de score comercial) ──
 
 function computeMatriculasPorAgente(
     allMatriculas: SponteMatricula[],

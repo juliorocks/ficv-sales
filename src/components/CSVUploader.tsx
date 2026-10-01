@@ -2,6 +2,27 @@ import React, { useState } from 'react';
 import { Upload, FileText, CheckCircle2, AlertCircle } from 'lucide-react';
 import { processCSV, ConversationAnalysis } from '../utils/csvProcessor';
 import { supabase } from '../lib/supabase';
+import { findMatriculaMatch, SponteMatriculaLite } from '@/utils/sponteMatch';
+
+// Lead fechou matrícula de verdade (Sponte) depois desse atendimento? É sinal muito
+// mais forte que qualquer heurística de texto — sobrescreve a nota Comercial.
+async function applyMatriculaBoost(results: ConversationAnalysis[]): Promise<ConversationAnalysis[]> {
+    const { data: matriculas } = await supabase
+        .from('sponte_matriculas')
+        .select('aluno, celular, data_matricula, nome_curso, situacao_id')
+        .in('situacao_id', [1, 6]) as { data: SponteMatriculaLite[] | null };
+    if (!matriculas?.length) return results;
+
+    return results.map((r) => {
+        if (!r.isCommercial || r.status !== 'approved') return r;
+        const match = findMatriculaMatch(r.contact, r.date.slice(0, 10), matriculas, 30);
+        if (!match || r.commercialScore >= 9) return r;
+        const commercialScore = 9;
+        const scores = [r.empathyScore, r.clarityScore, r.depthScore, commercialScore, r.agilityScore];
+        const finalScore = Number((scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1));
+        return { ...r, commercialScore, finalScore, closingAttempt: true };
+    });
+}
 
 interface CSVUploaderProps {
     onDataLoaded: (data: ConversationAnalysis[]) => void;
@@ -26,8 +47,10 @@ export const CSVUploader: React.FC<CSVUploaderProps> = ({ onDataLoaded, uploader
         setErrorMsg('');
         setProgress('Lendo e analisando o CSV…');
         try {
-            const results = await processCSV(file);
-            if (!results.length) throw new Error('Nenhuma conversa encontrada no CSV. Confira se é o export certo do WideChat.');
+            const rawResults = await processCSV(file);
+            if (!rawResults.length) throw new Error('Nenhuma conversa encontrada no CSV. Confira se é o export certo do WideChat.');
+            setProgress('Cruzando com matrículas do Sponte…');
+            const results = await applyMatriculaBoost(rawResults);
             setProgress(`Salvando ${results.length} conversas…`);
 
             // 1. Create the upload log entry first to get an ID

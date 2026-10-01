@@ -60,14 +60,30 @@ function isSystemMessageText(text: string): boolean {
 }
 
 const EMPATHY_KEYWORDS = ['bom dia', 'boa tarde', 'obrigado', 'obrigada', 'fico feliz', 'posso ajudar'];
+// Antes exigia frases completas quase exatas ("posso enviar o link para
+// matrícula") — na prática os agentes escrevem de formas bem diferentes
+// ("vamos prosseguir com a sua matricula?", "fazer a matricula", "segue
+// boleto e contrato"...) e nunca batiam, fazendo TODO atendimento comercial
+// cair no baseline mínimo mesmo quando fechou de verdade. Agora são radicais/
+// trechos curtos, comparados sem acento (normalizeForMatch), e cobrem desde a
+// tentativa de fechamento até os passos reais de fechamento (link de
+// pagamento, boleto, contrato, comprovante).
 const CLOSING_KEYWORDS = [
-    'posso enviar o link para matrícula',
-    'deseja se inscrever',
-    'quer fazer sua matrícula',
-    'posso enviar o link de inscrição',
-    'enviar o link',
-    'fazer a inscrição'
+    'matricul',               // matrícula, matricular, matriculado, matricule-se
+    'inscri',                 // inscrição, inscrever, inscreva-se
+    'garantir sua vaga', 'garanta sua vaga', 'garantir a vaga',
+    'vamos prosseguir', 'vamos dar continuidade', 'podemos prosseguir',
+    'fazer o pagamento', 'efetuar o pagamento', 'link de pagamento', 'link para pagamento',
+    'boleto', 'contrato', 'comprovante',
+    'fechar com a gente', 'fechamento',
 ];
+function normalizeForMatch(s: string): string {
+    return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+function hasKeyword(text: string, keywords: string[]): boolean {
+    const norm = normalizeForMatch(text);
+    return keywords.some((k) => norm.includes(normalizeForMatch(k)));
+}
 
 const parseBrazilianDate = (dateStr: string): string => {
     if (!dateStr) return new Date().toISOString();
@@ -244,9 +260,7 @@ const analyzeProtocol = async (protocol: string, messages: WhatsAppMessage[]): P
             return '🚩 Script Engessado: Você enviou um bloco grande de informações sem antes entender a dúvida real do cliente. Isso quebra o rapport.';
         }
 
-        const hasClosing = CLOSING_KEYWORDS.some(k => lowerText.includes(k)) ||
-            lowerText.includes('matrícula') ||
-            lowerText.includes('inscrição');
+        const hasClosing = hasKeyword(text, CLOSING_KEYWORDS);
 
         if (hasClosing) return '🎯 Direcionamento: Excelente tentativa de conduzir o cliente ao fechamento.';
 
@@ -265,8 +279,12 @@ const analyzeProtocol = async (protocol: string, messages: WhatsAppMessage[]): P
     };
 
     // Calculate Scores from relevantMessages only (post agent entry — no bot flow)
-    const empathyScore = aiResult ? aiResult.globalScores.empathy : Math.max(0, Math.min(10, relevantMessages.filter(m => EMPATHY_KEYWORDS.some(k => m.Mensagem.toLowerCase().includes(k))).length * 2 + 5));
-    const commercialScore = aiResult ? aiResult.globalScores.commercial : Math.max(0, Math.min(10, relevantMessages.filter(m => CLOSING_KEYWORDS.some(k => m.Mensagem.toLowerCase().includes(k))).length * 4 + 2));
+    const empathyScore = aiResult ? aiResult.globalScores.empathy : Math.max(0, Math.min(10, relevantMessages.filter(m => hasKeyword(m.Mensagem, EMPATHY_KEYWORDS)).length * 2 + 5));
+    // Baseline neutro (5), não punitivo (2): sem palavra de fechamento no texto não
+    // significa que o atendente não fechou — só que o scanner de palavras-chave não
+    // achou evidência (ver findMatriculaMatch em CSVUploader.tsx, que sobrescreve esta
+    // nota quando o Sponte confirma matrícula real — sinal muito mais forte que texto).
+    const commercialScore = aiResult ? aiResult.globalScores.commercial : Math.max(0, Math.min(10, 5 + relevantMessages.filter(m => hasKeyword(m.Mensagem, CLOSING_KEYWORDS)).length * 2));
     const clarityScore = aiResult ? aiResult.globalScores.clarity : Math.max(0, Math.min(10, relevantMessages.filter(m => m.Mensagem.length > 60).length * 2 + 5));
     const depthScore = aiResult ? aiResult.globalScores.depth : Math.max(0, Math.min(10, relevantMessages.filter(m => m.Mensagem.includes('?') && isAgentMsg(m)).length * 2 + 3));
     const agilityScore = aiResult ? aiResult.globalScores.agility : (relevantMessages.length > 5 ? 9 : 7);
@@ -311,7 +329,7 @@ const analyzeProtocol = async (protocol: string, messages: WhatsAppMessage[]): P
         agilityScore,
         isCommercial: aiResult?.isCommercial ?? true,
         overallConclusion: aiResult?.overallConclusion ?? (finalScore >= 8 ? 'Excelente' : 'Regular'),
-        closingAttempt: relevantMessages.some(m => CLOSING_KEYWORDS.some(k => m.Mensagem.toLowerCase().includes(k))),
+        closingAttempt: relevantMessages.some(m => hasKeyword(m.Mensagem, CLOSING_KEYWORDS)),
         improvements,
         messageCount: agentMessages.length,
         date,
