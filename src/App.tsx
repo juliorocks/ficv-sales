@@ -1456,7 +1456,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                         {/* Stat cards (3) + 2 compact Goal Gauges */}
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 items-stretch">
                             <StatCard icon={MessageSquare} title="Total Atendimentos" value={filteredData.length > 0 ? filteredData.length.toLocaleString() : "0"} subtext="Baseado em dados reais" />
-                            <StatCard icon={Award} title="Score Qualidade" value={avgScore} subtext="Média dos protoc." />
+                            <StatCard icon={Award} title="Score Qualidade" value={avgScore} subtext={`Média de ${validData.length.toLocaleString()} atend. avaliados`} />
                             <StatCard icon={Target} title="Média de Conversão" value={conversionRate !== null ? `${conversionRate.toFixed(1)}%` : enrollmentCount === null ? '...' : '0.0%'} subtext={enrollmentCount !== null ? `${enrollmentCount} matrículas no período · Obj: 15%` : 'Objetivo: 15%'} />
 
                             {/* 2 compact gauges */}
@@ -1625,7 +1625,11 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                         {/* Row 5: Pie Chart + Recent Analysis */}
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                             <div className="lg:col-span-1 glass-card p-8">
-                                <h3 className="text-xs font-bold text-[#8B949E] uppercase tracking-widest mb-6">Distribuição por Agente</h3>
+                                <h3 className="text-xs font-bold text-[#8B949E] uppercase tracking-widest">Distribuição por Agente</h3>
+                                <p className="text-[10px] text-[#6B7280] mb-6">
+                                    {validData.length} de {filteredData.length} atendimentos avaliados
+                                    {filteredData.length > validData.length && ` — ${filteredData.length - validData.length} sem nota válida (sem interação real ou ainda não analisados)`}
+                                </p>
                                 <div className="h-64">
                                     <ResponsiveContainer width="100%" height="100%">
                                         <PieChart>
