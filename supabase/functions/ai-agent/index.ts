@@ -110,6 +110,14 @@ Deno.serve(async (req) => {
                 `Agora é ${agora} (horário de Brasília).`,
                 `Um atendente humano${nome ? ` (que está conversando com ${nome}${curso ? `, interessado em ${curso}` : ""})` : ""} marcou pra retomar contato com este lead agora, com esta nota interna dele mesmo (não mostre a nota ao lead, é só contexto seu): "${note || "retomar o contato"}".`,
                 `Escreva UMA mensagem curta e natural de retomada, como se fosse o PRÓPRIO atendente continuando a conversa de onde parou (veja o histórico abaixo) — não se apresente como assistente virtual/IA, não diga "sou a Vivi". Releia o histórico com atenção: NUNCA ofereça mandar de novo algo que JÁ foi enviado nesta conversa (ex.: grade, ementa, valores já ditos). Vá direto ao que a nota pede, com a mesma naturalidade de quem lembrou de voltar a falar com alguém. Termine com uma pergunta que avance.`,
+                // Achado ao vivo 01/10 (grave): nota de teste "Falar sobre bolsa 75%" virou mensagem
+                // REAL pro lead confirmando "bolsa de 75%" — número que não existe na base (o real
+                // é até 50%) e que ninguém autorizou de verdade; a nota é um LEMBRETE rápido do
+                // atendente pra SI MESMO ("preciso falar sobre X"), não uma autorização confirmada
+                // pra prometer um valor exato. Regra MAIS FORTE que a de baixo: valor/desconto/
+                // condição financeira específica só pode ser citado ao lead se aparecer também na
+                // BASE DE CONHECIMENTO abaixo — nunca só porque está na nota.
+                `Se a nota mencionar um valor, desconto, percentual ou condição financeira ESPECÍFICA (ex.: "bolsa 75%", "desconto de X%") que NÃO apareça confirmada na BASE DE CONHECIMENTO abaixo, NÃO cite esse número exato pro lead — a nota é um lembrete rápido do atendente pra ele mesmo lembrar do assunto, não uma confirmação de que aquele valor é real ou foi autorizado. Nesse caso, retome o assunto de forma genérica ("quero confirmar uma condição especial que estamos avaliando pra você"/"voltar a falar sobre a questão do investimento") e ofereça encaminhar pra um atendente confirmar os detalhes — sem prometer nenhum número.`,
                 ...(listAlreadySentIn(histMsgs)
                     ? [`ATENÇÃO: o histórico abaixo já tem uma lista/grade numerada enviada nesta conversa — não ofereça mandar de novo.`]
                     : []),
