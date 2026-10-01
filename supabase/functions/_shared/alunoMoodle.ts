@@ -66,24 +66,14 @@ function matchCourse(disciplina: string, courses: { id: number; fullname: string
     return null;
 }
 
-/** Notas parciais de UMA disciplina, puxadas do Moodle — mesmo formato {nome,nota} que o
- *  Sponte usa pra turma presencial (ver avaliacoesPorDisciplina em alunoSponte.ts), pra caber
- *  no mesmo campo `avaliacoes` da tela sem mudar nada no front. Agrupa os itens de nota (quiz/
- *  tarefa) pela categoria do Moodle: item sozinho na categoria → mostra ele mesmo (ex.: "AV2");
- *  vários itens na mesma categoria (ex.: 15 questionários de módulo dentro de "AV1") → mostra só
- *  o TOTAL da categoria (já calculado pelo Moodle), nomeado pelo prefixo comum dos itens
- *  ("AV1 - Módulo 1" → "AV1"). `media`: a nota final do curso (itemtype='course').
- */
-export async function moodleAvaliacoes(userid: number, courses: { id: number; fullname: string }[], disciplina: string):
-    Promise<{ avaliacoes: Avaliacao[]; media: string | null } | null> {
-    const courseId = matchCourse(disciplina, courses);
-    if (!courseId) return null;
-    let items: any[];
-    try {
-        const d = await moodleCall("gradereport_user_get_grade_items", { courseid: courseId, userid });
-        items = d?.usergrades?.[0]?.gradeitems ?? [];
-    } catch { return null; }
-
+/** `gradereport_user_get_grade_items` cru → {avaliacoes, media}, já agrupado/nomeado.
+ *  Item sozinho na categoria do Moodle → mostra ele mesmo (ex.: "AV2"); vários itens na mesma
+ *  categoria (ex.: 15 questionários de módulo dentro de "AV1") → mostra só o TOTAL da
+ *  categoria (já calculado pelo Moodle, nunca recalculado aqui), nomeado pelo prefixo comum
+ *  dos itens ("AV1 - Módulo 1" → "AV1"). `media`: a nota final do curso (itemtype='course').
+ *  Compartilhado por moodleAvaliacoes (1 disciplina já casada) e
+ *  moodleDisciplinasDoPeriodo (Sponte sem nada lançado — monta a disciplina inteira). */
+function extrairAvaliacoes(items: any[]): { avaliacoes: Avaliacao[]; media: string | null } {
     const avaliados = items.filter((it) => (it.itemtype === "mod" || it.itemtype === "manual") && it.graderaw != null);
     const categorias = items.filter((it) => it.itemtype === "category");
     const itemCurso = items.find((it) => it.itemtype === "course");
@@ -105,6 +95,56 @@ export async function moodleAvaliacoes(userid: number, courses: { id: number; fu
         }
     }
     return { avaliacoes: semPrefixoComum(avaliacoes), media: itemCurso?.graderaw != null ? fmt(itemCurso.graderaw) : null };
+}
+
+async function gradeItemsDoCurso(userid: number, courseId: number): Promise<any[]> {
+    try {
+        const d = await moodleCall("gradereport_user_get_grade_items", { courseid: courseId, userid });
+        return d?.usergrades?.[0]?.gradeitems ?? [];
+    } catch { return []; }
+}
+
+/** Notas parciais de UMA disciplina já identificada (o Sponte tem a disciplina lançada, só
+ *  falta o detalhe — ver avaliacoesPorDisciplina em alunoSponte.ts), puxadas do Moodle no
+ *  mesmo formato {nome,nota} que o Sponte usa pra turma presencial — cabe no mesmo campo
+ *  `avaliacoes` da tela sem mudar nada no front. */
+export async function moodleAvaliacoes(userid: number, courses: { id: number; fullname: string }[], disciplina: string):
+    Promise<{ avaliacoes: Avaliacao[]; media: string | null } | null> {
+    const courseId = matchCourse(disciplina, courses);
+    if (!courseId) return null;
+    const items = await gradeItemsDoCurso(userid, courseId);
+    if (!items.length) return null;
+    return extrairAvaliacoes(items);
+}
+
+type DisciplinaSintetizada = {
+    disciplina: string; modulo: null; notas: string[]; media: string | null; faltas: null; situacao: null; avaliacoes: Avaliacao[] | null;
+};
+
+// normaliza (sem acento/caixa) pra comparar nome de turma do Sponte com o do Moodle
+const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+
+/** Quando o Sponte não tem NENHUMA disciplina lançada pro período (achado ao vivo 01/10:
+ *  acontece com turma EAD encerrada — o período existe e tem matrícula, mas o boletim do
+ *  Sponte vem vazio, mesmo com nota completa no Moodle), monta a lista de disciplinas DIRETO
+ *  do Moodle: acha todos os cursos cujo nome começa com o mesmo período do Sponte
+ *  ("Teologia EAD - 2025.2 - P3 - <disciplina>") e trata cada um como uma disciplina. */
+export async function moodleDisciplinasDoPeriodo(userid: number, courses: { id: number; fullname: string }[], turmaNome: string):
+    Promise<DisciplinaSintetizada[]> {
+    const prefixo = norm(turmaNome);
+    if (!prefixo) return [];
+    const doPeriodo = courses.filter((c) => norm(c.fullname).startsWith(`${prefixo} - `));
+    const out: DisciplinaSintetizada[] = [];
+    for (const c of doPeriodo) {
+        const partes = c.fullname.split(" - ");
+        const disciplina = partes[partes.length - 1].trim();
+        if (!disciplina) continue;
+        const items = await gradeItemsDoCurso(userid, c.id);
+        if (!items.length) continue;
+        const { avaliacoes, media } = extrairAvaliacoes(items);
+        out.push({ disciplina, modulo: null, notas: [], media, faltas: null, situacao: null, avaliacoes: avaliacoes.length ? avaliacoes : null });
+    }
+    return out;
 }
 
 // Vários itens avaliados SEM estar na mesma categoria do Moodle (por isso não entraram no

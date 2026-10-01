@@ -9,8 +9,8 @@
 //   pagamento { conta_receber_id, numero_parcela } → link Sponte Pay ou linha digitável
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { nivelDoCurso } from "../_shared/sponte.ts";
-import { alunoBoletim, alunoBoletins, alunoFoto, alunoOverview, alunoPagamento } from "../_shared/alunoSponte.ts";
-import { moodleAvaliacoes, moodleCourses, moodleUserId } from "../_shared/alunoMoodle.ts";
+import { alunoBoletins, alunoFoto, alunoOverview, alunoPagamento } from "../_shared/alunoSponte.ts";
+import { moodleAvaliacoes, moodleCourses, moodleDisciplinasDoPeriodo, moodleUserId } from "../_shared/alunoMoodle.ts";
 
 const cors = {
     "Access-Control-Allow-Origin": "*",
@@ -19,21 +19,32 @@ const cors = {
 const j = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
 const n = (v?: string) => (v && v.trim() !== "" ? v.trim() : null);
 
-// Completa com o Moodle as disciplinas que o Sponte NÃO lança em detalhe (turma EAD — ver
-// _shared/alunoMoodle.ts) — pedido do usuário 01/10: "casar" as duas fontes pra o painel de
-// notas ficar 100% completo. Só mexe em disciplina sem `avaliacoes` (turma presencial já vem
-// cheia do Sponte, nunca é sobrescrita). Só entra no Moodle se precisar — aluno 100%
-// presencial não gasta a chamada à toa. Nunca derruba a tela: qualquer falha no Moodle
-// (fora do ar, aluno sem conta lá, disciplina sem correspondente) deixa a disciplina como
-// já estava, só com o que o Sponte tinha.
-async function completarComMoodle(turmas: { turma_id: number; disciplinas: { avaliacoes: unknown[] | null; media: string | null; disciplina: string }[] }[], email: string | null) {
-    const precisa = turmas.some((t) => t.disciplinas.some((d) => !d.avaliacoes?.length));
-    if (!precisa) return;
+// Completa com o Moodle as notas que o Sponte NÃO tem (turma EAD — ver _shared/alunoMoodle.ts)
+// — pedido do usuário 01/10: "casar" as duas fontes pra o painel de notas ficar 100% completo.
+// Dois casos, nunca sobrescreve o que o Sponte já tem (presencial sempre vem de lá):
+//   1. Sponte tem a disciplina lançada mas sem o detalhe (AV1/AV2) → completa só isso.
+//   2. Sponte não lançou NENHUMA disciplina pro período inteiro (comum em turma EAD encerrada
+//      — achado ao vivo 01/10, print do usuário: Moodle tinha nota completa pra um período que
+//      sumia do portal) → monta a lista de disciplinas inteira a partir do Moodle.
+// Só entra no Moodle se precisar — aluno 100% presencial não gasta a chamada à toa. Nunca
+// derruba a tela: qualquer falha no Moodle deixa a turma como já estava.
+async function completarComMoodle(
+    turmas: { turma_id: number; turma?: string | null; disciplinas: { avaliacoes: unknown[] | null; media: string | null; disciplina: string }[] }[],
+    email: string | null,
+) {
+    const precisaCompletar = turmas.some((t) => t.disciplinas.some((d) => !d.avaliacoes?.length));
+    const precisaSintetizar = turmas.some((t) => t.disciplinas.length === 0 && t.turma);
+    if (!precisaCompletar && !precisaSintetizar) return;
     const uid = await moodleUserId(email);
     if (!uid) return;
     const cursos = await moodleCourses(uid);
     if (!cursos.length) return;
     for (const t of turmas) {
+        if (t.disciplinas.length === 0 && t.turma) {
+            const sintetizadas = await moodleDisciplinasDoPeriodo(uid, cursos, t.turma);
+            if (sintetizadas.length) (t as any).disciplinas = sintetizadas;
+            continue;
+        }
         for (const d of t.disciplinas) {
             if (d.avaliacoes?.length) continue;
             const m = await moodleAvaliacoes(uid, cursos, d.disciplina);
@@ -91,10 +102,10 @@ Deno.serve(async (req) => {
         if (action === "boletim") {
             const turma = Number(body.turma_id);
             if (!turma) return j({ error: "turma_id obrigatório." }, 400);
-            const disciplinas = await alunoBoletim(A, turma);
-            if (!disciplinas) return j({ error: "Turma não encontrada." }, 404);
-            await completarComMoodle([{ turma_id: turma, disciplinas }], aluno.email ?? null);
-            return j({ disciplinas });
+            const turmas = await alunoBoletins(A, [turma]);
+            if (!turmas?.length) return j({ error: "Turma não encontrada." }, 404);
+            await completarComMoodle(turmas, aluno.email ?? null);
+            return j({ disciplinas: turmas[0].disciplinas });
         }
 
         if (action === "foto") return j({ foto: await alunoFoto(A) });

@@ -142,13 +142,23 @@ export async function alunoBoletim(A: number, turma: number): Promise<Disciplina
 }
 
 /** Boletins de várias turmas de uma vez (os períodos de um mesmo curso). Só turmas do próprio aluno;
- *  null se nenhuma for. Uma consulta de matrículas + os boletins em paralelo. */
-export async function alunoBoletins(A: number, turmas: number[]): Promise<{ turma_id: number; disciplinas: Disciplina[] }[] | null> {
+ *  null se nenhuma for. Uma consulta de matrículas + os boletins em paralelo.
+ *  `turma` (NomeTurma, ex.: "Teologia EAD - 2025.2 - P3") vai junto — o aluno-portal usa pra
+ *  achar o período certo no Moodle quando o Sponte não tem NENHUMA disciplina lançada ali
+ *  (ver moodleDisciplinasDoPeriodo em _shared/alunoMoodle.ts). */
+export async function alunoBoletins(A: number, turmas: number[]): Promise<{ turma_id: number; turma: string | null; disciplinas: Disciplina[] }[] | null> {
     const xm = await sponteCall("GetMatriculas", { sParametrosBusca: `AlunoID=${A}` });
-    const minhas = new Set(records(xm, "wsMatricula").map((r) => Number(r.TurmaID)));
+    const minhas = new Set<number>();
+    const nomes = new Map<number, string>();
+    for (const r of records(xm, "wsMatricula")) {
+        const tid = Number(r.TurmaID);
+        if (!tid) continue;
+        minhas.add(tid);
+        if (n(r.NomeTurma)) nomes.set(tid, n(r.NomeTurma)!);
+    }
     const ids = [...new Set(turmas)].filter((t) => minhas.has(t));
     if (!ids.length) return null;
-    return await Promise.all(ids.map(async (t) => ({ turma_id: t, disciplinas: await boletimDaTurma(A, t) })));
+    return await Promise.all(ids.map(async (t) => ({ turma_id: t, turma: nomes.get(t) ?? null, disciplinas: await boletimDaTurma(A, t) })));
 }
 
 /** Foto do aluno (a do app do Sponte) como data URL, ou null se não tiver. Só ~7% dos alunos têm foto lá.
