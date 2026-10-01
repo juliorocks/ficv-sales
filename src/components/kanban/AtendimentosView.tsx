@@ -19,7 +19,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { formatDistanceToNowStrict } from "date-fns"
 import { ptBR } from "date-fns/locale"
-import { Check, ChevronDown, GraduationCap, Loader2, MessageSquare, PencilLine, Search } from "lucide-react"
+import { Check, ChevronDown, GraduationCap, Loader2, MessageSquare, PencilLine } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { WideChatHistory } from "./WideChatHistory"
@@ -55,7 +55,7 @@ const preview = (r: Row) => {
 }
 const ago = (iso: string) => formatDistanceToNowStrict(new Date(iso), { locale: ptBR }).replace(/ (minutos?|horas?|dias?|segundos?|meses|mês)/, (m) => ({ " minuto": "min", " minutos": "min", " hora": "h", " horas": "h", " dia": "d", " dias": "d", " segundo": "s", " segundos": "s", " mês": "m", " meses": "m" } as Record<string, string>)[m] ?? m)
 
-export function AtendimentosView({ assigneeFilter = "all", teamAgentIds }: { assigneeFilter?: string; teamAgentIds?: string[] }) {
+export function AtendimentosView({ searchTerm = "", assigneeFilter = "all", teamAgentIds }: { searchTerm?: string; assigneeFilter?: string; teamAgentIds?: string[] }) {
     const { data: stages = [] } = useQuery<Stage[]>({
         queryKey: ["stages"],
         queryFn: async () => {
@@ -73,13 +73,16 @@ export function AtendimentosView({ assigneeFilter = "all", teamAgentIds }: { ass
         setTab((stages.find((s) => /entrada/i.test(s.name)) ?? stages[0]).id)
     }, [stages, tab])
 
-    const [search, setSearch] = useState("")
     const [q, setQ] = useState("")
     const [selected, setSelected] = useState<number | null>(null)
     // painel "Detalhes do contato" à direita (lembrado no navegador)
     const [details, setDetails] = useState<boolean>(() => { try { return localStorage.getItem("ficv_inbox_details") === "1" } catch { return false } })
     const toggleDetails = (v: boolean) => { setDetails(v); try { localStorage.setItem("ficv_inbox_details", v ? "1" : "0") } catch { /* sem storage */ } }
-    useEffect(() => { const t = setTimeout(() => setQ(search.trim()), 300); return () => clearTimeout(t) }, [search])
+    // busca = a MESMA caixa "Pesquisar leads..." do topo da página (searchTerm), igual o
+    // Kanban já usa — antes esta tela tinha uma caixa de busca própria aqui dentro, que não
+    // tinha ligação nenhuma com a de cima (o usuário digitava lá em cima e nada acontecia,
+    // 01/10). Removida a duplicata, só a de cima manda agora.
+    useEffect(() => { const t = setTimeout(() => setQ(searchTerm.trim()), 300); return () => clearTimeout(t) }, [searchTerm])
 
     const agents = teamAgentIds?.filter((id) => id !== "__unassigned__")
     // buscando: procura em todas as conversas (ignora filtros de atendente/departamento)
@@ -90,7 +93,7 @@ export function AtendimentosView({ assigneeFilter = "all", teamAgentIds }: { ass
         p_agents: !semFiltro && teamAgentIds ? agents : null,
         p_no_owner: !!teamAgentIds?.includes("__unassigned__"),
     }
-    const { data: rows = [], isLoading, isFetching } = useQuery<Row[]>({
+    const { data: rows = [], isLoading } = useQuery<Row[]>({
         queryKey: ["inbox-leads", tab, filtros],
         queryFn: async () => {
             const { data, error } = await supabase.rpc("inbox_leads", { p_stage_id: tab, ...filtros, p_limit: 200 })
@@ -193,12 +196,6 @@ export function AtendimentosView({ assigneeFilter = "all", teamAgentIds }: { ass
                                 {!!counts[s.id] && <span className="ml-0.5 rounded-full bg-primary/15 text-primary text-[10px] px-1.5">{counts[s.id]}</span>}
                             </button>
                         ))}
-                    </div>
-                    <div className="relative">
-                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--text-muted)]" />
-                        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar nome ou telefone"
-                            className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-main)] pl-8 pr-3 py-2 text-sm text-[var(--text-main)] outline-none focus:border-primary" />
-                        {isFetching && <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-[var(--text-muted)]" />}
                     </div>
                     {/* mesmos filtros de cada coluna do Kanban (pedido do usuário 30/09) —
                         curso + ordenar/filtrar (Não atendidos/Esperando Resposta conforme a aba) */}

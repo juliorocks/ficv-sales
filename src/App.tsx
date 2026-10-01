@@ -1953,6 +1953,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                     <div className="animate-fade-in min-w-0">
                         {kanbanTeamId && kanbanTeamId === secretariaTeamId ? <SecretariaBoard /> : kanbanView === 'atendimentos' ? (
                             <AtendimentosView
+                                searchTerm={kanbanSearch}
                                 assigneeFilter={kanbanAssignee}
                                 teamAgentIds={kanbanTeamAgentIds}
                             />
