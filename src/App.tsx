@@ -18,6 +18,7 @@ import {
     RefreshCcw,
     BookOpen,
     ChevronRight,
+    ChevronLeft,
     Loader2,
     Target,
     ArrowLeft,
@@ -106,13 +107,14 @@ interface Profile {
 }
 
 // Temporary component for navigation items
-const NavItem = React.memo(({ icon: Icon, label, active, onClick }: { icon: any, label: string, active?: boolean, onClick: () => void }) => (
+const NavItem = React.memo(({ icon: Icon, label, active, onClick, collapsed }: { icon: any, label: string, active?: boolean, onClick: () => void, collapsed?: boolean }) => (
     <button
         onClick={onClick}
-        className={`sidebar-item ${active ? 'sidebar-item-active' : ''}`}
+        title={collapsed ? label : undefined}
+        className={`sidebar-item ${active ? 'sidebar-item-active' : ''} ${collapsed ? 'justify-center px-0' : ''}`}
     >
         <Icon size={18} />
-        <span className="font-medium text-[13px]">{label}</span>
+        {!collapsed && <span className="font-medium text-[13px]">{label}</span>}
     </button>
 ));
 NavItem.displayName = 'NavItem';
@@ -145,6 +147,18 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     const [activeTab, setActiveTab] = useState(() => localStorage.getItem('ficv_active_tab') || 'dashboard');
     const [analysisData, setAnalysisData] = useState<ConversationAnalysis[]>([]);
     const [isTvMode, setIsTvMode] = useState(false);
+    // Menu lateral: pedido do usuário (30/09) pra abrir colapsado por padrão, com botão
+    // pra expandir — fica salvo pra manter a escolha entre sessões.
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+        try { return localStorage.getItem('ficv_sidebar_collapsed') !== 'false' } catch { return true }
+    });
+    const toggleSidebarCollapsed = () => {
+        setSidebarCollapsed(prev => {
+            const next = !prev;
+            try { localStorage.setItem('ficv_sidebar_collapsed', String(next)) } catch { /* sem storage */ }
+            return next;
+        });
+    };
     const [profile, setProfile] = useState<Profile | null>(null);
     const [authLoading, setAuthLoading] = useState(true);
 
@@ -164,8 +178,11 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     const [refreshProgress, setRefreshProgress] = useState({ current: 0, total: 0 });
     const [kanbanSearch, setKanbanSearch] = useState("");
     // Funil de Leads: quadro (Kanban) ou caixa de entrada estilo WhatsApp (Atendimentos)
+    // 30/09: pedido do usuário — por padrão, ao entrar no menu já abre em Atendimentos
+    // (só continua em Quadro se o agente explicitamente escolheu Quadro antes, por isso
+    // o fallback pra quem já tinha 'quadro' salvo também mudou — ver pickKanbanView).
     const [kanbanView, setKanbanView] = useState<'quadro' | 'atendimentos'>(() => {
-        try { return localStorage.getItem('ficv_kanban_view') === 'atendimentos' ? 'atendimentos' : 'quadro' } catch { return 'quadro' }
+        try { return localStorage.getItem('ficv_kanban_view') === 'quadro' ? 'quadro' : 'atendimentos' } catch { return 'atendimentos' }
     });
     const pickKanbanView = (v: 'quadro' | 'atendimentos') => { setKanbanView(v); try { localStorage.setItem('ficv_kanban_view', v) } catch { /* sem storage */ } };
     const [kanbanAssignee, setKanbanAssignee] = useState("all"); // 'all' | 'unassigned' | profile.id — filtra o Kanban por atendente, em todas as colunas
@@ -869,12 +886,20 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
             )}
             {/* Sidebar */}
             {!isTvMode && (
-                <aside className="w-[240px] flex flex-col bg-[var(--bg-sidebar)] border-r border-[var(--border)] fixed h-screen z-50">
-                    <div className="px-4 pt-6 pb-8 flex items-center justify-between gap-2">
+                <aside className={`${sidebarCollapsed ? 'w-[76px]' : 'w-[240px]'} flex flex-col bg-[var(--bg-sidebar)] border-r border-[var(--border)] fixed h-screen z-50 transition-all duration-200`}>
+                    <button
+                        onClick={toggleSidebarCollapsed}
+                        title={sidebarCollapsed ? 'Expandir menu' : 'Recolher menu'}
+                        className="absolute -right-3 top-20 z-10 flex items-center justify-center w-6 h-6 rounded-full bg-[var(--bg-card)] border border-[var(--border)] text-[var(--text-muted)] hover:text-primary hover:border-primary shadow-sm transition-all"
+                    >
+                        {sidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+                    </button>
+
+                    <div className={`pt-6 pb-8 flex gap-2 ${sidebarCollapsed ? 'flex-col items-center px-2' : 'items-center justify-between px-4'}`}>
                         <img
                             src="https://siteficv.vercel.app/images/test-logo.png"
                             alt="FICV"
-                            className="h-16 w-auto object-contain"
+                            className={sidebarCollapsed ? 'h-8 max-w-[48px] object-contain' : 'h-16 w-auto object-contain'}
                             onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
                         />
                         {profile && (
@@ -885,17 +910,17 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                         )}
                     </div>
 
-                    <div className="px-4 py-2 flex-1 overflow-y-auto custom-scrollbar">
+                    <div className={`py-2 flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar ${sidebarCollapsed ? 'px-2' : 'px-4'}`}>
                         {/* Secretaria/Tutor/Coordenador: só Chamados (sem CRM de vendas) */}
                         {isTicketRole ? (<>
-                        <p className="text-[10px] text-[var(--text-muted)] font-bold tracking-widest uppercase mb-4 px-2">Atendimento ao Aluno</p>
+                        {!sidebarCollapsed && <p className="text-[10px] text-[var(--text-muted)] font-bold tracking-widest uppercase mb-4 px-2">Atendimento ao Aluno</p>}
                         <nav className="space-y-1">
-                            <NavItem icon={TicketIcon} label="Chamados" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
+                            <NavItem collapsed={sidebarCollapsed} icon={TicketIcon} label="Chamados" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
                         </nav>
                         </>) : (<>
-                        <p className="text-[10px] text-[var(--text-muted)] font-bold tracking-widest uppercase mb-4 px-2">Menu Principal</p>
+                        {!sidebarCollapsed && <p className="text-[10px] text-[var(--text-muted)] font-bold tracking-widest uppercase mb-4 px-2">Menu Principal</p>}
                         <nav className="space-y-1">
-                            <NavItem icon={LayoutDashboard} label="Visão Geral" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
+                            <NavItem collapsed={sidebarCollapsed} icon={LayoutDashboard} label="Visão Geral" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
 
                             <div className="space-y-1">
                                 <NavItem
@@ -903,8 +928,9 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                     label="Leads (Kanban)"
                                     active={activeTab.startsWith('kanban')}
                                     onClick={() => setActiveTab('kanban')}
+                                    collapsed={sidebarCollapsed}
                                 />
-                                {activeTab.startsWith('kanban') && (
+                                {!sidebarCollapsed && activeTab.startsWith('kanban') && (
                                     <div className="ml-6 flex flex-col gap-1 border-l border-primary/20 pl-2 mt-1 animate-in slide-in-from-left-2 duration-200">
                                         <button
                                             onClick={() => setActiveTab('kanban')}
@@ -962,20 +988,20 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                 )}
                             </div>
 
-                            {(profile?.role === 'admin') && <NavItem icon={Users} label="Agentes" active={activeTab === 'agents'} onClick={() => setActiveTab('agents')} />}
-                            {(profile?.role === 'agent') && <NavItem icon={Award} label="Meu Desempenho" active={activeTab === 'performance'} onClick={() => setActiveTab('performance')} />}
-                            {(profile?.role === 'admin') && <NavItem icon={Target} label="Metas" active={activeTab === 'goals'} onClick={() => setActiveTab('goals')} />}
-                            {(profile?.role === 'admin') && <NavItem icon={FileUp} label="Uploads" active={activeTab === 'uploads'} onClick={() => setActiveTab('uploads')} />}
-                            <NavItem icon={BookOpen} label="Base de Conhecimento" active={activeTab === 'knowledge'} onClick={() => setActiveTab('knowledge')} />
-                            <NavItem icon={MessageSquare} label="Meu Widechat" active={activeTab === 'widechat'} onClick={() => setActiveTab('widechat')} />
+                            {(profile?.role === 'admin') && <NavItem collapsed={sidebarCollapsed} icon={Users} label="Agentes" active={activeTab === 'agents'} onClick={() => setActiveTab('agents')} />}
+                            {(profile?.role === 'agent') && <NavItem collapsed={sidebarCollapsed} icon={Award} label="Meu Desempenho" active={activeTab === 'performance'} onClick={() => setActiveTab('performance')} />}
+                            {(profile?.role === 'admin') && <NavItem collapsed={sidebarCollapsed} icon={Target} label="Metas" active={activeTab === 'goals'} onClick={() => setActiveTab('goals')} />}
+                            {(profile?.role === 'admin') && <NavItem collapsed={sidebarCollapsed} icon={FileUp} label="Uploads" active={activeTab === 'uploads'} onClick={() => setActiveTab('uploads')} />}
+                            <NavItem collapsed={sidebarCollapsed} icon={BookOpen} label="Base de Conhecimento" active={activeTab === 'knowledge'} onClick={() => setActiveTab('knowledge')} />
+                            <NavItem collapsed={sidebarCollapsed} icon={MessageSquare} label="Meu Widechat" active={activeTab === 'widechat'} onClick={() => setActiveTab('widechat')} />
                             {(profile?.role === 'admin' || profile?.role === 'agent') && (
-                                <NavItem icon={CalendarClock} label="Follow-ups" active={activeTab === 'followups'} onClick={() => setActiveTab('followups')} />
+                                <NavItem collapsed={sidebarCollapsed} icon={CalendarClock} label="Follow-ups" active={activeTab === 'followups'} onClick={() => setActiveTab('followups')} />
                             )}
                             {profile?.role === 'admin' && (
-                                <NavItem icon={TicketIcon} label="Tickets" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
+                                <NavItem collapsed={sidebarCollapsed} icon={TicketIcon} label="Tickets" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
                             )}
                             {(profile?.role === 'admin' || profile?.role === 'agent') && (
-                                <NavItem icon={GraduationCap} label="Matrículas" active={activeTab === 'matriculas'} onClick={() => setActiveTab('matriculas')} />
+                                <NavItem collapsed={sidebarCollapsed} icon={GraduationCap} label="Matrículas" active={activeTab === 'matriculas'} onClick={() => setActiveTab('matriculas')} />
                             )}
                             {(profile?.role === 'admin') && (
                                 <div className="space-y-1">
@@ -984,8 +1010,9 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                         label="Marketing"
                                         active={activeTab.startsWith('marketing') || activeTab === 'campanhas'}
                                         onClick={() => setActiveTab('marketing-forms')}
+                                        collapsed={sidebarCollapsed}
                                     />
-                                    {(activeTab.startsWith('marketing') || activeTab === 'campanhas') && (
+                                    {!sidebarCollapsed && (activeTab.startsWith('marketing') || activeTab === 'campanhas') && (
                                         <div className="ml-6 flex flex-col gap-1 border-l border-primary/20 pl-2 mt-1 animate-in slide-in-from-left-2 duration-200">
                                             <button
                                                 onClick={() => { setMarketingFormEditId(null); setActiveTab('marketing-forms') }}
@@ -1003,34 +1030,34 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                     )}
                                 </div>
                             )}
-                            {(profile?.role === 'admin') && <NavItem icon={Tv} label="Dashboard Live" active={isTvMode} onClick={() => setIsTvMode(!isTvMode)} />}
+                            {(profile?.role === 'admin') && <NavItem collapsed={sidebarCollapsed} icon={Tv} label="Dashboard Live" active={isTvMode} onClick={() => setIsTvMode(!isTvMode)} />}
                         </nav>
                         </>)}
 
                         {profile?.role === 'admin' && (
                             <>
-                                <p className="text-[10px] text-[var(--text-muted)] font-bold tracking-widest uppercase mt-8 mb-4 px-2">Gestão</p>
+                                {!sidebarCollapsed && <p className="text-[10px] text-[var(--text-muted)] font-bold tracking-widest uppercase mt-8 mb-4 px-2">Gestão</p>}
                                 <nav className="space-y-1">
-                                    <NavItem icon={Users} label="Equipes" active={activeTab === 'teams'} onClick={() => setActiveTab('teams')} />
-                                    <NavItem icon={Users} label="Usuários" active={activeTab === 'users'} onClick={() => setActiveTab('users')} />
-                                    <NavItem icon={Inbox} label="Filas de Atendimento" active={activeTab === 'ticket-queues'} onClick={() => setActiveTab('ticket-queues')} />
-                                    <NavItem icon={GraduationCap} label="Tutor Virtual" active={activeTab === 'tutor-virtual'} onClick={() => setActiveTab('tutor-virtual')} />
-                                    <NavItem icon={KeyRound} label="Integrações" active={activeTab === 'integrations'} onClick={() => setActiveTab('integrations')} />
-                                    <NavItem icon={Bot} label="IA de Atendimento" active={activeTab === 'ai-agent'} onClick={() => setActiveTab('ai-agent')} />
-                                    <NavItem icon={Plug} label="VivaConnect" active={activeTab === 'vivaconnect'} onClick={() => setActiveTab('vivaconnect')} />
-                                    <NavItem icon={Settings} label="Configurações" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
-                                    <NavItem icon={History} label="Relatórios (Admin)" active={activeTab === 'history'} onClick={() => { setHistoryAgentFilter(null); setActiveTab('history'); }} />
+                                    <NavItem collapsed={sidebarCollapsed} icon={Users} label="Equipes" active={activeTab === 'teams'} onClick={() => setActiveTab('teams')} />
+                                    <NavItem collapsed={sidebarCollapsed} icon={Users} label="Usuários" active={activeTab === 'users'} onClick={() => setActiveTab('users')} />
+                                    <NavItem collapsed={sidebarCollapsed} icon={Inbox} label="Filas de Atendimento" active={activeTab === 'ticket-queues'} onClick={() => setActiveTab('ticket-queues')} />
+                                    <NavItem collapsed={sidebarCollapsed} icon={GraduationCap} label="Tutor Virtual" active={activeTab === 'tutor-virtual'} onClick={() => setActiveTab('tutor-virtual')} />
+                                    <NavItem collapsed={sidebarCollapsed} icon={KeyRound} label="Integrações" active={activeTab === 'integrations'} onClick={() => setActiveTab('integrations')} />
+                                    <NavItem collapsed={sidebarCollapsed} icon={Bot} label="IA de Atendimento" active={activeTab === 'ai-agent'} onClick={() => setActiveTab('ai-agent')} />
+                                    <NavItem collapsed={sidebarCollapsed} icon={Plug} label="VivaConnect" active={activeTab === 'vivaconnect'} onClick={() => setActiveTab('vivaconnect')} />
+                                    <NavItem collapsed={sidebarCollapsed} icon={Settings} label="Configurações" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
+                                    <NavItem collapsed={sidebarCollapsed} icon={History} label="Relatórios (Admin)" active={activeTab === 'history'} onClick={() => { setHistoryAgentFilter(null); setActiveTab('history'); }} />
                                 </nav>
                             </>
                         )}
                     </div>
 
-                    <div className="p-4 border-t border-[var(--border)]">
+                    <div className={`border-t border-[var(--border)] ${sidebarCollapsed ? 'p-2' : 'p-4'}`}>
                         <div className="space-y-4">
-                            <div className="flex items-center gap-3 p-2 bg-[var(--bg-card)] rounded-xl border border-[var(--border)]">
+                            <div className={`flex items-center p-2 bg-[var(--bg-card)] rounded-xl border border-[var(--border)] ${sidebarCollapsed ? 'flex-col gap-2' : 'gap-3'}`}>
                                 <button
                                     onClick={() => setActiveTab('profile')}
-                                    className={`flex items-center gap-3 flex-1 overflow-hidden text-left rounded-lg -m-1 p-1 transition-all hover:bg-white/5 ${activeTab === 'profile' ? 'ring-1 ring-primary/40' : ''}`}
+                                    className={`flex items-center gap-3 overflow-hidden text-left rounded-lg -m-1 p-1 transition-all hover:bg-white/5 ${activeTab === 'profile' ? 'ring-1 ring-primary/40' : ''} ${sidebarCollapsed ? 'justify-center' : 'flex-1'}`}
                                     title="Meu perfil"
                                 >
                                     {profile?.avatar_url ? (
@@ -1040,10 +1067,12 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                             {profile?.full_name?.charAt(0) || 'U'}
                                         </div>
                                     )}
-                                    <div className="flex-1 overflow-hidden">
-                                        <p className="text-[11px] font-bold truncate text-[var(--text-main)]">{profile?.full_name || 'Usuário'}</p>
-                                        <p className="text-[9px] text-[var(--text-muted)] uppercase font-bold tracking-wide">{profile?.role || 'Agente'}</p>
-                                    </div>
+                                    {!sidebarCollapsed && (
+                                        <div className="flex-1 overflow-hidden">
+                                            <p className="text-[11px] font-bold truncate text-[var(--text-main)]">{profile?.full_name || 'Usuário'}</p>
+                                            <p className="text-[9px] text-[var(--text-muted)] uppercase font-bold tracking-wide">{profile?.role || 'Agente'}</p>
+                                        </div>
+                                    )}
                                 </button>
                                 <button onClick={handleLogout} className="text-[var(--text-muted)] hover:text-primary transition-all shrink-0" title="Sair">
                                     <LogOut size={16} />
@@ -1052,17 +1081,18 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
 
                             <button
                                 onClick={() => setIsDarkMode(!isDarkMode)}
+                                title={sidebarCollapsed ? (isDarkMode ? 'Modo Claro' : 'Modo Escuro') : undefined}
                                 className="sidebar-item group w-full flex items-center justify-center gap-2 border border-dashed border-[var(--border)] py-2 rounded-xl transition-all hover:bg-primary/5 active:scale-95"
                             >
                                 {isDarkMode ? (
                                     <>
                                         <Sun size={14} className="text-amber-400 group-hover:scale-110 transition-transform" />
-                                        <span className="text-[11px] font-bold uppercase tracking-wider">Modo Claro</span>
+                                        {!sidebarCollapsed && <span className="text-[11px] font-bold uppercase tracking-wider">Modo Claro</span>}
                                     </>
                                 ) : (
                                     <>
                                         <Moon size={14} className="text-primary group-hover:scale-110 transition-transform" />
-                                        <span className="text-[11px] font-bold uppercase tracking-wider">Modo Escuro</span>
+                                        {!sidebarCollapsed && <span className="text-[11px] font-bold uppercase tracking-wider">Modo Escuro</span>}
                                     </>
                                 )}
                             </button>
@@ -1073,7 +1103,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
             }
 
             {/* Main Content */}
-            <main className={`flex-1 min-w-0 min-h-screen bg-[var(--bg-main)] p-8 transition-all overflow-x-clip ${isTvMode ? 'ml-0' : 'ml-[240px]'}`}>
+            <main className={`flex-1 min-w-0 min-h-screen bg-[var(--bg-main)] p-8 transition-all overflow-x-clip ${isTvMode ? 'ml-0' : sidebarCollapsed ? 'ml-[76px]' : 'ml-[240px]'}`}>
                 {(activeTab === 'dashboard' || activeTab === 'agents' || activeTab === 'history' || activeTab.startsWith('kanban')) && (
                     <header className={`flex justify-between items-start relative ${activeTab === 'kanban' ? 'mb-6 items-center' : 'mb-10'}`}>
                         {activeTab === 'kanban' ? (
