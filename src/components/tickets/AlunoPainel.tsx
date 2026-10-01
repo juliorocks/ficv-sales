@@ -335,23 +335,10 @@ type Disciplina = {
   avaliacoes: Avaliacao[] | null; exame_final: string | null
 }
 
-// Aprovado em verde, reprovado em vermelho, em recuperação/cursando em âmbar — pedido do usuário
-// 29/09. Reprovado primeiro na checagem: "reprovado por falta" também bate em /aprovado/ se fosse
-// checado depois (contém "provado").
-const situacaoCor = (s: string | null) =>
-  s && /reprovad/i.test(s) ? 'text-red-500 dark:text-red-400'
-    : s && /aprovad/i.test(s) ? 'text-green-600 dark:text-green-400'
-    : s && /recupera|cursando/i.test(s) ? 'text-amber-600 dark:text-amber-400'
-    : 'text-[var(--text-main)]'
-
-// Disciplina sem Situação oficial do Sponte (nota só do Moodle — ele não devolve veredito
-// pronto, só o número) — pedido do usuário 01/10: calcula Aprovado/Reprovado pela nota, ≥
-// 7,0 (o mesmo critério do PPC do EAD: "aproveitamento mínimo de 70%, nota 7,0").
-const situacaoInferida = (media: string | null): string | null => {
-  if (!media) return null
-  const n = Number(media.replace(',', '.'))
-  return Number.isFinite(n) ? (n >= 7 ? 'Aprovado' : 'Reprovado') : null
-}
+// 01/10: tinha Aprovado/Reprovado (oficial do Sponte quando tinha, calculado pela nota quando
+// não) — usuário pediu pra tirar ("não há questionamentos"): só a média, sempre neutra (ver o
+// bloco "text-right" mais abaixo). O chip Vigente/Encerrado do período é outra coisa (status
+// da MATRÍCULA, não da nota da disciplina) e não mudou.
 
 export function AlunoNotas({ foco }: { foco?: NotasFoco | null }) {
   const q = useOverview()
@@ -434,7 +421,6 @@ export function AlunoNotas({ foco }: { foco?: NotasFoco | null }) {
                     d.exame_final ? `Exame Final ${d.exame_final}` : null,
                     d.faltas ? `${d.faltas} falta(s)` : null,
                   ].filter(Boolean).join(' · ')
-                  const situacao = d.situacao ?? situacaoInferida(d.media)
                   return (
                   <div key={i} className="py-3 flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
@@ -451,9 +437,11 @@ export function AlunoNotas({ foco }: { foco?: NotasFoco | null }) {
                         </div>
                       )}
                     </div>
+                    {/* pedido do usuário 01/10: sem Aprovado/Reprovado (gera dúvida quando um
+                        vem do Sponte oficial e outro é calculado) — só a média, sempre neutra */}
                     <div className="text-right shrink-0">
-                      <p className={`text-lg font-bold ${situacaoCor(situacao)}`}>{d.media ?? '—'}</p>
-                      <p className={`text-[11px] ${situacao ? situacaoCor(situacao) : 'text-[var(--text-muted)]'}`}>{situacao ?? (d.media ? 'média' : 'sem nota')}</p>
+                      <p className="text-lg font-bold text-[var(--text-main)]">{d.media ?? '—'}</p>
+                      <p className="text-[11px] text-[var(--text-muted)]">{d.media ? 'média' : 'sem nota'}</p>
                     </div>
                   </div>
                   )
