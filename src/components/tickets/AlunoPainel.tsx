@@ -523,7 +523,7 @@ export function AlunoDeclaracao({ onVoltar }: { onVoltar: () => void }) {
         {/* assinatura + carimbo da Secretaria Acadêmica — mesma imagem usada no Sponte (pedido do
             usuário 01/10: "pode manter essa assinatura aí") */}
         <div className="flex flex-col items-center">
-          <img src="/documentos/assinatura-secretaria-academica.png" alt="Assinatura — Secretaria Acadêmica" className="w-56 h-auto object-contain" />
+          <img src="/documentos/assinatura-secretaria-academica.png" alt="Assinatura — Secretaria Acadêmica" className="w-[28rem] h-auto object-contain" />
         </div>
 
         <div className="text-center text-xs mt-8 space-y-0.5">
