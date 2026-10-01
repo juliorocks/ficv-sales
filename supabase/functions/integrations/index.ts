@@ -19,7 +19,7 @@ type Integration = { id: string; name: string; description: string; fields: Fiel
 
 const REGISTRY: Integration[] = [
     {
-        id: "openai", name: "OpenAI", description: "IA de atendimento e indexação da Base de Conhecimento.",
+        id: "openai", name: "OpenAI", description: "IA de atendimento, indexação da Base de Conhecimento e análise de qualidade dos atendimentos (gpt-5-mini, ~$2-5/mês no volume atual).",
         fields: [{ key: "OPENAI_API_KEY", label: "API Key", placeholder: "sk-...", help: "platform.openai.com → API keys" }],
     },
     {
