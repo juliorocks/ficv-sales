@@ -59,7 +59,7 @@ const REGISTRY: Integration[] = [
         fields: [{ key: "GITHUB_DISPATCH_TOKEN", label: "Token (fine-grained, Actions: read & write)", placeholder: "github_pat_..." }],
     },
     {
-        id: "moodle", name: "Moodle", description: "API REST do Moodle (ainda sem uso automático no sistema — só guarda a chave por enquanto).",
+        id: "moodle", name: "Moodle", description: "Portal do Aluno: completa as notas da turma EAD que só existem no Moodle (o usuário do token precisa de um papel com acesso de leitura a todos os cursos — ex. Manager no nível do site).",
         fields: [
             { plain: true, key: "MOODLE_URL", label: "Endereço do Moodle", placeholder: "https://moodle.ficv.edu.br", help: "Sem barra no final." },
             { key: "MOODLE_TOKEN", label: "Token da API (Web Services)", help: "Moodle → Administração do site → Serviços web → Gerenciar tokens" },
