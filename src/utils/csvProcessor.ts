@@ -61,16 +61,25 @@ function isSystemMessageText(text: string): boolean {
 
 const EMPATHY_KEYWORDS = ['bom dia', 'boa tarde', 'obrigado', 'obrigada', 'fico feliz', 'posso ajudar'];
 // Antes exigia frases completas quase exatas ("posso enviar o link para
-// matrícula") — na prática os agentes escrevem de formas bem diferentes
-// ("vamos prosseguir com a sua matricula?", "fazer a matricula", "segue
-// boleto e contrato"...) e nunca batiam, fazendo TODO atendimento comercial
-// cair no baseline mínimo mesmo quando fechou de verdade. Agora são radicais/
-// trechos curtos, comparados sem acento (normalizeForMatch), e cobrem desde a
-// tentativa de fechamento até os passos reais de fechamento (link de
-// pagamento, boleto, contrato, comprovante).
-const CLOSING_KEYWORDS = [
-    'matricul',               // matrícula, matricular, matriculado, matricule-se
-    'inscri',                 // inscrição, inscrever, inscreva-se
+// matrícula") — na prática os agentes escrevem de formas bem diferentes e
+// nunca batiam, fazendo TODO atendimento comercial cair no baseline mínimo
+// mesmo quando fechou de verdade.
+//
+// MAS mencionar "matrícula"/"boleto"/"contrato" só prova que o atendente
+// TENTOU — não que fechou bem. Uma conversa onde o cliente levanta objeção de
+// prazo duas vezes e o atendente só repete a regra, sem oferecer alternativa,
+// contém as mesmas palavras que uma conversa que fechou de verdade (link
+// enviado, pedido pra "fazer a matrícula" etc.) — por isso agora há dois
+// níveis: CONFIRMAÇÃO (o CLIENTE confirma ter concluído — comprovante, "já
+// paguei", "finalizei") é prova forte; TENTATIVA (atendente menciona o
+// processo) é só sinal fraco, não garante nota alta sozinho.
+const CLOSING_CONFIRMATION_KEYWORDS = [
+    'finalizei', 'finalizado minha', 'consegui fazer', 'deu certo',
+    'ja fiz a matricula', 'ja fiz minha matricula', 'matricula paga', 'ja paguei',
+    'segue comprovante', 'segue o comprovante', 'comprovante de pagamento',
+];
+const CLOSING_ATTEMPT_KEYWORDS = [
+    'matricul', 'inscri',                 // radicais: matrícula/matricular, inscrição/inscrever
     'garantir sua vaga', 'garanta sua vaga', 'garantir a vaga',
     'vamos prosseguir', 'vamos dar continuidade', 'podemos prosseguir',
     'fazer o pagamento', 'efetuar o pagamento', 'link de pagamento', 'link para pagamento',
@@ -260,7 +269,7 @@ const analyzeProtocol = async (protocol: string, messages: WhatsAppMessage[]): P
             return '🚩 Script Engessado: Você enviou um bloco grande de informações sem antes entender a dúvida real do cliente. Isso quebra o rapport.';
         }
 
-        const hasClosing = hasKeyword(text, CLOSING_KEYWORDS);
+        const hasClosing = hasKeyword(text, CLOSING_ATTEMPT_KEYWORDS);
 
         if (hasClosing) return '🎯 Direcionamento: Excelente tentativa de conduzir o cliente ao fechamento.';
 
@@ -283,8 +292,13 @@ const analyzeProtocol = async (protocol: string, messages: WhatsAppMessage[]): P
     // Baseline neutro (5), não punitivo (2): sem palavra de fechamento no texto não
     // significa que o atendente não fechou — só que o scanner de palavras-chave não
     // achou evidência (ver findMatriculaMatch em CSVUploader.tsx, que sobrescreve esta
-    // nota quando o Sponte confirma matrícula real — sinal muito mais forte que texto).
-    const commercialScore = aiResult ? aiResult.globalScores.commercial : Math.max(0, Math.min(10, 5 + relevantMessages.filter(m => hasKeyword(m.Mensagem, CLOSING_KEYWORDS)).length * 2));
+    // nota quando o Sponte confirma matrícula VIGENTE — sinal muito mais forte que texto).
+    // Tentativa (atendente menciona matrícula/boleto/contrato) soma pouco e tem teto —
+    // só prova que ele tentou. Confirmação (CLIENTE diz "finalizei"/"segue comprovante")
+    // soma forte — é prova de fechamento de verdade, não só de tentativa.
+    const confirmationHits = relevantMessages.filter(m => !isAgentMsg(m) && hasKeyword(m.Mensagem, CLOSING_CONFIRMATION_KEYWORDS)).length;
+    const attemptHits = relevantMessages.filter(m => hasKeyword(m.Mensagem, CLOSING_ATTEMPT_KEYWORDS)).length;
+    const commercialScore = aiResult ? aiResult.globalScores.commercial : Math.max(0, Math.min(10, 5 + Math.min(attemptHits, 2) * 1 + confirmationHits * 4));
     const clarityScore = aiResult ? aiResult.globalScores.clarity : Math.max(0, Math.min(10, relevantMessages.filter(m => m.Mensagem.length > 60).length * 2 + 5));
     const depthScore = aiResult ? aiResult.globalScores.depth : Math.max(0, Math.min(10, relevantMessages.filter(m => m.Mensagem.includes('?') && isAgentMsg(m)).length * 2 + 3));
     const agilityScore = aiResult ? aiResult.globalScores.agility : (relevantMessages.length > 5 ? 9 : 7);
@@ -329,7 +343,7 @@ const analyzeProtocol = async (protocol: string, messages: WhatsAppMessage[]): P
         agilityScore,
         isCommercial: aiResult?.isCommercial ?? true,
         overallConclusion: aiResult?.overallConclusion ?? (finalScore >= 8 ? 'Excelente' : 'Regular'),
-        closingAttempt: relevantMessages.some(m => hasKeyword(m.Mensagem, CLOSING_KEYWORDS)),
+        closingAttempt: relevantMessages.some(m => hasKeyword(m.Mensagem, CLOSING_ATTEMPT_KEYWORDS)),
         improvements,
         messageCount: agentMessages.length,
         date,

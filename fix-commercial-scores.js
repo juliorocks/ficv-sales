@@ -98,8 +98,16 @@ function findMatriculaMatch(contact, protocolDate, matriculas, windowDays = 30) 
     return matriculas.find((sm) => normalizeName(sm.aluno) === normContact && inWindow(sm)) ?? null;
 }
 
-// ── mesma lógica de src/utils/csvProcessor.ts (CLOSING_KEYWORDS/hasKeyword) ──
-const CLOSING_KEYWORDS = [
+// ── mesma lógica de src/utils/csvProcessor.ts ─────────────────────────────────
+// TENTATIVA (qualquer um menciona o processo) soma pouco e tem teto — só prova
+// que alguém tentou. CONFIRMAÇÃO (o CLIENTE diz ter concluído) soma forte — é
+// prova de fechamento de verdade, não só de tentativa.
+const CLOSING_CONFIRMATION_KEYWORDS = [
+    'finalizei', 'finalizado minha', 'consegui fazer', 'deu certo',
+    'ja fiz a matricula', 'ja fiz minha matricula', 'matricula paga', 'ja paguei',
+    'segue comprovante', 'segue o comprovante', 'comprovante de pagamento',
+];
+const CLOSING_ATTEMPT_KEYWORDS = [
     'matricul', 'inscri',
     'garantir sua vaga', 'garanta sua vaga', 'garantir a vaga',
     'vamos prosseguir', 'vamos dar continuidade', 'podemos prosseguir',
@@ -138,13 +146,17 @@ async function main() {
         let messages = [];
         try { messages = JSON.parse(log.message_content || '[]'); } catch { /* ignora transcript malformado */ }
 
-        const keywordHits = messages.filter((m) => hasKeyword(m.text || '', CLOSING_KEYWORDS)).length;
-        let newCommercial = Math.max(0, Math.min(10, 5 + keywordHits * 2));
+        const confirmationHits = messages.filter((m) => m.role !== 'agent' && hasKeyword(m.text || '', CLOSING_CONFIRMATION_KEYWORDS)).length;
+        const attemptHits = messages.filter((m) => hasKeyword(m.text || '', CLOSING_ATTEMPT_KEYWORDS)).length;
+        let newCommercial = Math.max(0, Math.min(10, 5 + Math.min(attemptHits, 2) * 1 + confirmationHits * 4));
 
         const protocolDate = (log.timestamp || '').slice(0, 10);
         const match = protocolDate ? findMatriculaMatch(log.contact, protocolDate, matriculas, 30) : null;
-        const matchedSponte = !!match && newCommercial < 9;
-        if (matchedSponte) newCommercial = 9;
+        // só "Vigente" (situacao_id=1) é prova forte (piso 9); "Pré Matrícula" (situacao_id=6)
+        // é sinal mais fraco — piso 7, não sobrescreve nota melhor que o texto já indique.
+        const floor = match ? (match.situacao_id === 1 ? 9 : 7) : 0;
+        const matchedSponte = !!match && newCommercial < floor;
+        if (matchedSponte) newCommercial = floor;
 
         if (newCommercial === log.commercial_score) continue;
 
@@ -157,6 +169,14 @@ async function main() {
             oldCommercial: log.commercial_score, newCommercial,
             oldFinal: null, newFinal, matchedAluno: match?.aluno ?? null, matchedCurso: match?.nome_curso ?? null,
         });
+    }
+
+    const watchlist = ['2026092900017', '2026092900113'];
+    console.log('\nCasos de referência (revisados manualmente):');
+    for (const p of watchlist) {
+        const log = logs.find((l) => l.protocol === p);
+        const change = changes.find((c) => c.protocol === p);
+        console.log(`  [${p}] ${log?.agent_name ?? '?'} — atual: ${log?.commercial_score ?? '?'} → novo: ${change ? change.newCommercial : log?.commercial_score ?? '?'}`);
     }
 
     console.log(`\n${changes.length} atendimentos vão mudar de nota Comercial:`);

@@ -4,8 +4,13 @@ import { processCSV, ConversationAnalysis } from '../utils/csvProcessor';
 import { supabase } from '../lib/supabase';
 import { findMatriculaMatch, SponteMatriculaLite } from '@/utils/sponteMatch';
 
-// Lead fechou matrícula de verdade (Sponte) depois desse atendimento? É sinal muito
-// mais forte que qualquer heurística de texto — sobrescreve a nota Comercial.
+// Lead fechou matrícula de verdade (Sponte) depois desse atendimento? É sinal mais forte
+// que texto — MAS "a pessoa acabou matriculando" não é o mesmo que "esse atendimento
+// específico teve ótima técnica comercial" (pode ter fechado por outro motivo/depois,
+// com atendimento morno). Por isso só "Vigente" (situacao_id=1, matrícula confirmada/
+// ativa) é tratado como prova forte (piso 9); "Pré Matrícula" (situacao_id=6, passo
+// inicial, pode nem ter sido paga ainda) só garante um piso mais baixo (7), não sobrescreve
+// uma nota melhor que o texto já tenha indicado.
 async function applyMatriculaBoost(results: ConversationAnalysis[]): Promise<ConversationAnalysis[]> {
     const { data: matriculas } = await supabase
         .from('sponte_matriculas')
@@ -16,8 +21,10 @@ async function applyMatriculaBoost(results: ConversationAnalysis[]): Promise<Con
     return results.map((r) => {
         if (!r.isCommercial || r.status !== 'approved') return r;
         const match = findMatriculaMatch(r.contact, r.date.slice(0, 10), matriculas, 30);
-        if (!match || r.commercialScore >= 9) return r;
-        const commercialScore = 9;
+        if (!match) return r;
+        const floor = match.situacao_id === 1 ? 9 : 7;
+        if (r.commercialScore >= floor) return r;
+        const commercialScore = floor;
         const scores = [r.empathyScore, r.clarityScore, r.depthScore, commercialScore, r.agilityScore];
         const finalScore = Number((scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1));
         return { ...r, commercialScore, finalScore, closingAttempt: true };
