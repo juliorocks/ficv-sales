@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog'
 import { TicketDetail } from './TicketDetail'
 import { InstallAppBanner, InstallAppButton } from './InstallAppBanner'
-import { AlunoInicio, AlunoFinanceiro, AlunoNotas, useOverview, type NotasFoco } from './AlunoPainel'
+import { AlunoInicio, AlunoFinanceiro, AlunoNotas, AlunoDeclaracao, useOverview, type NotasFoco } from './AlunoPainel'
 import { showSuccess, showError } from '../../utils/toast'
 import {
   Plus, Ticket as TicketIcon, Clock, CheckCircle2,
@@ -359,7 +359,9 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, appInstalado, onL
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
   }, [])
-  const [tab, setTab] = useState<'inicio' | 'financeiro' | 'notas' | 'chamados'>('inicio')
+  // 'declaracao' não entra na barra de baixo (tabs) — só acessível pelo botão em Início,
+  // tela própria em branco (document), sem o header/nav escuro do portal por cima.
+  const [tab, setTab] = useState<'inicio' | 'financeiro' | 'notas' | 'chamados' | 'declaracao'>('inicio')
   // período tocado no Início → Notas abre já nele (some ao trocar de aba pelo menu)
   const [notasFoco, setNotasFoco] = useState<NotasFoco | null>(null)
   const [showNew, setShowNew] = useState(false)
@@ -394,6 +396,9 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, appInstalado, onL
     { id: 'notas', label: 'Notas', icon: BookOpen },
     { id: 'chamados', label: 'Chamados', icon: TicketIcon, badge: aguardando },
   ] as const
+
+  // tela própria (documento pra imprimir) — sem o header/nav escuro do portal por cima
+  if (tab === 'declaracao') return <AlunoDeclaracao onVoltar={() => setTab('inicio')} />
 
   return (
     <div className="min-h-screen bg-[var(--bg-main)] overflow-x-clip">
@@ -444,7 +449,7 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, appInstalado, onL
 
       {tab !== 'chamados' && (
         <div className="p-4 sm:p-6 pb-28 sm:pb-6 max-w-3xl mx-auto">
-          {tab === 'inicio' && <AlunoInicio onGo={(t, foco) => { setNotasFoco(t === 'notas' ? foco ?? null : null); setTab(t); window.scrollTo({ top: 0 }); if (t === 'chamados') setShowNew(true) }} />}
+          {tab === 'inicio' && <AlunoInicio onGo={(t, foco) => { setNotasFoco(t === 'notas' ? foco ?? null : null); setTab(t); window.scrollTo({ top: 0 }); if (t === 'chamados') setShowNew(true) }} onDeclaracao={() => { setTab('declaracao'); window.scrollTo({ top: 0 }) }} />}
           {tab === 'financeiro' && <AlunoFinanceiro />}
           {tab === 'notas' && <AlunoNotas foco={notasFoco} />}
         </div>

@@ -85,7 +85,9 @@ Deno.serve(async (req) => {
             if (Object.keys(patch).length) await db.from("alunos").update(patch).eq("id", aluno.id);
 
             return j({
-                aluno: { ...sa, nome: sa.nome ?? aluno.nome, ra: sa.ra ?? aluno.ra, email: sa.email ?? aluno.email, celular: sa.celular ?? aluno.telefone },
+                // cpf vem só do nosso cadastro (é o que já usamos pra login) — o Sponte não
+                // devolve isso em GetAlunos; usado na Declaração de Matrícula.
+                aluno: { ...sa, nome: sa.nome ?? aluno.nome, ra: sa.ra ?? aluno.ra, email: sa.email ?? aluno.email, celular: sa.celular ?? aluno.telefone, cpf: aluno.cpf ?? null },
                 matriculas, parcelas,
             });
         }

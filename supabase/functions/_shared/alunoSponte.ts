@@ -48,6 +48,9 @@ export async function alunoOverview(A: number) {
         aluno: {
             nome: n(a.Nome), ra: n(a.RA), email: n(a.Email), celular: n(a.Celular), situacao: n(a.Situacao),
             turma_atual: n(a.TurmaAtual), inadimplente: /sim|true|^1$/i.test(a.Inadimplente ?? ""),
+            // Declaração de Matrícula (01/10): precisa da data de nascimento, que mais nada do
+            // portal usava até agora.
+            data_nascimento: brDate(a.DataNascimento),
         },
         matriculas, parcelas,
     };

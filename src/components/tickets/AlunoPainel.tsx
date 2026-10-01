@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
-import { AlertCircle, BookOpen, CalendarDays, CheckCircle2, ChevronRight, ChevronsUpDown, Copy, CreditCard, ExternalLink, GraduationCap, Loader2, RefreshCw, Wallet } from 'lucide-react'
+import { AlertCircle, BookOpen, CalendarDays, CheckCircle2, ChevronRight, ChevronsUpDown, Copy, CreditCard, ExternalLink, FileText, GraduationCap, Loader2, Printer, RefreshCw, Wallet } from 'lucide-react'
 import { showError, showSuccess } from '../../utils/toast'
 
 export interface Parcela {
@@ -17,7 +17,11 @@ export interface Matricula {
   data_matricula: string | null; data_inicio: string | null; data_termino: string | null
 }
 export interface Overview {
-  aluno: { nome: string; ra: string | null; email: string | null; celular: string | null; situacao: string | null; turma_atual: string | null; inadimplente: boolean }
+  aluno: {
+    nome: string; ra: string | null; email: string | null; celular: string | null; situacao: string | null; turma_atual: string | null; inadimplente: boolean
+    // Declaração de Matrícula (01/10)
+    data_nascimento: string | null; cpf: string | null
+  }
   matriculas: Matricula[]
   parcelas: Parcela[]
 }
@@ -118,7 +122,7 @@ function LoadState({ isLoading, error, refetch }: { isLoading: boolean; error: u
 
 // ── Início ───────────────────────────────────────────────────
 
-export function AlunoInicio({ onGo }: { onGo: (tab: 'financeiro' | 'notas' | 'chamados', foco?: NotasFoco) => void }) {
+export function AlunoInicio({ onGo, onDeclaracao }: { onGo: (tab: 'financeiro' | 'notas' | 'chamados', foco?: NotasFoco) => void; onDeclaracao: () => void }) {
   const q = useOverview()
   const foto = useFoto()
   if (!q.data) return <LoadState isLoading={q.isLoading} error={q.error} refetch={q.refetch} />
@@ -219,6 +223,14 @@ export function AlunoInicio({ onGo }: { onGo: (tab: 'financeiro' | 'notas' | 'ch
           })}
         </div>
       )}
+
+      <Box className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <FileText className="w-4 h-4 text-[var(--text-muted)] shrink-0" />
+          <p className="text-sm text-[var(--text-main)]">Declaração de Matrícula</p>
+        </div>
+        <button onClick={onDeclaracao} className="text-xs text-[var(--primary)] hover:underline shrink-0">Gerar →</button>
+      </Box>
 
       <Box className="flex items-center justify-between gap-3">
         <p className="text-sm text-[var(--text-main)]">Precisa de ajuda com algo?</p>
@@ -441,6 +453,84 @@ export function AlunoNotas({ foco }: { foco?: NotasFoco | null }) {
           )}
         </>
       )}
+    </div>
+  )
+}
+
+// ── Declaração de Matrícula ─────────────────────────────────
+// Pedido do usuário 01/10: "dá pra fazer isso direto pelo Sponte?" — não: a API do Sponte
+// (WSAPIEdu, as 138 funções do WSDL) não tem um "gerar declaração", só GetContratoPDFBase64
+// (o contrato, documento diferente) e GetCertificadoValido (só VALIDA um certificado que já
+// existe). O documento aqui é montado por nós, com os dados reais do aluno (Sponte) — mesmo
+// texto/layout que a secretaria já emite hoje pelo sistema deles (modelo que o usuário mandou).
+
+const MESES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
+const dataPorExtenso = (d: Date) => `${d.getDate()} de ${MESES[d.getMonth()]} de ${d.getFullYear()}`
+// aluno.data_nascimento vem "AAAA-MM-DD" (brDate do Sponte) → "DD/MM/AAAA" pro texto da declaração
+const dataBr = (iso: string | null) => {
+  const [y, m, d] = (iso ?? '').split('-')
+  return d && m && y ? `${d}/${m}/${y}` : null
+}
+// "Teologia Ead - 2026.2 - P4" / "Modular - 2026.2" → "2026.2" (mesmo padrão de periodoKey acima)
+const semestreDaTurma = (turma: string | null) => turma?.match(/\b(20\d{2}\.\d)\b/)?.[1] ?? null
+
+export function AlunoDeclaracao({ onVoltar }: { onVoltar: () => void }) {
+  const q = useOverview()
+  if (!q.data) return <div className="p-4 sm:p-6 max-w-2xl mx-auto"><LoadState isLoading={q.isLoading} error={q.error} refetch={q.refetch} /></div>
+  const { aluno, matriculas } = q.data
+  const vig = matriculas.find((m) => VIGENTE.test(m.situacao ?? '')) ?? matriculas[0] ?? null
+  const semestre = semestreDaTurma(vig?.turma ?? null)
+  const nascimento = dataBr(aluno.data_nascimento)
+
+  return (
+    <div className="min-h-screen bg-[var(--bg-main)]">
+      {/* barra de ação — some ao imprimir (@media print), só o documento sai na folha */}
+      <div className="print:hidden sticky top-0 z-10 bg-[var(--bg-main)]/95 backdrop-blur border-b border-[var(--border)] px-4 py-3 flex items-center justify-between">
+        <button onClick={onVoltar} className="flex items-center gap-1 text-sm text-[var(--text-muted)] hover:text-[var(--text-main)]">
+          <ChevronRight className="w-4 h-4 rotate-180" /> Voltar
+        </button>
+        <button onClick={() => window.print()} className="btn-primary text-sm px-4 py-2 rounded-lg flex items-center gap-2">
+          <Printer className="w-4 h-4" /> Imprimir / Salvar PDF
+        </button>
+      </div>
+
+      {!vig && (
+        <p className="print:hidden max-w-2xl mx-auto mt-4 px-4 text-sm text-red-500">
+          Nenhuma matrícula encontrada no sistema acadêmico — a declaração pode sair incompleta. Procure a secretaria se precisar dela com urgência.
+        </p>
+      )}
+
+      {/* o documento: fundo branco/texto preto FIXO (é uma folha pra imprimir, não segue o tema escuro do portal) */}
+      <div className="max-w-2xl mx-auto bg-white text-black p-8 sm:p-12 my-4 sm:my-8 rounded-xl shadow-sm print:shadow-none print:rounded-none print:max-w-none print:m-0 print:p-10">
+        <div className="flex justify-center mb-6">
+          <img src="https://siteficv.vercel.app/images/test-logo.png" alt="FICV" className="h-20 w-auto object-contain" />
+        </div>
+        <div className="text-center space-y-0.5 mb-8">
+          <p className="font-bold text-sm">FACULDADE INTERNACIONAL CIDADE VIVA</p>
+          <p className="font-bold text-sm">Credenciada pelo MEC - Portaria nº 35 de 19/01/2018</p>
+          <p className="font-bold text-sm">CNPJ: 09.491.298/0003-16</p>
+        </div>
+        <p className="text-center font-bold text-base mb-10">DECLARAÇÃO DE MATRÍCULA</p>
+        <p className="text-center font-bold text-sm leading-relaxed mb-10 px-2">
+          Declaramos para os devidos fins que, o(a) aluno(a) {aluno.nome}, matrícula nº {aluno.ra ?? '—'}
+          {nascimento ? `, nascido(a) em ${nascimento}` : ''}
+          {aluno.cpf ? `, portador(a) do documento de número ${aluno.cpf}` : ''}
+          , encontra-se regularmente matriculado(a) no curso:{' '}
+          {vig?.curso ?? '—'}, nesta Instituição de Ensino Superior{semestre ? `, no semestre letivo de ${semestre}` : ''}.
+        </p>
+        <p className="text-center font-bold text-sm mb-20">João Pessoa/PB, {dataPorExtenso(new Date())}.</p>
+
+        {/* assinatura da Secretaria Acadêmica — TODO: imagem (ver pedido ao usuário) */}
+        <div className="flex flex-col items-center h-24" />
+
+        <div className="text-center text-xs mt-8 space-y-0.5">
+          <p>Rua Luzia Simões Bertoline, nº 50, Aeroclube</p>
+          <p>João Pessoa/PB - CEP: 58.036.630</p>
+          <p className="underline">83 3041-7471</p>
+          <p className="underline">ficv.edu.br</p>
+          <p className="underline">faculdade@cidadeviva.org</p>
+        </div>
+      </div>
     </div>
   )
 }
