@@ -15,7 +15,7 @@ import { showSuccess, showError } from '../../utils/toast'
 import {
   X, Send, Lock, Clock, CheckCircle2, Star, ChevronRight,
   MessageSquare, Shield, Loader2, UserCircle2, AlertCircle,
-  Paperclip, FileText, ImageIcon, Download, XCircle, Mic, MicOff, Play, BookOpen
+  Paperclip, FileText, ImageIcon, Download, XCircle, Mic, MicOff, Play, BookOpen, Trash2
 } from 'lucide-react'
 import { formatDistanceToNow, format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -410,6 +410,18 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
     refetchInterval: 5000,
   })
 
+  // Apagar mensagem (soft delete — fica "Mensagem apagada" no lugar, não some da conversa):
+  // só quem mandou pode apagar a própria, admin apaga qualquer uma. Pedido do usuário 02/10.
+  const canDeleteMessage = (m: TicketMessage) => isStaff && (m.autor_id === currentUserId || user?.role === 'admin')
+  async function deleteMessage(id: number) {
+    if (!window.confirm('Apagar esta mensagem? Ela vai aparecer como "Mensagem apagada" pra quem já viu a conversa.')) return
+    const { error } = await supabase.from('ticket_messages')
+      .update({ deleted_at: new Date().toISOString(), deleted_by: currentUserId })
+      .eq('id', id)
+    if (error) { showError(`Não foi possível apagar: ${error.message}`); return }
+    qc.invalidateQueries({ queryKey: ['ticket-messages', ticket.id] })
+  }
+
   // Fetch ticket (para status atualizado)
   const { data: currentTicket } = useQuery<Ticket>({
     queryKey: ['ticket', ticket.id],
@@ -713,9 +725,10 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
               messages.map(m => {
                 const isMine = m.autor_id === currentUserId && m.autor_role !== 'tutor_virtual'
                 const isInterno = m.interno
+                const isDeleted = !!m.deleted_at
 
                 return (
-                  <div key={m.id} className={`flex gap-3 ${isMine ? 'flex-row-reverse' : 'flex-row'}`}>
+                  <div key={m.id} className={`flex gap-3 group ${isMine ? 'flex-row-reverse' : 'flex-row'}`}>
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-xs font-bold
                       ${m.autor_role === 'aluno'
                         ? 'bg-[var(--primary)]/20 text-[var(--primary)]'
@@ -726,7 +739,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                     <div className={`max-w-[70%] ${isMine ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-[var(--text-muted)] font-medium">{m.autor_nome}</span>
-                        {isInterno && (
+                        {isInterno && !isDeleted && (
                           <span className="flex items-center gap-1 text-xs text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
                             <Lock className="w-2.5 h-2.5" /> Interno
                           </span>
@@ -734,7 +747,21 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                         <span className="text-xs text-[var(--text-muted)]">
                           {formatDistanceToNow(new Date(m.created_at), { addSuffix: true, locale: ptBR })}
                         </span>
+                        {!isDeleted && canDeleteMessage(m) && (
+                          <button
+                            onClick={() => deleteMessage(m.id)}
+                            title="Apagar mensagem"
+                            className="opacity-0 group-hover:opacity-100 transition-opacity text-[var(--text-muted)] hover:text-red-400"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
                       </div>
+                      {isDeleted ? (
+                        <div className="px-4 py-2.5 rounded-2xl text-sm italic text-[var(--text-muted)] bg-[var(--bg-main)] border border-dashed border-[var(--border)]">
+                          Mensagem apagada
+                        </div>
+                      ) : (
                       <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words
                         ${isInterno
                           ? 'bg-amber-500/10 border border-amber-500/20 text-amber-200'
@@ -779,6 +806,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                           </div>
                         )}
                       </div>
+                      )}
                     </div>
                   </div>
                 )

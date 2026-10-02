@@ -299,6 +299,9 @@ export interface TicketMessage {
   autor_role: 'aluno' | 'atendente' | 'admin' | 'agent' | 'secretaria' | 'tutor' | 'coordenador' | 'biblioteca' | 'tutor_virtual'
   conteudo: string
   interno: boolean
+  attachments?: { name: string; url: string; type: string; size: number }[] | null
+  deleted_at?: string | null
+  deleted_by?: string | null
   created_at: string
 }
 
