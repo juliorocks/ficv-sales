@@ -152,9 +152,16 @@ export async function planejar(
 
 /** Pré-filtro barato (regex) pra saber se vale rodar a triagem completa (classify(), que
  *  chama a OpenAI) — evita gastar uma chamada a mais em toda mensagem normal da Faculdade.
- *  Mesmas famílias de palavra que o classify() já usa pra reconhecer Igreja/Escola/etc. */
+ *  Mesmas famílias de palavra que o classify() já usa pra reconhecer Igreja/Escola/etc.
+ *  01/10: achado ao vivo — "quero saber sobre as matriculas do fundamental, na escola" não
+ *  batia em NADA aqui (exigia "ensino fundamental" junto, nunca só "fundamental"/"escola"
+ *  soltos, e a parte de matrícula só cobria "dele/dela/do meu filho/da minha filha") — o lead
+ *  ficou preso na IA da Faculdade com contexto antigo em vez de ir pra classificação do Hub.
+ *  Palavras soltas (escola, fundamental, infantil…) têm risco baixo de disparar à toa: isso só
+ *  decide se vale chamar o classify() (que ainda decide de verdade, com o contexto todo, e já
+ *  protege contra redirecionar a própria Faculdade pra ela mesma) — não redireciona sozinho. */
 export function mentionsOtherCompany(text: string): boolean {
-    return /\bmembro\b|\bmembresia\b|\bbatismo\b|\bculto\b|\bc[eé]lula\b|\bpastor\b|\bora[çc][ãa]o\b|\bdiz[íi]mo|\boferta\b|educa[çc][ãa]o infantil|ensino fundamental|ensino m[eé]dio|\bmeu filho\b|\bminha filha\b|matr[íi]cula (dele|dela|do meu filho|da minha filha)/i.test(text);
+    return /\bmembro\b|\bmembresia\b|\bbatismo\b|\bculto\b|\bc[eé]lula\b|\bpastor\b|\bora[çc][ãa]o\b|\bdiz[íi]mo|\boferta\b|\bescola\b|\binfantil\b|\bfundamental\b|ensino m[eé]dio|\brematr[íi]cula\b|\buniforme\b|material escolar|reuni[ãa]o de pais|\bmeu filho\b|\bminha filha\b|matr[íi]cula (dele|dela|do meu filho|da minha filha|do fundamental|da infantil|no fundamental|na infantil|no m[eé]dio|na m[eé]dio|escolar)/i.test(text);
 }
 
 /**
