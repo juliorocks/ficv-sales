@@ -188,6 +188,13 @@ Deno.serve(async (req) => {
             );
         }
 
+        // precisa estar FORA do if(lead) — usada lá embaixo, já fora do escopo do bloco, na
+        // chamada de aiReply() (bug real 02/10: `reopenNote` não existia ali, a function
+        // quebrava com "ReferenceError: reopenNote is not defined" e ficava muda, sem
+        // responder NADA — nem a mensagem antiga nem a nova lógica de reabertura chegavam a
+        // rodar; só apareceu no vivaconnect_webhook_logs.outcome, não em lugar nenhum visível
+        // no chat)
+        let leadReopened = false;
         if (lead) {
             const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
             // Segue o canal de CADA mensagem, igual ticket_id/contact_id logo abaixo — não fica
@@ -245,6 +252,7 @@ Deno.serve(async (req) => {
                 }
             }
             await db.from("leads").update(patch).eq("id", lead.id);
+            leadReopened = !!reopenNote;
             if (reopenNote) {
                 const now = String(patch.stage_entry_date);
                 await db.from("lead_notes").insert({ lead_id: lead.id, note: reopenNote, created_at: now });
@@ -330,7 +338,7 @@ Deno.serve(async (req) => {
         // respondia nem 1x, mesmo com o canal "IA responde" ligado — card ficava preso em
         // Entrada pra sempre porque advanceAiStage nunca era chamado.
         if (ch.ai_enabled && lead && !(isStudent && ch.purpose === "official") && !m.agentUserId) {
-            const outcome = await aiReply(db, settings, lead.id, ch.id, m.number, !!reopenNote);
+            const outcome = await aiReply(db, settings, lead.id, ch.id, m.number, leadReopened);
             return await done(`stored:${outcome}`, lead.id);
         }
 
