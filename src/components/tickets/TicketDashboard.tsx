@@ -8,16 +8,18 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../hooks/use-auth'
 import type { Ticket, TicketCategoria, TicketStatus, TicketEvaluation } from '../../types/database'
 import { TicketDetail } from './TicketDetail'
+import { NewTicketDialog } from './NewTicketDialog'
 import { TicketKanban } from './TicketKanban'
 import { NpsPanel } from './NpsPanel'
 import { AlunoHistorico } from './AlunoHistorico'
 import { Input } from '../ui/input'
+import { Button } from '../ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { Badge } from '../ui/badge'
 import {
   Ticket as TicketIcon, Clock, CheckCircle2, AlertCircle, Star,
   Search, Filter, Users, TrendingUp, MessageSquare, Timer,
-  ChevronRight, Loader2, RefreshCw
+  ChevronRight, Loader2, RefreshCw, Plus
 } from 'lucide-react'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -165,6 +167,7 @@ export function TicketDashboard() {
   const isAdmin = user?.role === 'admin'
 
   const [selected, setSelected] = useState<Ticket | null>(null)
+  const [novoChamado, setNovoChamado] = useState(false)
   const podeVerNpsGeral = user?.role === 'admin' || user?.role === 'coordenador'
   type View = 'painel' | 'kanban' | 'nps'
   const [view, setView] = useState<View>(() => {
@@ -266,6 +269,9 @@ export function TicketDashboard() {
           <p className="text-sm text-[var(--text-muted)] mt-1">Gerencie e acompanhe todos os atendimentos</p>
         </div>
         <div className="flex items-center gap-3">
+          <Button size="sm" className="gap-1.5" onClick={() => setNovoChamado(true)}>
+            <Plus className="w-4 h-4" /> Novo Chamado
+          </Button>
           <div className="flex rounded-lg border border-[var(--border)] p-0.5 bg-[var(--bg-card)]">
             {(['painel', 'kanban', 'nps'] as const).map(v => (
               <button key={v} onClick={() => pickView(v)}
@@ -554,6 +560,10 @@ export function TicketDashboard() {
       </>}
 
       {selected && <TicketDetail ticket={selected} onClose={() => setSelected(null)} />}
+
+      {novoChamado && (
+        <NewTicketDialog onClose={() => setNovoChamado(false)} onCreated={() => refetch()} />
+      )}
 
       {selectedAluno && (
         <AlunoHistorico

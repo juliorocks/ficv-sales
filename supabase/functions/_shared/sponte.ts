@@ -81,6 +81,55 @@ export async function sponteAlunoByCpf(cpf: string) {
     };
 }
 
+/** Aluno do Sponte pelo AlunoID — usado pra abrir chamado em nome de um aluno (busca por nome/
+ *  turma) que ainda não tem conta no Portal: dá o CPF pra `ensureAlunoAccount` criar a conta. */
+export async function sponteAlunoById(alunoId: number) {
+    const xml = await sponteCall("GetAlunos", { sParametrosBusca: `AlunoID=${alunoId}` });
+    const a = records(xml, "wsAluno").find((r) => Number(r.AlunoID) === alunoId);
+    if (!a) return null;
+    return {
+        aluno_id: Number(a.AlunoID), nome: a.Nome, cpf: a.CPF || null, email: (a.Email || "").toLowerCase() || null,
+        celular: a.Celular || a.Telefone || null, ra: a.RA || a.NumeroMatricula || null,
+        situacao: a.Situacao || null, turma_atual: a.TurmaAtual || null,
+    };
+}
+
+/** Busca alunos pelo nome (Portal/chamado em nome de alguém) — só os campos necessários pra
+ *  montar a lista, nunca CPF/senha. */
+export async function sponteBuscarAlunos(nome: string) {
+    const xml = await sponteCall("GetAlunos", { sParametrosBusca: `Nome=${nome}` });
+    return records(xml, "wsAluno")
+        .filter((r) => r.AlunoID && r.AlunoID !== "0")
+        .map((r) => ({ aluno_id: Number(r.AlunoID), nome: r.Nome, situacao: r.Situacao || null, turma_atual: r.TurmaAtual || null }));
+}
+
+/** Busca turmas pelo nome — só as ABERTAS (fechada/encerrada não faz sentido abrir chamado
+ *  "pra turma toda" nela). */
+export async function sponteBuscarTurmas(nome: string) {
+    const xml = await sponteCall("GetTurmas", { sParametrosBusca: `Nome=${nome}` });
+    return records(xml, "wsTurma")
+        .filter((r) => r.TurmaID && r.TurmaID !== "0" && /aberta/i.test(r.Situacao || ""))
+        .map((r) => ({
+            turma_id: Number(r.TurmaID), nome: r.Nome, curso_id: Number(r.CursoID) || null, curso: r.Curso || null,
+            vagas_ocupadas: Number(r.VagasOcupadas) || 0,
+        }));
+}
+
+/** Matriculados numa turma (pra abrir chamado "pra turma toda") — dedup por AlunoID (o Sponte
+ *  às vezes repete o mesmo aluno/turma por re-matrícula/cancelamento histórico; fica o Vigente,
+ *  ou o 1º se nenhum for). */
+export async function sponteRosterTurma(turmaId: number) {
+    const xml = await sponteCall("GetMatriculas", { sParametrosBusca: `TurmaID=${turmaId}` });
+    const byAluno = new Map<number, { aluno_id: number; nome: string; situacao: string | null }>();
+    for (const r of records(xml, "wsMatricula")) {
+        const id = Number(r.AlunoID);
+        if (!id) continue;
+        const atual = byAluno.get(id);
+        if (!atual || /vigente/i.test(r.Situacao ?? "")) byAluno.set(id, { aluno_id: id, nome: r.Aluno, situacao: r.Situacao || null });
+    }
+    return [...byAluno.values()].sort((a, b) => a.nome.localeCompare(b.nome));
+}
+
 /** Nível pelo nome do curso: Pós/Especialização/MBA → pos; Bacharelado/Licenciatura/Tecnólogo/Graduação → graduacao. */
 export function nivelDoCurso(nome?: string | null): "pos" | "graduacao" | null {
     const n = String(nome ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");

@@ -1,7 +1,7 @@
 // Conta do Portal do Aluno a partir do Sponte (usada no 1º acesso e na transferência
 // Comercial → Secretaria). E-mail interno <cpf>@aluno.ficv.br; senha inicial = CPF
 // (padrão do Sponte) e must_change_password = true.
-import { cpfDigits, sponteAlunoByCpf, sponteNivelAluno } from "./sponte.ts";
+import { cpfDigits, sponteAlunoByCpf, sponteAlunoById, sponteNivelAluno } from "./sponte.ts";
 
 export const fmtCpf = (d: string) => d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4");
 
@@ -37,4 +37,17 @@ export async function ensureAlunoAccount(db: any, cpf: string): Promise<{ aluno?
     const { error: iErr } = await db.from("alunos").insert(row);
     if (iErr) { await db.auth.admin.deleteUser(created.user.id); return { error: "Não foi possível salvar o aluno." }; }
     return { aluno: row, created: true };
+}
+
+/** Mesma garantia de conta, mas a partir do AlunoID do Sponte (busca por nome/turma, 02/10 —
+ *  "abrir chamado pra um aluno específico ou pra turma inteira") — quando já tem conta, nem
+ *  chama o Sponte de novo; quando não tem, busca o CPF pelo AlunoID e delega pro mesmo fluxo
+ *  de criação de sempre (ensureAlunoAccount), pra nunca duplicar a lógica sensível de conta. */
+export async function ensureAlunoAccountById(db: any, sponteAlunoId: number): Promise<{ aluno?: any; created?: boolean; error?: string }> {
+    const { data: existing } = await db.from("alunos").select("id, nome, email, cpf, sponte_aluno_id, nivel")
+        .eq("sponte_aluno_id", sponteAlunoId).maybeSingle();
+    if (existing) return { aluno: existing, created: false };
+    const s = await sponteAlunoById(sponteAlunoId);
+    if (!s?.cpf) return { error: "CPF não encontrado no Sponte pra esse aluno." };
+    return ensureAlunoAccount(db, s.cpf);
 }
