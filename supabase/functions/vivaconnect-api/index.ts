@@ -39,7 +39,7 @@ const CH_COLS = "id, name, purpose, kind, phone, api_id, api_token, active, dail
 
 // Respostas automáticas (IA / Hub / portal / 1ª mensagem) nunca saem pela API OFICIAL paga
 // da Meta: número WABA só envia automático com o Modo Híbrido ativo no Z-PRO (decisão 26/09).
-const AUTO_KINDS = new Set(["ai_reply", "hub_ask", "hub_redirect", "hub_forward", "student_reply", "first_message"]);
+const AUTO_KINDS = new Set(["ai_reply", "hub_ask", "hub_redirect", "hub_forward", "student_reply", "first_message", "ticket_notice"]);
 function hybridBlock(ch: any, kind: string): string | null {
     if (!AUTO_KINDS.has(kind)) return null;
     const isWaba = ch.zpro_type ? /waba|official|cloud/i.test(ch.zpro_type) : ch.kind === "waba" || ch.kind === "hybrid";

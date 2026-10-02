@@ -18,7 +18,7 @@ import { AlunoInicio, AlunoFinanceiro, AlunoNotas, AlunoDeclaracao, useOverview,
 import { showSuccess, showError } from '../../utils/toast'
 import {
   Plus, Ticket as TicketIcon, Clock, CheckCircle2,
-  AlertCircle, ChevronRight, Loader2, Search, Star, LogOut, Home, Wallet, BookOpen, RefreshCw
+  AlertCircle, ChevronRight, Loader2, Search, Star, LogOut, Home, Wallet, BookOpen, RefreshCw, Bell
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -416,6 +416,14 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, appInstalado, onL
           </div>
         </div>
         <div className="flex items-center gap-4 sm:gap-5">
+        <button onClick={() => setTab('chamados')} aria-label="Notificações" className="relative text-[#8A8A9A] hover:text-[#F0EDE8] transition-colors">
+          <Bell className="w-4 h-4 sm:w-[18px] sm:h-[18px]" />
+          {aguardando > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-[#C9A84C] text-[9px] font-bold text-[#13161D]">
+              {aguardando}
+            </span>
+          )}
+        </button>
         <InstallAppButton />
         <button onClick={refreshAll} disabled={refreshing} aria-label="Atualizar"
           className="flex items-center gap-1.5 text-xs text-[#8A8A9A] hover:text-[#F0EDE8] transition-colors">

@@ -11,6 +11,49 @@
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { identify, jsonRes } from "../_shared/ai.ts";
 import { emailLayout, escHtml, portalUrl, sendEmail, ticketReplyAddress } from "../_shared/email.ts";
+import { toZproNumber } from "../_shared/vivaconnect.ts";
+
+// Mesmo aviso do e-mail, também por WhatsApp não oficial (canal pool/Baileys, sem custo Meta)
+// — pedido do usuário 02/10: "muita gente não fica abrindo e-mail". Best-effort: nunca lança
+// (falha aqui não pode derrubar o envio do e-mail, que é o canal garantido).
+async function sendTicketWhatsApp(db: any, telefone: string | null | undefined, text: string): Promise<void> {
+    try {
+        const number = toZproNumber(telefone);
+        if (!number || !text) return;
+        const { data: settings } = await db.from("vivaconnect_settings").select("enabled").eq("id", 1).maybeSingle();
+        if (!settings?.enabled) return;
+        const { data: channelId } = await db.rpc("vivaconnect_pick_pool_channel");
+        if (!channelId) return;
+
+        // mesma janela de horário comercial do follow-up automático da IA (ai_agent_settings,
+        // achado ao vivo 01/10 nesta mesma sessão: "não é legal mandar de madrugada") — fora
+        // da janela, agenda pro próximo horário de abertura em vez de mandar na hora.
+        const { data: ai } = await db.from("ai_agent_settings").select("followup_window_start, followup_window_end").eq("id", 1).maybeSingle();
+        const start = ai?.followup_window_start ?? 8, end = ai?.followup_window_end ?? 20;
+        const hour = Number(new Intl.DateTimeFormat("en-US", { hour: "numeric", hourCycle: "h23", timeZone: "America/Sao_Paulo" }).format(new Date()));
+        const dentroDaJanela = hour >= start && hour < end;
+        const scheduledAt = dentroDaJanela
+            ? new Date()
+            : new Date(Date.now() + (hour < start ? start - hour : 24 - hour + start) * 3600_000);
+
+        await db.from("vivaconnect_outbox").insert({
+            lead_id: null, channel_id: channelId, kind: "ticket_notice", number, body: text,
+            scheduled_at: scheduledAt.toISOString(),
+        });
+        // dispara o worker agora só se já está na janela (senão fica agendado; o cron do
+        // VivaConnect, de 1 em 1 min, pega sozinho quando chegar a hora)
+        if (dentroDaJanela) {
+            await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/vivaconnect-api`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` },
+                body: JSON.stringify({ action: "process_outbox" }),
+                signal: AbortSignal.timeout(15000),
+            }).catch(() => {});
+        }
+    } catch (e) {
+        console.error("ticket-emails: WhatsApp (ignorado):", (e as Error).message);
+    }
+}
 
 const CAT: Record<string, string> = {
     financeiro: "Financeiro", academico: "Acadêmico", secretaria: "Secretaria", suporte_tecnico: "Suporte Técnico",
@@ -53,14 +96,17 @@ Deno.serve(async (req) => {
         const { data: t } = await db.from("tickets").select("id, protocolo, titulo, categoria, status, aluno_id, aluno_nome, aluno_email, created_at, encerrado_pelo_aluno")
             .eq("id", row.ticket_id).maybeSingle();
         if (!t) { await finish("skipped", { error: "chamado não existe mais" }); continue; }
-        const { data: al } = t.aluno_id ? await db.from("alunos").select("nome, email, must_change_password").eq("id", t.aluno_id).maybeSingle() : { data: null };
+        const { data: al } = t.aluno_id ? await db.from("alunos").select("nome, email, telefone, must_change_password").eq("id", t.aluno_id).maybeSingle() : { data: null };
         const replyTo = await ticketReplyAddress(db, t.id); // null se RESEND_INBOUND_DOMAIN não configurado
         const L = (title: string, body: string, cta?: { label: string; url: string }) => emailLayout(title, body, cta, !!replyTo);
         const to = (al?.email || t.aluno_email || "").trim();
-        if (!to.includes("@") || to.endsWith("@aluno.ficv.br")) { await finish("skipped", { error: "aluno sem e-mail" }); continue; }
+        // sem e-mail válido não pula a linha inteira (o WhatsApp abaixo ainda pode mandar pra
+        // quem só tem telefone — achado ao vivo 02/10, pedido do usuário: "muita gente não
+        // fica abrindo e-mail") — só marca que a PARTE do e-mail não dá, perto do envio.
+        const hasEmail = to.includes("@") && !to.endsWith("@aluno.ficv.br");
         const nome = first(al?.nome ?? t.aluno_nome);
         const tag = `#${t.protocolo}`;
-        let subject = "", html = "";
+        let subject = "", html = "", waText = "";
 
         if (row.kind === "transferred") {
             const { data: m } = await db.from("ticket_messages").select("autor_nome, conteudo, created_at").eq("ticket_id", t.id)
@@ -76,6 +122,7 @@ Deno.serve(async (req) => {
                 O WhatsApp não será mais usado para este assunto.</p>
                 ${t.aluno_id ? `<p style="font-size:13px;color:#8A8A9A">Acesso ao portal: login = seu CPF${al?.must_change_password ? " · senha inicial = seu CPF (só números)" : ""}.</p>` : ""}`,
                 t.aluno_id ? { label: "Abrir o Portal do Aluno", url: PORTAL_URL } : undefined);
+            waText = `Oi, ${nome}! Sua conversa virou o chamado *${t.protocolo}* — ${t.titulo}, agora com a Secretaria.\n\nA partir de agora as respostas acontecem pelo Portal do Aluno: ${PORTAL_URL}`;
         } else if (row.kind === "created") {
             const { data: m } = await db.from("ticket_messages").select("conteudo").eq("ticket_id", t.id).eq("autor_role", "aluno")
                 .order("created_at").limit(1).maybeSingle();
@@ -85,6 +132,7 @@ Deno.serve(async (req) => {
                 Guarde o protocolo: <b style="color:#C9A84C">${escHtml(t.protocolo)}</b>.</p>
                 ${m?.conteudo ? quote("Você escreveu", fmt(t.created_at), m.conteudo) : ""}
                 <p>Você recebe um e-mail aqui assim que respondermos.</p>`, { label: "Acompanhar no Portal", url: PORTAL_URL });
+            waText = `Oi, ${nome}! Recebemos seu chamado *${t.protocolo}* — ${t.titulo}. Guarde esse protocolo.\n\nVocê recebe uma mensagem aqui assim que respondermos. Acompanhe pelo Portal: ${PORTAL_URL}`;
         } else if (row.kind === "reply") {
             const { data: prev } = await db.from("ticket_email_outbox").select("sent_at").eq("ticket_id", t.id).eq("kind", "reply")
                 .eq("status", "sent").order("sent_at", { ascending: false }).limit(1).maybeSingle();
@@ -101,6 +149,9 @@ Deno.serve(async (req) => {
                 ${staff.map((m) => quote(m.autor_nome || "Equipe FICV", fmt(m.created_at), m.conteudo)).join("")}
                 ${t.status === "aguardando_aluno" ? "<p><b>Precisamos da sua resposta</b> para continuar o atendimento.</p>" : ""}`,
                 { label: "Responder no Portal", url: PORTAL_URL });
+            const lastStaffText = String(lastStaff.conteudo ?? "");
+            const preview = lastStaffText.length > 220 ? `${lastStaffText.slice(0, 220)}…` : lastStaffText;
+            waText = `Oi, ${nome}! Tem resposta nova no seu chamado *${t.protocolo}* — ${t.titulo}:\n\n"${preview}"\n\nResponda pelo Portal: ${PORTAL_URL}`;
         } else if (row.kind === "resolved") {
             if (t.status !== "resolvido") { await finish("skipped", { error: `status mudou para ${t.status}` }); continue; }
             if ((t as any).encerrado_pelo_aluno) { await finish("skipped", { error: "o próprio aluno encerrou" }); continue; }
@@ -109,14 +160,21 @@ Deno.serve(async (req) => {
                 <p>Marcamos o chamado <b style="color:#C9A84C">${escHtml(t.protocolo)}</b> — ${escHtml(t.titulo)} como <b>resolvido</b>.</p>
                 <p>Se ainda precisar de algo, é só responder por lá que ele volta pra equipe. E, se puder, avalie o atendimento — leva 10 segundos. 💛</p>`,
                 { label: "Avaliar atendimento", url: PORTAL_URL });
+            waText = `Oi, ${nome}! Marcamos seu chamado *${t.protocolo}* — ${t.titulo} como resolvido.\n\nSe ainda precisar de algo, é só responder por lá que ele volta pra equipe. 💛`;
         } else if (row.kind === "reminder") {
             if (t.status !== "aguardando_aluno") { await finish("skipped", { error: `status mudou para ${t.status}` }); continue; }
             subject = `Estamos aguardando sua resposta — chamado ${tag}`;
             html = L("Aguardando sua resposta", `<p>Olá, ${escHtml(nome)}!</p>
                 <p>O chamado <b style="color:#C9A84C">${escHtml(t.protocolo)}</b> — ${escHtml(t.titulo)} está esperando uma resposta sua há 2 dias.
                 Assim que você responder, a equipe continua o atendimento.</p>`, { label: "Responder no Portal", url: PORTAL_URL });
+            waText = `Oi, ${nome}! Seu chamado *${t.protocolo}* — ${t.titulo} está esperando sua resposta há 2 dias.\n\nResponda pelo Portal quando puder: ${PORTAL_URL}`;
         }
 
+        // WhatsApp é independente do e-mail (best-effort, nunca lança) — roda mesmo se o
+        // aluno não tiver e-mail válido, que é justamente quem mais precisa desse canal.
+        await sendTicketWhatsApp(db, al?.telefone, waText);
+
+        if (!hasEmail) { await finish("skipped", { error: "aluno sem e-mail válido" }); continue; }
         const r = await sendEmail(to, subject, html, replyTo);
         if (r.ok) await finish("sent", { sent_at: new Date().toISOString(), to_email: to, error: null });
         else if (/não configurada/.test(r.error ?? "")) { out.failed++; break; } // sem chave: deixa na fila pra quando configurar
