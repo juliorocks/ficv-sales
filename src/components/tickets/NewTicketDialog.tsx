@@ -171,10 +171,10 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose: () => void; o
                   <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Nome do aluno (direto no Sponte)…" className="pl-9" />
                   {searching && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-[var(--text-muted)]" />}
                   {alunoResults.length > 0 && (
-                    <div className="mt-1.5 max-h-48 overflow-y-auto border border-[var(--border)] rounded-lg divide-y divide-[var(--border)]">
+                    <div className="mt-1.5 max-h-48 overflow-y-auto border border-[var(--border)] rounded-lg divide-y divide-[var(--border)] bg-[var(--bg-card)] shadow-lg">
                       {alunoResults.map((a) => (
                         <button key={a.aluno_id} onClick={() => { setAlunoSel(a); setAlunoResults([]) }}
-                          className="w-full text-left px-3 py-2 hover:bg-[var(--bg-card-hover)] transition-colors">
+                          className="w-full text-left px-3 py-2 bg-[var(--bg-card)] hover:bg-[var(--bg-card-hover)] transition-colors">
                           <p className="text-sm text-[var(--text-main)]">{a.nome}</p>
                           <p className="text-xs text-[var(--text-muted)]">{a.turma_atual ?? a.situacao ?? ''}</p>
                         </button>
@@ -212,10 +212,10 @@ export function NewTicketDialog({ onClose, onCreated }: { onClose: () => void; o
                   <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Nome da turma (ex.: Teologia EAD 2026.1)…" className="pl-9" />
                   {searching && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-[var(--text-muted)]" />}
                   {turmaResults.length > 0 && (
-                    <div className="mt-1.5 max-h-48 overflow-y-auto border border-[var(--border)] rounded-lg divide-y divide-[var(--border)]">
+                    <div className="mt-1.5 max-h-48 overflow-y-auto border border-[var(--border)] rounded-lg divide-y divide-[var(--border)] bg-[var(--bg-card)] shadow-lg">
                       {turmaResults.map((t) => (
                         <button key={t.turma_id} onClick={() => { setTurmaSel(t); setTurmaResults([]) }}
-                          className="w-full text-left px-3 py-2 hover:bg-[var(--bg-card-hover)] transition-colors">
+                          className="w-full text-left px-3 py-2 bg-[var(--bg-card)] hover:bg-[var(--bg-card-hover)] transition-colors">
                           <p className="text-sm text-[var(--text-main)]">{t.nome}</p>
                           <p className="text-xs text-[var(--text-muted)]">{t.curso} · {t.vagas_ocupadas} matriculados</p>
                         </button>
