@@ -26,14 +26,12 @@ export const Login: React.FC = () => {
         <div className="min-h-screen bg-[var(--bg-main)] flex items-center justify-center p-4">
             <div className="glass-card p-10 w-full max-w-md animate-fade-in shadow-2xl">
                 <div className="flex flex-col items-center mb-10">
-                    <div className="p-4 rounded-3xl bg-white border border-[var(--border)] mb-8 shadow-xl">
-                        <img
-                            src="https://siteficv.vercel.app/images/test-logo.png"
-                            alt="FICV"
-                            className="h-12 w-auto object-contain"
-                            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                        />
-                    </div>
+                    <img
+                        src="https://siteficv.vercel.app/images/test-logo.png"
+                        alt="FICV"
+                        className="h-16 w-auto object-contain mb-8"
+                        onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                    />
                     <h1 className="text-3xl font-black font-display text-[var(--text-main)] tracking-tight">Connect FICV</h1>
                     <p className="text-[var(--text-muted)] mt-2 font-medium">Acesse sua conta para continuar</p>
                 </div>
