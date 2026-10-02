@@ -5,8 +5,11 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <script>
-      // Portal do Aluno (portal.* ou /aluno) = app instalável (PWA). O CRM não ganha manifest.
+      // Portal do Aluno (portal.* ou /aluno) = app instalável (PWA). O CRM não ganha manifest —
+      // nem em /connect (CRM rodando no MESMO domínio portal.*) nem /relatorio (link público
+      // de relatório de agente, pode abrir em qualquer domínio) — pedido do usuário 02/10.
       (function () {
+        if (/^\/(connect|relatorio)(\/|$)/.test(location.pathname)) return
         if (!/^portal\./i.test(location.hostname) && !/^\/(aluno|atendimento)/.test(location.pathname)) return
         var h = document.head
         // iPhone dá zoom sozinho ao tocar num campo com letra < 16px (login do CPF) e a página
