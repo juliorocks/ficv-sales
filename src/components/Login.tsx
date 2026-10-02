@@ -78,10 +78,12 @@ export const Login: React.FC = () => {
                     <button
                         type="submit"
                         disabled={loading}
-                        className="btn-primary w-full py-4 flex items-center justify-center gap-2 text-lg"
+                        // cor da FICV (dourado, mesma dupla usada no Portal do Aluno) + texto escuro —
+                        // pedido do usuário 02/10, só este botão (não mexe no .btn-primary global)
+                        className="w-full py-4 rounded-full font-bold text-[#13161D] bg-gradient-to-br from-[#E2C878] to-[#C9A84C] hover:brightness-105 active:scale-95 transition-all shadow-[0_10px_15px_-3px_rgba(201,168,76,0.35)] flex items-center justify-center gap-2 text-lg disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                         {loading ? (
-                            <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            <div className="w-6 h-6 border-2 border-[#13161D]/30 border-t-[#13161D] rounded-full animate-spin" />
                         ) : (
                             <>
                                 <LogIn size={20} />
