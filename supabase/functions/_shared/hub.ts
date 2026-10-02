@@ -157,11 +157,15 @@ export async function planejar(
  *  batia em NADA aqui (exigia "ensino fundamental" junto, nunca só "fundamental"/"escola"
  *  soltos, e a parte de matrícula só cobria "dele/dela/do meu filho/da minha filha") — o lead
  *  ficou preso na IA da Faculdade com contexto antigo em vez de ir pra classificação do Hub.
- *  Palavras soltas (escola, fundamental, infantil…) têm risco baixo de disparar à toa: isso só
- *  decide se vale chamar o classify() (que ainda decide de verdade, com o contexto todo, e já
- *  protege contra redirecionar a própria Faculdade pra ela mesma) — não redireciona sozinho. */
+ *  Testando as OUTRAS empresas depois desse achado: Igreja já funcionava (tinha membro/culto/
+ *  pastor/oração/dízimo/oferta), mas faltava "igreja" sozinho, "ministério" e "retiro"; Fundação
+ *  não tinha NENHUMA palavra sua na lista (doação/projeto social/voluntariado) — qualquer
+ *  pergunta sobre doação pra Fundação caía direto na Vivi da Faculdade, igual o caso da Escola.
+ *  Palavras soltas (escola, fundamental, igreja, doação…) têm risco baixo de disparar à toa:
+ *  isso só decide se vale chamar o classify() (que ainda decide de verdade, com o contexto todo,
+ *  e já protege contra redirecionar a própria Faculdade pra ela mesma) — não redireciona sozinho. */
 export function mentionsOtherCompany(text: string): boolean {
-    return /\bmembro\b|\bmembresia\b|\bbatismo\b|\bculto\b|\bc[eé]lula\b|\bpastor\b|\bora[çc][ãa]o\b|\bdiz[íi]mo|\boferta\b|\bescola\b|\binfantil\b|\bfundamental\b|ensino m[eé]dio|\brematr[íi]cula\b|\buniforme\b|material escolar|reuni[ãa]o de pais|\bmeu filho\b|\bminha filha\b|matr[íi]cula (dele|dela|do meu filho|da minha filha|do fundamental|da infantil|no fundamental|na infantil|no m[eé]dio|na m[eé]dio|escolar)/i.test(text);
+    return /\bmembro\b|\bmembresia\b|\bbatismo\b|\bculto\b|\bc[eé]lula\b|\bpastor|\bora[çc][ãa]o\b|\bdiz[íi]mo|\boferta\b|\bigreja\b|minist[eé]rio|\bretiro\b|\bescola\b|\binfantil\b|\bfundamental\b|ensino m[eé]dio|\brematr[íi]cula\b|\buniforme\b|material escolar|reuni[ãa]o de pais|\bmeu filho\b|\bminha filha\b|matr[íi]cula (dele|dela|do meu filho|da minha filha|do fundamental|da infantil|no fundamental|na infantil|no m[eé]dio|na m[eé]dio|escolar)|funda[çc][ãa]o|doa[çc][ãa]o|doa[çc][õo]es|projeto(s)? social|projetos sociais|a[çc][ãa]o social|voluntari|parceria(s)? social/i.test(text);
 }
 
 /**
