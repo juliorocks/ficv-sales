@@ -330,7 +330,7 @@ Deno.serve(async (req) => {
         // respondia nem 1x, mesmo com o canal "IA responde" ligado — card ficava preso em
         // Entrada pra sempre porque advanceAiStage nunca era chamado.
         if (ch.ai_enabled && lead && !(isStudent && ch.purpose === "official") && !m.agentUserId) {
-            const outcome = await aiReply(db, settings, lead.id, ch.id, m.number);
+            const outcome = await aiReply(db, settings, lead.id, ch.id, m.number, !!reopenNote);
             return await done(`stored:${outcome}`, lead.id);
         }
 
@@ -341,7 +341,7 @@ Deno.serve(async (req) => {
     }
 });
 
-async function aiReply(db: any, settings: any, leadId: number, channelId: number, number: string): Promise<string> {
+async function aiReply(db: any, settings: any, leadId: number, channelId: number, number: string, isReopen: boolean): Promise<string> {
     const { data: hist } = await db.from("widechat_messages").select("origin, message, created_at")
         .eq("lead_id", leadId).eq("provider", "vivaconnect").eq("interno", false).order("created_at", { ascending: false }).limit(20);
     const messages = (hist ?? []).reverse()
@@ -370,10 +370,19 @@ async function aiReply(db: any, settings: any, leadId: number, channelId: number
     // Faculdade), 12 min depois voltou perguntando de Direito, e levou a saudação inteira
     // de novo porque a sessão tinha sido apagada. Contato recente → pula a saudação, a IA já
     // responde direto ao que foi perguntado (o prompt já instrui a nunca se reapresentar).
+    //
+    // EXCETO TAMBÉM se for uma REABERTURA de verdade (isReopen, vindo do Finalizado/Perdido lá
+    // de cima) — achado ao vivo 02/10: o texto fixo usa {curso} = leads.curso_interesse, que
+    // nunca é limpo no encerramento; lead que writeu de novo sobre OUTRO assunto (matrícula do
+    // fundamental) recebeu "Recebemos seu interesse no curso de História do Cristianismo"
+    // (assunto do atendimento ANTERIOR, já finalizado) — presumindo continuação em vez de
+    // perguntar. Reabertura cai direto na IA de verdade, com instrução própria pra perguntar
+    // se é o mesmo assunto de antes ou algo novo (`reopened: true` no corpo abaixo) — nunca o
+    // texto fixo de 1ª mensagem, que é pra lead literalmente novo vindo de anúncio.
     const { data: sess } = await db.from("ai_lead_sessions").select("lead_id").eq("lead_id", leadId).maybeSingle();
     const lastAuto = (hist ?? []).find((h: any) => h.origin === "auto" && h.message);
     const contatoRecente = !!lastAuto && Date.now() - new Date(lastAuto.created_at).getTime() < Number(settings.first_message_skip_hours ?? 48) * 3600_000;
-    if (!sess && !contatoRecente && settings.first_message_enabled && String(settings.first_message_template ?? "").trim()) {
+    if (!sess && !isReopen && !contatoRecente && settings.first_message_enabled && String(settings.first_message_template ?? "").trim()) {
         // lead literalmente recém-criado nesta mesma request já pode ter o gatilho do banco
         // (vivaconnect_enqueue_first_message) enfileirado o mesmo texto — não manda 2x.
         const { data: already } = await db.from("vivaconnect_outbox").select("id")
@@ -409,7 +418,7 @@ async function aiReply(db: any, settings: any, leadId: number, channelId: number
     const r = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-agent`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` },
-        body: JSON.stringify({ action: "reply", lead_id: leadId, messages }),
+        body: JSON.stringify({ action: "reply", lead_id: leadId, messages, ...(!sess && isReopen ? { reopened: true } : {}) }),
         signal: AbortSignal.timeout(90000),
     });
     const out = await r.json().catch(() => ({}));
