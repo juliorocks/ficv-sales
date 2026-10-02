@@ -607,10 +607,10 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   return (
     <>
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-3xl h-[90vh] flex flex-col p-0 bg-[var(--bg-card)] border-[var(--border)]">
+      <DialogContent className="max-w-[95vw] w-[95vw] h-[95vh] flex flex-col p-0 bg-[var(--bg-card)] border-[var(--border)]">
         {/* Header */}
         <DialogHeader className="px-6 pt-5 pb-4 border-b border-[var(--border)] shrink-0">
-          <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1 flex-wrap">
                 <span className="text-xs font-mono text-[var(--primary)] bg-[var(--primary)]/10 px-2 py-0.5 rounded">
@@ -641,7 +641,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
             {/* Staff controls */}
             {isStaff && (
               <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
-                <Button type="button" variant="outline" size="sm" className="h-8 text-xs gap-1.5"
+                <Button type="button" variant="default" size="sm" className="h-8 text-xs gap-1.5 font-semibold shadow-sm"
                   onClick={() => setShowAlunoPainel(true)} title="Ver Financeiro/Notas do aluno">
                   <GraduationCap className="w-3.5 h-3.5" /> Painel do Aluno
                 </Button>
