@@ -15,8 +15,9 @@ import { showSuccess, showError } from '../../utils/toast'
 import {
   X, Send, Lock, Clock, CheckCircle2, Star, ChevronRight,
   MessageSquare, Shield, Loader2, UserCircle2, AlertCircle,
-  Paperclip, FileText, ImageIcon, Download, XCircle, Mic, MicOff, Play, BookOpen, Trash2
+  Paperclip, FileText, ImageIcon, Download, XCircle, Mic, MicOff, Play, BookOpen, Trash2, GraduationCap
 } from 'lucide-react'
+import { AlunoPainelDrawer } from './AlunoPainelDrawer'
 import { formatDistanceToNow, format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
@@ -232,6 +233,10 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   const isStaff = alunoId ? false : ['admin', 'agent', 'secretaria', 'tutor', 'coordenador', 'atendente', 'biblioteca'].includes(String(user?.role ?? ''))
   const currentUserId = alunoId ?? user?.id
   const currentUserName = alunoNome ?? user?.full_name ?? ''
+  // Painel do Aluno (Início/Financeiro/Notas) no chamado — pedido 02/10. Financeiro é dado mais
+  // sensível: só quem já lida com cobrança (admin/agent/secretaria/coordenador).
+  const [showAlunoPainel, setShowAlunoPainel] = useState(false)
+  const canSeeFinanceiro = ['admin', 'agent', 'secretaria', 'coordenador'].includes(String(user?.role ?? ''))
 
   const [msg, setMsg] = useState('')
   const [kbOpen, setKbOpen] = useState(false)
@@ -600,6 +605,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   }
 
   return (
+    <>
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-3xl h-[90vh] flex flex-col p-0 bg-[var(--bg-card)] border-[var(--border)]">
         {/* Header */}
@@ -635,6 +641,10 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
             {/* Staff controls */}
             {isStaff && (
               <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+                <Button type="button" variant="outline" size="sm" className="h-8 text-xs gap-1.5"
+                  onClick={() => setShowAlunoPainel(true)} title="Ver Financeiro/Notas do aluno">
+                  <GraduationCap className="w-3.5 h-3.5" /> Painel do Aluno
+                </Button>
                 <Combobox
                   value={(t as any).queue_id ? `q:${(t as any).queue_id}` : ''}
                   onValueChange={transferTo}
@@ -1009,6 +1019,11 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
         )}
       </DialogContent>
     </Dialog>
+    {showAlunoPainel && (
+      <AlunoPainelDrawer alunoId={t.aluno_id} alunoNome={t.aluno_nome} canSeeFinanceiro={canSeeFinanceiro}
+        onClose={() => setShowAlunoPainel(false)} />
+    )}
+    </>
   )
 }
 

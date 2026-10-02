@@ -15,8 +15,13 @@ import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { corsHeaders, jsonRes } from "../_shared/ai.ts";
 import { ensureAlunoAccountById } from "../_shared/aluno.ts";
 import { sponteBuscarAlunos, sponteBuscarTurmas, sponteRosterTurma } from "../_shared/sponte.ts";
+import { boletimFor, overviewFor } from "../_shared/alunoPortalCore.ts";
 
 const TICKET_STAFF_ROLES = ["admin", "agent", "secretaria", "tutor", "coordenador", "atendente", "biblioteca"];
+// Financeiro (parcelas) é dado mais sensível — pedido do usuário 02/10: só quem já lida com
+// cobrança/financeiro vê. Notas/cadastro (aluno_overview sem parcelas, aluno_boletim) seguem
+// abertos a todo TICKET_STAFF_ROLES, igual à visibilidade de chamados em si.
+const FINANCEIRO_ROLES = ["admin", "agent", "secretaria", "coordenador"];
 
 Deno.serve(async (req) => {
     if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -51,6 +56,25 @@ Deno.serve(async (req) => {
             if (!turmaId) return jsonRes({ error: "turma_id obrigatório." }, 400);
             const roster = await sponteRosterTurma(turmaId);
             return jsonRes({ roster });
+        }
+
+        // Painel do aluno dentro do chamado (pedido do usuário 02/10: atendente ver Financeiro/Notas
+        // sem sair da tela de Chamados — mesmo dado que o aluno vê no /aluno, mas pelo aluno_id do
+        // ticket em vez do JWT do próprio aluno).
+        if (action === "aluno_overview" || action === "aluno_boletim") {
+            const alunoId = String(body.aluno_id ?? "");
+            if (!alunoId) return jsonRes({ error: "aluno_id obrigatório." }, 400);
+            const { data: aluno } = await db.from("alunos")
+                .select("id, nome, cpf, email, telefone, ra, sponte_aluno_id, nivel").eq("id", alunoId).maybeSingle();
+            if (!aluno?.sponte_aluno_id) return jsonRes({ error: "Aluno sem matrícula vinculada ao Sponte." }, 404);
+
+            if (action === "aluno_boletim") {
+                const r = await boletimFor(aluno.sponte_aluno_id, aluno.email ?? null, body);
+                return jsonRes(r.body, r.status);
+            }
+            const result = await overviewFor(db, aluno as any);
+            if (!FINANCEIRO_ROLES.includes(caller.role)) (result as any).parcelas = [];
+            return jsonRes(result);
         }
 
         if (action === "create") {

@@ -1,12 +1,26 @@
 /**
  * AlunoPainel — abas Início / Financeiro / Notas do Portal do Aluno.
  * Dados ao vivo do Sponte via edge function aluno-portal (só o aluno logado).
+ *
+ * Também é reusado pelo painel lateral de Chamados (atendente vendo o aluno do
+ * ticket) — ver AlunoPainelProvider: fora de um Provider com alunoId, os hooks
+ * chamam aluno-portal (modo self-service); dentro, chamam staff-tickets
+ * (aluno_overview/aluno_boletim) com o aluno_id do ticket. A UI (JSX) é 100%
+ * a mesma nos dois casos — só muda de onde o dado vem.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { AlertCircle, BookOpen, CalendarDays, CheckCircle2, ChevronRight, ChevronsUpDown, Copy, CreditCard, ExternalLink, FileText, GraduationCap, Loader2, Printer, RefreshCw, Wallet } from 'lucide-react'
 import { showError, showSuccess } from '../../utils/toast'
+
+interface AlunoPainelCtx { targetAlunoId?: string }
+const Ctx = createContext<AlunoPainelCtx>({})
+/** Envolve AlunoInicio/AlunoFinanceiro/AlunoNotas pra mostrarem o painel de OUTRO aluno
+ * (visão do atendente) em vez do aluno logado. Sem este Provider, comportamento normal. */
+export function AlunoPainelProvider({ alunoId, children }: { alunoId?: string; children: React.ReactNode }) {
+  return <Ctx.Provider value={{ targetAlunoId: alunoId }}>{children}</Ctx.Provider>
+}
 
 export interface Parcela {
   conta_receber_id: number; numero_parcela: number; vencimento: string | null; valor: number; valor_pago: number | null
@@ -26,8 +40,18 @@ export interface Overview {
   parcelas: Parcela[]
 }
 
-async function portal<T>(body: Record<string, unknown>): Promise<T> {
-  const { data, error } = await supabase.functions.invoke('aluno-portal', { body })
+// no modo atendente (targetAlunoId presente) as ações viram "aluno_X" em staff-tickets, que só
+// expõe overview/boletim (ver _shared/alunoPortalCore.ts) — foto/pagamento continuam só self-service.
+function staffActionName(action: string): string {
+  if (action === 'overview') return 'aluno_overview'
+  if (action === 'boletim') return 'aluno_boletim'
+  throw new Error(`Ação "${action}" não disponível na visão do atendente.`)
+}
+
+async function portal<T>(body: Record<string, unknown>, targetAlunoId?: string): Promise<T> {
+  const fn = targetAlunoId ? 'staff-tickets' : 'aluno-portal'
+  const payload = targetAlunoId ? { ...body, action: staffActionName(String(body.action)), aluno_id: targetAlunoId } : body
+  const { data, error } = await supabase.functions.invoke(fn, { body: payload })
   if (error) {
     const ctx = await (error as any).context?.json?.().catch(() => null)
     throw new Error(ctx?.error ?? 'Não foi possível carregar agora.')
@@ -37,7 +61,12 @@ async function portal<T>(body: Record<string, unknown>): Promise<T> {
 }
 
 export function useOverview() {
-  return useQuery<Overview>({ queryKey: ['aluno-overview'], queryFn: () => portal<Overview>({ action: 'overview' }), staleTime: 5 * 60_000, retry: 1 })
+  const { targetAlunoId } = useContext(Ctx)
+  return useQuery<Overview>({
+    queryKey: ['aluno-overview', targetAlunoId ?? 'self'],
+    queryFn: () => portal<Overview>({ action: 'overview' }, targetAlunoId),
+    staleTime: 5 * 60_000, retry: 1,
+  })
 }
 
 // ── Cursos: reúne as matrículas de um mesmo curso (períodos P1, P2… / turmas) — Início e Notas usam igual ──
@@ -79,11 +108,14 @@ function agruparCursos(ms: Matricula[]): CursoAgrupado[] {
     .sort((x, y) => Number(y.vigente) - Number(x.vigente) || y.ultima.localeCompare(x.ultima))
 }
 
-/** Foto do aluno no Sponte (só ~7% têm); cache longo — a foto quase não muda e vem pesada (base64). */
+/** Foto do aluno no Sponte (só ~7% têm); cache longo — a foto quase não muda e vem pesada (base64).
+ * Na visão do atendente (targetAlunoId) nem busca — staff-tickets não expõe essa ação; o Avatar
+ * já cai nas iniciais sem foto. */
 function useFoto() {
+  const { targetAlunoId } = useContext(Ctx)
   return useQuery<string | null>({
-    queryKey: ['aluno-foto'],
-    queryFn: async () => (await portal<{ foto: string | null }>({ action: 'foto' })).foto,
+    queryKey: ['aluno-foto', targetAlunoId ?? 'self'],
+    queryFn: async () => targetAlunoId ? null : (await portal<{ foto: string | null }>({ action: 'foto' })).foto,
     staleTime: 30 * 60_000, retry: 0,
   })
 }
@@ -243,6 +275,7 @@ export function AlunoInicio({ onGo, onDeclaracao }: { onGo: (tab: 'financeiro' |
 // ── Financeiro ───────────────────────────────────────────────
 
 export function AlunoFinanceiro() {
+  const { targetAlunoId } = useContext(Ctx)
   const q = useOverview()
   const [busy, setBusy] = useState<string | null>(null)
   const [pay, setPay] = useState<Record<string, { link?: string; linha?: string; msg?: string }>>({})
@@ -252,6 +285,8 @@ export function AlunoFinanceiro() {
   const pagas = parcelas.filter(isPaid).reverse()
 
   const pagar = async (p: Parcela) => {
+    // gerar link de pagamento é só self-service — staff-tickets não expõe essa ação (ver portal())
+    if (targetAlunoId) return
     const k = `${p.conta_receber_id}-${p.numero_parcela}`
     setBusy(k)
     try {
@@ -285,10 +320,12 @@ export function AlunoFinanceiro() {
             <p className="text-sm font-semibold text-[var(--text-main)]">{brl(paid && p.valor_pago ? p.valor_pago : p.valor)}</p>
             {paid
               ? <span className="text-[11px] text-green-400">Pago</span>
-              : <button onClick={() => pagar(p)} disabled={busy === k}
-                  className="text-[11px] text-[var(--primary)] hover:underline inline-flex items-center gap-1">
-                  {busy === k ? <Loader2 className="w-3 h-3 animate-spin" /> : <CreditCard className="w-3 h-3" />} Pagar
-                </button>}
+              : targetAlunoId
+                ? <span className="text-[11px] text-[var(--text-muted)]">Em aberto</span>
+                : <button onClick={() => pagar(p)} disabled={busy === k}
+                    className="text-[11px] text-[var(--primary)] hover:underline inline-flex items-center gap-1">
+                    {busy === k ? <Loader2 className="w-3 h-3 animate-spin" /> : <CreditCard className="w-3 h-3" />} Pagar
+                  </button>}
           </div>
         </div>
         {st?.link && <a href={st.link} target="_blank" rel="noopener noreferrer" className="text-xs text-[var(--primary)] inline-flex items-center gap-1 mt-1">Abrir página de pagamento <ExternalLink className="w-3 h-3" /></a>}
@@ -341,6 +378,7 @@ type Disciplina = {
 // da MATRÍCULA, não da nota da disciplina) e não mudou.
 
 export function AlunoNotas({ foco }: { foco?: NotasFoco | null }) {
+  const { targetAlunoId } = useContext(Ctx)
   const q = useOverview()
   // um curso (ex.: Bacharelado em Teologia - EAD) reúne todos os períodos/turmas em que o aluno esteve
   const cursos = useMemo(() => agruparCursos((q.data?.matriculas ?? []).filter((m) => m.turma_id)), [q.data])
@@ -353,8 +391,8 @@ export function AlunoNotas({ foco }: { foco?: NotasFoco | null }) {
   const pedidos = curso?.turmas.map((t) => ({ turma_id: t.turma_id!, turma: t.turma })) ?? []
   const ids = pedidos.map((p) => p.turma_id)
   const b = useQuery<{ turmas: { turma_id: number; disciplinas: Disciplina[] }[] }>({
-    queryKey: ['aluno-boletim', ids.join(',')],
-    queryFn: () => portal({ action: 'boletim', turmas: pedidos }),
+    queryKey: ['aluno-boletim', targetAlunoId ?? 'self', ids.join(',')],
+    queryFn: () => portal({ action: 'boletim', turmas: pedidos }, targetAlunoId),
     enabled: ids.length > 0, staleTime: 5 * 60_000, retry: 1,
   })
   // veio do Início tocando num período: rola até ele quando o boletim carregar (uma vez)
