@@ -3,7 +3,7 @@
  * Permite abrir novos tickets e acompanhar os seus.
  * Props passadas pelo AlunoPortalPage (auth separado do sistema interno).
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import type { Ticket, TicketCategoria, TicketPrioridade } from '../../types/database'
@@ -381,6 +381,21 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, appInstalado, onL
     },
     refetchInterval: 30000,
   })
+
+  // Link direto de um chamado (?chamado=<id>) — vem do aviso por WhatsApp/e-mail, abre o
+  // chamado na hora em vez do aluno ter que procurar na lista.
+  const deepLinkHandled = useRef(false)
+  useEffect(() => {
+    if (deepLinkHandled.current || isLoading) return
+    deepLinkHandled.current = true
+    const id = Number(new URLSearchParams(window.location.search).get('chamado'))
+    if (!id) return
+    const t = tickets.find(t => t.id === id)
+    if (t) { setTab('chamados'); setSelected(t) }
+    const url = new URL(window.location.href)
+    url.searchParams.delete('chamado')
+    window.history.replaceState(null, '', url.toString())
+  }, [isLoading, tickets])
 
   const filtered = tickets.filter(t =>
     t.titulo.toLowerCase().includes(search.toLowerCase()) ||

@@ -106,6 +106,13 @@ Deno.serve(async (req) => {
         const hasEmail = to.includes("@") && !to.endsWith("@aluno.ficv.br");
         const nome = first(al?.nome ?? t.aluno_nome);
         const tag = `#${t.protocolo}`;
+        // link direto pro chamado (?chamado=<id> — TicketPortal abre ele na hora) e, no
+        // WhatsApp, um aviso de que é mão única: pedido do usuário 02/10, "não queremos
+        // interação do aluno pelo whatsapp... avisar que se ele responder não será válido"
+        // (o canal oficial é o Portal; WhatsApp aqui é só notificação, sem ligação nenhuma
+        // com o chamado — uma resposta do aluno nesse número nunca vira mensagem do ticket).
+        const TICKET_URL = `${PORTAL_URL}?chamado=${t.id}`;
+        const WA_AVISO = "\n\n_Aviso automático — não precisa responder por aqui, não conta como resposta ao chamado. Use o link acima._";
         let subject = "", html = "", waText = "";
 
         if (row.kind === "transferred") {
@@ -122,7 +129,7 @@ Deno.serve(async (req) => {
                 O WhatsApp não será mais usado para este assunto.</p>
                 ${t.aluno_id ? `<p style="font-size:13px;color:#8A8A9A">Acesso ao portal: login = seu CPF${al?.must_change_password ? " · senha inicial = seu CPF (só números)" : ""}.</p>` : ""}`,
                 t.aluno_id ? { label: "Abrir o Portal do Aluno", url: PORTAL_URL } : undefined);
-            waText = `Oi, ${nome}! Sua conversa virou o chamado *${t.protocolo}* — ${t.titulo}, agora com a Secretaria.\n\nA partir de agora as respostas acontecem pelo Portal do Aluno: ${PORTAL_URL}`;
+            waText = `Oi, ${nome}! Sua conversa virou o chamado *${t.protocolo}* — ${t.titulo}, agora com a Secretaria.\n\nA partir de agora as respostas acontecem pelo Portal do Aluno: ${TICKET_URL}${WA_AVISO}`;
         } else if (row.kind === "created") {
             const { data: m } = await db.from("ticket_messages").select("conteudo").eq("ticket_id", t.id).eq("autor_role", "aluno")
                 .order("created_at").limit(1).maybeSingle();
@@ -132,7 +139,7 @@ Deno.serve(async (req) => {
                 Guarde o protocolo: <b style="color:#C9A84C">${escHtml(t.protocolo)}</b>.</p>
                 ${m?.conteudo ? quote("Você escreveu", fmt(t.created_at), m.conteudo) : ""}
                 <p>Você recebe um e-mail aqui assim que respondermos.</p>`, { label: "Acompanhar no Portal", url: PORTAL_URL });
-            waText = `Oi, ${nome}! Recebemos seu chamado *${t.protocolo}* — ${t.titulo}. Guarde esse protocolo.\n\nVocê recebe uma mensagem aqui assim que respondermos. Acompanhe pelo Portal: ${PORTAL_URL}`;
+            waText = `Oi, ${nome}! Recebemos seu chamado *${t.protocolo}* — ${t.titulo}. Guarde esse protocolo.\n\nVocê recebe um aviso aqui assim que respondermos. Acompanhe pelo Portal: ${TICKET_URL}${WA_AVISO}`;
         } else if (row.kind === "reply") {
             const { data: prev } = await db.from("ticket_email_outbox").select("sent_at").eq("ticket_id", t.id).eq("kind", "reply")
                 .eq("status", "sent").order("sent_at", { ascending: false }).limit(1).maybeSingle();
@@ -151,7 +158,7 @@ Deno.serve(async (req) => {
                 { label: "Responder no Portal", url: PORTAL_URL });
             const lastStaffText = String(lastStaff.conteudo ?? "");
             const preview = lastStaffText.length > 220 ? `${lastStaffText.slice(0, 220)}…` : lastStaffText;
-            waText = `Oi, ${nome}! Tem resposta nova no seu chamado *${t.protocolo}* — ${t.titulo}:\n\n"${preview}"\n\nResponda pelo Portal: ${PORTAL_URL}`;
+            waText = `Oi, ${nome}! Tem resposta nova no seu chamado *${t.protocolo}* — ${t.titulo}:\n\n"${preview}"\n\nResponda pelo Portal: ${TICKET_URL}${WA_AVISO}`;
         } else if (row.kind === "resolved") {
             if (t.status !== "resolvido") { await finish("skipped", { error: `status mudou para ${t.status}` }); continue; }
             if ((t as any).encerrado_pelo_aluno) { await finish("skipped", { error: "o próprio aluno encerrou" }); continue; }
@@ -160,14 +167,14 @@ Deno.serve(async (req) => {
                 <p>Marcamos o chamado <b style="color:#C9A84C">${escHtml(t.protocolo)}</b> — ${escHtml(t.titulo)} como <b>resolvido</b>.</p>
                 <p>Se ainda precisar de algo, é só responder por lá que ele volta pra equipe. E, se puder, avalie o atendimento — leva 10 segundos. 💛</p>`,
                 { label: "Avaliar atendimento", url: PORTAL_URL });
-            waText = `Oi, ${nome}! Marcamos seu chamado *${t.protocolo}* — ${t.titulo} como resolvido.\n\nSe ainda precisar de algo, é só responder por lá que ele volta pra equipe. 💛`;
+            waText = `Oi, ${nome}! Marcamos seu chamado *${t.protocolo}* — ${t.titulo} como resolvido.\n\nSe ainda precisar de algo, é só reabrir pelo Portal que ele volta pra equipe: ${TICKET_URL} 💛${WA_AVISO}`;
         } else if (row.kind === "reminder") {
             if (t.status !== "aguardando_aluno") { await finish("skipped", { error: `status mudou para ${t.status}` }); continue; }
             subject = `Estamos aguardando sua resposta — chamado ${tag}`;
             html = L("Aguardando sua resposta", `<p>Olá, ${escHtml(nome)}!</p>
                 <p>O chamado <b style="color:#C9A84C">${escHtml(t.protocolo)}</b> — ${escHtml(t.titulo)} está esperando uma resposta sua há 2 dias.
                 Assim que você responder, a equipe continua o atendimento.</p>`, { label: "Responder no Portal", url: PORTAL_URL });
-            waText = `Oi, ${nome}! Seu chamado *${t.protocolo}* — ${t.titulo} está esperando sua resposta há 2 dias.\n\nResponda pelo Portal quando puder: ${PORTAL_URL}`;
+            waText = `Oi, ${nome}! Seu chamado *${t.protocolo}* — ${t.titulo} está esperando sua resposta há 2 dias.\n\nResponda pelo Portal quando puder: ${TICKET_URL}${WA_AVISO}`;
         }
 
         // WhatsApp é independente do e-mail (best-effort, nunca lança) — roda mesmo se o
