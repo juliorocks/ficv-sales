@@ -56,7 +56,7 @@ serve(async (req) => {
 
         if (action === 'list') {
             const { data, error } = await admin.from('profiles')
-                .select('id, email, full_name, role').order('full_name', { ascending: true });
+                .select('id, email, full_name, role, must_change_password').order('full_name', { ascending: true });
             if (error) throw error;
             return json({ success: true, profiles: data });
         }
@@ -71,8 +71,10 @@ serve(async (req) => {
             });
             if (cErr) throw cErr;
             const id = created.user.id;
+            // senha escolhida pelo ADMIN, não pela pessoa → troca obrigatória no 1º login
+            // (pedido do usuário 02/10, ver migration 20261002090000)
             const { error: pErr } = await admin.from('profiles')
-                .upsert({ id, email, full_name, role: role ?? 'agent' }, { onConflict: 'id' });
+                .upsert({ id, email, full_name, role: role ?? 'agent', must_change_password: true }, { onConflict: 'id' });
             if (pErr) throw pErr;
 
             await surrealMirror(esc => `INSERT INTO profiles [{ id: ${esc(id)}, email: ${esc(email)}, full_name: ${esc(full_name)}, role: ${esc(role ?? 'agent')}, password: crypto::argon2::generate(${esc(password)}), active: true, created_at: time::now() }] RETURN NONE;`);
@@ -103,6 +105,9 @@ serve(async (req) => {
 
             const { error } = await admin.auth.admin.updateUserById(userId, { password });
             if (error) throw error;
+            // reset = o ADMIN escolheu a senha nova, não a pessoa → troca obrigatória de novo
+            // no próximo login (mesma regra do 'create' acima)
+            await admin.from('profiles').update({ must_change_password: true }).eq('id', userId);
             await surrealMirror(esc => `UPDATE profiles SET password = crypto::argon2::generate(${esc(password)}) WHERE id = profiles:⟨${userId}⟩;`);
             return json({ success: true });
         }

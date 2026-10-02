@@ -51,6 +51,7 @@ interface Profile {
     email?: string;
     role: Role;
     created_at: string;
+    must_change_password?: boolean;
 }
 
 export const UserManagement: React.FC = () => {
@@ -221,6 +222,11 @@ export const UserManagement: React.FC = () => {
                                                 <div>
                                                     <p className="text-sm font-bold text-[var(--text-main)] group-hover:text-primary transition-colors">{p.full_name || 'Usuário Sem Nome'}</p>
                                                     <p className="text-[10px] text-[var(--text-muted)]">{p.email || 'E-mail não visível'}</p>
+                                                    {p.must_change_password && (
+                                                        <p className="text-[9px] text-amber-500 font-bold uppercase tracking-wide mt-0.5" title="Ainda não trocou a senha definida pelo admin">
+                                                            ⏳ Aguardando troca de senha
+                                                        </p>
+                                                    )}
                                                 </div>
                                             </div>
                                         </td>

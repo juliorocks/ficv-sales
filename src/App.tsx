@@ -43,6 +43,7 @@ import { AutoWidthSelect } from './utils/dashboardFilters';
 import { GoalDashboard } from './components/GoalDashboard';
 import { AgentProfile } from './components/AgentProfile';
 import { Login } from './components/Login';
+import { ForceChangePassword } from './components/ForceChangePassword';
 import { AnalysisDetail } from './components/AnalysisDetail';
 import { KnowledgeBase } from './components/KnowledgeBase';
 import { ArcGauge, GoalsPage, useFinancialGoals } from './components/GoalGauge';
@@ -2082,6 +2083,9 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
 const FullApp = () => {
     const [session, setSession] = useState<any>(null);
     const [loading, setLoading] = useState(true);
+    // null = ainda não checou; troca obrigatória de senha (admin criou a conta ou resetou a
+    // senha — pedido do usuário 02/10, ver ForceChangePassword.tsx)
+    const [mustChangePassword, setMustChangePassword] = useState<boolean | null>(null);
     const [isDarkMode, setIsDarkMode] = useState(() => {
         const saved = localStorage.getItem('theme');
         return saved ? saved === 'dark' : true;
@@ -2117,6 +2121,17 @@ const FullApp = () => {
         return () => { clearTimeout(timeout); subscription.unsubscribe(); };
     }, []);
 
+    // checa a troca obrigatória de senha assim que loga (ou troca de usuário) — null de volta
+    // no logout, pra não "vazar" o estado de um usuário pro próximo que logar neste navegador
+    useEffect(() => {
+        const uid = session?.user?.id;
+        if (!uid) { setMustChangePassword(null); return; }
+        let ativo = true;
+        supabase.from('profiles').select('must_change_password').eq('id', uid).maybeSingle()
+            .then(({ data }) => { if (ativo) setMustChangePassword(!!data?.must_change_password); });
+        return () => { ativo = false; };
+    }, [session?.user?.id]);
+
     if (loading) return (
         <div className="min-h-screen bg-[var(--bg-main)] flex flex-col items-center justify-center gap-8">
             <div className="relative">
@@ -2137,6 +2152,16 @@ const FullApp = () => {
 
 
     if (!session) return <Login />;
+
+    // ainda checando must_change_password (select rápido, 1 linha) — evita o flash do App
+    // inteiro antes de decidir se mostra o gate
+    if (mustChangePassword === null) return (
+        <div className="min-h-screen bg-[var(--bg-main)] flex items-center justify-center">
+            <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+        </div>
+    );
+
+    if (mustChangePassword) return <ForceChangePassword userId={session.user.id} onDone={() => setMustChangePassword(false)} />;
 
     return (
         <QueryClientProvider client={queryClient}>
