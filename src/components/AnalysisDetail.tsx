@@ -42,6 +42,47 @@ interface AnalysisDetailProps {
 
 
 
+// Precisa estar FORA de AnalysisDetail: declarado dentro, vira uma função NOVA a cada render
+// (ex.: a cada dígito que o atendente digita pra corrigir uma nota na mão) — o React então
+// trata como um componente DIFERENTE e remonta a subárvore (inclusive o <input> de dentro),
+// derrubando o foco a cada caractere (mesma causa achada ao vivo 02/10 em MyProfile.tsx).
+const StatItem = ({ icon: Icon, label, value, color, onChange, field, isCommercial, onCommercialChange }: {
+    icon: any, label: string, value: number, color: string, onChange?: (val: string) => void, field: string
+    isCommercial: boolean, onCommercialChange: (checked: boolean) => void
+}) => (
+    <div className="flex items-center gap-3 p-4 bg-white/5 rounded-2xl border border-white/5 group hover:border-primary/30 transition-all">
+        <div className={`p-2 rounded-lg bg-${color}/10 text-${color}`}>
+            <Icon size={18} />
+        </div>
+        <div className="flex-1">
+            <div className="flex justify-between items-center mb-1">
+                <p className="text-[9px] text-[#8B949E] font-bold uppercase tracking-widest">{label}</p>
+                {field === 'commercial' && (
+                    <label className="flex items-center gap-1 cursor-pointer">
+                        <span className="text-[8px] text-[#8B949E] uppercase font-bold">Venda?</span>
+                        <input
+                            type="checkbox"
+                            checked={isCommercial}
+                            onChange={(e) => onCommercialChange(e.target.checked)}
+                            className="w-3 h-3 rounded border-[#30363D] accent-primary"
+                        />
+                    </label>
+                )}
+            </div>
+            <input
+                type="number"
+                min="0"
+                max="10"
+                step="0.1"
+                disabled={field === 'commercial' && !isCommercial}
+                value={value}
+                onChange={(e) => onChange?.(e.target.value)}
+                className={`w-full bg-transparent text-sm font-bold text-[var(--text-main)] focus:outline-none border-b border-transparent focus:border-primary/50 ${field === 'commercial' && !isCommercial ? 'opacity-30 cursor-not-allowed' : ''}`}
+            />
+        </div>
+    </div>
+);
+
 export const AnalysisDetail: React.FC<AnalysisDetailProps> = ({
     analysis: initialAnalysis,
     onClose,
@@ -176,43 +217,7 @@ export const AnalysisDetail: React.FC<AnalysisDetailProps> = ({
     ];
 
 
-    const StatItem = ({ icon: Icon, label, value, color, onChange, field }: { icon: any, label: string, value: number, color: string, onChange?: (val: string) => void, field: string }) => (
-        <div className="flex items-center gap-3 p-4 bg-white/5 rounded-2xl border border-white/5 group hover:border-primary/30 transition-all">
-            <div className={`p-2 rounded-lg bg-${color}/10 text-${color}`}>
-                <Icon size={18} />
-            </div>
-            <div className="flex-1">
-                <div className="flex justify-between items-center mb-1">
-                    <p className="text-[9px] text-[#8B949E] font-bold uppercase tracking-widest">{label}</p>
-                    {field === 'commercial' && (
-                        <label className="flex items-center gap-1 cursor-pointer">
-                            <span className="text-[8px] text-[#8B949E] uppercase font-bold">Venda?</span>
-                            <input
-                                type="checkbox"
-                                checked={scores.isCommercial}
-                                onChange={(e) => {
-                                    setScores(prev => ({ ...prev, isCommercial: e.target.checked }));
-                                }}
-                                className="w-3 h-3 rounded border-[#30363D] accent-primary"
-                            />
-                        </label>
-                    )}
-                </div>
-                <input
-                    type="number"
-                    min="0"
-                    max="10"
-                    step="0.1"
-                    disabled={field === 'commercial' && !scores.isCommercial}
-                    value={value}
-                    onChange={(e) => onChange?.(e.target.value)}
-                    className={`w-full bg-transparent text-sm font-bold text-[var(--text-main)] focus:outline-none border-b border-transparent focus:border-primary/50 ${field === 'commercial' && !scores.isCommercial ? 'opacity-30 cursor-not-allowed' : ''}`}
-                />
-            </div>
-
-        </div>
-    );
-
+    const handleCommercialChange = (checked: boolean) => setScores(prev => ({ ...prev, isCommercial: checked }));
 
     return (
         <AnimatePresence>
@@ -331,11 +336,11 @@ export const AnalysisDetail: React.FC<AnalysisDetailProps> = ({
                                 </div>
 
                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                                    <StatItem icon={Heart} label="Empatia" value={scores.empathy} color="primary" field="empathy" onChange={(v) => handleScoreChange('empathy', v)} />
-                                    <StatItem icon={Eye} label="Clareza" value={scores.clarity} color="primary" field="clarity" onChange={(v) => handleScoreChange('clarity', v)} />
-                                    <StatItem icon={Star} label="Profundidade" value={scores.depth} color="primary" field="depth" onChange={(v) => handleScoreChange('depth', v)} />
-                                    <StatItem icon={Target} label="Venda" value={scores.commercial} color="primary" field="commercial" onChange={(v) => handleScoreChange('commercial', v)} />
-                                    <StatItem icon={Zap} label="Agilidade" value={scores.agility} color="primary" field="agility" onChange={(v) => handleScoreChange('agility', v)} />
+                                    <StatItem icon={Heart} label="Empatia" value={scores.empathy} color="primary" field="empathy" onChange={(v) => handleScoreChange('empathy', v)} isCommercial={scores.isCommercial} onCommercialChange={handleCommercialChange} />
+                                    <StatItem icon={Eye} label="Clareza" value={scores.clarity} color="primary" field="clarity" onChange={(v) => handleScoreChange('clarity', v)} isCommercial={scores.isCommercial} onCommercialChange={handleCommercialChange} />
+                                    <StatItem icon={Star} label="Profundidade" value={scores.depth} color="primary" field="depth" onChange={(v) => handleScoreChange('depth', v)} isCommercial={scores.isCommercial} onCommercialChange={handleCommercialChange} />
+                                    <StatItem icon={Target} label="Venda" value={scores.commercial} color="primary" field="commercial" onChange={(v) => handleScoreChange('commercial', v)} isCommercial={scores.isCommercial} onCommercialChange={handleCommercialChange} />
+                                    <StatItem icon={Zap} label="Agilidade" value={scores.agility} color="primary" field="agility" onChange={(v) => handleScoreChange('agility', v)} isCommercial={scores.isCommercial} onCommercialChange={handleCommercialChange} />
                                 </div>
 
 

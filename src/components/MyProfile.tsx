@@ -12,6 +12,20 @@ interface MyProfileProps {
     onUpdated: () => void
 }
 
+// Precisa estar FORA de MyProfile: declarado dentro, vira uma função NOVA a cada render (ex.:
+// a cada tecla digitada num input) — o React então trata como um componente DIFERENTE e
+// remonta a subárvore inteira (inclusive os Input de dentro), derrubando o foco a cada
+// caractere (achado ao vivo 02/10: "digito um caractere e tenho que clicar de novo").
+const Section = ({ icon: Icon, title, children }: { icon: any; title: string; children: React.ReactNode }) => (
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-6">
+        <div className="flex items-center gap-2 mb-5">
+            <div className="p-1.5 rounded-lg bg-primary/10"><Icon size={16} className="text-primary" /></div>
+            <h3 className="text-sm font-bold text-[var(--text-main)]">{title}</h3>
+        </div>
+        {children}
+    </div>
+)
+
 export function MyProfile({ profile, onUpdated }: MyProfileProps) {
     const fileRef = useRef<HTMLInputElement>(null)
     const [name, setName] = useState(profile?.full_name ?? "")
@@ -101,16 +115,6 @@ export function MyProfile({ profile, onUpdated }: MyProfileProps) {
             showError(`Erro ao trocar a senha: ${err?.message || err}`)
         } finally { setSavingPw(false) }
     }
-
-    const Section = ({ icon: Icon, title, children }: { icon: any; title: string; children: React.ReactNode }) => (
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-6">
-            <div className="flex items-center gap-2 mb-5">
-                <div className="p-1.5 rounded-lg bg-primary/10"><Icon size={16} className="text-primary" /></div>
-                <h3 className="text-sm font-bold text-[var(--text-main)]">{title}</h3>
-            </div>
-            {children}
-        </div>
-    )
 
     return (
         <div className="max-w-2xl mx-auto py-6 space-y-6">
