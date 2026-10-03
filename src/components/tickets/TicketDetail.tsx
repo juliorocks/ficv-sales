@@ -685,6 +685,11 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
           </div>
         </DialogHeader>
 
+        {/* Corpo: coluna do chamado + painel do aluno lado a lado (não é overlay — pedido do
+            usuário 03/10, antes um drawer por cima fechava o chamado ao clicar nas abas, porque
+            o Dialog do Radix tratava o portal separado como clique "fora" do modal). */}
+        <div className="flex-1 flex min-h-0 overflow-hidden">
+        <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         {/* Aluno: encerrar o próprio chamado */}
         {canClose && (
           <div className="mx-6 mt-3 shrink-0 flex justify-end">
@@ -1017,12 +1022,14 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
             </div>
           </div>
         )}
+        </div>
+        {showAlunoPainel && (
+          <AlunoPainelDrawer alunoId={t.aluno_id} alunoNome={t.aluno_nome} canSeeFinanceiro={canSeeFinanceiro}
+            onClose={() => setShowAlunoPainel(false)} />
+        )}
+        </div>
       </DialogContent>
     </Dialog>
-    {showAlunoPainel && (
-      <AlunoPainelDrawer alunoId={t.aluno_id} alunoNome={t.aluno_nome} canSeeFinanceiro={canSeeFinanceiro}
-        onClose={() => setShowAlunoPainel(false)} />
-    )}
     </>
   )
 }
