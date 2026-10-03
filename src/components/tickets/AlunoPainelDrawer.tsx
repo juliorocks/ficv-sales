@@ -5,6 +5,7 @@
  * do aluno". Mesmo padrão visual de AlunoHistorico.tsx (overlay + drawer fixo).
  */
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { X, User, GraduationCap } from 'lucide-react'
 import { AlunoPainelProvider, AlunoInicio, AlunoFinanceiro, AlunoNotas, AlunoDeclaracao, type NotasFoco } from './AlunoPainel'
 
@@ -28,13 +29,16 @@ export function AlunoPainelDrawer({ alunoId, alunoNome, canSeeFinanceiro, onClos
   const [notasFoco, setNotasFoco] = useState<NotasFoco | null>(null)
   const tabs = canSeeFinanceiro ? TABS : TABS.filter((t) => t.id !== 'financeiro')
 
-  return (
+  // Portal direto pro body: o TicketDetail que abre isso é um Dialog do Radix já aberto, que
+  // trata irmãos fora do próprio portal como "fundo inerte" (foco/clique presos dentro dele).
+  // Sem o portal, o drawer renderiza mas fica sem resposta a clique — achado ao vivo 03/10.
+  return createPortal(
     <AlunoPainelProvider alunoId={alunoId}>
       {/* Overlay */}
-      <div className="fixed inset-0 bg-black/50 z-[60] backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 bg-black/50 z-[60] backdrop-blur-sm pointer-events-auto" onClick={onClose} />
 
       {/* Drawer */}
-      <div className="fixed right-0 top-0 h-full w-full max-w-xl bg-[var(--bg-card)] border-l border-[var(--border)] z-[70] flex flex-col shadow-2xl">
+      <div className="fixed right-0 top-0 h-full w-full max-w-xl bg-[var(--bg-card)] border-l border-[var(--border)] z-[70] flex flex-col shadow-2xl pointer-events-auto">
         {tab === 'declaracao' ? (
           <div className="flex-1 overflow-y-auto">
             <AlunoDeclaracao onVoltar={() => setTab('inicio')} />
@@ -91,6 +95,7 @@ export function AlunoPainelDrawer({ alunoId, alunoNome, canSeeFinanceiro, onClos
           </>
         )}
       </div>
-    </AlunoPainelProvider>
+    </AlunoPainelProvider>,
+    document.body,
   )
 }
