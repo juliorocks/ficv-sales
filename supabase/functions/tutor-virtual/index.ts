@@ -12,6 +12,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { chatWithTools, corsHeaders, ensureLineBreaks, expandForFullList, identify, jsonRes, searchKnowledge, trailingAssistantText, wantsFullCourseList } from "../_shared/ai.ts";
 import { alunoBoletim, alunoOverview, alunoPagamento } from "../_shared/alunoSponte.ts";
 import { getSecret } from "../_shared/secrets.ts";
+import { firstName } from "../_shared/vivaconnect.ts";
 const PUBLICOS = ["alunos", "ambos"];
 
 const hoje = () => new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", weekday: "long", day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -31,6 +32,11 @@ const TOOLS = [
     {
         name: "passar_para_equipe", description: "Transfere o chamado para a equipe humana (Secretaria/Tutoria). Use conforme as regras de handoff.",
         parameters: { type: "object", properties: { motivo: { type: "string" }, resumo: { type: "string", description: "Resumo pra equipe: o que o aluno pediu, o que já foi respondido/consultado." } }, required: ["motivo", "resumo"] },
+    },
+    {
+        name: "concluir_atendimento",
+        description: "Marca o chamado como RESOLVIDO — use só quando o aluno CONFIRMAR que a dúvida dele já foi totalmente respondida e não precisa de mais nada (ex.: agradecimento final, \"era só isso\", \"perfeito, obrigada\"). Nunca chame isso só porque você acabou de responder — espere a confirmação do aluno antes.",
+        parameters: { type: "object", properties: {} },
     },
 ];
 
@@ -147,8 +153,10 @@ Deno.serve(async (req) => {
             : "(nenhum trecho relevante na base de conhecimento)";
 
         let handoffCall: { motivo: string; resumo: string } | null = null;
+        let concluirCall = false;
         const run = async (name: string, args: any) => {
             if (name === "passar_para_equipe") { handoffCall = { motivo: String(args.motivo ?? ""), resumo: String(args.resumo ?? "") }; return { ok: true }; }
+            if (name === "concluir_atendimento") { concluirCall = true; return { ok: true }; }
             if (!A) return { erro: "Este chamado não está ligado a um aluno do sistema acadêmico — não dá pra consultar dados." };
             if (name === "consultar_matriculas") return (await alunoOverview(A)).matriculas;
             if (name === "consultar_financeiro") {
@@ -164,6 +172,14 @@ Deno.serve(async (req) => {
             return { erro: "ferramenta desconhecida" };
         };
 
+        // 1ª mensagem de verdade neste chamado (nenhuma fala sua antes da última do aluno) —
+        // pedido do usuário 05/10: se apresentar como assistente de IA logo de cara, pra nunca
+        // parecer que está "enganando" o aluno fazendo ele achar que fala com um humano. Nome
+        // continua "Tutor Virtual" (não virou "Vivi" — são assuntos diferentes, acadêmico ×
+        // vendas, decisão do usuário).
+        const primeiraMensagem = !conversa.slice(0, -1).some((m) => m.role === "assistant");
+        const nomeAluno = firstName(al?.nome ?? t.aluno_nome ?? "");
+
         const system = [
             s.system_prompt,
             `Seu nome é ${s.nome}. Agora é ${hoje()} (horário de Brasília).`,
@@ -172,24 +188,37 @@ Deno.serve(async (req) => {
             `Aluno: ${al?.nome ?? t.aluno_nome}${A ? "" : " (sem vínculo com o sistema acadêmico — ferramentas de consulta indisponíveis)"}.`,
             `Formatação: texto simples, sem markdown de títulos, mas pule uma linha (\\n\\n) entre ideias diferentes — nunca um parágrafo gigante. Valores em R$; datas no formato dd/mm/aaaa.`,
             // mesmas regras do ai-agent (29/09, achado ao vivo em VÁRIOS chamados de teste):
-            `Se já existe QUALQUER mensagem sua nesta conversa, você já se apresentou — NUNCA se apresente de novo, mesmo que a última fala do aluno seja só um cumprimento curto. Trate como continuação natural.`,
+            primeiraMensagem
+                ? `Esta é a SUA 1ª mensagem neste chamado — antes de responder de verdade, apresente-se em UMA frase curta e natural deixando claro que você é um assistente de IA, não uma pessoa (ex.: "Oi${nomeAluno ? `, ${nomeAluno}` : ""}! Sou o ${s.nome} da FICV 🤖, um assistente virtual."), e já emende a resposta na sequência, na MESMA mensagem — nunca separe apresentação e resposta em duas falas. Depois desta, NUNCA mais se apresente nesta conversa.`
+                : `Se já existe QUALQUER mensagem sua nesta conversa, você já se apresentou — NUNCA se apresente de novo, mesmo que a última fala do aluno seja só um cumprimento curto. Trate como continuação natural.`,
             `Você só se comunica por TEXTO — nunca tem arquivo, PDF ou link pra enviar de verdade (link de pagamento é diferente: isso a ferramenta link_pagamento gera de fato). Se o aluno pedir grade/ementa/conteúdo e a base tiver, escreva direto na mensagem; se não tiver, chame passar_para_equipe. NUNCA diga "vou te enviar" ou "vou verificar e te aviso" sem cumprir na mesma resposta — prometer e sumir é pior que admitir que não sabe.`,
             `Quando o aluno pedir uma LISTA COMPLETA de algo (disciplinas, grade, módulos, ementa) e a base tiver, liste TODOS os itens — nunca corte pra "algumas" quando ele pediu "todas". Isso vale IGUAL quando é você mesma quem oferece detalhar tudo e o aluno só confirma com um "sim"/"quero": entregue TODOS os itens nessa resposta, nunca só os primeiros com um "quer que eu continue?".${fullDocUsed ? ` A base abaixo inclui o documento "${fullDocUsed}" INTEIRO pra isso.` : ""}`,
+            // pedido do usuário 05/10: identificado o atendimento concluído, já move pra
+            // Resolvidos sozinho.
+            `Quando o aluno CONFIRMAR que sua dúvida já foi totalmente resolvida e não precisa de mais nada (agradecimento final, "era só isso", "perfeito, obrigada" e parecidos), chame a ferramenta concluir_atendimento — isso fecha o chamado automaticamente como Resolvido. Nunca chame isso só porque VOCÊ respondeu; espere a confirmação do aluno.`,
             `BASE DE CONHECIMENTO (única fonte para regras e procedimentos):\n\n${kb}`,
         ].join("\n\n");
 
         const { text: rawText, toolsUsed } = await chatWithTools(s.chat_model, Number(s.temperature), [{ role: "system", content: system }, ...conversa], TOOLS, run);
         const text = ensureLineBreaks(rawText);
-        // passou pra equipe: no lugar do texto da IA vai a mensagem padrão (horário, e-mail, protocolo)
-        const vaiPraEquipe = !!handoffCall || !text;
-        const reply = vaiPraEquipe ? await mensagemPassagem() : text;
+        // passou pra equipe: no lugar do texto da IA vai a mensagem padrão (horário, e-mail, protocolo).
+        // concluir_atendimento sem texto nenhum (o modelo às vezes só chama a ferramenta, sem
+        // escrever nada) NÃO é "não conseguiu responder" — não pode cair no handoff por isso.
+        const vaiPraEquipe = !!handoffCall || (!text && !concluirCall);
+        const reply = vaiPraEquipe ? await mensagemPassagem() : (text || "Fico feliz em ter ajudado! Qualquer outra dúvida, é só chamar por aqui. 😊");
 
         await db.from("ticket_messages").insert({ ticket_id: t.id, autor_id: null, autor_nome: s.nome, autor_role: "tutor_virtual", interno: false, conteudo: reply });
-        await db.from("tickets").update({ ai_turns: (t.ai_turns ?? 0) + 1, ...(handoffCall || !text ? {} : { status: "aguardando_aluno" }) }).eq("id", t.id);
+        // 05/10, pedido do usuário: identificado o atendimento concluído (aluno confirmou que
+        // não precisa de mais nada), já move pra Resolvidos sozinho — mesmo gatilho de e-mail
+        // "resolvido" que já existe pro fechamento manual (ticket_email_on_ticket).
+        await db.from("tickets").update({
+            ai_turns: (t.ai_turns ?? 0) + 1,
+            ...(vaiPraEquipe ? {} : concluirCall ? { status: "resolvido" } : { status: "aguardando_aluno" }),
+        }).eq("id", t.id);
         const hc = handoffCall as { motivo: string; resumo: string } | null;
-        if (hc || !text) await handoff(hc?.motivo ?? "o tutor não conseguiu responder", hc?.resumo ?? "");
+        if (vaiPraEquipe) await handoff(hc?.motivo ?? "o tutor não conseguiu responder", hc?.resumo ?? "");
 
-        return jsonRes({ ok: true, handoff: !!(hc || !text), tools: toolsUsed, sources: (hits ?? []).length });
+        return jsonRes({ ok: true, handoff: vaiPraEquipe, concluido: concluirCall && !vaiPraEquipe, tools: toolsUsed, sources: (hits ?? []).length });
     } catch (e) {
         console.error("tutor-virtual:", e);
         await handoff(`erro no tutor: ${(e as Error).message.slice(0, 200)}`, "", await mensagemPassagem().catch(() => "Vou passar seu chamado para a nossa equipe, que vai continuar com você por aqui."));
