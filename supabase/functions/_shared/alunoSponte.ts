@@ -37,7 +37,15 @@ export async function alunoOverview(A: number) {
         contrato_id: Number(r.ContratoID), curso: n(r.NomeCurso), turma: n(r.NomeTurma), turma_id: Number(r.TurmaID) || null,
         situacao: n(r.Situacao), data_matricula: brDate(r.DataMatricula), data_inicio: brDate(r.DataInicio), data_termino: brDate(r.DataTermino),
     }))).sort((x, y) => String(y.data_matricula).localeCompare(String(x.data_matricula)));
-    const parcelas = records(xp, "wsParcela").filter((r) => r.ContaReceberID && r.ContaReceberID !== "0").map((r) => ({
+    // 05/10, achado ao vivo (print real de um colega testando o próprio portal — "estou devendo
+    // horrores mas as pós foram canceladas"): matrícula Cancelada no Sponte NÃO apaga as
+    // parcelas dela — elas continuam existindo em GetParcelas, só que com SituacaoParcela =
+    // "Cancelada" (confirmado com dado real: AlunoID 6668, 2 matrículas Pós canceladas, TODAS
+    // as parcelas delas vêm "Cancelada"). isPaid() do front só reconhece quit/pag/baix — uma
+    // parcela Cancelada não batia em nenhum, então entrava como dívida real (inclusive "em
+    // atraso" se a data já tinha passado) pro aluno ver. Filtra aqui, na camada compartilhada
+    // (Portal E Tutor Virtual), pra nunca mostrar cobrança de uma matrícula que não existe mais.
+    const parcelas = records(xp, "wsParcela").filter((r) => r.ContaReceberID && r.ContaReceberID !== "0" && !/cancelad/i.test(r.SituacaoParcela ?? "")).map((r) => ({
         conta_receber_id: Number(r.ContaReceberID), numero_parcela: Number(r.NumeroParcela) || 0,
         vencimento: brDate(r.Vencimento), valor: brNum(r.ValorParcela), valor_pago: brNum(r.ValorPago) || null,
         data_pagamento: brDate(r.DataPagamento), situacao: n(r.SituacaoParcela), forma: n(r.FormaCobranca),
