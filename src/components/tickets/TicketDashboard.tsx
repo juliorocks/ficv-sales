@@ -3,8 +3,10 @@
  * Painel completo com métricas, filtros e lista de tickets.
  */
 import { useState, useMemo, useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
+import { showError, showSuccess } from '../../utils/toast'
+import { withTimeout } from '../../utils/withTimeout'
 import { useAuth } from '../../hooks/use-auth'
 import type { Ticket, TicketCategoria, TicketStatus, TicketEvaluation } from '../../types/database'
 import { TicketDetail } from './TicketDetail'
@@ -19,7 +21,7 @@ import { Badge } from '../ui/badge'
 import {
   Ticket as TicketIcon, Clock, CheckCircle2, AlertCircle, Star,
   Search, Filter, Users, TrendingUp, MessageSquare, Timer,
-  ChevronRight, Loader2, RefreshCw, Plus
+  ChevronRight, Loader2, RefreshCw, Plus, Trash2
 } from 'lucide-react'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -165,9 +167,31 @@ function PriBadge({ p }: { p: string }) {
 export function TicketDashboard({ isDarkMode }: { isDarkMode?: boolean }) {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
+  const qc = useQueryClient()
 
   const [selected, setSelected] = useState<Ticket | null>(null)
   const [novoChamado, setNovoChamado] = useState(false)
+
+  // Apagar chamado de vez — pedido do usuário 05/10, agora também na visão Painel (lista),
+  // mesma ação já usada no card do Kanban (TicketKanban.tsx). Só admin (checado de novo no
+  // servidor). ticket_messages/ticket_evaluations/ticket_email_outbox têm ON DELETE CASCADE.
+  const deleteTicket = async (t: Ticket) => {
+    if (!window.confirm(`Apagar o chamado ${t.protocolo} (${t.titulo}) de vez? Isso remove a conversa inteira e a avaliação do aluno junto — não dá pra desfazer.`)) return
+    try {
+      const { data, error } = await withTimeout(
+        supabase.functions.invoke('staff-tickets', { body: { action: 'delete_ticket', ticket_id: t.id } }),
+        15000, 'Apagar o chamado',
+      )
+      const erroMsg = error ? await (error as any).context?.json?.().then((j: any) => j?.error).catch(() => null) : null
+      if (error || data?.error) { showError(erroMsg ?? data?.error ?? error?.message ?? 'Não foi possível apagar.'); return }
+      qc.setQueryData<Ticket[]>(['tickets', 'dashboard'], (old) => old?.filter((x) => x.id !== t.id))
+      qc.invalidateQueries({ queryKey: ['tickets'] })
+      qc.invalidateQueries({ queryKey: ['ticket-evaluations'] })
+      showSuccess(`Chamado ${t.protocolo} apagado.`)
+    } catch (e: any) {
+      showError(e?.message ?? 'Não foi possível apagar.')
+    }
+  }
   const podeVerNpsGeral = user?.role === 'admin' || user?.role === 'coordenador'
   type View = 'painel' | 'kanban' | 'nps'
   const [view, setView] = useState<View>(() => {
@@ -546,7 +570,18 @@ export function TicketDashboard({ isDarkMode }: { isDarkMode?: boolean }) {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <ChevronRight className="w-4 h-4 text-[var(--text-muted)]" />
+                        <div className="flex items-center gap-2">
+                          {isAdmin && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); deleteTicket(t) }}
+                              title="Apagar chamado"
+                              className="text-[var(--text-muted)] hover:text-red-500 transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          <ChevronRight className="w-4 h-4 text-[var(--text-muted)]" />
+                        </div>
                       </td>
                     </tr>
                   )
