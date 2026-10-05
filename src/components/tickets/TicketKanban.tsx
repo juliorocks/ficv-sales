@@ -69,10 +69,9 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin, isDar
   // por created_at (quando o chamado foi aberto — equivalente da data_entrada de lá).
   const [dateRange, setDateRange] = useState<KanbanDateRange>({ start: '', end: '' })
   // "Meus chamados" — pedido do Matheus repassado pelo usuário 05/10 ("tem como eu filtrar só
-  // os que estão comigo?"): por padrão o quadro mostra a fila inteira (mesma lógica já visível
-  // pra todo mundo na fila, decisão já confirmada antes pro Resolvidos), então o filtro é
-  // manual, não automático.
-  const [meusChamados, setMeusChamados] = useState(false)
+  // os que estão comigo?"), depois ajustado pra já vir ligado por padrão: cada um abre o quadro
+  // já vendo só os seus, e clica no botão pra ver a fila inteira (os outros) quando quiser.
+  const [meusChamados, setMeusChamados] = useState(true)
   const TICKET_SORT_OPTIONS = [
     { key: 'updated_at', label: 'Última Atividade' },
     { key: 'created_at', label: 'Data de Abertura' },
