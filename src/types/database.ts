@@ -281,6 +281,8 @@ export interface Ticket {
   aluno_email: string
   atendente_id: string | null
   curso_id: number | null
+  curso_nome: string | null
+  nivel: 'pos' | 'graduacao' | null
   created_at: string
   updated_at: string
   first_response_at: string | null

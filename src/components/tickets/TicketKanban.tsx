@@ -10,7 +10,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { DragDropContext, Draggable, Droppable, type DropResult } from '@hello-pangea/dnd'
 import { formatDistanceToNow } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { MessageCircleReply, Search, Trash2, UserRound } from 'lucide-react'
+import { GraduationCap, MessageCircleReply, Search, Trash2, UserRound } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import type { Ticket, TicketStatus } from '../../types/database'
 import { showError, showSuccess } from '../../utils/toast'
@@ -198,6 +198,12 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin }: { t
                                 </div>
                                 <p className="text-sm font-medium text-[var(--text-main)] leading-snug line-clamp-2 pr-4">{t.titulo}</p>
                                 <p className="text-xs text-[var(--text-muted)] mt-1 truncate">{t.aluno_nome}</p>
+                                {(t.curso_nome || t.curso?.name) && (
+                                  <p className="mt-1 inline-flex items-center gap-1 max-w-full text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-card)] border border-[var(--border)] text-[var(--text-muted)]" title={t.curso_nome ?? t.curso?.name ?? ''}>
+                                    <GraduationCap className="w-2.5 h-2.5 shrink-0" />
+                                    <span className="truncate">{t.curso_nome ?? t.curso?.name}</span>
+                                  </p>
+                                )}
                                 <div className="flex items-center justify-between mt-2 text-[11px] text-[var(--text-muted)]">
                                   <span className="flex items-center gap-1 truncate">
                                     <UserRound className="w-3 h-3 shrink-0" /> {(t as any).atendente?.full_name ?? 'sem responsável'}
