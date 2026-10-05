@@ -782,7 +782,12 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
               </div>
             ) : (
               messages.map(m => {
-                const isMine = m.autor_id === currentUserId && m.autor_role !== 'tutor_virtual'
+                // Lado da bolha = QUEM FALA (aluno sempre à esquerda, qualquer agente — humano
+                // ou Tutor Virtual — sempre à direita), não "sou eu que estou logado agora".
+                // Achado ao vivo 05/10: quem reabria um chamado que outro colega já tinha
+                // respondido via essa tela via TODAS as mensagens à esquerda, sem alternar,
+                // porque antes só a PRÓPRIA mensagem de quem estava logado ia pra direita.
+                const isMine = m.autor_role !== 'aluno'
                 const isInterno = m.interno
                 const isDeleted = !!m.deleted_at
 
@@ -824,10 +829,10 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                       <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words
                         ${isInterno
                           ? 'bg-amber-500/10 border border-amber-500/20 text-amber-200'
-                          : isMine
-                            ? 'bg-[var(--primary)] text-white rounded-tr-sm'
-                            : m.autor_role === 'tutor_virtual'
-                              ? 'bg-purple-500/10 border border-purple-500/25 text-[var(--text-main)] rounded-tl-sm'
+                          : m.autor_role === 'tutor_virtual'
+                            ? 'bg-purple-500/10 border border-purple-500/25 text-[var(--text-main)] rounded-tr-sm'
+                            : isMine
+                              ? 'bg-[var(--primary)] text-white rounded-tr-sm'
                               : 'bg-[var(--bg-main)] border border-[var(--border)] text-[var(--text-main)] rounded-tl-sm'
                         }`}>
                         {linkify(m.conteudo)}
