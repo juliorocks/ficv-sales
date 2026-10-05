@@ -2019,7 +2019,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {/* Tickets — staff only (alunos usam /atendimento) */}
                 {activeTab === 'tickets' && (profile?.role === 'admin' || profile?.role === 'agent' || isTicketRole) && (
                     <div className="animate-fade-in">
-                        <TicketDashboard />
+                        <TicketDashboard isDarkMode={isDarkMode} />
                     </div>
                 )}
 

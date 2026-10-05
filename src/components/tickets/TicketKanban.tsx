@@ -16,6 +16,8 @@ import type { Ticket, TicketStatus } from '../../types/database'
 import { showError, showSuccess } from '../../utils/toast'
 import { withTimeout } from '../../utils/withTimeout'
 import { Input } from '../ui/input'
+import { KanbanSort, type SortOption } from '../kanban/KanbanSort'
+import { KanbanDateFilter, type KanbanDateRange } from '../kanban/KanbanDateFilter'
 
 // 1ª coluna: chamados que o Tutor Virtual está atendendo (ai_status = 'active') — a equipe
 // acompanha abrindo o card e só entra se quiser (Assumir / arrastar pra outra coluna).
@@ -35,7 +37,7 @@ const CAT_ICON: Record<string, string> = {
 const PRIO_DOT: Record<string, string> = { urgente: 'bg-red-500', alta: 'bg-orange-500', media: 'bg-yellow-400', baixa: 'bg-green-500' }
 const QUEUE_KEY = 'ficv_ticket_kanban_queue'
 
-export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin }: { tickets: Ticket[]; onOpen: (t: Ticket) => void; defaultQueueName?: string; isAdmin?: boolean }) {
+export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin, isDarkMode }: { tickets: Ticket[]; onOpen: (t: Ticket) => void; defaultQueueName?: string; isAdmin?: boolean; isDarkMode?: boolean }) {
   const qc = useQueryClient()
   const { data: queues = [] } = useQuery<{ id: number; nome: string }[]>({
     queryKey: ['ticket-queues'],
@@ -52,6 +54,26 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin }: { t
   const [search, setSearch] = useState('')
   const pickCat = (q: number | 'todas') => { setQueuePick(String(q)); try { if (!defaultQueueName) localStorage.setItem(QUEUE_KEY, String(q)) } catch { /* sem storage */ } }
 
+  // Ordenar/filtrar — pedido do usuário 05/10 ("colocar os filtros nas colunas, os que fazem
+  // sentido"), mesmo componente já usado no Kanban de Leads (KanbanSort), mas com campos
+  // próprios de Ticket (sem curso/valor/temperatura) — ver options abaixo. Um controle só pro
+  // quadro inteiro (não um por coluna) — mesma escolha já feita na tela Atendimentos, mais
+  // simples e já cobre o que interessa aqui.
+  const [sortBy, setSortBy] = useState<SortOption>({ key: 'updated_at', label: 'Última Atividade', direction: 'asc' })
+  const [priorityOnly, setPriorityOnly] = useState(false)
+  const [priorityFirst, setPriorityFirst] = useState(true)
+  // Período — pedido do usuário 05/10 ("colocar também por data, pra poder buscar por
+  // períodos"), mesmo componente já usado no Kanban de Leads (KanbanDateFilter), filtrando
+  // por created_at (quando o chamado foi aberto — equivalente da data_entrada de lá).
+  const [dateRange, setDateRange] = useState<KanbanDateRange>({ start: '', end: '' })
+  const TICKET_SORT_OPTIONS = [
+    { key: 'updated_at', label: 'Última Atividade' },
+    { key: 'created_at', label: 'Data de Abertura' },
+    { key: 'aluno_nome', label: 'Nome do Aluno' },
+    { key: 'prioridade', label: 'Prioridade' },
+  ]
+  const PRIO_ORDER: Record<string, number> = { urgente: 4, alta: 3, media: 2, baixa: 1 }
+
   // quem falou por último em cada chamado → destaca "aluno respondeu" nos que estão com a equipe
   const ids = tickets.map((t) => t.id)
   const { data: lastWho = {} } = useQuery<Record<number, string>>({
@@ -66,18 +88,25 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin }: { t
     enabled: ids.length > 0,
     refetchInterval: 30000,
   })
+  // "esperando resposta" = aluno falou por último num chamado que a equipe já está tocando —
+  // mesmo sinal que já acendia o selo "aluno respondeu" no card, agora também vira o filtro de
+  // prioridade do KanbanSort (mesmo conceito do "Esperando Resposta" da tela Atendimentos).
+  const alunoRespondeu = (t: Ticket) => lastWho[t.id] === 'aluno' && ['em_atendimento', 'aguardando_aluno'].includes(t.status)
 
   const since15 = Date.now() - 15 * 86400_000
   const visible = useMemo(() => tickets.filter((t) => {
     if (cat !== 'todas' && (t as any).queue_id !== cat) return false
     // resolvido e fechado (finalizado pela avaliação do aluno) caem juntos na coluna Resolvidos
     if (['resolvido', 'fechado'].includes(t.status) && new Date(t.resolved_at ?? t.updated_at).getTime() < since15) return false
+    if (priorityOnly && !alunoRespondeu(t)) return false
+    if (dateRange.start && t.created_at.slice(0, 10) < dateRange.start) return false
+    if (dateRange.end && t.created_at.slice(0, 10) > dateRange.end) return false
     if (search) {
       const q = search.toLowerCase()
       if (!t.titulo.toLowerCase().includes(q) && !t.protocolo.toLowerCase().includes(q) && !t.aluno_nome.toLowerCase().includes(q)) return false
     }
     return true
-  }), [tickets, cat, search, since15])
+  }), [tickets, cat, search, since15, priorityOnly, lastWho, dateRange])
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {}
@@ -146,6 +175,14 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin }: { t
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar aluno, título, protocolo…"
             className="pl-9 h-9 bg-[var(--bg-card)] border-[var(--border)] text-[var(--text-main)]" />
         </div>
+        <KanbanSort
+          sortBy={sortBy} onSortChange={setSortBy}
+          mode="waitingReply"
+          priorityOnly={priorityOnly} onPriorityOnlyChange={setPriorityOnly}
+          priorityFirst={priorityFirst} onPriorityFirstChange={setPriorityFirst}
+          options={TICKET_SORT_OPTIONS}
+        />
+        <KanbanDateFilter value={dateRange} onChange={setDateRange} isDarkMode={!!isDarkMode} />
       </div>
 
       <DragDropContext onDragEnd={onDragEnd}>
@@ -154,7 +191,22 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin }: { t
             const comTutor = (t: Ticket) => (t as any).ai_status === 'active'
             const items = visible.filter((t) => col.status === TUTOR ? comTutor(t)
               : !comTutor(t) && (col.status === 'resolvido' ? ['resolvido', 'fechado'].includes(t.status) : t.status === col.status))
-              .sort((a, b) => new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime())
+              .sort((a, b) => {
+                if (priorityFirst) {
+                  const ap = alunoRespondeu(a), bp = alunoRespondeu(b)
+                  if (ap !== bp) return ap ? -1 : 1
+                }
+                const key = sortBy.key
+                let av: any, bv: any
+                if (key === 'prioridade') { av = PRIO_ORDER[a.prioridade] || 0; bv = PRIO_ORDER[b.prioridade] || 0 }
+                else if (key === 'created_at' || key === 'updated_at') { av = new Date(a[key]).getTime(); bv = new Date(b[key]).getTime() }
+                else if (key === 'aluno_nome') { av = a.aluno_nome; bv = b.aluno_nome }
+                else { av = 0; bv = 0 }
+                if (typeof av === 'string' && typeof bv === 'string') return sortBy.direction === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av)
+                if (av < bv) return sortBy.direction === 'asc' ? -1 : 1
+                if (av > bv) return sortBy.direction === 'asc' ? 1 : -1
+                return 0
+              })
             return (
               <div key={col.status} className={`rounded-xl bg-[var(--bg-card)]/60 border border-[var(--border)] border-t-4 ${col.accent}`}>
                 <div className="px-3 pt-3 pb-2">
@@ -169,7 +221,7 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin }: { t
                     <div ref={prov.innerRef} {...prov.droppableProps}
                       className={`px-2 pb-2 space-y-2 min-h-[120px] max-h-[70vh] overflow-y-auto custom-scrollbar rounded-b-xl ${snap.isDraggingOver ? 'bg-[var(--primary)]/5' : ''}`}>
                       {items.map((t, i) => {
-                        const alunoFalou = lastWho[t.id] === 'aluno' && ['em_atendimento', 'aguardando_aluno'].includes(t.status)
+                        const alunoFalou = alunoRespondeu(t)
                         return (
                           <Draggable key={t.id} draggableId={String(t.id)} index={i}>
                             {(p) => (

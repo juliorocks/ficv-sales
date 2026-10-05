@@ -9,7 +9,7 @@ import {
     DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
 
-type SortOption = {
+export type SortOption = {
     key: string
     label: string
     direction: 'asc' | 'desc'
@@ -22,6 +22,19 @@ const PRIORITY_LABELS = {
     waitingReply: { first: 'Esperando Resposta primeiro', only: 'Somente Esperando Resposta', title: 'Filtro: só esperando resposta' },
 } as const;
 
+// Campos de ordenação do Kanban de Leads (curso/valor/temperatura não existem em Tickets,
+// por isso virou prop — pedido do usuário 05/10, "colocar os filtros no Kanban de Chamados
+// também"). Mantido como default pra não precisar tocar nos dois lugares que já usavam isto
+// sem passar `options` (KanbanColumn.tsx, AtendimentosView.tsx).
+const DEFAULT_OPTIONS: Omit<SortOption, 'direction'>[] = [
+    { key: 'updated_at', label: 'Última Atividade' },
+    { key: 'stage_entry_date', label: 'Data no Estágio' },
+    { key: 'data_entrada', label: 'Data de Entrada' },
+    { key: 'nome_completo', label: 'Nome' },
+    { key: 'valor_oportunidade', label: 'Valor' },
+    { key: 'temperatura', label: 'Temperatura' },
+]
+
 export function KanbanSort({
     sortBy,
     onSortChange,
@@ -30,6 +43,7 @@ export function KanbanSort({
     onPriorityOnlyChange,
     priorityFirst,
     onPriorityFirstChange,
+    options = DEFAULT_OPTIONS,
 }: {
     sortBy: SortOption
     onSortChange: (option: SortOption) => void
@@ -38,16 +52,9 @@ export function KanbanSort({
     onPriorityOnlyChange: (value: boolean) => void
     priorityFirst: boolean
     onPriorityFirstChange: (value: boolean) => void
+    options?: Omit<SortOption, 'direction'>[]
 }) {
     const labels = PRIORITY_LABELS[mode];
-    const options: Omit<SortOption, 'direction'>[] = [
-        { key: 'updated_at', label: 'Última Atividade' },
-        { key: 'stage_entry_date', label: 'Data no Estágio' },
-        { key: 'data_entrada', label: 'Data de Entrada' },
-        { key: 'nome_completo', label: 'Nome' },
-        { key: 'valor_oportunidade', label: 'Valor' },
-        { key: 'temperatura', label: 'Temperatura' },
-    ]
 
     const handleSelect = (key: string, label: string) => {
         if (sortBy.key === key) {

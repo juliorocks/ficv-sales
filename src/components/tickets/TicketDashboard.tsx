@@ -162,7 +162,7 @@ function PriBadge({ p }: { p: string }) {
 
 // ── Main ─────────────────────────────────────────────────────
 
-export function TicketDashboard() {
+export function TicketDashboard({ isDarkMode }: { isDarkMode?: boolean }) {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
 
@@ -291,7 +291,7 @@ export function TicketDashboard() {
 
       {view === 'nps' && <NpsPanel podeVerTudo={podeVerNpsGeral} />}
 
-      {view === 'kanban' && <TicketKanban tickets={tickets} onOpen={setSelected} isAdmin={isAdmin} />}
+      {view === 'kanban' && <TicketKanban tickets={tickets} onOpen={setSelected} isAdmin={isAdmin} isDarkMode={!!isDarkMode} />}
 
       {view === 'painel' && <>
 
