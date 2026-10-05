@@ -291,7 +291,7 @@ export function TicketDashboard() {
 
       {view === 'nps' && <NpsPanel podeVerTudo={podeVerNpsGeral} />}
 
-      {view === 'kanban' && <TicketKanban tickets={tickets} onOpen={setSelected} />}
+      {view === 'kanban' && <TicketKanban tickets={tickets} onOpen={setSelected} isAdmin={isAdmin} />}
 
       {view === 'painel' && <>
 

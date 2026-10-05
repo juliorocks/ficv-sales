@@ -10,10 +10,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { DragDropContext, Draggable, Droppable, type DropResult } from '@hello-pangea/dnd'
 import { formatDistanceToNow } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { MessageCircleReply, Search, UserRound } from 'lucide-react'
+import { MessageCircleReply, Search, Trash2, UserRound } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import type { Ticket, TicketStatus } from '../../types/database'
 import { showError, showSuccess } from '../../utils/toast'
+import { withTimeout } from '../../utils/withTimeout'
 import { Input } from '../ui/input'
 
 // 1ª coluna: chamados que o Tutor Virtual está atendendo (ai_status = 'active') — a equipe
@@ -34,7 +35,7 @@ const CAT_ICON: Record<string, string> = {
 const PRIO_DOT: Record<string, string> = { urgente: 'bg-red-500', alta: 'bg-orange-500', media: 'bg-yellow-400', baixa: 'bg-green-500' }
 const QUEUE_KEY = 'ficv_ticket_kanban_queue'
 
-export function TicketKanban({ tickets, onOpen, defaultQueueName }: { tickets: Ticket[]; onOpen: (t: Ticket) => void; defaultQueueName?: string }) {
+export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin }: { tickets: Ticket[]; onOpen: (t: Ticket) => void; defaultQueueName?: string; isAdmin?: boolean }) {
   const qc = useQueryClient()
   const { data: queues = [] } = useQuery<{ id: number; nome: string }[]>({
     queryKey: ['ticket-queues'],
@@ -106,6 +107,29 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName }: { tickets: T
     qc.invalidateQueries({ queryKey: ['tickets'] })
   }
 
+  // Apagar chamado de vez — pedido do usuário 05/10 ("Admins poderem apagar cards e,
+  // consequentemente, os NPS ligados"). Só admin (checado de novo no servidor — este botão só
+  // aparece pra quem já é admin no front, mas a function staff-tickets confere o papel de
+  // verdade). ticket_messages/ticket_evaluations/ticket_email_outbox têm ON DELETE CASCADE,
+  // então apagar o chamado já leva a conversa e a avaliação junto, sem sobrar nada.
+  const deleteTicket = async (t: Ticket) => {
+    if (!window.confirm(`Apagar o chamado ${t.protocolo} (${t.titulo}) de vez? Isso remove a conversa inteira e a avaliação do aluno junto — não dá pra desfazer.`)) return
+    try {
+      const { data, error } = await withTimeout(
+        supabase.functions.invoke('staff-tickets', { body: { action: 'delete_ticket', ticket_id: t.id } }),
+        15000, 'Apagar o chamado',
+      )
+      const erroMsg = error ? await (error as any).context?.json?.().then((j: any) => j?.error).catch(() => null) : null
+      if (error || data?.error) { showError(erroMsg ?? data?.error ?? error?.message ?? 'Não foi possível apagar.'); return }
+      qc.setQueryData<Ticket[]>(['tickets', 'dashboard'], (old) => old?.filter((x) => x.id !== t.id))
+      qc.invalidateQueries({ queryKey: ['tickets'] })
+      qc.invalidateQueries({ queryKey: ['ticket-evaluations'] })
+      showSuccess(`Chamado ${t.protocolo} apagado.`)
+    } catch (e: any) {
+      showError(e?.message ?? 'Não foi possível apagar.')
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -149,8 +173,19 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName }: { tickets: T
                         return (
                           <Draggable key={t.id} draggableId={String(t.id)} index={i}>
                             {(p) => (
-                              <button ref={p.innerRef} {...p.draggableProps} {...p.dragHandleProps} onClick={() => onOpen(t)}
-                                className="w-full text-left rounded-lg bg-[var(--bg-main)] border border-[var(--border)] p-3 hover:border-[var(--primary)]/50 transition-colors shadow-sm">
+                              <div ref={p.innerRef} {...p.draggableProps} {...p.dragHandleProps}
+                                role="button" tabIndex={0} onClick={() => onOpen(t)}
+                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onOpen(t) }}
+                                className="group relative w-full text-left rounded-lg bg-[var(--bg-main)] border border-[var(--border)] p-3 hover:border-[var(--primary)]/50 transition-colors shadow-sm cursor-pointer">
+                                {isAdmin && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); deleteTicket(t) }}
+                                    title="Apagar chamado"
+                                    className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-[var(--text-muted)] hover:text-red-500 bg-[var(--bg-main)] rounded p-0.5"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                                 <div className="flex items-center gap-1.5 mb-1">
                                   <span className={`w-2 h-2 rounded-full shrink-0 ${PRIO_DOT[t.prioridade] ?? 'bg-slate-400'}`} title={`Prioridade ${t.prioridade}`} />
                                   <span className="text-[11px] font-mono text-[var(--primary)]">{t.protocolo}</span>
@@ -161,7 +196,7 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName }: { tickets: T
                                     </span>
                                   )}
                                 </div>
-                                <p className="text-sm font-medium text-[var(--text-main)] leading-snug line-clamp-2">{t.titulo}</p>
+                                <p className="text-sm font-medium text-[var(--text-main)] leading-snug line-clamp-2 pr-4">{t.titulo}</p>
                                 <p className="text-xs text-[var(--text-muted)] mt-1 truncate">{t.aluno_nome}</p>
                                 <div className="flex items-center justify-between mt-2 text-[11px] text-[var(--text-muted)]">
                                   <span className="flex items-center gap-1 truncate">
@@ -169,7 +204,7 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName }: { tickets: T
                                   </span>
                                   <span className="shrink-0">{formatDistanceToNow(new Date(t.updated_at), { addSuffix: false, locale: ptBR })}</span>
                                 </div>
-                              </button>
+                              </div>
                             )}
                           </Draggable>
                         )

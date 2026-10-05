@@ -107,6 +107,24 @@ Deno.serve(async (req) => {
             return jsonRes({ ok: true, queue_nome: fila?.nome ?? null });
         }
 
+        // Apagar chamado de vez — pedido do usuário 05/10 ("colocar pra Admins poder apagar
+        // cards e, consequentemente, os NPS ligados"). Só admin. Roda com service role: as
+        // tabelas filhas (ticket_messages, ticket_evaluations, ticket_email_outbox) já têm
+        // ON DELETE CASCADE no banco, mas RLS de DELETE não existe em NENHUMA delas — um
+        // DELETE direto do cliente (mesmo como admin) falharia tentando cascatear pra
+        // ticket_evaluations sem policy de DELETE lá. Service role bypassa RLS nas 4 tabelas
+        // de uma vez, sem precisar abrir policy de DELETE em nenhuma (mais contido/auditável
+        // só aqui do que espalhar "admin pode apagar" em 4 tabelas diferentes).
+        if (action === "delete_ticket") {
+            if (caller.role !== "admin") return jsonRes({ error: "Só administradores podem apagar chamados." }, 403);
+            const ticketId = Number(body.ticket_id);
+            if (!ticketId) return jsonRes({ error: "ticket_id obrigatório." }, 400);
+            const { error, count } = await db.from("tickets").delete({ count: "exact" }).eq("id", ticketId);
+            if (error) return jsonRes({ error: error.message }, 500);
+            if (!count) return jsonRes({ error: "Chamado não encontrado." }, 404);
+            return jsonRes({ ok: true });
+        }
+
         if (action === "create") {
             const targets = Array.isArray(body.targets) ? body.targets : [];
             const titulo = String(body.titulo ?? "").trim();
