@@ -12,6 +12,7 @@ import { formatDistanceToNow } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { GraduationCap, MessageCircleReply, Search, Trash2, UserRound } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { useAuth } from '../../hooks/use-auth'
 import type { Ticket, TicketStatus } from '../../types/database'
 import { showError, showSuccess } from '../../utils/toast'
 import { withTimeout } from '../../utils/withTimeout'
@@ -39,6 +40,7 @@ const QUEUE_KEY = 'ficv_ticket_kanban_queue'
 
 export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin, isDarkMode }: { tickets: Ticket[]; onOpen: (t: Ticket) => void; defaultQueueName?: string; isAdmin?: boolean; isDarkMode?: boolean }) {
   const qc = useQueryClient()
+  const { user } = useAuth()
   const { data: queues = [] } = useQuery<{ id: number; nome: string }[]>({
     queryKey: ['ticket-queues'],
     queryFn: async () => (await supabase.from('ticket_queues').select('id, nome').eq('ativo', true).order('ordem')).data ?? [],
@@ -66,6 +68,11 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin, isDar
   // períodos"), mesmo componente já usado no Kanban de Leads (KanbanDateFilter), filtrando
   // por created_at (quando o chamado foi aberto — equivalente da data_entrada de lá).
   const [dateRange, setDateRange] = useState<KanbanDateRange>({ start: '', end: '' })
+  // "Meus chamados" — pedido do Matheus repassado pelo usuário 05/10 ("tem como eu filtrar só
+  // os que estão comigo?"): por padrão o quadro mostra a fila inteira (mesma lógica já visível
+  // pra todo mundo na fila, decisão já confirmada antes pro Resolvidos), então o filtro é
+  // manual, não automático.
+  const [meusChamados, setMeusChamados] = useState(false)
   const TICKET_SORT_OPTIONS = [
     { key: 'updated_at', label: 'Última Atividade' },
     { key: 'created_at', label: 'Data de Abertura' },
@@ -98,6 +105,7 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin, isDar
     if (cat !== 'todas' && (t as any).queue_id !== cat) return false
     // resolvido e fechado (finalizado pela avaliação do aluno) caem juntos na coluna Resolvidos
     if (['resolvido', 'fechado'].includes(t.status) && new Date(t.resolved_at ?? t.updated_at).getTime() < since15) return false
+    if (meusChamados && t.atendente_id !== user?.id) return false
     if (priorityOnly && !alunoRespondeu(t)) return false
     if (dateRange.start && t.created_at.slice(0, 10) < dateRange.start) return false
     if (dateRange.end && t.created_at.slice(0, 10) > dateRange.end) return false
@@ -106,7 +114,7 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin, isDar
       if (!t.titulo.toLowerCase().includes(q) && !t.protocolo.toLowerCase().includes(q) && !t.aluno_nome.toLowerCase().includes(q)) return false
     }
     return true
-  }), [tickets, cat, search, since15, priorityOnly, lastWho, dateRange])
+  }), [tickets, cat, search, since15, priorityOnly, lastWho, dateRange, meusChamados, user?.id])
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {}
@@ -170,6 +178,12 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin, isDar
             {q.nome}{counts[String(q.id)] ? <span className="ml-1 opacity-80">({counts[String(q.id)]})</span> : null}
           </button>
         ))}
+        <button onClick={() => setMeusChamados((v) => !v)}
+          className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors flex items-center gap-1 ${meusChamados
+            ? 'bg-[var(--primary)] text-white border-[var(--primary)]'
+            : 'border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}>
+          <UserRound className="w-3.5 h-3.5" /> Meus chamados
+        </button>
         <div className="relative ml-auto w-full sm:w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar aluno, título, protocolo…"
