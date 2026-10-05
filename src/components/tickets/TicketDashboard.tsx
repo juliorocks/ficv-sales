@@ -18,6 +18,7 @@ import { Input } from '../ui/input'
 import { Button } from '../ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { Badge } from '../ui/badge'
+import { Tooltip as UiTooltip, TooltipContent as UiTooltipContent, TooltipProvider as UiTooltipProvider, TooltipTrigger as UiTooltipTrigger } from '../ui/tooltip'
 import {
   Ticket as TicketIcon, Clock, CheckCircle2, AlertCircle, Star,
   Search, Filter, Users, TrendingUp, MessageSquare, Timer,
@@ -320,26 +321,42 @@ export function TicketDashboard({ isDarkMode }: { isDarkMode?: boolean }) {
       {view === 'painel' && <>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-        {[
-          { label: 'Total', value: metrics.total, sub: 'tickets', icon: TicketIcon, color: 'text-[var(--primary)]' },
-          { label: 'Resolvidos', value: metrics.resolved, sub: 'tickets', icon: CheckCircle2, color: 'text-green-400' },
-          { label: 'TMA', value: formatMinutes(metrics.tma), sub: '1ª resposta', icon: Timer, color: 'text-blue-400' },
-          { label: 'TMR', value: formatMinutes(metrics.tmr), sub: 'resolução', icon: Clock, color: 'text-amber-400' },
-          { label: 'CSAT', value: metrics.csatAvg ? `${metrics.csatAvg.toFixed(1)}/5` : '—', sub: 'satisfação', icon: Star, color: 'text-yellow-400' },
-          { label: 'FCR', value: metrics.fcrPct !== null ? `${Math.round(metrics.fcrPct)}%` : '—', sub: '1º contato', icon: CheckCircle2, color: 'text-green-400' },
-          { label: 'NPS', value: metrics.nps !== null ? metrics.nps : '—', sub: 'net promoter', icon: TrendingUp, color: metrics.nps !== null ? (metrics.nps >= 50 ? 'text-green-400' : metrics.nps >= 0 ? 'text-amber-400' : 'text-red-400') : 'text-[var(--text-muted)]' },
-        ].map(kpi => (
-          <div key={kpi.label} className="glass-card p-4 flex flex-col gap-1">
-            <div className="flex items-center gap-1.5">
-              <kpi.icon className={`w-3.5 h-3.5 ${kpi.color}`} />
-              <p className="text-xs text-[var(--text-muted)]">{kpi.label}</p>
-            </div>
-            <p className="text-xl font-bold text-[var(--text-main)]">{kpi.value}</p>
-            <p className="text-xs text-[var(--text-muted)]">{kpi.sub}</p>
-          </div>
-        ))}
-      </div>
+      <UiTooltipProvider delayDuration={200}>
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+          {[
+            { label: 'Total', value: metrics.total, sub: 'tickets', icon: TicketIcon, color: 'text-[var(--primary)]',
+              tip: 'Quantidade de chamados abertos no período filtrado, de qualquer status.' },
+            { label: 'Resolvidos', value: metrics.resolved, sub: 'tickets', icon: CheckCircle2, color: 'text-green-400',
+              tip: 'Chamados já marcados como Resolvido ou Fechado no período. Pra subir: não deixar chamado parado em "Em atendimento" ou "Aguardando aluno" — acompanhe essas colunas no Kanban.' },
+            { label: 'TMA', value: formatMinutes(metrics.tma), sub: '1ª resposta', icon: Timer, color: 'text-blue-400',
+              tip: 'Tempo Médio de Atendimento: quanto tempo leva, em média, até a primeira resposta da equipe depois que o aluno abre o chamado. Pra melhorar: priorize os chamados "Novos" mais antigos, sem deixar acumular.' },
+            { label: 'TMR', value: formatMinutes(metrics.tmr), sub: 'resolução', icon: Clock, color: 'text-amber-400',
+              tip: 'Tempo Médio de Resolução: quanto tempo leva, em média, do chamado aberto até ele ser marcado como Resolvido. Pra melhorar: resolver já na primeira interação quando der, evitando idas e vindas entre filas.' },
+            { label: 'CSAT', value: metrics.csatAvg ? `${metrics.csatAvg.toFixed(1)}/5` : '—', sub: 'satisfação', icon: Star, color: 'text-yellow-400',
+              tip: 'Nota média (1 a 5) que o aluno dá ao avaliar o atendimento. Pra melhorar: respostas claras e educadas, e confirmar com o aluno se o problema foi mesmo resolvido antes de encerrar.' },
+            { label: 'FCR', value: metrics.fcrPct !== null ? `${Math.round(metrics.fcrPct)}%` : '—', sub: '1º contato', icon: CheckCircle2, color: 'text-green-400',
+              tip: 'First Contact Resolution: % de chamados que o aluno avaliou como resolvidos já no primeiro contato, sem precisar voltar a perguntar. Pra melhorar: ter de cara a resposta certa (Base de Conhecimento/Sponte) em vez de várias trocas de mensagem.' },
+            { label: 'NPS', value: metrics.nps !== null ? metrics.nps : '—', sub: 'net promoter', icon: TrendingUp, color: metrics.nps !== null ? (metrics.nps >= 50 ? 'text-green-400' : metrics.nps >= 0 ? 'text-amber-400' : 'text-red-400') : 'text-[var(--text-muted)]',
+              tip: 'Net Promoter Score (-100 a 100): o quanto o aluno recomendaria o atendimento, pela nota de 0 a 10 da avaliação. Acima de 50 é ótimo, abaixo de 0 é alerta. Atendimento rápido e resolutivo puxa o NPS junto com o CSAT.' },
+          ].map(kpi => (
+            <UiTooltip key={kpi.label}>
+              <UiTooltipTrigger asChild>
+                <div className="glass-card p-4 flex flex-col gap-1 text-left cursor-default">
+                  <div className="flex items-center gap-1.5">
+                    <kpi.icon className={`w-3.5 h-3.5 ${kpi.color}`} />
+                    <p className="text-xs text-[var(--text-muted)]">{kpi.label}</p>
+                  </div>
+                  <p className="text-xl font-bold text-[var(--text-main)]">{kpi.value}</p>
+                  <p className="text-xs text-[var(--text-muted)]">{kpi.sub}</p>
+                </div>
+              </UiTooltipTrigger>
+              <UiTooltipContent className="max-w-[240px] text-xs leading-relaxed">
+                <p>{kpi.tip}</p>
+              </UiTooltipContent>
+            </UiTooltip>
+          ))}
+        </div>
+      </UiTooltipProvider>
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
