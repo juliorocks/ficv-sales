@@ -18,6 +18,10 @@ import { sponteBuscarAlunos, sponteBuscarTurmas, sponteRosterTurma } from "../_s
 import { boletimFor, overviewFor } from "../_shared/alunoPortalCore.ts";
 
 const TICKET_STAFF_ROLES = ["admin", "agent", "secretaria", "tutor", "coordenador", "atendente", "biblioteca"];
+// mesmo critério de 3 níveis que ticket_visible() já usa no Postgres (RLS) — repetido aqui
+// porque essa function roda com service role (sem auth.uid() de contexto pra chamar a RPC
+// direto) e o transfer_queue abaixo PRECISA checar isso na mão antes de mexer.
+const TICKET_FULL_ACCESS_ROLES = ["admin", "agent", "coordenador"];
 // Financeiro (parcelas) é dado mais sensível — pedido do usuário 02/10: só quem já lida com
 // cobrança/financeiro vê. Notas/cadastro (aluno_overview sem parcelas, aluno_boletim) seguem
 // abertos a todo TICKET_STAFF_ROLES, igual à visibilidade de chamados em si.
@@ -75,6 +79,32 @@ Deno.serve(async (req) => {
             const result = await overviewFor(db, aluno as any);
             if (!FINANCEIRO_ROLES.includes(caller.role)) (result as any).parcelas = [];
             return jsonRes(result);
+        }
+
+        // Transferir pra OUTRA fila (equipe diferente) — pedido do usuário 05/10 (print da
+        // Izabelly: "apareceu a mensagem que foi, mas está ainda na minha caixa"). Isso solta o
+        // atendente atual (volta pro status Aberto), senão o chamado continua "preso" na caixa
+        // de quem transferiu mesmo depois de mudar de fila (ticket_visible() libera visão pra
+        // quem é o atendente, independente da fila). Precisa rodar com service role: o UPDATE
+        // que zera atendente_id + muda queue_id ao mesmo tempo faz o RLS normal (tickets_update)
+        // rejeitar a PRÓPRIA transferência — a policy reavalia visibilidade em cima da LINHA
+        // NOVA (sem atendente, fila que quem transferiu não é membro) e barra o UPDATE. Por
+        // isso a checagem de acesso abaixo é feita na mão, igual ticket_visible() faz, antes de
+        // usar o service role (que não passa pelo RLS).
+        if (action === "transfer_queue") {
+            const ticketId = Number(body.ticket_id);
+            const queueId = Number(body.queue_id);
+            if (!ticketId || !queueId) return jsonRes({ error: "ticket_id e queue_id obrigatórios." }, 400);
+            const { data: t } = await db.from("tickets").select("id, queue_id, atendente_id").eq("id", ticketId).maybeSingle();
+            if (!t) return jsonRes({ error: "Chamado não encontrado." }, 404);
+            const podeVer = TICKET_FULL_ACCESS_ROLES.includes(caller.role)
+                || t.atendente_id === caller.id
+                || !!(await db.from("ticket_queue_members").select("queue_id").eq("queue_id", t.queue_id).eq("profile_id", caller.id).maybeSingle()).data;
+            if (!podeVer) return jsonRes({ error: "Você não tem acesso a este chamado." }, 403);
+            const { error: upErr } = await db.from("tickets").update({ queue_id: queueId, atendente_id: null, status: "aberto" }).eq("id", ticketId);
+            if (upErr) return jsonRes({ error: upErr.message }, 500);
+            const { data: fila } = await db.from("ticket_queues").select("nome").eq("id", queueId).maybeSingle();
+            return jsonRes({ ok: true, queue_nome: fila?.nome ?? null });
         }
 
         if (action === "create") {

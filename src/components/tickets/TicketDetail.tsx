@@ -554,14 +554,34 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   })
   const changeQueue = async (queue_id: string) => {
     await withTimeout(supabase.auth.getSession(), 8000, 'A sessão').catch(() => {})
-    const { data, error } = await withTimeout(
-      supabase.from('tickets').update({ queue_id: Number(queue_id) }).eq('id', ticket.id).select('id'),
-      15000, 'Mudar a fila',
-    ).catch((e) => ({ data: null, error: e }))
-    if (error || !data?.length) { showError(error?.message ?? 'Não foi possível mudar a fila (sua sessão pode ter expirado). Recarregue a página e tente de novo.'); return }
-    qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
+    // Achado ao vivo 05/10 (print da Izabelly): transferir pra OUTRA fila funcionava, mas o
+    // chamado continuava preso na caixa de quem transferiu — porque atendente_id não era
+    // limpo, e ticket_visible() libera visão pra quem é o atendente, nem sempre importando a
+    // fila. "Transferir pra fila" é entregar pra OUTRA equipe pegar — solta o atendente atual
+    // e volta o status pra Aberto. Isso precisa passar pela function staff-tickets (service
+    // role): um UPDATE direto que zera atendente_id + muda queue_id NA MESMA chamada faz o
+    // RLS normal (tickets_update) rejeitar a PRÓPRIA transferência — a policy reavalia
+    // visibilidade em cima da linha NOVA (sem atendente, fila que quem transferiu não é
+    // membro) e barra o próprio UPDATE antes dele completar. Continua diferente de
+    // "Transferir para o agente" (esse mantém o atendente, de propósito — é entrega direta).
+    let res: { data: { queue_nome?: string | null; error?: string } | null; error: any }
+    try {
+      const { data, error } = await withTimeout(
+        supabase.functions.invoke('staff-tickets', { body: { action: 'transfer_queue', ticket_id: ticket.id, queue_id: Number(queue_id) } }),
+        15000, 'Mudar a fila',
+      )
+      res = { data, error }
+    } catch (e: any) {
+      res = { data: null, error: e }
+    }
+    const erroMsg = res.error ? await (res.error as any).context?.json?.().then((j: any) => j?.error).catch(() => null) : null
+    if (res.error || res.data?.error) { showError(erroMsg ?? res.data?.error ?? res.error?.message ?? 'Não foi possível mudar a fila (sua sessão pode ter expirado). Recarregue a página e tente de novo.'); return }
     qc.invalidateQueries({ queryKey: ['tickets'] })
-    showSuccess(`Chamado enviado para a fila ${queues.find(q => String(q.id) === queue_id)?.nome ?? ''}.`)
+    showSuccess(`Chamado enviado para a fila ${res.data?.queue_nome ?? queues.find(q => String(q.id) === queue_id)?.nome ?? ''}.`)
+    // soltou o atendente (acima) → quem transferiu pode perder a visibilidade deste chamado
+    // na mesma hora (RLS), então fecha o painel em vez de deixar uma tela quebrada/travada
+    // tentando recarregar um chamado que não é mais dela.
+    onClose()
   }
 
   // Tutor Virtual: aluno pede humano / equipe devolve o chamado pro tutor
