@@ -211,9 +211,13 @@ Deno.serve(async (req) => {
         // 05/10, pedido do usuário: identificado o atendimento concluído (aluno confirmou que
         // não precisa de mais nada), já move pra Resolvidos sozinho — mesmo gatilho de e-mail
         // "resolvido" que já existe pro fechamento manual (ticket_email_on_ticket).
+        // Achado ao vivo 05/10 (print do usuário): o card ficava preso na coluna "🤖 Tutor
+        // Virtual" do Kanban mesmo com status=resolvido, porque essa coluna olha SÓ
+        // ai_status==='active' (TicketKanban.tsx comTutor()) — faltava soltar o tutor do
+        // chamado igual handoff() já faz, só que pra esse caminho (resolvido sozinho).
         await db.from("tickets").update({
             ai_turns: (t.ai_turns ?? 0) + 1,
-            ...(vaiPraEquipe ? {} : concluirCall ? { status: "resolvido" } : { status: "aguardando_aluno" }),
+            ...(vaiPraEquipe ? {} : concluirCall ? { status: "resolvido", ai_status: "handed_off" } : { status: "aguardando_aluno" }),
         }).eq("id", t.id);
         const hc = handoffCall as { motivo: string; resumo: string } | null;
         if (vaiPraEquipe) await handoff(hc?.motivo ?? "o tutor não conseguiu responder", hc?.resumo ?? "");
