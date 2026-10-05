@@ -12,6 +12,7 @@ import { Badge } from '../ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { Combobox } from '../ui/combobox'
 import { showSuccess, showError } from '../../utils/toast'
+import { withTimeout } from '../../utils/withTimeout'
 import {
   X, Send, Lock, Clock, CheckCircle2, Star, ChevronRight,
   MessageSquare, Shield, Loader2, UserCircle2, AlertCircle,
@@ -420,10 +421,12 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   const canDeleteMessage = (m: TicketMessage) => isStaff && (m.autor_id === currentUserId || user?.role === 'admin')
   async function deleteMessage(id: number) {
     if (!window.confirm('Apagar esta mensagem? Ela vai aparecer como "Mensagem apagada" pra quem já viu a conversa.')) return
-    const { error } = await supabase.from('ticket_messages')
-      .update({ deleted_at: new Date().toISOString(), deleted_by: currentUserId })
-      .eq('id', id)
-    if (error) { showError(`Não foi possível apagar: ${error.message}`); return }
+    await withTimeout(supabase.auth.getSession(), 8000, 'A sessão').catch(() => {})
+    const { data, error } = await withTimeout(
+      supabase.from('ticket_messages').update({ deleted_at: new Date().toISOString(), deleted_by: currentUserId }).eq('id', id).select('id'),
+      15000, 'Apagar a mensagem',
+    ).catch((e) => ({ data: null, error: e }))
+    if (error || !data?.length) { showError(error?.message ?? 'Não foi possível apagar (sua sessão pode ter expirado). Recarregue a página e tente de novo.'); return }
     qc.invalidateQueries({ queryKey: ['ticket-messages', ticket.id] })
   }
 
@@ -523,12 +526,21 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
     }
   }
 
+  // Padrão de todas as escritas desta tela (changeStatus/changeQueue/assignTo/assumirConversa):
+  // achado ao vivo 05/10 — mesmo bug recorrente de [[project_token_refresh_silent_fail]] (token
+  // expirado em refresh → UPDATE filtra 0 linhas sem erro nenhum, ou trava "Salvando..." pra
+  // sempre). getSession() ANTES renova o token se precisar; withTimeout nunca deixa travar;
+  // .select('id') + checar 0 linhas pega o que passaria como falso sucesso.
   const changeStatus = async (status: TicketStatus) => {
-    const { error } = await supabase.from('tickets').update({
-      status,
-      ...(status === 'resolvido' ? { resolved_at: new Date().toISOString() } : {}),
-    }).eq('id', ticket.id)
-    if (error) { showError('Erro ao atualizar status.'); return }
+    await withTimeout(supabase.auth.getSession(), 8000, 'A sessão').catch(() => {})
+    const { data, error } = await withTimeout(
+      supabase.from('tickets').update({
+        status,
+        ...(status === 'resolvido' ? { resolved_at: new Date().toISOString() } : {}),
+      }).eq('id', ticket.id).select('id'),
+      15000, 'Atualizar o status',
+    ).catch((e) => ({ data: null, error: e }))
+    if (error || !data?.length) { showError(error?.message ?? 'Não foi possível atualizar (sua sessão pode ter expirado). Recarregue a página e tente de novo.'); return }
     qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
     qc.invalidateQueries({ queryKey: ['tickets'] })
     showSuccess('Status atualizado.')
@@ -541,8 +553,12 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
     enabled: isStaff, staleTime: 5 * 60_000,
   })
   const changeQueue = async (queue_id: string) => {
-    const { data, error } = await supabase.from('tickets').update({ queue_id: Number(queue_id) }).eq('id', ticket.id).select('id')
-    if (error || !data?.length) { showError('Erro ao mudar a fila.'); return }
+    await withTimeout(supabase.auth.getSession(), 8000, 'A sessão').catch(() => {})
+    const { data, error } = await withTimeout(
+      supabase.from('tickets').update({ queue_id: Number(queue_id) }).eq('id', ticket.id).select('id'),
+      15000, 'Mudar a fila',
+    ).catch((e) => ({ data: null, error: e }))
+    if (error || !data?.length) { showError(error?.message ?? 'Não foi possível mudar a fila (sua sessão pode ter expirado). Recarregue a página e tente de novo.'); return }
     qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
     qc.invalidateQueries({ queryKey: ['tickets'] })
     showSuccess(`Chamado enviado para a fila ${queues.find(q => String(q.id) === queue_id)?.nome ?? ''}.`)
@@ -557,10 +573,14 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   }
   // equipe entra na conversa: Tutor sai deste chamado e ele vai pra "Em atendimento" com você
   const assumirConversa = async () => {
-    const { data, error } = await supabase.from('tickets').update({
-      ai_status: 'handed_off', status: 'em_atendimento', ...(t.atendente_id ? {} : { atendente_id: currentUserId }),
-    }).eq('id', ticket.id).select('id')
-    if (error || !data?.length) { showError('Não foi possível assumir agora.'); return }
+    await withTimeout(supabase.auth.getSession(), 8000, 'A sessão').catch(() => {})
+    const { data, error } = await withTimeout(
+      supabase.from('tickets').update({
+        ai_status: 'handed_off', status: 'em_atendimento', ...(t.atendente_id ? {} : { atendente_id: currentUserId }),
+      }).eq('id', ticket.id).select('id'),
+      15000, 'Assumir a conversa',
+    ).catch((e) => ({ data: null, error: e }))
+    if (error || !data?.length) { showError(error?.message ?? 'Não foi possível assumir agora (sua sessão pode ter expirado). Recarregue a página e tente de novo.'); return }
     qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
     qc.invalidateQueries({ queryKey: ['tickets'] })
     showSuccess('Você assumiu a conversa — o Tutor Virtual não responde mais este chamado.')
@@ -573,8 +593,12 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   }
 
   const assignTo = async (atendente_id: string) => {
-    const { data, error } = await supabase.from('tickets').update({ atendente_id }).eq('id', ticket.id).select('id')
-    if (error || !data?.length) { showError('Erro ao atribuir.'); return }
+    await withTimeout(supabase.auth.getSession(), 8000, 'A sessão').catch(() => {})
+    const { data, error } = await withTimeout(
+      supabase.from('tickets').update({ atendente_id }).eq('id', ticket.id).select('id'),
+      15000, 'Atribuir o chamado',
+    ).catch((e) => ({ data: null, error: e }))
+    if (error || !data?.length) { showError(error?.message ?? 'Não foi possível atribuir (sua sessão pode ter expirado). Recarregue a página e tente de novo.'); return }
     qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
     qc.invalidateQueries({ queryKey: ['tickets'] })
     showSuccess(`Chamado atribuído a ${atendentes.find((a: any) => a.id === atendente_id)?.full_name ?? 'atendente'}.`)
