@@ -335,8 +335,12 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
     })
     const vcAvailable = !!vc?.enabled && (vc.channels?.length ?? 0) > 0
     const lastProvider = [...(messages ?? [])].reverse().find((m) => m.provider)?.provider
+    // VivaConnect é o padrão pra tudo agora (06/10) — só fica no WideChat quem já tem
+    // conversa de verdade por lá (não troca o cliente de canal no meio do papo). Lead sem
+    // nenhuma conversa (nem canal fixo) cai no VivaConnect direto — antes caía no WideChat
+    // "porque o pool só tinha número de teste" (25/09), o que não é mais verdade.
     const autoProvider: 'widechat' | 'vivaconnect' =
-        vcAvailable && (vc?.lead_channel_id != null || lastProvider === 'vivaconnect') ? 'vivaconnect' : 'widechat'
+        vcAvailable && lastProvider !== 'widechat' ? 'vivaconnect' : 'widechat'
     const [providerChoice, setProviderChoice] = useState<'widechat' | 'vivaconnect' | null>(null)
     const provider = vcAvailable ? (providerChoice ?? autoProvider) : 'widechat'
     const isViva = provider === 'vivaconnect'
