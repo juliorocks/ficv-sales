@@ -388,6 +388,22 @@ async function aiReply(db: any, settings: any, leadId: number, channelId: number
     // se é o mesmo assunto de antes ou algo novo (`reopened: true` no corpo abaixo) — nunca o
     // texto fixo de 1ª mensagem, que é pra lead literalmente novo vindo de anúncio.
     const { data: sess } = await db.from("ai_lead_sessions").select("lead_id").eq("lead_id", leadId).maybeSingle();
+
+    // Contato ATIVO nosso (a 1ª mensagem saiu de nós, kind='first_message' — "pool, contato
+    // ativo" em Gestão > VivaConnect): a IA não pode assumir sozinha a 1ª resposta do lead,
+    // pedido do usuário 06/10 ("quando for contato ativo nosso, a IA não pode entrar
+    // automaticamente"). Fica em handed_off (igual um agente já ter assumido) até um humano
+    // decidir — "Devolver para a IA" no painel. Só vale a 1ª vez (!sess); depois que a sessão
+    // existe, segue o fluxo normal de handed_off/reactivate que já existe.
+    if (!sess) {
+        const { data: activeContact } = await db.from("vivaconnect_outbox").select("id")
+            .eq("lead_id", leadId).eq("kind", "first_message").limit(1).maybeSingle();
+        if (activeContact) {
+            await markAiHandedOff(db, leadId, "Contato ativo nosso — 1ª resposta do lead aguarda atendimento humano");
+            return "ia:pulou (contato ativo, aguardando humano)";
+        }
+    }
+
     const lastAuto = (hist ?? []).find((h: any) => h.origin === "auto" && h.message);
     const contatoRecente = !!lastAuto && Date.now() - new Date(lastAuto.created_at).getTime() < Number(settings.first_message_skip_hours ?? 48) * 3600_000;
     if (!sess && !isReopen && !contatoRecente && settings.first_message_enabled && String(settings.first_message_template ?? "").trim()) {

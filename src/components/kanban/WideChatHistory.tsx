@@ -896,6 +896,11 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                     {aiState.status === 'handed_off' || aiState.status === 'disabled' ? (<>
                         <span className="text-muted-foreground" title={aiState.motivo ?? ''}>👤 Atendimento humano — a IA não responde este lead</span>
                         {user?.role === 'admin' && <button onClick={() => aiAction('reactivate')} className="text-primary hover:underline">Devolver para a IA</button>}
+                    </>) : aiState.status === null ? (<>
+                        {/* sem ai_lead_sessions: a IA nunca tocou nesse lead — não é "conduzindo", é só disponível
+                            (contato ativo nosso, se o lead responder, já nasce handed_off — ver aiReply no webhook) */}
+                        <span className="text-muted-foreground">💬 Sem conversa ainda — a IA só entra se o cliente escrever</span>
+                        {aiState.iaGeral && <button onClick={() => aiAction('takeover')} className="text-primary hover:underline">Assumir já</button>}
                     </>) : (<>
                         <span className={aiState.iaGeral ? 'text-violet-500' : 'text-muted-foreground'}>
                             {aiState.iaGeral ? '🤖 IA conduzindo esta conversa' : '🤖 IA disponível, mas desligada em Gestão › IA de Atendimento'}
