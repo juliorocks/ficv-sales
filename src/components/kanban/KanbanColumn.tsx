@@ -76,7 +76,13 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, channe
     const [unattendedOnly, setUnattendedOnly] = useState(false);
     const [unattendedFirst, setUnattendedFirst] = useState(true);
     const [waitingReplyOnly, setWaitingReplyOnly] = useState(false);
-    const [waitingReplyFirst, setWaitingReplyFirst] = useState(true);
+    // Desligado por padrão (06/10): com os dois ligados, um lead que a equipe ACABOU de
+    // responder (updated_at agora) ficava atrás de todo mundo que ainda está "esperando
+    // resposta" — reproduzindo de novo o bug original do 24/09 ("card que a Thayanne
+    // respondeu ficava enterrado"), só que agora escondido atrás do filtro em vez do
+    // sortBy errado. "Esperando Resposta" continua disponível pra quem quiser priorizar
+    // manualmente, só não força mais por cima da ordenação por última atividade.
+    const [waitingReplyFirst, setWaitingReplyFirst] = useState(false);
     // Última atividade (bumpa a cada mensagem, nossa ou do cliente — ver
     // widechat-webhook) — não "Data no Estágio": um lead que só ficou parado na
     // mesma etapa mas trocou mensagem agora precisa aparecer no topo, não enterrado
