@@ -41,8 +41,13 @@ export async function markAiHandedOff(db: SupabaseClient, leadId: number, reason
 
 /** Agente respondeu DE VERDADE (mensagem enviada por nós, pelo VivaConnect ou pelo CRM) → a IA
  *  sai desse lead E, se estava em Entrada ou "IA Atendendo", sobe pra "Em Contato" — só aqui, que
- *  é onde de fato existe conversa humana em andamento. */
-export async function markHumanReplied(db: SupabaseClient, leadId: number, reason: string) {
+ *  é onde de fato existe conversa humana em andamento.
+ *  `agentId` (quando dá pra saber quem respondeu — só o envio pelo CRM sabe, o painel nativo do
+ *  Z-PRO não) vincula o lead a esse agente se ele ainda estiver sem atendente — pedido do
+ *  usuário 06/10: lead que uma agente passa a chamar ativamente não pode continuar "sem
+ *  atendente" aparecendo pra qualquer outra agente puxar. Só reivindica quando tá livre; nunca
+ *  troca o dono de um lead que já é de outra pessoa. */
+export async function markHumanReplied(db: SupabaseClient, leadId: number, reason: string, agentId?: string | null) {
     const { data: sess } = await db.from("ai_lead_sessions").select("status").eq("lead_id", leadId).maybeSingle();
     if (sess?.status !== "handed_off") {
         await db.from("ai_lead_sessions").upsert({
@@ -50,8 +55,11 @@ export async function markHumanReplied(db: SupabaseClient, leadId: number, reaso
             handed_off_at: new Date().toISOString(), updated_at: new Date().toISOString(),
         });
     }
-    const { data: lead } = await db.from("leads").select("stage_id").eq("id", leadId).maybeSingle();
+    const { data: lead } = await db.from("leads").select("stage_id, assigned_to_id").eq("id", leadId).maybeSingle();
     if (!lead?.stage_id) return;
+    if (agentId && !lead.assigned_to_id) {
+        await db.from("leads").update({ assigned_to_id: agentId }).eq("id", leadId);
+    }
     const { data: st } = await db.from("stages").select("name").eq("id", lead.stage_id).maybeSingle();
     if (lead.stage_id !== 1 && !/ia atend/i.test(st?.name ?? "")) return;
     const { data: ec } = await db.from("stages").select("id").ilike("name", "%contato%").order("order", { ascending: true }).limit(1).maybeSingle();

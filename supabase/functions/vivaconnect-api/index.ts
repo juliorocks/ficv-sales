@@ -156,8 +156,9 @@ Deno.serve(async (req) => {
             }).select("*").single();
             if (error) return jsonRes({ error: error.message }, 500);
             const res = await sendRow(db, settings, row, ch);
-            // agente respondeu de verdade pelo CRM → IA sai desse lead e sobe pra "Em Contato"
-            if (res.ok && createdBy) await markHumanReplied(db, leadId, "Agente respondeu pelo CRM");
+            // agente respondeu de verdade pelo CRM → IA sai desse lead, sobe pra "Em Contato" e
+            // reivindica o lead pra esse agente se ainda tava sem atendente
+            if (res.ok && createdBy) await markHumanReplied(db, leadId, "Agente respondeu pelo CRM", createdBy);
             return jsonRes(res, res.ok ? 200 : 502);
         }
 
@@ -176,11 +177,14 @@ Deno.serve(async (req) => {
             const chId = msgRow?.channel_id ?? lead.vivaconnect_channel_id;
             const { data: ch } = chId ? await db.from("vivaconnect_channels").select(CH_COLS).eq("id", chId).maybeSingle() : { data: null };
             if (!ch) return jsonRes({ error: "Lead sem número do VivaConnect." }, 400);
-            const ticketId = msgRow?.session_id ?? await ticketFor(settings, ch, lead);
+            // ticket/mensagens de verdade moram no canal que REALMENTE manda (delegado, se houver)
+            // — não no canal "dono" só porque é ele quem recebe (ver resolveExecChannel acima)
+            const execCh = await resolveExecChannel(db, ch);
+            const ticketId = msgRow?.session_id ?? await ticketFor(settings, execCh, lead);
 
             if (action === "finish") {
                 if (ticketId) {
-                    const r = await zpro(settings.base_url, ch, "/updateticketinfo", { ticketId: Number(ticketId), status: "closed" });
+                    const r = await zpro(settings.base_url, execCh, "/updateticketinfo", { ticketId: Number(ticketId), status: "closed" });
                     if (!r.ok) return jsonRes({ error: zproErr(r.status, r.data) }, 502);
                 }
                 // mensagem de despedida (opcional, Gestão > VivaConnect) — sai igual um envio
@@ -210,7 +214,7 @@ Deno.serve(async (req) => {
             }
 
             if (!ticketId) return jsonRes({ error: "Conversa ainda não tem ticket no Z-PRO." }, 404);
-            const r = await zpro(settings.base_url, ch, "/showAllMessages", { ticket: Number(ticketId) });
+            const r = await zpro(settings.base_url, execCh, "/showAllMessages", { ticket: Number(ticketId) });
             if (!r.ok) return jsonRes({ error: zproErr(r.status, r.data) }, 502);
             const list = asList(r.data);
 
@@ -361,22 +365,26 @@ async function markChannel(db: any, id: number, ok: boolean, err: string | null,
     }).eq("id", id);
 }
 
+// "Enviar por" (Gestão > VivaConnect): QUALQUER chamada à API do Z-PRO pra esse canal (não só
+// envio — também checar status da mensagem, buscar o ticket, fechar o atendimento) sai pelo
+// canal delegado (normalmente a Baileys vinculada de verdade) quando send_via_channel_id está
+// configurado — a gente decide o caminho, não confia na Coexistência do Z-PRO escolher sozinha
+// (28/09: não dava pra confirmar qual caminho ele usava). `ch` continua sendo o canal "dono"
+// pra tudo o resto (histórico, lead fixo, limites/contadores do pool); só a chamada HTTP de
+// verdade usa o canal resolvido aqui. Receber fica sempre no oficial.
+// Achado ao vivo 06/10: resolver só no envio (sendRow) não bastava — message_status/finish
+// continuavam checando o ticket no canal OFICIAL (onde a mensagem nunca chegou, foi a Baileys
+// quem mandou) e davam "a mensagem não apareceu no WhatsApp" pra mensagem que, na verdade, saiu
+// certinha pelo canal delegado.
+async function resolveExecChannel(db: any, ch: any): Promise<any> {
+    if (!ch.send_via_channel_id) return ch;
+    const { data: via } = await db.from("vivaconnect_channels").select(CH_COLS).eq("id", ch.send_via_channel_id).maybeSingle();
+    return via?.active ? via : ch;
+}
+
 /** Envia UMA linha da fila (já com canal definido). Trava a linha com status 'sending'. */
 async function sendRow(db: any, settings: any, row: any, ch: any) {
-    // "Enviar por" (Gestão > VivaConnect): QUALQUER envio (manual do atendente incluído, não só
-    // automático) de um canal com send_via_channel_id configurado sai pela API do canal delegado
-    // (normalmente a Baileys vinculada de verdade) — a gente decide o caminho, não confia na
-    // Coexistência do Z-PRO escolher sozinha (28/09: não dava pra confirmar qual caminho ele
-    // usava). `ch` continua sendo o canal "dono" pra tudo o mais (histórico, lead fixo,
-    // limites/contadores do pool); só a chamada HTTP de envio usa `execCh`. Receber fica sempre
-    // no oficial (decisão do usuário 06/10: "receber pelo oficial, responder pelo não oficial" —
-    // antes só os automáticos (AUTO_KINDS) delegavam, manual saía direto pela oficial e esbarrava
-    // na janela de 24h/template da Meta, que o VivaConnect nem sabe mandar ainda).
-    let execCh = ch;
-    if (ch.send_via_channel_id) {
-        const { data: via } = await db.from("vivaconnect_channels").select(CH_COLS).eq("id", ch.send_via_channel_id).maybeSingle();
-        if (via?.active) execCh = via;
-    }
+    const execCh = await resolveExecChannel(db, ch);
     // a trava de custo Meta só faz sentido quando a chamada REALMENTE pode cair na API paga —
     // com canal delegado configurado, já sabemos que não vai (é a Baileys por baixo)
     const blocked = execCh.id === ch.id ? hybridBlock(ch, row.kind) : null;
@@ -567,9 +575,10 @@ async function runFollowupGiveups(db: any, settings: any) {
         const now = new Date().toISOString();
         const chId: number | null = c.vivaconnect_channel_id ?? (await db.rpc("vivaconnect_pick_pool_channel")).data ?? null;
         const ch = chId ? (await db.from("vivaconnect_channels").select(CH_COLS).eq("id", chId).maybeSingle()).data : null;
+        const execCh = ch ? await resolveExecChannel(db, ch) : null;
 
         if (ch?.active && c.vivaconnect_ticket_id) {
-            const r = await zpro(settings.base_url, ch, "/updateticketinfo", { ticketId: Number(c.vivaconnect_ticket_id), status: "closed" });
+            const r = await zpro(settings.base_url, execCh, "/updateticketinfo", { ticketId: Number(c.vivaconnect_ticket_id), status: "closed" });
             if (!r.ok) out.details.push(`lead #${c.lead_id}: fechar ticket falhou (${zproErr(r.status, r.data)}), seguindo assim mesmo`);
         }
         if (ch?.active && settings.farewell_message_enabled && String(settings.farewell_message_template ?? "").trim()) {
