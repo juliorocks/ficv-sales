@@ -17,6 +17,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabase"
 import { showError, showSuccess } from "@/utils/toast"
 import { Stage, LeadSource, Course, Lead } from "@/types/database"
+import { useAuth } from "@/hooks/use-auth"
 
 const numOrNull = z.preprocess((v) => (v === '' || v === undefined || v === null ? null : Number(v)), z.number().nullable())
 const formSchema = z.object({
@@ -38,6 +39,7 @@ type NewLeadFormValues = z.infer<typeof formSchema>
 
 export function NewLeadForm({ onSuccess }: NewLeadFormProps) {
     const queryClient = useQueryClient()
+    const { user } = useAuth()
 
     const { data: stages, isLoading: isLoadingStages } = useQuery<Stage[]>({
         queryKey: ['stages'],
@@ -85,6 +87,8 @@ export function NewLeadForm({ onSuccess }: NewLeadFormProps) {
             // normaliza telefone BR: só dígitos, e prepende 55 se veio sem DDI
             let tel = (values.telefone || '').replace(/\D/g, '')
             if ((tel.length === 10 || tel.length === 11) && !tel.startsWith('55')) tel = '55' + tel
+            // quem cria manualmente já fica dono do lead — pedido do usuário 06/10: "não faz
+            // sentido" o agente ter que ir até a tela e se autovincular depois de criar
             const { data: leadData, error } = await supabase
                 .from('leads')
                 .insert({
@@ -93,6 +97,7 @@ export function NewLeadForm({ onSuccess }: NewLeadFormProps) {
                     data_entrada: new Date().toISOString(),
                     stage_entry_date: new Date().toISOString(),
                     temperatura: 'frio',
+                    assigned_to_id: user?.id ?? null,
                 })
                 .select()
                 .single()
@@ -104,9 +109,8 @@ export function NewLeadForm({ onSuccess }: NewLeadFormProps) {
                 .map(([key, value]) => ({ field: key, from: null, to: value }))
 
             if (changes.length > 0) {
-                const { data: authData } = await supabase.auth.getUser()
                 await supabase.from('audit_logs').insert({
-                    user_id: authData.user?.id ?? null,
+                    user_id: user?.id ?? null,
                     action: 'lead_created',
                     details: { lead_id: leadData.id, changes }
                 })
