@@ -242,10 +242,16 @@ Deno.serve(async (req) => {
             // message_status: última mensagem NOSSA no ticket (ack 0 pendente · 1 servidor · 2 entregue · 3 lida · <0 erro)
             // com `body` (o que o agente acabou de mandar): procura ESSA mensagem nos últimos 10 min —
             // o Z-PRO responde "sucesso" até quando a mídia falha depois; se não aparecer → missing.
+            // Achado ao vivo 06/10: `expected` é o texto PURO que o agente digitou, mas o que sai
+            // de verdade pro Z-PRO é ASSINADO (sendRow: "*Nome do agente:*\n" + corpo — pedido do
+            // usuário 29/09, pra aparecer quem respondeu) — a comparação exata nunca batia pra
+            // NENHUM envio manual de um agente de verdade (só pros meus testes via service role,
+            // sem sender_name, que não assina). unsign() tira esse prefixo antes de comparar.
+            const unsign = (s: string) => s.replace(/^\*[^*\n]{1,80}:\*\n/, "");
             const expected = typeof body.body === "string" ? body.body.trim() : null;
             const since = new Date(Date.now() - 10 * 60_000).toISOString();
             const mine = list.filter((x: any) => x.fromMe && !String(x.body ?? "").startsWith("*System:*"))
-                .filter((x: any) => expected == null || (String(x.body ?? "").trim() === expected && String(x.createdAt) >= since))
+                .filter((x: any) => expected == null || (unsign(String(x.body ?? "")).trim() === expected && String(x.createdAt) >= since))
                 .sort((a: any, b: any) => String(a.createdAt).localeCompare(String(b.createdAt)));
             const last = mine[mine.length - 1];
             if (!last) return jsonRes({ last: expected != null ? { status: "missing" } : null });
