@@ -109,7 +109,9 @@ Deno.serve(async (req) => {
             const leadId = Number(body.lead_id);
             const { data: lead } = await db.from("leads").select("vivaconnect_channel_id, vivaconnect_ticket_id").eq("id", leadId).maybeSingle();
             // canais de OUTRAS empresas do grupo (purpose 'grupo') nunca aparecem no chat dos leads
-            const { data: chans } = await db.from("vivaconnect_channels").select("id, name, kind, purpose, phone").eq("active", true).neq("purpose", "grupo").order("id");
+            // send_via_channel_id vai junto p/ o front saber que o envio real sai por outro canal
+            // (ex.: oficial delegando pra Baileys) e não exigir janela de 24h à toa
+            const { data: chans } = await db.from("vivaconnect_channels").select("id, name, kind, purpose, phone, send_via_channel_id").eq("active", true).neq("purpose", "grupo").order("id");
             return jsonRes({
                 enabled: !!settings.enabled,
                 channels: chans ?? [],
@@ -361,14 +363,17 @@ async function markChannel(db: any, id: number, ok: boolean, err: string | null,
 
 /** Envia UMA linha da fila (já com canal definido). Trava a linha com status 'sending'. */
 async function sendRow(db: any, settings: any, row: any, ch: any) {
-    // "Enviar automáticos por" (Gestão > VivaConnect): resposta AUTOMÁTICA de um canal com
-    // send_via_channel_id configurado sai pela API do canal delegado (normalmente a Baileys
-    // vinculada de verdade) — a gente decide o caminho, não confia na Coexistência do Z-PRO
-    // escolher sozinha (28/09: não dava pra confirmar qual caminho ele usava). `ch` continua
-    // sendo o canal "dono" pra tudo o mais (histórico, lead fixo, limites/contadores do pool);
-    // só a chamada HTTP de envio usa `execCh`. Envio manual e HSM (só a oficial manda) não mudam.
+    // "Enviar por" (Gestão > VivaConnect): QUALQUER envio (manual do atendente incluído, não só
+    // automático) de um canal com send_via_channel_id configurado sai pela API do canal delegado
+    // (normalmente a Baileys vinculada de verdade) — a gente decide o caminho, não confia na
+    // Coexistência do Z-PRO escolher sozinha (28/09: não dava pra confirmar qual caminho ele
+    // usava). `ch` continua sendo o canal "dono" pra tudo o mais (histórico, lead fixo,
+    // limites/contadores do pool); só a chamada HTTP de envio usa `execCh`. Receber fica sempre
+    // no oficial (decisão do usuário 06/10: "receber pelo oficial, responder pelo não oficial" —
+    // antes só os automáticos (AUTO_KINDS) delegavam, manual saía direto pela oficial e esbarrava
+    // na janela de 24h/template da Meta, que o VivaConnect nem sabe mandar ainda).
     let execCh = ch;
-    if (AUTO_KINDS.has(row.kind) && ch.send_via_channel_id) {
+    if (ch.send_via_channel_id) {
         const { data: via } = await db.from("vivaconnect_channels").select(CH_COLS).eq("id", ch.send_via_channel_id).maybeSingle();
         if (via?.active) execCh = via;
     }

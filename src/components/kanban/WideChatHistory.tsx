@@ -324,7 +324,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
     // mensagem da conversa veio de lá. Lead sem conversa nenhuma: continua WideChat por
     // padrão (o pool ainda é só o número de teste, 25/09) — o agente pode trocar no seletor.
     // Tudo acontece aqui: agente nunca precisa abrir o painel do Z-PRO.
-    const { data: vc } = useQuery<{ enabled: boolean; channels: { id: number; name: string; kind: string; purpose: string; phone: string | null }[]; lead_channel_id: number | null } | null>({
+    const { data: vc } = useQuery<{ enabled: boolean; channels: { id: number; name: string; kind: string; purpose: string; phone: string | null; send_via_channel_id: number | null }[]; lead_channel_id: number | null } | null>({
         queryKey: ['vivaconnect-chat-context', String(leadId)],
         queryFn: async () => {
             const { data, error } = await supabase.functions.invoke('vivaconnect-api', { body: { action: 'chat_context', lead_id: leadId } })
@@ -343,8 +343,12 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
     const [vcChannelChoice, setVcChannelChoice] = useState<number | null>(null)
     const vcFixedChannel = vc?.channels.find((c) => c.id === vc?.lead_channel_id) ?? null
     const vcChannel = vcFixedChannel ?? vc?.channels.find((c) => c.id === vcChannelChoice) ?? vc?.channels.find((c) => c.purpose === 'pool') ?? vc?.channels[0] ?? null
+    // canal com send_via_channel_id manda de verdade pelo delegado (normalmente a Baileys vinculada)
+    // — espelha o execCh do backend (vivaconnect-api/sendRow), senão o aviso de janela aparece à toa
+    // pra quem só recebe no oficial mas responde pelo não oficial (decisão do usuário 06/10)
+    const vcSendChannel = vcChannel?.send_via_channel_id ? (vc?.channels.find((c) => c.id === vcChannel.send_via_channel_id) ?? vcChannel) : vcChannel
     // Baileys não tem janela de 24h da Meta; WABA tem (e templates ainda não são suportados no VivaConnect)
-    const vcNeedsWindow = vcChannel?.kind === 'waba'
+    const vcNeedsWindow = vcSendChannel?.kind === 'waba'
 
     // estado da IA neste lead (trava "IA nunca volta depois que um humano assumiu")
     const { data: aiState, refetch: refetchAi } = useQuery<{ status: string | null; motivo: string | null; iaGeral: boolean } | null>({
