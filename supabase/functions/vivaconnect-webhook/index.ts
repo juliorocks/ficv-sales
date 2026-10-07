@@ -219,12 +219,24 @@ Deno.serve(async (req) => {
                 const { data: st } = await db.from("stages").select("name").eq("id", lead.stage_id).maybeSingle();
                 const eraPerdido = st?.name ? /perdid/i.test(st.name) : false;
                 if (st?.name && /finaliz|encerr|conclu/i.test(st.name) || eraPerdido) {
-                    const { data: last } = await db.from("widechat_messages").select("origin")
+                    const { data: last } = await db.from("widechat_messages").select("origin, raw_data")
                         .eq("lead_id", lead.id).eq("interno", false).order("created_at", { ascending: false }).limit(1).maybeSingle();
                     const now = new Date().toISOString();
                     patch.stage_entry_date = now;
                     if (eraPerdido) patch.motivo_perda_id = null; // não é mais um lead perdido
-                    if (last?.origin === "agent") {
+                    // Bug real 07/10: Thayanne clicou "Finalizar" com a Gabriela (mensagem de
+                    // despedida sai com origin='auto', kind='farewell' — quem mandou de verdade foi
+                    // o botão, não a Gabriela nem a IA). 5min depois ela respondeu só "Muito
+                    // obrigada" — a despedida é que ficou sendo a ÚLTIMA mensagem não-interna, então
+                    // `last?.origin === "agent"` dava falso e caía no else: tirava a Thayanne do
+                    // lead (assigned_to_id=null) e jogava direto pra "IA Atendendo", que respondeu
+                    // de novo com uma pergunta de continuação pra uma conversa que já tinha sido
+                    // encerrada de propósito minutos antes. Despedida (farewell) conta igual
+                    // 'agent' aqui — é sempre um encerramento DELIBERADO (clique humano no painel ou
+                    // o cron de desistência depois de 24h parado), nunca o fim de uma IA solta no
+                    // meio de assunto.
+                    const lastWasFarewell = (last as any)?.raw_data?.kind === "farewell";
+                    if (last?.origin === "agent" || lastWasFarewell) {
                         const { data: ec } = await db.from("stages").select("id").ilike("name", "%contato%")
                             .order("order", { ascending: true }).limit(1).maybeSingle();
                         patch.stage_id = ec?.id ?? 1;
