@@ -104,7 +104,9 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin, isDar
     if (cat !== 'todas' && (t as any).queue_id !== cat) return false
     // resolvido e fechado (finalizado pela avaliação do aluno) caem juntos na coluna Resolvidos
     if (['resolvido', 'fechado'].includes(t.status) && new Date(t.resolved_at ?? t.updated_at).getTime() < since15) return false
-    if (meusChamados && t.atendente_id !== user?.id) return false
+    // sem atendente (ex.: coluna Novos) tem que aparecer pra todo mundo, mesmo com "Meus
+    // chamados" ligado — senão ninguém vê os que ainda precisam ser pegos (pedido do usuário 07/10)
+    if (meusChamados && t.atendente_id != null && t.atendente_id !== user?.id) return false
     if (priorityOnly && !alunoRespondeu(t)) return false
     if (dateRange.start && t.created_at.slice(0, 10) < dateRange.start) return false
     if (dateRange.end && t.created_at.slice(0, 10) > dateRange.end) return false
