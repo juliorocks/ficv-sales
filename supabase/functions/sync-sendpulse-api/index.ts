@@ -67,7 +67,10 @@ serve(async (req) => {
         const { data: siteSource } = await supabaseClient.from('lead_sources').select('id').ilike('name', 'Site').maybeSingle();
         if (siteSource) sourceId = siteSource.id;
 
-        const { data: stageData } = await supabaseClient.from('stages').select('id').order('order', { ascending: true }).limit(1).single();
+        // "Entrada" por NOME, não pela `order` mais baixa — mesmo bug do sendpulse-webhook/
+        // widechat-api: "IA Atendendo" tem order=1 (abaixo de Entrada) desde 28-29/09, achado
+        // ao vivo 08/10.
+        const { data: stageData } = await supabaseClient.from('stages').select('id').ilike('name', '%entrada%').limit(1).single();
         const stageId = stageData?.id;
         if (!stageId) throw new Error("No initial stage found in Kanban");
 

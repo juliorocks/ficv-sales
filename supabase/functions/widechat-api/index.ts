@@ -93,6 +93,7 @@ serve(async (req) => {
                 } catch { /* próximo */ }
             }
             if (!integ?.widechat_email) {
+                console.log(`widechat-api DEBUG: NO_CREDENTIALS who=${who.email}`);
                 return jsonRes({ error: 'Nenhum agente tem o login do WideChat cadastrado. Vá em Configurações > Integração WideChat.', code: 'NO_CREDENTIALS' }, 400);
             }
         }
@@ -127,6 +128,7 @@ serve(async (req) => {
 
         if (!wcToken || !exp || new Date() > exp) {
             if (!await freshLogin()) {
+                console.log(`widechat-api DEBUG: LOGIN_FAILED conta=${integ.widechat_email} credOwner=${credOwner}`);
                 return jsonRes({ error: 'Falha ao logar no WideChat. Revise a senha em Configurações > Integração WideChat.', code: 'LOGIN_FAILED' }, 400);
             }
         }
@@ -613,8 +615,15 @@ serve(async (req) => {
                         .select('stage_id, assigned_to_id').eq('id', body.lead_id).maybeSingle();
                     if (leadRow) {
                         const upd: Record<string, unknown> = {};
+                        // "Entrada" por NOME, não pela `order` mais baixa — mesmo bug já corrigido em
+                        // widechat-webhook/index.ts (29/09): "IA Atendendo" tem order=1 (abaixo de
+                        // Entrada, order=2) desde que o VivaConnect criou essa etapa, então pegar a
+                        // etapa de menor `order` aqui comparava contra a etapa ERRADA e esse avanço
+                        // Entrada→Em Contato ficava sempre mudo (silencioso, sem erro) — achado ao
+                        // vivo 08/10, lead "Matheus Mohallem" ficou preso em Entrada mesmo com a
+                        // Thayanne já respondendo pelo nosso painel.
                         const { data: stg0 } = await supabase.from('stages').select('id')
-                            .order('order', { ascending: true }).limit(1).maybeSingle();
+                            .ilike('name', '%entrada%').limit(1).maybeSingle();
                         if (stg0?.id && leadRow.stage_id === stg0.id) {
                             const { data: emContato } = await supabase.from('stages').select('id')
                                 .ilike('name', '%contato%').order('order', { ascending: true }).limit(1).maybeSingle();
@@ -721,12 +730,14 @@ serve(async (req) => {
         // que a WideChat dispara depois disso e move o lead pra Finalizado sozinho
         // (mesma lógica que já existe pra finalização vinda do painel nativo deles).
         if (action === 'finish_attendance') {
+            console.log(`widechat finish_attendance DEBUG: session_id=${body.session_id ?? '-'}`);
             if (!body.session_id) return jsonRes({ error: 'session_id é obrigatório (widechat_session_id do lead).' }, 400);
             const payload: Record<string, unknown> = { session_id: body.session_id };
             if (body.tabulation_id) payload.tabulation_id = body.tabulation_id;
             const { ok, status, data } = await wcCall('/attendances/finish', {
                 method: 'POST', body: JSON.stringify(payload),
             });
+            console.log(`widechat finish_attendance DEBUG: ok=${ok} status=${status} data=${JSON.stringify(data).slice(0, 400)}`);
             if (!ok) {
                 const d = typeof data === 'string' ? data : (data?.message || data?.error || JSON.stringify(data ?? {}));
                 return jsonRes({ error: `WideChat ${status}: ${d}` });

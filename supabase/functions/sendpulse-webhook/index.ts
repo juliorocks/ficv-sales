@@ -42,7 +42,11 @@ serve(async (req) => {
         const observations = `Origem SendPulse: ${origin}\n\n=== Status Payload ===\n${JSON.stringify(contact, null, 2)}`;
 
         const [{ data: stage }, { data: src }, { data: courses }] = await Promise.all([
-            db.from('stages').select('id').order('order', { ascending: true }).limit(1).maybeSingle(),
+            // "Entrada" por NOME, não pela `order` mais baixa — "IA Atendendo" tem order=1 (abaixo
+            // de Entrada) desde que o VivaConnect criou essa etapa (28-29/09); por `order` cru,
+            // lead novo do SendPulse nascia direto em "IA Atendendo". Mesmo bug já corrigido em
+            // widechat-webhook/index.ts, achado aqui ao vivo 08/10.
+            db.from('stages').select('id').ilike('name', '%entrada%').limit(1).maybeSingle(),
             db.from('lead_sources').select('id').ilike('name', '%site%').limit(1).maybeSingle(),
             db.from('courses').select('id, name, default_value'),
         ]);
