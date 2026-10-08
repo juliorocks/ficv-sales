@@ -197,6 +197,26 @@ Deno.serve(async (req) => {
     if (hit) {
         const nota = `📋 Novo formulário: ${form.name}` + (cursoNome ? ` — interesse em ${cursoNome}` : "");
         const isStaleReentry = hit.stage === 1;
+
+        // 08/10, pedido do usuário: reenviar o formulário é sinal de interesse NOVO — a IA tem
+        // que continuar esse atendimento mesmo que o lead já tivesse ficado parado em "Em
+        // Contato"/Finalizado/Perdido há tempos (ex.: conversa humana antiga, 7 meses parada).
+        // Mesmo padrão já usado na reabertura por WhatsApp (vivaconnect-webhook, reopen de
+        // Finalizado/Perdido): apaga a sessão de IA velha (senão o ai-agent recusa responder,
+        // "status: handed_off") + pula direto pra "IA Atendendo". Só NÃO mexe se o lead já é
+        // Matriculado (aluno de verdade — não arrasta de volta pro funil comercial).
+        // stage 1 (Entrada) já segue o caminho natural sozinho (1ª resposta de verdade da IA
+        // avança pra IA Atendendo); só precisa desse empurrão quem está travado MAIS à frente.
+        let reengageStageId: number | null = null;
+        if (preferredContact === "whatsapp" && hit.stage != null && !isStaleReentry) {
+            const { data: curStage } = await db.from("stages").select("name").eq("id", hit.stage).maybeSingle();
+            if (!/matricul/i.test(curStage?.name ?? "")) {
+                const { data: iaStage } = await db.from("stages").select("id, name").ilike("name", "%ia atend%").maybeSingle();
+                if (iaStage && iaStage.id !== hit.stage) reengageStageId = iaStage.id;
+                await db.from("ai_lead_sessions").delete().eq("lead_id", hit.id);
+            }
+        }
+
         // 29/09, pedido do usuário: o curso de interesse segue o formulário mais RECENTE, sempre
         // — não importa se antes o lead falou sobre outro curso, nem em que etapa ele estava
         // (inclusive Perdido: reenviar o formulário é um sinal de interesse novo).
@@ -204,6 +224,7 @@ Deno.serve(async (req) => {
             contact_count: (hit.cc ?? 0) + 1,
             updated_at: nowIso,
             ...(isStaleReentry ? { data_entrada: nowIso, stage_entry_date: nowIso } : {}),
+            ...(reengageStageId != null ? { stage_id: reengageStageId, stage_entry_date: nowIso } : {}),
             ...(form.course_id != null ? { curso_interesse: form.course_id, curso_interesse_nome: cursoNome } : {}),
             ...(!hit.email && email ? { email } : {}),
             // 29/09: faltava aqui — lead JÁ existente reenviando o formulário nunca disparava a
@@ -217,6 +238,7 @@ Deno.serve(async (req) => {
         await mirror(
             `UPDATE leads:⟨${hit.id}⟩ SET contact_count = (contact_count ?? 0) + 1, updated_at = time::now()` +
             (isStaleReentry ? `, data_entrada = d${sv(nowIso)}, stage_entry_date = d${sv(nowIso)}` : "") +
+            (reengageStageId != null ? `, stage_id = stages:⟨${reengageStageId}⟩, stage_entry_date = d${sv(nowIso)}` : "") +
             (form.course_id != null ? `, curso_interesse = courses:⟨${form.course_id}⟩` : "") +
             (!hit.email && email ? `, email = ${sv(email)}` : "") +
             (preferredContact ? `, preferred_contact = ${sv(preferredContact)}` : "") + `;\n` +
