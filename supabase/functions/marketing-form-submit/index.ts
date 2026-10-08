@@ -211,6 +211,7 @@ Deno.serve(async (req) => {
             // UPDATE, ele nunca roda pra reentrada, só pra lead novo). Sempre grava a preferência
             // que a PESSOA acabou de escolher agora.
             ...(preferredContact ? { preferred_contact: preferredContact } : {}),
+            from_marketing_form: true,
         }).eq("id", hit.id);
         await db.from("lead_notes").insert({ lead_id: hit.id, note: nota, created_at: nowIso });
         await mirror(
@@ -228,6 +229,7 @@ Deno.serve(async (req) => {
             stage_id: 1, source_id: form.source_id, curso_interesse: form.course_id, curso_interesse_nome: cursoNome,
             fonte_lead: form.name, observacoes: obs, valor_oportunidade: valor, temperatura: "frio", contact_count: 1,
             data_entrada: nowIso, stage_entry_date: nowIso, preferred_contact: preferredContact,
+            from_marketing_form: true,
         };
         const { data: created, error } = await db.from("leads").insert(newLead).select("id").single();
         if (error) {

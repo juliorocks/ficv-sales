@@ -23,6 +23,7 @@ interface VcSettings {
     webhook_secret: string
     first_message_enabled: boolean
     first_message_template: string
+    first_message_template_form: string | null
     send_window_start: number
     send_window_end: number
     min_interval_seconds: number
@@ -174,6 +175,7 @@ export function VivaConnectSettings() {
             base_url: form.base_url.trim().replace(/\/$/, ""),
             first_message_enabled: form.first_message_enabled,
             first_message_template: form.first_message_template,
+            first_message_template_form: form.first_message_template_form,
             send_window_start: Number(form.send_window_start),
             send_window_end: Number(form.send_window_end),
             min_interval_seconds: Number(form.min_interval_seconds),
@@ -303,6 +305,12 @@ export function VivaConnectSettings() {
                             <Label className={fieldLabel}>Texto da 1ª mensagem</Label>
                             <textarea className={textareaCls} value={form.first_message_template} onChange={(e) => set("first_message_template", e.target.value)} />
                             <p className="text-[11px] text-muted-foreground">Variáveis: {"{primeiro_nome}"}, {"{curso}"}, {"{curso_trecho}"} (vira " no curso de X" ou nada).</p>
+                        </div>
+                        <div className="space-y-2">
+                            <Label className={fieldLabel}>Texto da 1ª mensagem — vindo de Formulário (Marketing)</Label>
+                            <textarea className={textareaCls} value={form.first_message_template_form ?? ""}
+                                onChange={(e) => set("first_message_template_form", e.target.value)} />
+                            <p className="text-[11px] text-muted-foreground">Usado só quando o lead veio de um Formulário de Marketing (sabe que a pessoa visitou o site do curso). Vazio = usa o texto genérico acima também para esses leads.</p>
                         </div>
                         <div className="grid grid-cols-3 gap-3">
                             <div className="space-y-2">
