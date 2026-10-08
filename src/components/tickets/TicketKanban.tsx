@@ -10,7 +10,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { DragDropContext, Draggable, Droppable, type DropResult } from '@hello-pangea/dnd'
 import { formatDistanceToNow } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { GraduationCap, MessageCircleReply, Search, Trash2, UserRound } from 'lucide-react'
+import { Bot, GraduationCap, MessageCircleReply, Search, Trash2, UserRound } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../hooks/use-auth'
 import type { Ticket, TicketStatus } from '../../types/database'
@@ -262,6 +262,11 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin, isDar
                                       <MessageCircleReply className="w-3 h-3" /> aluno respondeu
                                     </span>
                                   )}
+                                  {t.ai_resolved && (
+                                    <span className="ml-auto flex items-center gap-1 text-[10px] font-semibold text-violet-500" title="Resolvido 100% pelo Tutor Virtual, sem nenhum agente humano responder">
+                                      <Bot className="w-3 h-3" /> resolvido pela IA
+                                    </span>
+                                  )}
                                 </div>
                                 <p className="text-sm font-medium text-[var(--text-main)] leading-snug line-clamp-2 pr-4">{t.titulo}</p>
                                 <p className="text-xs text-[var(--text-muted)] mt-1 truncate">{t.aluno_nome}</p>
@@ -273,7 +278,9 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin, isDar
                                 )}
                                 <div className="flex items-center justify-between mt-2 text-[11px] text-[var(--text-muted)]">
                                   <span className="flex items-center gap-1 truncate">
-                                    <UserRound className="w-3 h-3 shrink-0" /> {(t as any).atendente?.full_name ?? 'sem responsável'}
+                                    {t.ai_resolved
+                                      ? <><Bot className="w-3 h-3 shrink-0" /> Tutor Virtual</>
+                                      : <><UserRound className="w-3 h-3 shrink-0" /> {(t as any).atendente?.full_name ?? 'sem responsável'}</>}
                                   </span>
                                   <span className="shrink-0">{formatDistanceToNow(new Date(t.updated_at), { addSuffix: false, locale: ptBR })}</span>
                                 </div>

@@ -3,6 +3,8 @@
 //   { ticket_id, message_id }   ← gatilho do banco (x-cron-key) quando o aluno escreve
 //   { action: "handoff", ticket_id }     ← aluno clicou "Falar com a equipe"
 //   { action: "reactivate", ticket_id }  ← equipe devolve o chamado pro tutor
+//   { action: "auto_resolve_stale" }     ← cron (x-cron-key): encerra sozinho quem o Tutor
+//     já respondeu e o aluno nunca mais escreveu (ver tutor_settings.auto_resolve_*)
 //
 // Responde com a base de conhecimento dos ALUNOS (knowledge_base.publico alunos/ambos)
 // e consulta o Sponte do próprio aluno por ferramentas (matrículas, financeiro, link de
@@ -45,6 +47,38 @@ Deno.serve(async (req) => {
     const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
     const caller = await identify(req, db);
     const body = await req.json().catch(() => ({}));
+
+    // ── encerramento automático por silêncio (cron, igual ao giveup dos leads) ──────────
+    // Achado ao vivo 08/10: chamado que o Tutor respondeu DE VERDADE (gerou o link do
+    // boleto pedido) ficava preso pra sempre em "Aguardando Aluno" porque esta function só
+    // roda quando o aluno escreve de novo — sem resposta nenhuma, nunca mais é reavaliado.
+    // Aqui não precisa de "confirmação" do aluno pra concluir (diferente da ferramenta
+    // concluir_atendimento): X horas de silêncio depois da ÚLTIMA fala ser do próprio Tutor
+    // já é sinal forte o bastante de que resolveu.
+    if (body.action === "auto_resolve_stale") {
+        if (caller?.kind !== "service") return jsonRes({ error: "Só o cron." }, 403);
+        const { data: s0 } = await db.from("tutor_settings").select("nome, auto_resolve_enabled, auto_resolve_hours").eq("id", 1).single();
+        if (!s0?.auto_resolve_enabled) return jsonRes({ skipped: "encerramento automático desligado" });
+        const cutoff = new Date(Date.now() - Number(s0.auto_resolve_hours ?? 24) * 3600_000).toISOString();
+        const { data: candidatos } = await db.from("tickets").select("id")
+            .eq("status", "aguardando_aluno").eq("ai_status", "active");
+        const out = { finished: 0, skipped: 0 };
+        for (const c of candidatos ?? []) {
+            const { data: last } = await db.from("ticket_messages").select("autor_role, created_at")
+                .eq("ticket_id", c.id).eq("interno", false).order("created_at", { ascending: false }).limit(1).maybeSingle();
+            if (!last || last.autor_role !== "tutor_virtual" || last.created_at > cutoff) { out.skipped++; continue; }
+            await db.from("tickets").update({
+                status: "resolvido", ai_status: "handed_off", resolved_at: new Date().toISOString(),
+            }).eq("id", c.id);
+            await db.from("ticket_messages").insert({
+                ticket_id: c.id, autor_id: null, autor_nome: s0.nome, autor_role: "tutor_virtual", interno: true,
+                conteudo: `🤖 Encerrado automaticamente como Resolvido — ${s0.auto_resolve_hours}h sem resposta do aluno após a última mensagem do ${s0.nome}.`,
+            });
+            out.finished++;
+        }
+        return jsonRes(out);
+    }
+
     const ticketId = Number(body.ticket_id);
     if (!ticketId) return jsonRes({ error: "ticket_id obrigatório." }, 400);
 
@@ -217,7 +251,11 @@ Deno.serve(async (req) => {
         // chamado igual handoff() já faz, só que pra esse caminho (resolvido sozinho).
         await db.from("tickets").update({
             ai_turns: (t.ai_turns ?? 0) + 1,
-            ...(vaiPraEquipe ? {} : concluirCall ? { status: "resolvido", ai_status: "handed_off" } : { status: "aguardando_aluno" }),
+            // resolved_at faltava aqui (08/10, achado junto do auto-encerramento por
+            // silêncio abaixo) — todo outro caminho que resolve um chamado grava isso
+            // (TicketDetail, TicketKanban), só este ficava de fora; sem ele o TMR (tempo
+            // médio de resolução) do Painel ignorava todo chamado fechado pelo Tutor.
+            ...(vaiPraEquipe ? {} : concluirCall ? { status: "resolvido", ai_status: "handed_off", resolved_at: new Date().toISOString() } : { status: "aguardando_aluno" }),
         }).eq("id", t.id);
         const hc = handoffCall as { motivo: string; resumo: string } | null;
         if (vaiPraEquipe) await handoff(hc?.motivo ?? "o tutor não conseguiu responder", hc?.resumo ?? "");

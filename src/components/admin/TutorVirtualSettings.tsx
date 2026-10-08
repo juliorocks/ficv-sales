@@ -16,6 +16,7 @@ interface TutorSettings {
     enabled: boolean; nome: string; system_prompt: string; handoff_instructions: string
     chat_model: string; temperature: number; max_turns: number
     horario_atendimento: string; handoff_message: string
+    auto_resolve_enabled: boolean; auto_resolve_hours: number
 }
 const fieldLabel = "text-xs font-bold uppercase tracking-widest text-muted-foreground"
 const textareaCls = "w-full min-h-[150px] rounded-xl border border-[var(--border)] bg-muted/20 p-3 text-sm leading-relaxed text-[var(--text-main)] outline-none focus:border-primary custom-scrollbar"
@@ -48,12 +49,16 @@ export function TutorVirtualSettings() {
         queryKey: ["tutor_stats"],
         queryFn: async () => {
             const since = new Date(Date.now() - 30 * 86400_000).toISOString()
-            const { data } = await supabase.from("tickets").select("ai_status, ai_turns, status").gte("created_at", since).eq("origem", "portal")
+            const { data } = await supabase.from("tickets").select("ai_status, ai_turns, status, ai_resolved").gte("created_at", since).eq("origem", "portal")
             const rows = data ?? []
             const atendidos = rows.filter((r: any) => r.ai_turns > 0)
             return {
                 total: rows.length, atendidos: atendidos.length,
-                resolvidosSemHumano: atendidos.filter((r: any) => r.ai_status === "active" && ["resolvido", "fechado", "aguardando_aluno"].includes(r.status)).length,
+                // 08/10: antes olhava ai_status==='active' junto com status resolvido/fechado — combinação
+                // que nunca acontece de verdade (resolver sempre solta o tutor, ai_status vira handed_off),
+                // então isto nunca contava nada. Troca pela coluna ai_resolved (chamado fechado sem NENHUM
+                // agente ter respondido), que é o que o rótulo sempre quis dizer.
+                resolvidosSemHumano: rows.filter((r: any) => r.ai_resolved).length,
                 passados: atendidos.filter((r: any) => r.ai_status === "handed_off").length,
             }
         },
@@ -70,6 +75,7 @@ export function TutorVirtualSettings() {
             handoff_instructions: form.handoff_instructions, chat_model: form.chat_model.trim(),
             temperature: Number(form.temperature), max_turns: Number(form.max_turns),
             horario_atendimento: form.horario_atendimento.trim(), handoff_message: form.handoff_message,
+            auto_resolve_enabled: form.auto_resolve_enabled, auto_resolve_hours: Number(form.auto_resolve_hours) || 24,
             updated_at: new Date().toISOString(), updated_by: user?.id ?? null,
         }).eq("id", 1).select("id")
         setSaving(false)
@@ -102,7 +108,22 @@ export function TutorVirtualSettings() {
                         </label>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center">
+                    <div className="flex items-center justify-between gap-4 rounded-xl border border-[var(--border)] p-4">
+                        <div>
+                            <p className="text-sm font-bold text-[var(--text-main)]">Encerrar sozinho se o aluno não responder</p>
+                            <p className="text-xs text-muted-foreground">
+                                Chamado que o Tutor respondeu e o aluno nunca mais escreveu (achado ao vivo 08/10: ficava preso pra sempre em "Aguardando Aluno").
+                                Depois de <Input type="number" min={1} value={form.auto_resolve_hours} onChange={(e) => set("auto_resolve_hours", Number(e.target.value))}
+                                    className="inline-block w-16 h-6 mx-1 px-1 py-0 bg-muted/20 text-center align-middle" /> hora(s) de silêncio, marca como Resolvido sozinho.
+                            </p>
+                        </div>
+                        <label className="flex items-center gap-2 cursor-pointer text-sm font-bold shrink-0">
+                            <input type="checkbox" checked={form.auto_resolve_enabled} onChange={(e) => set("auto_resolve_enabled", e.target.checked)} className="w-4 h-4 accent-[var(--primary)]" />
+                            {form.auto_resolve_enabled ? "Ligado" : "Desligado"}
+                        </label>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
                         <div className="rounded-xl bg-muted/30 p-3">
                             <p className="text-lg font-bold flex items-center justify-center gap-1.5"><BookOpen size={16} /> {kb?.ready ?? 0}/{kb?.total ?? 0}</p>
                             <p className="text-[10px] uppercase text-muted-foreground">docs "Alunos" indexados</p>
@@ -110,6 +131,10 @@ export function TutorVirtualSettings() {
                         <div className="rounded-xl bg-muted/30 p-3">
                             <p className="text-lg font-bold">{stats?.atendidos ?? 0}<span className="text-sm text-muted-foreground">/{stats?.total ?? 0}</span></p>
                             <p className="text-[10px] uppercase text-muted-foreground">chamados atendidos (30d)</p>
+                        </div>
+                        <div className="rounded-xl bg-muted/30 p-3">
+                            <p className="text-lg font-bold text-violet-400">{stats?.resolvidosSemHumano ?? 0}</p>
+                            <p className="text-[10px] uppercase text-muted-foreground">resolvidos 100% pela IA (30d)</p>
                         </div>
                         <div className="rounded-xl bg-muted/30 p-3">
                             <p className="text-lg font-bold">{stats?.passados ?? 0}</p>

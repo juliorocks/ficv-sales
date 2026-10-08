@@ -288,6 +288,7 @@ export interface Ticket {
   first_response_at: string | null
   resolved_at: string | null
   avaliado: boolean
+  ai_resolved: boolean
   // joins
   atendente?: { full_name: string } | null
   curso?: { name: string; type: string } | null

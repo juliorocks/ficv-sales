@@ -22,7 +22,7 @@ import { Tooltip as UiTooltip, TooltipContent as UiTooltipContent, TooltipProvid
 import {
   Ticket as TicketIcon, Clock, CheckCircle2, AlertCircle, Star,
   Search, Filter, Users, TrendingUp, MessageSquare, Timer,
-  ChevronRight, Loader2, RefreshCw, Plus, Trash2
+  ChevronRight, Loader2, RefreshCw, Plus, Trash2, Bot
 } from 'lucide-react'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -106,7 +106,13 @@ function calcMetrics(tickets: Ticket[], evaluations: TicketEvaluation[]) {
     ? evaluations.reduce((a, e) => a + e.ces_nota, 0) / evaluations.length
     : null
 
-  return { total, resolved: resolved.length, tma, tmr, csatAvg, fcrPct, nps, cesAvg }
+  // % resolvido 100% pelo Tutor Virtual, sem nenhum agente humano responder (pedido do
+  // usuário 08/10) — sobre os resolvidos do período, não sobre o total (um chamado ainda
+  // aberto não tem como contar aqui ainda).
+  const aiResolvedCount = resolved.filter(t => t.ai_resolved).length
+  const aiResolvedPct = resolved.length ? (aiResolvedCount / resolved.length) * 100 : null
+
+  return { total, resolved: resolved.length, tma, tmr, csatAvg, fcrPct, nps, cesAvg, aiResolvedCount, aiResolvedPct }
 }
 
 function formatMinutes(min: number | null) {
@@ -322,7 +328,7 @@ export function TicketDashboard({ isDarkMode }: { isDarkMode?: boolean }) {
 
       {/* KPI Cards */}
       <UiTooltipProvider delayDuration={200}>
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
           {[
             { label: 'Total', value: metrics.total, sub: 'tickets', icon: TicketIcon, color: 'text-[var(--primary)]',
               tip: 'Quantidade de chamados abertos no período filtrado, de qualquer status.' },
@@ -338,6 +344,8 @@ export function TicketDashboard({ isDarkMode }: { isDarkMode?: boolean }) {
               tip: 'First Contact Resolution: % de chamados que o aluno avaliou como resolvidos já no primeiro contato, sem precisar voltar a perguntar. Pra melhorar: ter de cara a resposta certa (Base de Conhecimento/Sponte) em vez de várias trocas de mensagem.' },
             { label: 'NPS', value: metrics.nps !== null ? metrics.nps : '—', sub: 'net promoter', icon: TrendingUp, color: metrics.nps !== null ? (metrics.nps >= 50 ? 'text-green-400' : metrics.nps >= 0 ? 'text-amber-400' : 'text-red-400') : 'text-[var(--text-muted)]',
               tip: 'Net Promoter Score (-100 a 100): o quanto o aluno recomendaria o atendimento, pela nota de 0 a 10 da avaliação. Acima de 50 é ótimo, abaixo de 0 é alerta. Atendimento rápido e resolutivo puxa o NPS junto com o CSAT.' },
+            { label: 'Resolvido IA', value: metrics.aiResolvedPct !== null ? `${Math.round(metrics.aiResolvedPct)}%` : '—', sub: `${metrics.aiResolvedCount} chamado(s)`, icon: Bot, color: 'text-violet-400',
+              tip: 'Fatia dos chamados resolvidos neste período que o Tutor Virtual encerrou sozinho, sem nenhum agente humano responder ao aluno. Pra subir: Base de Conhecimento completa e atualizada, pra IA resolver de cara sem precisar passar pra equipe.' },
           ].map(kpi => (
             <UiTooltip key={kpi.label}>
               <UiTooltipTrigger asChild>
