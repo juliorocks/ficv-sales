@@ -241,9 +241,15 @@ export function parseWebhook(p: any): ParsedMsg | null {
     // devolve o objeto inteiro, que sem isso virava `{"body":"..."}` stringificado na tela (visto
     // ao vivo no chat do lead e no Kanban). Só desembrulha um objeto {body|text|caption: string}.
     const rawBody = findKey(m, ["body", "text", "conversation", "caption"]) ?? findKey(p, ["body", "text"]);
-    const body = rawBody && typeof rawBody === "object" && !Array.isArray(rawBody)
+    let body = rawBody && typeof rawBody === "object" && !Array.isArray(rawBody)
         ? (rawBody.body ?? rawBody.text ?? rawBody.caption ?? rawBody)
         : rawBody;
+    // WABA às vezes manda um tipo que a própria Meta não consegue decodificar (visto ao
+    // vivo 08/10: msg.type="unsupported", errors[0].code=131051 "Message type unknown") —
+    // sem conteúdo nenhum no payload pra extrair, ficava salvo como "" (bolha em branco no
+    // chat, achado ao vivo: "mensagens que ele envia que não dá pra ver"). Aviso genérico em
+    // vez de string vazia.
+    if (!body && m?.type === "unsupported") body = "[mensagem não suportada pelo WhatsApp]";
     const ticket = findKey(p, ["ticket"]);
     const contact = findKey(p, ["contact", "contato"]);
     const rawNum = (contact && (contact.number ?? contact.phone)) ?? findKey(p, ["number", "remoteJidAlt", "from", "phone"]);
