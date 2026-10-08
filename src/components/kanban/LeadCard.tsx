@@ -96,10 +96,20 @@ export function LeadCard({ lead, users, leadSources, stages, courses, channels, 
         mutationFn: async () => {
             if (!user?.id) throw new Error("Sessão não identificada. Recarregue a página.");
             await withTimeout(supabase.auth.getSession(), 8000, "A sessão").catch(() => { });
+            // "Atender" reivindica o lead — a partir daqui ninguém mais deveria pegá-lo pra si,
+            // então já sai da fila de Entrada pra "Em Contato" no clique, sem esperar uma
+            // resposta de verdade sair primeiro (pedido do usuário 08/10: lead reivindicado
+            // continuava aparecendo em Entrada até o agente digitar algo — a saudação
+            // automática de "cold start" do WideChat/VivaConnect não conta como resposta real).
+            const emContato = stages.find(s => s.name.toLowerCase().includes('contato'));
+            const now = new Date().toISOString();
             const { data, error } = await withTimeout(
                 supabase
                     .from('leads')
-                    .update({ assigned_to_id: user.id, updated_at: new Date().toISOString() })
+                    .update({
+                        assigned_to_id: user.id, updated_at: now,
+                        ...(emContato ? { stage_id: emContato.id, stage_entry_date: now } : {}),
+                    })
                     .eq('id', lead.id)
                     .select('id'),
                 15000,
