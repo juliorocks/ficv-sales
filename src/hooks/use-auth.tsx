@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
 import { User } from "@/types/database";
 import { withTimeout } from "@/utils/withTimeout";
@@ -20,7 +20,18 @@ function readStoredUserId(): string | null {
     }
 }
 
-export function useAuth() {
+type AuthState = { user: User | null; isLoading: boolean };
+
+// Antes cada chamador de useAuth() resolvia a sessão + o profile por conta própria —
+// com 50+ LeadCard montados ao mesmo tempo no Kanban, isso virava 50+ requisições
+// paralelas e independentes pra /auth/v1 e pra `profiles`, e quando uma delas falhava
+// (timeout/rate limit no meio desse tropel) aquele card específico ficava com `user`
+// null pra sempre, sem erro nenhum — sintoma real 08/10: botão "Atender" sumia só de
+// alguns cards, um card diferente a cada reload. Context compartilhado = resolve 1 vez,
+// todo mundo (20 componentes) lê o mesmo resultado.
+const AuthContext = createContext<AuthState>({ user: null, isLoading: true });
+
+export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<User | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
@@ -76,5 +87,13 @@ export function useAuth() {
         };
     }, []);
 
-    return { user, isLoading };
+    return (
+        <AuthContext.Provider value={{ user, isLoading }}>
+            {children}
+        </AuthContext.Provider>
+    );
+}
+
+export function useAuth() {
+    return useContext(AuthContext);
 }

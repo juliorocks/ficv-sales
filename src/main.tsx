@@ -5,6 +5,7 @@ import App from './App'
 import { AgentReportPage } from './components/AgentReport'
 import { AlunoPortalPage } from './components/tickets/AlunoPortalPage'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { AuthProvider } from './hooks/use-auth'
 import './index.css'
 
 // code-split: formulário público embedado via iframe em sites externos não deve
@@ -28,6 +29,7 @@ const isCrmPath = /^\/(connect|relatorio|f)(\/|$)/.test(window.location.pathname
 ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
         <ErrorBoundary>
+            <AuthProvider>
             <BrowserRouter>
                 {isPortalHost && !isCrmPath ? (
                 <Routes>
@@ -43,6 +45,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                 </Routes>
                 )}
             </BrowserRouter>
+            </AuthProvider>
         </ErrorBoundary>
     </React.StrictMode>,
 )
