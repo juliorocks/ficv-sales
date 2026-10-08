@@ -13,6 +13,7 @@ import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, Command
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { showError, showSuccess } from "@/utils/toast"
+import { extractFnErrorMessage } from "@/utils/functionsError"
 import { useAuth } from "@/hooks/use-auth"
 import { KbAskPanel } from "@/components/KbAskPanel"
 import { QuickRepliesMenu } from "@/components/QuickReplies"
@@ -802,14 +803,15 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
         mutationFn: async () => {
             if (isViva) {
                 const { data, error } = await supabase.functions.invoke('vivaconnect-api', { body: { action: 'finish', lead_id: leadId } })
-                if (error || data?.error) throw new Error(data?.error ?? error?.message)
+                if (error) throw new Error(await extractFnErrorMessage(error))
+                if (data?.error) throw new Error(data.error)
                 queryClient.invalidateQueries({ queryKey: ['leads'] })
                 return
             }
             const { data, error } = await supabase.functions.invoke('widechat-api', {
                 body: { action: 'finish_attendance', session_id: sessionId },
             })
-            if (error) throw error
+            if (error) throw new Error(await extractFnErrorMessage(error))
             if (data?.error) throw new Error(typeof data.error === 'string' ? data.error : JSON.stringify(data.error))
         },
         onSuccess: () => {
