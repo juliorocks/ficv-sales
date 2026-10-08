@@ -176,20 +176,26 @@ Deno.serve(async (req) => {
             if (!lead) return jsonRes({ error: "Lead não encontrado." }, 404);
             const chId = msgRow?.channel_id ?? lead.vivaconnect_channel_id;
             const { data: ch } = chId ? await db.from("vivaconnect_channels").select(CH_COLS).eq("id", chId).maybeSingle() : { data: null };
-            if (!ch) return jsonRes({ error: "Lead sem número do VivaConnect." }, 400);
+            // "Finalizar" não exige canal — um lead que nunca teve conversa de WhatsApp de
+            // verdade (ex.: só preencheu formulário) ainda precisa poder ser fechado
+            // localmente no Kanban. message_status/media continuam exigindo (são sobre uma
+            // conversa que já existe). Achado ao vivo 08/10: "Finalizar" travava com "Lead
+            // sem número do VivaConnect" pra esses leads, sem jeito nenhum de fechar o card.
+            if (!ch && action !== "finish") return jsonRes({ error: "Lead sem número do VivaConnect." }, 400);
             // ticket/mensagens de verdade moram no canal que REALMENTE manda (delegado, se houver)
             // — não no canal "dono" só porque é ele quem recebe (ver resolveExecChannel acima)
-            const execCh = await resolveExecChannel(db, ch);
-            const ticketId = msgRow?.session_id ?? await ticketFor(settings, execCh, lead);
+            const execCh = ch ? await resolveExecChannel(db, ch) : null;
+            const ticketId = msgRow?.session_id ?? (execCh ? await ticketFor(settings, execCh, lead) : null);
 
             if (action === "finish") {
-                if (ticketId) {
+                if (ticketId && execCh) {
                     const r = await zpro(settings.base_url, execCh, "/updateticketinfo", { ticketId: Number(ticketId), status: "closed" });
                     if (!r.ok) return jsonRes({ error: zproErr(r.status, r.data) }, 502);
                 }
                 // mensagem de despedida (opcional, Gestão > VivaConnect) — sai igual um envio
                 // manual: na hora, sem trava de janela/Meta (é a equipe finalizando de propósito).
-                if (settings.farewell_message_enabled && String(settings.farewell_message_template ?? "").trim()) {
+                // Sem canal, não tem como mandar — só o fechamento local mesmo.
+                if (ch && settings.farewell_message_enabled && String(settings.farewell_message_template ?? "").trim()) {
                     const number = toZproNumber(lead.telefone);
                     if (number) {
                         const nome = firstName(lead.nome_completo ?? "");
