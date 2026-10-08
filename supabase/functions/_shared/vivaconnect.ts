@@ -190,6 +190,16 @@ const BAILEYS_TYPES: Record<string, string> = {
     buttonsResponseMessage: "text", listResponseMessage: "text", templateButtonReplyMessage: "text",
     interactiveResponseMessage: "text",
 };
+// tipos de mensagem do WABA (Meta) → mesmo vocabulário acima. Sem isso, toda mídia
+// recebida pelo canal oficial (áudio, imagem, vídeo, arquivo) caía como type:"text" e
+// body:"" — bolha em branco no chat, sem o player nem o link pra ouvir/ver (achado ao
+// vivo 08/10, lead "Edson Eloi": vários áudios recebidos ficaram brancos). O link em si
+// resolve depois, sob demanda, via vivaconnect-api{action:"media"} — aqui só precisa
+// classificar o tipo certo pra essa busca disparar.
+const WABA_MEDIA_TYPES: Record<string, string> = {
+    image: "images", sticker: "images", audio: "sounds", video: "videos",
+    document: "files", location: "location", contacts: "contact",
+};
 const IGNORABLE = ["reactionMessage", "protocolMessage", "editedMessage", "pollUpdateMessage", "senderKeyDistributionMessage"];
 
 /** Tira caracteres invisíveis (o Z-PRO manda nomes com U+200E na frente). */
@@ -266,7 +276,7 @@ export function parseWebhook(p: any): ParsedMsg | null {
         contactName: cleanName((contact && (contact.name ?? contact.pushname)) ?? findKey(p, ["pushName", "pushname", "notifyName"])),
         ticketId: ticket?.id != null ? String(ticket.id) : (findKey(p, ["ticketId"]) != null ? String(findKey(p, ["ticketId"])) : null),
         contactId: contact?.id != null ? String(contact.id) : (findKey(p, ["contactId"]) != null ? String(findKey(p, ["contactId"])) : null),
-        mediaType: findKey(m, ["mediaType"]) ?? null,
+        mediaType: findKey(m, ["mediaType"]) ?? (typeof m?.type === "string" ? WABA_MEDIA_TYPES[m.type] ?? null : null),
         mediaUrl: findKey(m, ["mediaUrl", "mediaURL", "media_url"]) ?? null,
         isGroup,
         whatsappId: findKey(p, ["whatsappId"]) != null ? String(findKey(p, ["whatsappId"])) : null,
