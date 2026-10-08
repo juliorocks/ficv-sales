@@ -115,9 +115,13 @@ export function NotificationBell({ profile, onOpenTab }: Props) {
                             title="Quando tocar o som de notificação"
                             className="rounded border border-border bg-transparent px-1.5 py-0.5 text-[11px] text-[var(--text-main)]"
                         >
-                            <option value="off">Desligado</option>
-                            <option value="new_leads">Só leads novos</option>
-                            <option value="all">Leads + mensagens</option>
+                            {/* a lista aberta do <select> é renderizada pelo navegador/SO com fundo
+                                claro, ignorando bg-transparent do elemento — sem cor fixa aqui, o
+                                texto herdava --text-main (branco no modo escuro) e ficava branco no
+                                branco (achado ao vivo 08/10, print do Tyago) */}
+                            <option value="off" className="text-black">Desligado</option>
+                            <option value="new_leads" className="text-black">Só leads novos</option>
+                            <option value="all" className="text-black">Leads + mensagens</option>
                         </select>
                     </div>
 
