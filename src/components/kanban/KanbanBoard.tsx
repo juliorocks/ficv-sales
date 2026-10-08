@@ -89,7 +89,11 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
     // do filtro client-side abaixo, mas via COUNT no banco — não trava no limite de busca.
     // Não calcula durante busca de texto nem no modo "sem atendente" (semânticas que o filtro
     // client-side trata diferente do parâmetro da RPC) — nesses casos o selo cai de volta pro
-    // tamanho do array já buscado, como sempre foi.
+    // tamanho do array já buscado, como sempre foi. 08/10: a RPC não recebe filtro de Data
+    // (só atendente/departamento) — com o filtro de Data ligado ela mostrava o total GERAL da
+    // etapa por cima de uma lista já filtrada (selo "442" com 3 cards na tela). Desligada
+    // nesse caso também, mesmo motivo: cai pro tamanho do array já filtrado por data.
+    const hasDateFilter = !!(dateRange?.start || dateRange?.end);
     const stageCountsAgents = teamAgentIds?.filter((id) => id !== '__unassigned__');
     const { data: stageCounts } = useQuery<Record<number, number>>({
         queryKey: ['leads_stage_counts', assigneeFilter, teamAgentIds],
@@ -102,7 +106,7 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
             if (error) throw error;
             return Object.fromEntries(((data ?? []) as { stage_id: number; total: number }[]).map((r) => [r.stage_id, r.total]));
         },
-        enabled: !isAuthLoading && !!user && !searchTerm.trim() && assigneeFilter !== 'unassigned',
+        enabled: !isAuthLoading && !!user && !searchTerm.trim() && assigneeFilter !== 'unassigned' && !hasDateFilter,
         staleTime: 30 * 1000,
     });
 
@@ -508,7 +512,7 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
                                     leadSources={leadSources || []}
                                     courses={courses || []}
                                     channels={vivaconnectChannels || []}
-                                    stageTotal={stageCounts?.[stage.id]}
+                                    stageTotal={hasDateFilter ? undefined : stageCounts?.[stage.id]}
                                     index={index}
                                     allStages={orderedStages}
                                     pendingByLead={pendingByLead}
