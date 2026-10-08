@@ -102,6 +102,13 @@ Deno.serve(async (req) => {
         if (m.ignorable) return await done("ignored:reação/edição/sistema");
         if (m.isGroup) return await done("ignored:grupo");
         if (!m.number) return await done("ignored:sem número");
+        // Lista de bloqueio (Gestão > VivaConnect ou excluir lead com "bloquear número"):
+        // ignora ANTES de criar/reabrir lead — excluir o card sozinho não impede uma
+        // mensagem nova de criar outro do zero (achado ao vivo 08/10, número do Hub do
+        // Grupo da própria FICV num loop bot-contra-bot).
+        const blockedNumber = toZproNumber(m.number) ?? m.number;
+        const { data: blocked } = await db.from("vivaconnect_blocked_numbers").select("number").eq("number", blockedNumber).maybeSingle();
+        if (blocked) return await done("ignored:número bloqueado");
         const botsOn = ZPRO_AI_FLAGS.filter((f) => payload?.ticket?.[f] === true);
         if (botsOn.length && m.ticketId) {
             const { data: tok } = await db.from("vivaconnect_channels").select("api_id, api_token").eq("id", ch.id).single();

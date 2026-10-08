@@ -299,8 +299,21 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
     });
 
     const deleteLeadMutation = useMutation({
-        mutationFn: async () => {
+        mutationFn: async (blockNumber: boolean) => {
             await withTimeout(supabase.auth.getSession(), 8000, "A sessão").catch(() => { });
+            // excluir o card sozinho não impede uma mensagem nova de criar outro do zero
+            // (achado ao vivo 08/10: número do Hub do Grupo da própria FICV num loop
+            // bot-contra-bot, o card reaparecia depois de excluído) — bloqueia o número
+            // ANTES de excluir, pro webhook (vivaconnect-webhook) já ignorar a próxima.
+            if (blockNumber) {
+                const digits = (lead.telefone || "").replace(/\D/g, "")
+                const number = digits.length === 10 || digits.length === 11 ? `55${digits}` : digits
+                if (number) {
+                    const { error } = await supabase.from('vivaconnect_blocked_numbers')
+                        .insert({ number, reason: `Bloqueado ao excluir o lead "${lead.nome_completo}" (#${lead.id}).`, created_by: user?.id })
+                    if (error && error.code !== '23505') throw error // 23505 = já bloqueado, segue o jogo
+                }
+            }
             const { error } = await withTimeout(
                 supabase.from('leads').delete().eq('id', lead.id),
                 15000,
@@ -308,18 +321,18 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
             );
             if (error) throw error;
         },
-        onSuccess: () => {
+        onSuccess: (_data, blockNumber) => {
             queryClient.invalidateQueries({ queryKey: ['leads'] });
-            showSuccess("Lead excluído com sucesso!");
+            showSuccess(blockNumber ? "Lead excluído e número bloqueado — não cria lead novo de novo." : "Lead excluído com sucesso!");
             onOpenChange(false);
         },
         onError: (error: any) => showError(`Erro ao excluir lead: ${error.message}`)
     });
 
     const handleDelete = () => {
-        if (window.confirm("Tem certeza que deseja excluir este lead? Esta ação não pode ser desfeita.")) {
-            deleteLeadMutation.mutate();
-        }
+        if (!window.confirm("Tem certeza que deseja excluir este lead? Esta ação não pode ser desfeita.")) return
+        const blockNumber = window.confirm("Bloquear também o número de WhatsApp desse lead, pra ele nunca mais criar um card novo (ex.: número errado/institucional)?")
+        deleteLeadMutation.mutate(blockNumber);
     };
 
     return (
