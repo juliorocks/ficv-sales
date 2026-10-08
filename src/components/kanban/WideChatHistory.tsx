@@ -253,6 +253,22 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
     const contactId = related?.contactId || widechatContactId
     const sessionId = related?.sessionId || ''
 
+    // Lead veio de formulário (SendPulse/Site) ou de importação em massa, nunca de uma
+    // mensagem real de WhatsApp — só os webhooks de canal (VivaConnect/Widechat) marcam
+    // fonte_lead assim na criação. Usado só pra deixar a tela "sem conversa" mais clara
+    // (achado 08/10: usuário estranhou vários leads sem mensagem — eram todos de formulário,
+    // nunca contatados, contact_count=1 só contava o preenchimento do formulário).
+    const { data: fonteLead } = useQuery<string | null>({
+        queryKey: ['lead-fonte', String(leadId)],
+        queryFn: async () => {
+            const { data } = await supabase.from('leads').select('fonte_lead').eq('id', leadId).maybeSingle()
+            return data?.fonte_lead ?? null
+        },
+        enabled: !!leadId,
+        staleTime: 60_000,
+    })
+    const veioDeFormulario = !!fonteLead && !/^(vivaconnect|widechat)/i.test(fonteLead)
+
     const { data: messages, isLoading, error } = useQuery<WideChatMessage[]>({
         queryKey: msgKey,
         queryFn: async () => {
@@ -984,7 +1000,9 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                 <Alert className="rounded-none border-x-0 border-t-0 bg-blue-50/50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800">
                     <AlertCircle className="h-4 w-4 text-blue-600" />
                     <AlertDescription className="text-xs text-blue-700 dark:text-blue-400">
-                        Ainda não teve conversa com esse lead. A 1ª mensagem sai pelo número <strong>{vcChannel?.name}</strong> e o lead fica fixo nele.
+                        {veioDeFormulario
+                            ? <>Esse lead veio de formulário{fonteLead ? <> (<strong>{fonteLead}</strong>)</> : ''} e ainda não teve contato por WhatsApp. A 1ª mensagem sai pelo número <strong>{vcChannel?.name}</strong> e o lead fica fixo nele.</>
+                            : <>Ainda não teve conversa com esse lead. A 1ª mensagem sai pelo número <strong>{vcChannel?.name}</strong> e o lead fica fixo nele.</>}
                     </AlertDescription>
                 </Alert>
             )}
@@ -995,7 +1013,11 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                         <MessageSquare className="h-8 w-8 mb-2" />
                         <p className="text-sm font-medium">Nenhuma conversa encontrada.</p>
                         <p className="text-xs mt-1">
-                            {contactId ? "Envie a primeira mensagem para iniciar." : "Este cliente ainda não interagiu pelo WhatsApp."}
+                            {contactId
+                                ? "Envie a primeira mensagem para iniciar."
+                                : veioDeFormulario
+                                    ? "Lead veio de formulário — ainda sem contato por WhatsApp."
+                                    : "Este cliente ainda não interagiu pelo WhatsApp."}
                         </p>
                     </div>
                 ) : (
