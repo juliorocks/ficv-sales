@@ -461,17 +461,30 @@ serve(async (req) => {
                 // Finalizado, volta pra Entrada com o MESMO agente, pra ele retomar quando o
                 // cliente responder — ver [[project_widechat_finalize_24h_stale]].
                 const isAutoTimeout = eventName === 'autoFinish';
-                const { data: curLead } = await db.from('leads').select('stage_id').eq('id', leadId).maybeSingle();
+                const { data: curLead } = await db.from('leads').select('stage_id, assigned_to_id').eq('id', leadId).maybeSingle();
                 if (curLead && ![6, 7].includes(curLead.stage_id)) {
                     const now = new Date().toISOString();
                     if (isAutoTimeout) {
-                        await db.from('leads').update({ stage_id: firstStageId, stage_entry_date: now }).eq('id', leadId);
+                        // Entrada é só pra lead novo ou sem dono — com agente atribuído, o card
+                        // tinha de ficar sem o botão Atender (já é de alguém) mas fora da fila
+                        // desse alguém, "órfão" visualmente. Pedido do usuário 08/10: com agente,
+                        // mantém em Em Contato (continua na fila de quem já atende); sem agente,
+                        // Entrada normal — ver [[project_widechat_finalize_24h_stale]].
+                        let destId = firstStageId;
+                        if (curLead.assigned_to_id) {
+                            const { data: emContato } = await db.from('stages').select('id')
+                                .ilike('name', '%contato%').order('order', { ascending: true }).limit(1).maybeSingle();
+                            destId = emContato?.id ?? firstStageId;
+                        }
+                        await db.from('leads').update({ stage_id: destId, stage_entry_date: now }).eq('id', leadId);
                         await db.from('lead_notes').insert({
                             lead_id: leadId,
-                            note: '🔁 Passaram 24h sem resposta do cliente e o WideChat encerrou a conversa sozinho (timeout). Reaberto para Entrada, mantendo o agente responsável, pra continuar o atendimento assim que o cliente responder.',
+                            note: curLead.assigned_to_id
+                                ? '🔁 Passaram 24h sem resposta do cliente e o WideChat encerrou a conversa sozinho (timeout). Mantido em Em Contato com o agente responsável, pra continuar o atendimento assim que o cliente responder.'
+                                : '🔁 Passaram 24h sem resposta do cliente e o WideChat encerrou a conversa sozinho (timeout). Reaberto para Entrada.',
                             created_at: now,
                         });
-                        await mirror(`UPDATE leads SET stage_id = stages:⟨${firstStageId}⟩, stage_entry_date = ${sv(now)} WHERE id = leads:⟨${leadId}⟩;`);
+                        await mirror(`UPDATE leads SET stage_id = stages:⟨${destId}⟩, stage_entry_date = ${sv(now)} WHERE id = leads:⟨${leadId}⟩;`);
                     } else {
                         const { data: st } = await db.from('stages').select('id')
                             .or('name.ilike.%finaliz%,name.ilike.%encerr%,name.ilike.%conclu%')
