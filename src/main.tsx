@@ -18,8 +18,12 @@ const PublicMarketingFormPage = React.lazy(() =>
 // /relatorio também escapa: é o link PÚBLICO de relatório de agente (AgentAdmin.tsx monta com
 // window.location.origin) — se gerado a partir de .../connect, precisa abrir em qualquer
 // domínio onde esse mesmo link for aberto, não só em /connect.
+// /f também escapa: é o formulário público do Marketing (EmbedCodeModal.tsx monta o snippet com
+// window.location.origin) — colado numa LP, precisa funcionar não importa de qual domínio do CRM
+// o admin gerou o código (achado ao vivo 08/10: snippet gerado em portal.ficv.edu.br/connect caía
+// no catch-all do portal, que não tem a rota /f e renderizava o login do aluno no lugar do form).
 const isPortalHost = /^portal\./i.test(window.location.hostname)
-const isCrmPath = /^\/(connect|relatorio)(\/|$)/.test(window.location.pathname)
+const isCrmPath = /^\/(connect|relatorio|f)(\/|$)/.test(window.location.pathname)
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
