@@ -16,10 +16,21 @@ import { toZproNumber } from "../_shared/vivaconnect.ts";
 // Mesmo aviso do e-mail, também por WhatsApp não oficial (canal pool/Baileys, sem custo Meta)
 // — pedido do usuário 02/10: "muita gente não fica abrindo e-mail". Best-effort: nunca lança
 // (falha aqui não pode derrubar o envio do e-mail, que é o canal garantido).
+// Celular BR de verdade: 55 + DDD (2) + 9 + 8 dígitos = 13 dígitos, com o 9 logo após o
+// DDD. Sem isso, um número de fixo/institucional salvo por engano em alunos.telefone (ex.:
+// o Sponte às vezes tem só o telefone da escola em vez do do aluno) passa batido pelo
+// toZproNumber() — achado ao vivo 08/10: o telefone da Nilda no cadastro era "(83)
+// 3041-7471", que é o número da FACULDADE/Hub do Grupo, com bot automático próprio. O
+// aviso de chamado foi mandado pra esse número, bateu no bot do Hub, e virou um looping
+// infinito bot-contra-bot (nosso Vivi × bot do Hub, cada um respondendo ao outro) por
+// quase 2 dias — lead "558330417471" reabrindo sozinho repetidas vezes. Fixo nunca é
+// WhatsApp de aluno de verdade, então nem tenta.
+const BR_CELULAR_RE = /^55\d{2}9\d{8}$/;
+
 async function sendTicketWhatsApp(db: any, telefone: string | null | undefined, text: string): Promise<void> {
     try {
         const number = toZproNumber(telefone);
-        if (!number || !text) return;
+        if (!number || !text || !BR_CELULAR_RE.test(number)) return;
         const { data: settings } = await db.from("vivaconnect_settings").select("enabled").eq("id", 1).maybeSingle();
         if (!settings?.enabled) return;
         const { data: channelId } = await db.rpc("vivaconnect_pick_pool_channel");
