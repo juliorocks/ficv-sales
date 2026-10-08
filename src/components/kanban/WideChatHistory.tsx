@@ -289,11 +289,24 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                         supabase.from('widechat_raw_messages').select('*').in('platform_id', phoneVariants),
                         new Promise<{ data: null }>((r) => setTimeout(() => r({ data: null }), 45000)),
                     ]) as { data: any[] | null }
-                    ;(raw.data || []).forEach((m: any) => out.push({
-                        id: m.id ?? m.message_id, lead_id: leadId, message_id: m.message_id ?? m.id,
-                        message: m.message, created_at: m.created_at, origin: m.origin,
-                        type: m.type ?? 'text', sender_name: m.sender_name,
-                    }))
+                    ;(raw.data || []).forEach((m: any) => {
+                        // widechat_raw_messages não tem coluna `type`/`media_url` (só `payload`
+                        // bruto) — mensagem só visível por este fallback (ex.: filtrada como
+                        // "setor não-comercial" antes de virar widechat_messages, achado ao vivo
+                        // 08/10: lead "hiagoaquino", imagem enviada por aluno já matriculado)
+                        // sempre caía como texto puro, mostrando o filename cru. Mesma extração
+                        // de widechat-webhook/index.ts (msgData = payload.data.content).
+                        const content = m.payload?.data?.content ?? m.payload?.data ?? {}
+                        const mediaUrl = content.storage_id
+                            ? `https://igrejabatista.widechat.com.br/config/storage/view/${content.storage_id}`
+                            : undefined
+                        out.push({
+                            id: m.id ?? m.message_id, lead_id: leadId, message_id: m.message_id ?? m.id,
+                            message: m.message, created_at: m.created_at, origin: m.origin,
+                            type: content.type ?? m.type ?? 'text', sender_name: m.sender_name,
+                            ...(mediaUrl ? { media_url: mediaUrl } : {}),
+                        })
+                    })
                 } catch { /* segue */ }
             }
             // ruído do WideChat que não interessa na conversa
