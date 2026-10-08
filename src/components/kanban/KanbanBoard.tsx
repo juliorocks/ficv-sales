@@ -6,7 +6,7 @@ import { Lead, Stage, User, LeadSource, Course } from "@/types/database"
 import { KanbanColumn } from "./KanbanColumn"
 import { KanbanSkeleton } from "./KanbanSkeleton"
 import { showError, showSuccess } from "@/utils/toast"
-import { playLeadSound } from "@/utils/notificationSound"
+import { playNewLeadSound, playReplySound } from "@/utils/notificationSound"
 import { KanbanSquare } from "lucide-react"
 import { AddStageForm } from "./AddStageForm"
 import { useAuth } from "@/hooks/use-auth"
@@ -294,6 +294,16 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
         }
     }, [stages, filteredLeads])
 
+    // Mapa lead_id -> assigned_to_id sempre atualizado, pra consultar dentro do handler
+    // realtime abaixo sem recriar a subscription a cada refetch de `leads` (closure fixa
+    // nas deps do useEffect de baixo — só reassina em login/logout).
+    const leadAssigneeRef = useRef<Map<number, string | null>>(new Map());
+    useEffect(() => {
+        const m = new Map<number, string | null>();
+        for (const l of leads || []) m.set(l.id, l.assigned_to_id ?? null);
+        leadAssigneeRef.current = m;
+    }, [leads]);
+
     // Realtime subscription for Leads
     const invalidateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     useEffect(() => {
@@ -329,14 +339,27 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
                         // @ts-ignore
                         const leadName = payload.new?.nome_completo || 'Novo Lead';
                         showSuccess(`Novo lead: ${leadName}`);
-                        playLeadSound(); // 08/10: som de lead novo — silenciável (sino de notificações)
+                        playNewLeadSound(); // 08/10: som de lead novo — silenciável (sino de notificações)
                     }
                 }
             )
             .on(
                 'postgres_changes',
                 { event: 'INSERT', schema: 'public', table: 'widechat_messages' },
-                () => scheduleInvalidate(),
+                (payload) => {
+                    scheduleInvalidate();
+
+                    // 08/10: som de resposta nova — só mensagem de cliente de verdade (não
+                    // nota interna, não agente, não IA), e só em lead atribuído ao agente
+                    // logado (lead sem dono não toca; fila de Entrada já tem o som de "novo
+                    // lead" acima). Nível "all" no sino de notificações, senão fica mudo.
+                    // @ts-ignore
+                    const msg = payload.new as { origin?: string; interno?: boolean; lead_id?: number };
+                    if (msg?.origin === 'channel' && !msg.interno && msg.lead_id != null) {
+                        const assignedTo = leadAssigneeRef.current.get(msg.lead_id);
+                        if (assignedTo && assignedTo === user.id) playReplySound();
+                    }
+                },
             )
             .subscribe();
 

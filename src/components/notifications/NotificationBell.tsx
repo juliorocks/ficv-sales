@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { LeadDialogById } from "@/components/kanban/LeadDialogById"
 import { showError, showSuccess } from "@/utils/toast"
 import { useDueFollowups, useSetFollowupStatus } from "@/hooks/use-followups"
-import { isLeadSoundMuted, playLeadSound, setLeadSoundMuted } from "@/utils/notificationSound"
+import { getSoundScope, playNewLeadSound, setSoundScope, type SoundScope } from "@/utils/notificationSound"
 
 interface Props {
     profile: { id: string; role?: string } | null
@@ -28,13 +28,12 @@ export function NotificationBell({ profile, onOpenTab }: Props) {
     const [open, setOpen] = useState(false)
     const [showAll, setShowAll] = useState(false)
     const [openLeadId, setOpenLeadId] = useState<number | null>(null)
-    // som de lead novo (toca no Kanban, ver KanbanBoard.tsx) — mudo é por agente/navegador
-    const [soundMuted, setSoundMuted] = useState(isLeadSoundMuted)
-    const toggleSound = () => {
-        const next = !soundMuted
-        setLeadSoundMuted(next)
-        setSoundMuted(next)
-        if (!next) playLeadSound() // toca um exemplo ao reativar, pra confirmar que ouviu
+    // som de notificação (toca no Kanban, ver KanbanBoard.tsx) — nível é por agente/navegador
+    const [soundScope, setSoundScopeState] = useState<SoundScope>(getSoundScope)
+    const changeSoundScope = (scope: SoundScope) => {
+        setSoundScope(scope)
+        setSoundScopeState(scope)
+        if (scope !== "off") playNewLeadSound() // toca um exemplo, pra confirmar que ouviu
     }
 
     const { data: due, isLoading } = useDueFollowups(profile?.id, isAdmin && showAll)
@@ -107,18 +106,20 @@ export function NotificationBell({ profile, onOpenTab }: Props) {
                         )}
                     </div>
 
-                    <button
-                        type="button"
-                        onClick={toggleSound}
-                        title={soundMuted ? "Ativar som de lead novo" : "Silenciar som de lead novo"}
-                        className="flex w-full items-center gap-2 border-b border-border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-white/5 hover:text-[var(--text-main)]"
-                    >
-                        {soundMuted ? <VolumeX className="h-3.5 w-3.5 shrink-0" /> : <Volume2 className="h-3.5 w-3.5 shrink-0" />}
-                        <span className="flex-1">Som de lead novo</span>
-                        <span className={`text-[10px] font-semibold ${soundMuted ? "text-muted-foreground" : "text-primary"}`}>
-                            {soundMuted ? "Desligado" : "Ligado"}
-                        </span>
-                    </button>
+                    <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-xs text-muted-foreground">
+                        {soundScope === "off" ? <VolumeX className="h-3.5 w-3.5 shrink-0" /> : <Volume2 className="h-3.5 w-3.5 shrink-0" />}
+                        <span className="flex-1">Som de notificação</span>
+                        <select
+                            value={soundScope}
+                            onChange={(e) => changeSoundScope(e.target.value as SoundScope)}
+                            title="Quando tocar o som de notificação"
+                            className="rounded border border-border bg-transparent px-1.5 py-0.5 text-[11px] text-[var(--text-main)]"
+                        >
+                            <option value="off">Desligado</option>
+                            <option value="new_leads">Só leads novos</option>
+                            <option value="all">Leads + mensagens</option>
+                        </select>
+                    </div>
 
                     <div className="max-h-80 overflow-y-auto">
                         {isLoading ? (

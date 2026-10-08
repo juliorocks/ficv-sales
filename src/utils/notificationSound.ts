@@ -1,14 +1,20 @@
-// Som de notificação (08/10, pedido do usuário): toca quando um lead novo entra no Kanban,
-// com opção de silenciar por agente. Gerado na hora via Web Audio API (um "ding" de dois tons)
-// em vez de carregar um arquivo de áudio — sem asset pra baixar, sem licença pra se preocupar.
-const MUTE_KEY = "ficv_lead_sound_muted"
+// Som de notificação (08/10, pedido do usuário): toca quando um lead novo entra no Kanban
+// e/ou quando chega resposta nova de cliente em lead já atribuído ao agente logado.
+// 3 níveis por agente/navegador: desligado, só leads novos, leads + mensagens.
+// Gerado na hora via Web Audio API (um "ding" de dois tons) — sem asset pra baixar.
+export type SoundScope = "off" | "new_leads" | "all"
+const SCOPE_KEY = "ficv_lead_sound_scope"
 
-export function isLeadSoundMuted(): boolean {
-    try { return localStorage.getItem(MUTE_KEY) === "1" } catch { return false }
+export function getSoundScope(): SoundScope {
+    try {
+        const v = localStorage.getItem(SCOPE_KEY)
+        if (v === "off" || v === "new_leads" || v === "all") return v
+    } catch { /* sem storage */ }
+    return "new_leads" // padrão: comportamento original (só lead novo)
 }
 
-export function setLeadSoundMuted(muted: boolean) {
-    try { localStorage.setItem(MUTE_KEY, muted ? "1" : "0") } catch { /* sem storage */ }
+export function setSoundScope(scope: SoundScope) {
+    try { localStorage.setItem(SCOPE_KEY, scope) } catch { /* sem storage */ }
 }
 
 // Um único AudioContext reaproveitado — criar um novo a cada toque esbarra no limite de
@@ -22,9 +28,7 @@ function getCtx(): AudioContext | null {
     } catch { return null }
 }
 
-/** Toca o "ding" de lead novo, a menos que o agente tenha silenciado. */
-export function playLeadSound() {
-    if (isLeadSoundMuted()) return
+function chime() {
     const audioCtx = getCtx()
     if (!audioCtx) return
     try {
@@ -44,4 +48,16 @@ export function playLeadSound() {
             osc.stop(start + dur + 0.02)
         }
     } catch { /* autoplay bloqueado antes de qualquer interação — tudo bem, só não toca */ }
+}
+
+/** Toca ao entrar lead novo no Kanban — toca nos níveis "new_leads" e "all". */
+export function playNewLeadSound() {
+    if (getSoundScope() === "off") return
+    chime()
+}
+
+/** Toca quando chega mensagem nova de cliente em lead do agente logado — só no nível "all". */
+export function playReplySound() {
+    if (getSoundScope() !== "all") return
+    chime()
 }
