@@ -416,9 +416,11 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
                                         )} />
 
                                         <DialogFooter className="pt-4 flex justify-between items-center sm:justify-between">
-                                            <Button type="button" variant="destructive" size="sm" onClick={handleDelete} title="Excluir Lead permanentemente">
-                                                Excluir
-                                            </Button>
+                                            {user?.role === 'admin' ? (
+                                                <Button type="button" variant="destructive" size="sm" onClick={handleDelete} title="Excluir Lead permanentemente">
+                                                    Excluir
+                                                </Button>
+                                            ) : <span />}
                                             <div className="flex gap-2">
                                                 {canReopen && (
                                                     <Button type="button" className="bg-[#25D366] hover:bg-[#1ebe5a] text-white" onClick={() => reabrirAtendimentoMutation.mutate()} disabled={reabrirAtendimentoMutation.isPending}>
