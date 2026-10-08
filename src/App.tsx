@@ -63,6 +63,7 @@ import {
 import confetti from 'canvas-confetti';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
+import { MatriculaConfetti } from './components/MatriculaConfetti';
 import { KanbanBoard } from './components/kanban/KanbanBoard';
 import { KanbanDateFilter } from './components/kanban/KanbanDateFilter';
 import { CreateLeadFab } from './components/kanban/CreateLeadFab';
@@ -2167,6 +2168,7 @@ const FullApp = () => {
         <QueryClientProvider client={queryClient}>
             <App session={session} isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} />
             <Toaster position="top-right" richColors theme={isDarkMode ? 'dark' : 'light'} />
+            <MatriculaConfetti />
         </QueryClientProvider>
     );
 };

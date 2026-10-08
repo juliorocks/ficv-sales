@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react"
-import { Camera, Loader2, Check, Lock, User as UserIcon, Mail } from "lucide-react"
+import { Camera, Loader2, Check, Lock, User as UserIcon, Mail, PartyPopper } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { AgentAvatar } from "./AgentAdmin"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { showError, showSuccess } from "@/utils/toast"
+import { isConfettiEnabled, setConfettiEnabled } from "@/lib/confettiPrefs"
 
 interface MyProfileProps {
     profile: { id: string; full_name: string; email: string; avatar_url?: string | null; role: string } | null
@@ -39,6 +40,13 @@ export function MyProfile({ profile, onUpdated }: MyProfileProps) {
     const [pw1, setPw1] = useState("")
     const [pw2, setPw2] = useState("")
     const [savingPw, setSavingPw] = useState(false)
+
+    const [confettiOn, setConfettiOn] = useState(isConfettiEnabled())
+    const toggleConfetti = () => {
+        const v = !confettiOn
+        setConfettiOn(v)
+        setConfettiEnabled(v)
+    }
 
     useEffect(() => {
         setName(profile?.full_name ?? "")
@@ -178,6 +186,24 @@ export function MyProfile({ profile, onUpdated }: MyProfileProps) {
                     <Button size="sm" variant="destructive" onClick={savePw} disabled={savingPw || !pw1 || !pw2}>
                         {savingPw ? <Loader2 size={14} className="animate-spin" /> : <Lock size={14} />} Alterar senha
                     </Button>
+                </div>
+            </Section>
+
+            <Section icon={PartyPopper} title="Preferências">
+                <div className="flex items-center justify-between gap-4">
+                    <div>
+                        <p className="text-sm text-[var(--text-main)]">Confete de nova matrícula</p>
+                        <p className="text-xs text-[var(--text-muted)] mt-0.5">Comemoração na tela quando o Sponte confirma uma matrícula nova.</p>
+                    </div>
+                    <button
+                        type="button"
+                        role="switch"
+                        aria-checked={confettiOn}
+                        onClick={toggleConfetti}
+                        className={`shrink-0 w-11 h-6 rounded-full transition-colors relative ${confettiOn ? 'bg-primary' : 'bg-[var(--border)]'}`}
+                    >
+                        <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${confettiOn ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </button>
                 </div>
             </Section>
 
