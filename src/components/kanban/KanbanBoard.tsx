@@ -6,6 +6,7 @@ import { Lead, Stage, User, LeadSource, Course } from "@/types/database"
 import { KanbanColumn } from "./KanbanColumn"
 import { KanbanSkeleton } from "./KanbanSkeleton"
 import { showError, showSuccess } from "@/utils/toast"
+import { playLeadSound } from "@/utils/notificationSound"
 import { KanbanSquare } from "lucide-react"
 import { AddStageForm } from "./AddStageForm"
 import { useAuth } from "@/hooks/use-auth"
@@ -328,6 +329,7 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
                         // @ts-ignore
                         const leadName = payload.new?.nome_completo || 'Novo Lead';
                         showSuccess(`Novo lead: ${leadName}`);
+                        playLeadSound(); // 08/10: som de lead novo — silenciável (sino de notificações)
                     }
                 }
             )

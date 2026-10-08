@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react"
-import { Bell, Check, CheckCheck, Loader2, ExternalLink } from "lucide-react"
+import { Bell, Check, CheckCheck, Loader2, ExternalLink, Volume2, VolumeX } from "lucide-react"
 import { toast } from "sonner"
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
 import { LeadDialogById } from "@/components/kanban/LeadDialogById"
 import { showError, showSuccess } from "@/utils/toast"
 import { useDueFollowups, useSetFollowupStatus } from "@/hooks/use-followups"
+import { isLeadSoundMuted, playLeadSound, setLeadSoundMuted } from "@/utils/notificationSound"
 
 interface Props {
     profile: { id: string; role?: string } | null
@@ -27,6 +28,14 @@ export function NotificationBell({ profile, onOpenTab }: Props) {
     const [open, setOpen] = useState(false)
     const [showAll, setShowAll] = useState(false)
     const [openLeadId, setOpenLeadId] = useState<number | null>(null)
+    // som de lead novo (toca no Kanban, ver KanbanBoard.tsx) — mudo é por agente/navegador
+    const [soundMuted, setSoundMuted] = useState(isLeadSoundMuted)
+    const toggleSound = () => {
+        const next = !soundMuted
+        setLeadSoundMuted(next)
+        setSoundMuted(next)
+        if (!next) playLeadSound() // toca um exemplo ao reativar, pra confirmar que ouviu
+    }
 
     const { data: due, isLoading } = useDueFollowups(profile?.id, isAdmin && showAll)
     const statusMut = useSetFollowupStatus()
@@ -97,6 +106,19 @@ export function NotificationBell({ profile, onOpenTab }: Props) {
                             </button>
                         )}
                     </div>
+
+                    <button
+                        type="button"
+                        onClick={toggleSound}
+                        title={soundMuted ? "Ativar som de lead novo" : "Silenciar som de lead novo"}
+                        className="flex w-full items-center gap-2 border-b border-border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-white/5 hover:text-[var(--text-main)]"
+                    >
+                        {soundMuted ? <VolumeX className="h-3.5 w-3.5 shrink-0" /> : <Volume2 className="h-3.5 w-3.5 shrink-0" />}
+                        <span className="flex-1">Som de lead novo</span>
+                        <span className={`text-[10px] font-semibold ${soundMuted ? "text-muted-foreground" : "text-primary"}`}>
+                            {soundMuted ? "Desligado" : "Ligado"}
+                        </span>
+                    </button>
 
                     <div className="max-h-80 overflow-y-auto">
                         {isLoading ? (
