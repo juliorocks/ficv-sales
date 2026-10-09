@@ -163,13 +163,6 @@ export function LeadCard({ lead, users, leadSources, stages, courses, channels, 
                                         {course ? course.name : lead.observacoes?.match(/\[O\]\s*([^:\n]+)/)?.[1] || 'SendPulse'}
                                     </span>
                                 )}
-                                {lead.status_wide && (
-                                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0 ${lead.status_wide === 'ok_wide'
-                                        ? 'bg-green-500/15 text-green-600 dark:text-green-400'
-                                        : 'bg-red-500/15 text-red-600 dark:text-red-400'}`}>
-                                        {lead.status_wide === 'ok_wide' ? 'OK WIDE' : 'ERRO'}
-                                    </span>
-                                )}
                                 {channel && (
                                     <TooltipProvider>
                                         <Tooltip>

@@ -364,19 +364,20 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
         staleTime: 60_000,
     })
     const vcAvailable = !!vc?.enabled && (vc.channels?.length ?? 0) > 0
-    const lastProvider = [...(messages ?? [])].reverse().find((m) => m.provider)?.provider
-    // VivaConnect é o padrão pra tudo agora (06/10) — só fica no WideChat quem já tem
-    // conversa de verdade por lá (não troca o cliente de canal no meio do papo). Lead sem
-    // nenhuma conversa (nem canal fixo) cai no VivaConnect direto — antes caía no WideChat
-    // "porque o pool só tinha número de teste" (25/09), o que não é mais verdade.
-    const autoProvider: 'widechat' | 'vivaconnect' =
-        vcAvailable && lastProvider !== 'widechat' ? 'vivaconnect' : 'widechat'
-    const [providerChoice, setProviderChoice] = useState<'widechat' | 'vivaconnect' | null>(null)
-    const provider = vcAvailable ? (providerChoice ?? autoProvider) : 'widechat'
+    // 09/10, pedido do usuário: a conexão do WideChat com a API Oficial foi desligada de lá
+    // e trazida pra cá (Z-PRO) — não existe mais conversa "ao vivo" no WideChat pra proteger
+    // trocando de canal no meio do papo (o motivo de antes checar lastProvider). Toda
+    // conversa, mesmo a que já vinha de lá, responde pelo VivaConnect a partir de agora;
+    // sem escolha manual pro agente (tirava a opção "Atender pelo Wide" do seletor).
+    const provider: 'widechat' | 'vivaconnect' = vcAvailable ? 'vivaconnect' : 'widechat'
     const isViva = provider === 'vivaconnect'
     const [vcChannelChoice, setVcChannelChoice] = useState<number | null>(null)
     const vcFixedChannel = vc?.channels.find((c) => c.id === vc?.lead_channel_id) ?? null
-    const vcChannel = vcFixedChannel ?? vc?.channels.find((c) => c.id === vcChannelChoice) ?? vc?.channels.find((c) => c.purpose === 'pool') ?? vc?.channels[0] ?? null
+    // Padrão sem canal fixo nem escolha manual = o número OFICIAL (09/10, pedido do usuário:
+    // 3041-7471 virou o número principal — antes caía no 1º canal "pool", que não é mais o
+    // comportamento certo). Sem canal oficial cadastrado, cai no pool como antes.
+    const vcChannel = vcFixedChannel ?? vc?.channels.find((c) => c.id === vcChannelChoice)
+        ?? vc?.channels.find((c) => c.purpose === 'official') ?? vc?.channels.find((c) => c.purpose === 'pool') ?? vc?.channels[0] ?? null
     // canal com send_via_channel_id manda de verdade pelo delegado (normalmente a Baileys vinculada)
     // — espelha o execCh do backend (vivaconnect-api/sendRow), senão o aviso de janela aparece à toa
     // pra quem só recebe no oficial mas responde pelo não oficial (decisão do usuário 06/10)
@@ -907,11 +908,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
             {vcAvailable && (
                 <div className="flex items-center gap-2 px-3 pt-2 text-[11px] text-muted-foreground bg-[var(--bg-card)]">
                     <span className="font-semibold uppercase tracking-wide">Enviar por</span>
-                    <select value={provider} onChange={(e) => setProviderChoice(e.target.value as 'widechat' | 'vivaconnect')}
-                        className="h-6 rounded-md border border-[var(--border)] bg-transparent px-1.5 text-[11px]">
-                        <option value="vivaconnect">VivaConnect</option>
-                        <option value="widechat">WideChat</option>
-                    </select>
+                    <span className="font-semibold text-[var(--text-main)]">VivaConnect</span>
                     {isViva && (vcFixedChannel
                         ? <span title="O cliente conversa com esse número — as respostas sempre saem dele">· {vcFixedChannel.name}{vcFixedChannel.phone ? ` (${vcFixedChannel.phone})` : ''}</span>
                         : (vc?.channels.length ?? 0) > 1

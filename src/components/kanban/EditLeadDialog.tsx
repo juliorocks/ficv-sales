@@ -371,13 +371,6 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
                                                 <FormItem><FormLabel>Temperatura</FormLabel><Select onValueChange={field.onChange} value={field.value || 'frio'}><FormControl><SelectTrigger><SelectValue placeholder="Selecione a temperatura" /></SelectTrigger></FormControl><SelectContent><SelectItem value="frio">Frio</SelectItem><SelectItem value="morno">Morno</SelectItem><SelectItem value="quente">Quente</SelectItem></SelectContent></Select><FormMessage /></FormItem>
                                             )} />
                                         </div>
-                                        {lead.status_wide && (
-                                            <div className="text-xs text-muted-foreground">
-                                                Confirmação WhatsApp: <span className={lead.status_wide === 'ok_wide' ? 'text-green-600 dark:text-green-400 font-medium' : 'text-red-600 dark:text-red-400 font-medium'}>
-                                                    {lead.status_wide === 'ok_wide' ? 'OK — contato confirmado automaticamente' : 'ERRO'}
-                                                </span>
-                                            </div>
-                                        )}
                                         <FormField
                                             control={form.control}
                                             name="curso_interesse"

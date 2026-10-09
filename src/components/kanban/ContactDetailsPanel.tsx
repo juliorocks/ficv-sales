@@ -97,7 +97,6 @@ export function ContactDetailsPanel({ leadId, onClose, highlightFollowupId }: { 
                                     <p className="font-semibold text-[var(--text-main)]">{lead.nome_completo}</p>
                                     <div className="flex justify-center gap-1.5 flex-wrap">
                                         {lead.perfil === "aluno" && <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500">Aluno</span>}
-                                        {(lead as any).status_wide === "ok_wide" && <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/10 text-green-500">WhatsApp confirmado</span>}
                                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--bg-main)] text-[var(--text-muted)]">#{lead.id}</span>
                                     </div>
                                     <button onClick={() => setEditOpen(true)} className="w-full mt-1 flex items-center justify-center gap-1.5 rounded-lg border border-[var(--border)] py-2 text-xs font-semibold text-[var(--text-main)] hover:border-primary">
