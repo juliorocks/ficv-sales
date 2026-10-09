@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabase"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
-import { AlertCircle, MessageSquare, Send, Loader2, FileText, Smile, Paperclip, Mic, Square, X, Image as ImageIcon, FileAudio, BookOpen, Lock } from "lucide-react"
+import { AlertCircle, MessageSquare, Send, Loader2, FileText, Smile, Paperclip, Mic, Square, X, Image as ImageIcon, FileAudio, BookOpen, Lock, Reply } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -180,6 +180,11 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
     // anexo (arquivo escolhido, aguardando confirmação/legenda antes de enviar)
     const fileInputRef = useRef<HTMLInputElement>(null)
     const [pendingFile, setPendingFile] = useState<File | null>(null)
+    // "Responder" (09/10, pedido do usuário — aproximação do recurso nativo do Z-PRO: a API
+    // externa não expõe reply/quote de verdade nem reação de emoji, nenhum dos dois — só dá
+    // pra simular citando o texto original como uma linha "> ..." (formatação de bloco de
+    // citação que o próprio WhatsApp já reconhece) na frente da resposta.
+    const [replyingTo, setReplyingTo] = useState<{ autor: string; texto: string } | null>(null)
     // gravação de áudio — mesma técnica do módulo de Tickets (MediaRecorder)
     const mediaRecorderRef = useRef<MediaRecorder | null>(null)
     const audioChunksRef = useRef<Blob[]>([])
@@ -608,17 +613,28 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
         onError: (e: any) => showError(`Erro ao salvar nota: ${e.message}`),
     })
 
+    // Monta a citação (bloco "> ...", formatação de citação que o WhatsApp já renderiza
+    // sozinho) na frente do texto, se a mensagem for uma "Resposta" — trunca o original pra
+    // não virar uma citação gigante.
+    const withQuote = (text: string) => {
+        if (!replyingTo) return text
+        const trecho = replyingTo.texto.length > 160 ? `${replyingTo.texto.slice(0, 160)}…` : replyingTo.texto
+        const linhas = trecho.split('\n').map((l) => `> ${l}`).join('\n')
+        return `${linhas}\n\n${text}`
+    }
     const doSend = () => {
         if (sendMessageMutation.isPending || !canSendText) return
         if (pendingFile) {
-            sendMessageMutation.mutate({ media: pendingFile, caption: newMessage.trim() })
+            sendMessageMutation.mutate({ media: pendingFile, caption: withQuote(newMessage.trim()) })
             setPendingFile(null)
             setNewMessage("")
+            setReplyingTo(null)
             return
         }
         if (!newMessage.trim()) return
-        sendMessageMutation.mutate(newMessage)
+        sendMessageMutation.mutate(withQuote(newMessage))
         setNewMessage("")
+        setReplyingTo(null)
     }
     const handleSend = (e: React.FormEvent) => { e.preventDefault(); doSend() }
 
@@ -1105,7 +1121,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                                 )
                             }
                             return (
-                                <div key={msg.id} className={`flex flex-col max-w-[85%] ${isUser ? "self-start" : "self-end items-end"}`}>
+                                <div key={msg.id} className={`group flex flex-col max-w-[85%] ${isUser ? "self-start" : "self-end items-end"}`}>
                                     <div className={`px-4 py-2 text-sm shadow-sm ${isUser
                                         ? "bg-white text-slate-800 rounded-2xl rounded-tl-md"
                                         : isBot
@@ -1155,9 +1171,14 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                                             return <p className="italic text-xs opacity-70">Arquivo de mídia ({msg.type})</p>
                                         })()}
                                     </div>
-                                    <span className="text-[10px] text-slate-500 mt-1 px-1">
-                                        {isAgent && msg.sender_name && <span className="mr-1 font-medium">{msg.sender_name} •</span>}
+                                    <span className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-1 px-1">
+                                        {isAgent && msg.sender_name && <span className="font-medium">{msg.sender_name} •</span>}
                                         {fmtHora(msg.created_at)}
+                                        <button type="button"
+                                            onClick={() => { setReplyingTo({ autor: isUser ? (leadName || 'o lead') : (msg.sender_name || (isBot ? 'a IA' : 'você')), texto: msg.message || '[mídia]' }); textareaRef.current?.focus() }}
+                                            className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-primary" title="Responder citando esta mensagem">
+                                            <Reply className="h-3 w-3" />
+                                        </button>
                                     </span>
                                 </div>
                             )
@@ -1195,6 +1216,18 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                     </form>
                 ) : canSendText ? (
                     <form onSubmit={handleSend} className="flex flex-col gap-2">
+                        {replyingTo && (
+                            <div className="flex items-center gap-2 bg-white border border-slate-200 border-l-4 border-l-primary rounded-xl px-3 py-2 text-sm">
+                                <Reply className="h-4 w-4 text-primary shrink-0" />
+                                <div className="min-w-0 flex-1">
+                                    <p className="text-xs font-semibold text-primary">Respondendo a {replyingTo.autor}</p>
+                                    <p className="truncate text-slate-600">{replyingTo.texto}</p>
+                                </div>
+                                <button type="button" onClick={() => setReplyingTo(null)} className="text-slate-400 hover:text-slate-700 shrink-0" title="Cancelar resposta">
+                                    <X className="h-4 w-4" />
+                                </button>
+                            </div>
+                        )}
                         {pendingFile && (
                             <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm">
                                 {pendingFile.type.startsWith('image/')
