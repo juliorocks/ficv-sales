@@ -53,6 +53,7 @@ import { TeamsAdmin } from './components/TeamsAdmin';
 import { HistoryLog } from './components/HistoryLog';
 import { UserManagement } from './components/UserManagement';
 import { ConversationAnalysis } from './utils/csvProcessor';
+import { computeMatriculasPorAgente, type SponteMatricula } from './utils/matriculaAttribution';
 import { supabase } from './lib/supabase';
 import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
@@ -684,27 +685,56 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
 
     const totalSales = useMemo(() => validData.filter(d => d.closingAttempt).length, [validData]);
 
-    // Enrollment count from Sponte (for real conversion rate), filtered by selected courses
-    const [enrollmentCount, setEnrollmentCount] = useState<number | null>(null);
+    // Matrícula de verdade só conta como "conversão" se veio de um atendimento rastreado —
+    // antes isso comparava TODAS as matrículas do Sponte no período contra o total de
+    // atendimentos (duas contagens soltas, sem vínculo nenhuma com a outra: uma aluna
+    // matriculada direto na secretaria contava igual a quem foi fechada por um agente).
+    // Pedido do usuário 09/10: "deveria ser quem se matriculou proveniente dos
+    // atendimentos". Reusa a MESMA atribuição atendimento→matrícula por telefone/nome (com
+    // janela de 30 dias) já usada no relatório "Matrículas" (SponteDashboard) e no recálculo
+    // do score Comercial da IA — os três números agora concordam entre si. Busca TODAS as
+    // matrículas (não só as do período): o cálculo precisa do histórico completo de cada
+    // aluna pra saber se é matrícula nova ou renovação (~3.800 linhas, tranquilo sem filtro).
+    const [matriculasData, setMatriculasData] = useState<SponteMatricula[]>([]);
     useEffect(() => {
-        const fetchEnrollments = async () => {
-            let query = supabase
+        const fetchMatriculas = async () => {
+            const { data, error } = await supabase
                 .from('sponte_matriculas')
-                .select('contrato_id', { count: 'exact', head: true });
-            if (dateRange.start) query = query.gte('data_matricula', dateRange.start);
-            if (dateRange.end)   query = query.lte('data_matricula', dateRange.end);
-            if (selectedCourses.length > 0) query = query.in('nome_curso', selectedCourses);
-            const { count, error } = await query;
-            if (!error) setEnrollmentCount(count ?? 0);
+                .select('contrato_id, aluno_id, aluno, turma_id, nome_turma, nome_curso, situacao_id, situacao, data_matricula, data_inicio, data_termino, contratante, numero_contrato, financeiro_lancado, celular')
+                .limit(20000);
+            if (!error) setMatriculasData((data ?? []) as SponteMatricula[]);
         };
-        fetchEnrollments();
-    }, [dateRange, selectedCourses]);
+        fetchMatriculas();
+    }, []);
+
+    // Mesmo recorte de agente/equipe do filteredData, mas SEM o filtro de data — o
+    // atendimento que gerou a matrícula pode ter acontecido antes do início do período
+    // selecionado (ex.: matrícula no dia 1 do mês, atendimento fechado 3 semanas antes).
+    const atendimentosParaMatch = useMemo(() => {
+        return analysisData
+            .filter(d => {
+                const matchesAgent = selectedAgents.length === 0 || selectedAgents.includes('all') || selectedAgents.includes(d.agent);
+                const matchesTeam = !selectedTeamId || agentTeamMap[d.agent] === selectedTeamId;
+                return matchesAgent && matchesTeam;
+            })
+            .map(d => ({ agent_name: d.agent, contact: d.contact, timestamp: d.date }));
+    }, [analysisData, selectedAgents, selectedTeamId, agentTeamMap]);
+
+    const matriculaAttribution = useMemo(() => computeMatriculasPorAgente(
+        matriculasData, atendimentosParaMatch,
+        dateRange.start || '0001-01-01', dateRange.end || '9999-12-31',
+        selectedCourses, '', '',
+    ), [matriculasData, atendimentosParaMatch, dateRange, selectedCourses]);
+
+    const matriculasConvertidas = useMemo(
+        () => matriculaAttribution.porAgente.reduce((sum, a) => sum + a.matriculas, 0),
+        [matriculaAttribution]
+    );
 
     const conversionRate = useMemo(() => {
-        if (enrollmentCount === null) return null;
         if (filteredData.length === 0) return 0;
-        return (enrollmentCount / filteredData.length) * 100;
-    }, [enrollmentCount, filteredData.length]);
+        return (matriculasConvertidas / filteredData.length) * 100;
+    }, [matriculasConvertidas, filteredData.length]);
 
     const avgScore = useMemo(() => {
         return validData.length > 0
@@ -1459,7 +1489,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 items-stretch">
                             <StatCard icon={MessageSquare} title="Total Atendimentos" value={filteredData.length > 0 ? filteredData.length.toLocaleString() : "0"} subtext="Baseado em dados reais" />
                             <StatCard icon={Award} title="Score Qualidade" value={avgScore} subtext={`Média de ${validData.length.toLocaleString()} atend. avaliados`} />
-                            <StatCard icon={Target} title="Média de Conversão" value={conversionRate !== null ? `${conversionRate.toFixed(1)}%` : enrollmentCount === null ? '...' : '0.0%'} subtext={enrollmentCount !== null ? `${enrollmentCount} matrículas no período · Obj: 15%` : 'Objetivo: 15%'} />
+                            <StatCard icon={Target} title="Média de Conversão" value={`${conversionRate.toFixed(1)}%`} subtext={`${matriculasConvertidas} matrículas de atendimento · Obj: 15%`} />
 
                             {/* 2 compact gauges */}
                             <div className="glass-card p-4 flex flex-col items-center justify-center">
