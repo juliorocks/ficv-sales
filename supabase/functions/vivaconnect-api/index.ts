@@ -12,6 +12,9 @@
 //   media          { message_row_id }        (staff)   → busca no Z-PRO o link de uma mídia RECEBIDA
 //   finish         { lead_id }               (staff)   → fecha o ticket no Z-PRO + lead → Finalizado
 //   transfer       { lead_id, profile_id }   (staff)   → passa o lead pra outro agente do CRM
+//   transfer_other_company { lead_id, destination_id } (staff) → manual: assunto não é da Faculdade
+//                    (mesma ação que o Hub faz sozinho — move a fila no Z-PRO se o destino
+//                    tiver zpro_queue_id, ou manda o número novo — e finaliza o lead aqui)
 //   enqueue_first  { lead_id }               (staff)   → força a 1ª mensagem de um lead
 //   process_outbox {}                        (service, cron 1/min)  → esvazia a fila
 //   run_followups  {}                        (service, cron 15/min) → IA reengaja lead quieto após silêncio
@@ -33,7 +36,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { corsHeaders, identify, isAdmin, isStaff, jsonRes } from "../_shared/ai.ts";
 import { asList, fillTemplate, firstName, loadSettings, markHumanReplied, parseApiRef, toDiscovered, toZproNumber, zpro, zproErr } from "../_shared/vivaconnect.ts";
 import { mirror, sv } from "../_shared/db.ts";
-import { type HubMsg, loadDestinations, planejar } from "../_shared/hub.ts";
+import { type HubMsg, filaText, loadDestinations, planejar, redirectText } from "../_shared/hub.ts";
 
 const CH_COLS = "id, name, purpose, kind, phone, api_id, api_token, active, daily_limit, zpro_whatsapp_id, last_sent_at, zpro_type, zpro_hybrid_mode, send_via_channel_id";
 
@@ -162,7 +165,7 @@ Deno.serve(async (req) => {
             return jsonRes(res, res.ok ? 200 : 502);
         }
 
-        if (action === "message_status" || action === "media" || action === "finish") {
+        if (action === "message_status" || action === "media" || action === "finish" || action === "transfer_other_company") {
             let leadId = Number(body.lead_id) || null;
             let msgRow: any = null;
             if (action === "media") {
@@ -217,6 +220,43 @@ Deno.serve(async (req) => {
                         `INSERT INTO lead_notes [{ lead_id: leads:⟨${lead.id}⟩, note: ${sv(note)}, created_at: d${sv(now)} }] RETURN NONE;`);
                 }
                 return jsonRes({ ok: true, ticket_closed: !!ticketId });
+            }
+
+            // Transferência MANUAL pra outra empresa do grupo (Igreja/Escola/Fundação) — pedido
+            // do usuário 09/10: hoje só a IA detecta isso sozinha (classify() em hub.ts); um
+            // agente humano que perceber no meio da conversa "isso não é da Faculdade" não tinha
+            // como fazer o mesmo encaminhamento pelo painel. Mesma ação de verdade que o Hub
+            // dispara sozinho (hubRoute/checkOtherCompany): manda o aviso certo (fila do Z-PRO
+            // ou número novo, conforme o destino) e finaliza o lead aqui.
+            if (action === "transfer_other_company") {
+                if (!ch) return jsonRes({ error: "Lead sem número do VivaConnect." }, 400);
+                const destId = Number(body.destination_id);
+                const { data: dest } = await db.from("vivaconnect_hub_destinations").select("*").eq("id", destId).eq("ativo", true).maybeSingle();
+                if (!dest) return jsonRes({ error: "Empresa não encontrada ou desativada." }, 404);
+                const number = toZproNumber(lead.telefone);
+                if (!number) return jsonRes({ error: "Lead sem telefone válido." }, 400);
+                const nome = firstName(lead.nome_completo ?? "");
+                const aviso = dest.zpro_queue_id ? filaText(dest, nome) : redirectText(dest, nome);
+                const { data: row } = await db.from("vivaconnect_outbox").insert({
+                    lead_id: lead.id, channel_id: ch.id, kind: "hub_redirect", number, body: aviso, created_by: createdBy,
+                }).select("*").single();
+                if (row) await sendRow(db, settings, row, ch);
+                if (dest.zpro_queue_id && ticketId && execCh) {
+                    const r = await zpro(settings.base_url, execCh, "/updateticketinfo", { ticketId: Number(ticketId), queueId: dest.zpro_queue_id });
+                    if (!r.ok) return jsonRes({ error: `Mensagem enviada, mas não consegui mover a fila no Z-PRO: ${zproErr(r.status, r.data)}` }, 502);
+                }
+                const { data: fin } = await db.from("stages").select("id").or("name.ilike.%finaliz%,name.ilike.%encerr%").limit(1).maybeSingle();
+                const now = new Date().toISOString();
+                const who = createdBy ? (await db.from("profiles").select("full_name").eq("id", createdBy).maybeSingle()).data?.full_name : null;
+                const note = `🔀 Transferência manual para ${dest.nome}${who ? ` por ${who}` : ""}.`;
+                if (fin) {
+                    await db.from("leads").update({ stage_id: fin.id, stage_entry_date: now, updated_at: now }).eq("id", lead.id);
+                    await db.from("lead_notes").insert({ lead_id: lead.id, note, created_at: now });
+                    await mirror(`UPDATE leads SET stage_id = stages:⟨${fin.id}⟩, stage_entry_date = d${sv(now)} WHERE id = leads:⟨${lead.id}⟩;\n` +
+                        `INSERT INTO lead_notes [{ lead_id: leads:⟨${lead.id}⟩, note: ${sv(note)}, created_at: d${sv(now)} }] RETURN NONE;`);
+                }
+                await db.from("ai_lead_sessions").delete().eq("lead_id", lead.id);
+                return jsonRes({ ok: true, empresa: dest.nome });
             }
 
             if (!ticketId) return jsonRes({ error: "Conversa ainda não tem ticket no Z-PRO." }, 404);

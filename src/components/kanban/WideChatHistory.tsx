@@ -777,6 +777,33 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
         staleTime: 60_000,
     })
 
+    // Transferir manualmente pra outra empresa do grupo (Igreja/Escola/Fundação) — pedido do
+    // usuário 09/10: hoje só a IA detecta isso sozinha; um agente que perceber no meio da
+    // conversa "isso não é da Faculdade" precisa de um jeito de fazer o mesmo encaminhamento
+    // (mesma ação de verdade que o Hub dispara sozinho — move a fila no Z-PRO ou manda o
+    // número novo, conforme o destino, e finaliza o lead aqui).
+    const { data: otherCompanyDests } = useQuery<{ id: number; nome: string; emoji: string }[]>({
+        queryKey: ['hub-destinations-transfer'],
+        queryFn: async () => {
+            const { data } = await supabase.from('vivaconnect_hub_destinations').select('id, nome, emoji').eq('ativo', true).eq('is_self', false).order('ordem')
+            return data ?? []
+        },
+        enabled: isViva,
+        staleTime: 5 * 60_000,
+    })
+    const transferOtherCompanyMutation = useMutation({
+        mutationFn: async (arg: { destination_id: number; label: string }) => {
+            const { data, error } = await supabase.functions.invoke('vivaconnect-api', { body: { action: 'transfer_other_company', lead_id: leadId, destination_id: arg.destination_id } })
+            if (error) throw new Error(await extractFnErrorMessage(error))
+            if (data?.error) throw new Error(data.error)
+            queryClient.invalidateQueries({ queryKey: ['leads'] })
+            queryClient.invalidateQueries({ queryKey: msgKey })
+            return arg.label
+        },
+        onSuccess: (label) => showSuccess(`Encaminhado para ${label} — o lead foi para Finalizado.`),
+        onError: (e: any) => showError(`Erro ao encaminhar: ${e.message}`),
+    })
+
     const transferMutation = useMutation({
         mutationFn: async (arg: { type: 'agent'; agent_id: string; label: string } | { type: 'attendance'; team_id: string; label: string } | { type: 'crm'; profile_id: string; label: string }) => {
             if (arg.type === 'crm') {
@@ -968,6 +995,17 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                                         {a.full_name}
                                     </DropdownMenuItem>
                                 ))}
+                                {!!otherCompanyDests?.length && (<>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuLabel>Não é da Faculdade — encaminhar para</DropdownMenuLabel>
+                                    <DropdownMenuSeparator />
+                                    {otherCompanyDests.map((d) => (
+                                        <DropdownMenuItem key={d.id} disabled={transferOtherCompanyMutation.isPending}
+                                            onClick={() => { if (window.confirm(`Encaminhar essa conversa para ${d.nome}? O lead vai para Finalizado aqui.`)) transferOtherCompanyMutation.mutate({ destination_id: d.id, label: d.nome }) }}>
+                                            {d.emoji} {d.nome}
+                                        </DropdownMenuItem>
+                                    ))}
+                                </>)}
                             </>) : (<>
                             <DropdownMenuLabel>Transferir para agente</DropdownMenuLabel>
                             <DropdownMenuSeparator />
