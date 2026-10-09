@@ -167,8 +167,15 @@ export function AtendimentosView({ searchTerm = "", assigneeFilter = "all", team
             const key = sortBy.key
             let av: any, bv: any
             if (key === "temperatura") { av = tempOrder[a.temperatura || ""] || 0; bv = tempOrder[b.temperatura || ""] || 0 }
-            else if (key === "stage_entry_date" || key === "data_entrada" || key === "updated_at") {
-                const k = key as "stage_entry_date" | "data_entrada" | "updated_at"
+            // "Última Atividade" nesta tela (caixa de entrada) tem que ser a ÚLTIMA MENSAGEM
+            // de verdade (last_at, o mesmo valor já exibido em cada linha via ago(r.last_at)),
+            // não leads.updated_at — esse campo também muda por coisas sem relação com
+            // conversa (mudar etapa, trocar atendente, sync do Sponte...), então ordenar por
+            // ele e mostrar outra data deixava a lista parecendo "embaralhada" mesmo
+            // tecnicamente ordenada (achado ao vivo 09/10).
+            else if (key === "updated_at") { av = a.last_at ? new Date(a.last_at).getTime() : 0; bv = b.last_at ? new Date(b.last_at).getTime() : 0 }
+            else if (key === "stage_entry_date" || key === "data_entrada") {
+                const k = key as "stage_entry_date" | "data_entrada"
                 av = a[k] ? new Date(a[k] as string).getTime() : 0; bv = b[k] ? new Date(b[k] as string).getTime() : 0
             } else if (key === "nome_completo") { av = a.nome; bv = b.nome }
             else if (key === "valor_oportunidade") { av = a.valor_oportunidade; bv = b.valor_oportunidade }

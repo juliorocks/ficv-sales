@@ -326,7 +326,7 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, channe
                                                         {...provided.dragHandleProps}
                                                         className={`${snapshot.isDragging ? 'shadow-lg ring-2 ring-primary' : ''}`}
                                                     >
-                                                        <LeadCard lead={lead} users={users} leadSources={leadSources} stages={allStages} courses={courses} channels={channels} pending={pendingByLead?.get(lead.id)} aiTouched={aiTouchedLeads?.has(lead.id)} onDialogOpenChange={(open) => setPinned(lead.id, open)} />
+                                                        <LeadCard lead={lead} users={users} leadSources={leadSources} stages={allStages} courses={courses} channels={channels} pending={pendingByLead?.get(lead.id)} aiTouched={aiTouchedLeads?.has(lead.id)} onDialogOpenChange={(open) => setPinned(lead.id, open)} sortKey={sortBy.key} />
                                                     </div>
                                                 )}
                                             </Draggable>

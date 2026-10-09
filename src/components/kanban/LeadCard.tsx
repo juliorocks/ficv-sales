@@ -36,9 +36,22 @@ interface LeadCardProps {
      * renderizado mesmo se o reordenamento (ex.: "Atender" tira o lead do topo dos "sem
      * atendente") empurrar ele pra fora do corte de `visibleCount` — ver KanbanColumn.tsx */
     onDialogOpenChange?: (open: boolean) => void
+    /** campo que a coluna está usando pra ordenar agora (sortBy.key do KanbanColumn) — o
+     * card sempre mostra ESSA data, nunca uma fixa. Sem isso, card e ordenação divergem toda
+     * vez que o padrão de ordenação muda (já aconteceu 2x: era data_entrada, virou
+     * stage_entry_date, virou updated_at em 24/09 — o card ficou mostrando stage_entry_date
+     * até o usuário notar os cards "embaralhados" em 09/10, mesmo a ordenação em si estando
+     * certa). */
+    sortKey?: 'updated_at' | 'stage_entry_date' | 'data_entrada' | string
 }
 
-export function LeadCard({ lead, users, leadSources, stages, courses, channels, pending, aiTouched, onDialogOpenChange }: LeadCardProps) {
+const DATE_FIELD_FALLBACK: Record<string, keyof Lead> = {
+    updated_at: 'updated_at',
+    stage_entry_date: 'stage_entry_date',
+    data_entrada: 'data_entrada',
+}
+
+export function LeadCard({ lead, users, leadSources, stages, courses, channels, pending, aiTouched, onDialogOpenChange, sortKey }: LeadCardProps) {
     const timeInStage = useTimeInStage(lead.stage_entry_date);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
     const [editTab, setEditTab] = useState<"details" | "chat">("chat");
@@ -289,13 +302,23 @@ export function LeadCard({ lead, users, leadSources, stages, courses, channels, 
                             {timeInStage}
                         </div>
                     )}
-                    {/* Mostra a mesma data que ordena a coluna por padrão (stage_entry_date) —
-                        antes mostrava data_entrada (entrada no FUNIL, não na etapa atual),
-                        que pra um lead que já mudou de etapa fica bem diferente da posição
-                        real dele na lista e parecia "fora de ordem"/misturado. */}
-                    <div className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0" title="Data/Hora nesta etapa">
-                        {new Date(lead.stage_entry_date || lead.data_entrada).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} {new Date(lead.stage_entry_date || lead.data_entrada).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                    </div>
+                    {/* Mostra SEMPRE a mesma data que está ordenando a coluna agora (sortKey,
+                        vindo de sortBy.key do KanbanColumn) — não uma fixa. Card e ordenação
+                        já divergiram 2x no passado (era data_entrada, virou stage_entry_date,
+                        o padrão da coluna virou updated_at em 24/09 e o card ficou mostrando
+                        stage_entry_date) porque a data exibida estava "hardcoded" sem
+                        acompanhar qual campo a coluna realmente usa pra ordenar — achado ao
+                        vivo 09/10, cards pareciam "embaralhados" mesmo com a ordenação certa. */}
+                    {(() => {
+                        const dateField = (sortKey && DATE_FIELD_FALLBACK[sortKey]) || 'stage_entry_date'
+                        const raw = (lead as any)[dateField] || lead.stage_entry_date || lead.data_entrada
+                        const d = new Date(raw)
+                        return (
+                            <div className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0" title="Data/Hora usada na ordenação">
+                                {d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} {d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                            </div>
+                        )
+                    })()}
                 </CardFooter>
                 {isEntradaStage && !lead.assigned_to_id && user && (
                     <div className="px-4 pb-4">
