@@ -435,12 +435,22 @@ async function aiReply(db: any, settings: any, leadId: number, channelId: number
     // automaticamente"). Fica em handed_off (igual um agente já ter assumido) até um humano
     // decidir — "Devolver para a IA" no painel. Só vale a 1ª vez (!sess); depois que a sessão
     // existe, segue o fluxo normal de handed_off/reactivate que já existe.
+    //
+    // EXCETO lead vindo de Formulário de Marketing (leads.from_marketing_form) — ali o
+    // "contato ativo" é só o sistema respondendo ao interesse que a PESSOA demonstrou
+    // preenchendo o formulário, não um disparo frio/proativo nosso. Achado ao vivo 09/10:
+    // três leads do form "Teologia EAD" (Izabella, Dave, Jucimara) perguntaram algo de
+    // verdade e a IA ficou muda esperando um humano — a regra de 06/10 foi pensada pra
+    // campanha de reconexão/disparo frio, não pra quem pediu contato pela LP.
     if (!sess) {
         const { data: activeContact } = await db.from("vivaconnect_outbox").select("id")
             .eq("lead_id", leadId).eq("kind", "first_message").limit(1).maybeSingle();
         if (activeContact) {
-            await markAiHandedOff(db, leadId, "Contato ativo nosso — 1ª resposta do lead aguarda atendimento humano");
-            return "ia:pulou (contato ativo, aguardando humano)";
+            const { data: leadRow } = await db.from("leads").select("from_marketing_form").eq("id", leadId).maybeSingle();
+            if (!leadRow?.from_marketing_form) {
+                await markAiHandedOff(db, leadId, "Contato ativo nosso — 1ª resposta do lead aguarda atendimento humano");
+                return "ia:pulou (contato ativo, aguardando humano)";
+            }
         }
     }
 
