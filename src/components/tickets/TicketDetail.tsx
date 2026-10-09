@@ -657,7 +657,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   return (
     <>
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-[95vw] w-[95vw] h-[95vh] flex flex-col p-0 bg-[var(--bg-card)] border-[var(--border)]">
+      <DialogContent className="max-w-[70vw] w-[70vw] h-[95vh] flex flex-col p-0 bg-[var(--bg-card)] border-[var(--border)]">
         {/* Header */}
         <DialogHeader className="px-6 pt-5 pb-4 border-b border-[var(--border)] shrink-0">
           <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -1030,7 +1030,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                   value={msg}
                   onChange={e => setMsg(e.target.value)}
                   placeholder={interno ? 'Nota interna (não visível ao aluno)...' : 'Digite sua mensagem...'}
-                  className={`resize-none w-[70%] bg-[var(--bg-main)] border-[var(--border)] text-[var(--text-main)] ${
+                  className={`resize-none flex-1 bg-[var(--bg-main)] border-[var(--border)] text-[var(--text-main)] ${
                     interno ? 'border-amber-500/50' : ''
                   }`}
                   rows={2}
