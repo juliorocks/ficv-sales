@@ -2,8 +2,9 @@
 -- pipeline comercial — precisa de uma etapa própria ("Aluno"), separada de "Matriculado"
 -- (que agora passa a significar só "era lead e virou matrícula de verdade", pra medir
 -- conversão de venda com fidelidade — ver src/utils/matriculaAttribution.ts).
+-- 09/10, ajustado: usuário pediu a coluna "Aluno" no FIM do quadro, não no início.
 insert into stages (name, "order")
-select 'Aluno', 0
+select 'Aluno', 7
 where not exists (select 1 from stages where name = 'Aluno');
 
 -- sync_leads_matriculado_from_sponte(): antes movia QUALQUER lead cujo telefone batesse
