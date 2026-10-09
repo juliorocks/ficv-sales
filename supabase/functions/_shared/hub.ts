@@ -194,7 +194,10 @@ export async function checkOtherCompany(
     if (!self || !dests.some((d) => !d.is_self)) return null;
     const c = await classify(db, dests, historico, nome, settings);
     if (!c.destino || c.destino.id === self.id || c.destino.id === undefined) return null;
-    return { destino: c.destino, redirect: redirectText(c.destino, nome) };
+    // 09/10, mesmo bug achado ao vivo do hubRoute(): destino com fila do Z-PRO (sem número
+    // próprio) usa a mensagem de fila, não o redirecionamento por número — quem move o
+    // ticket de fila de verdade é o caller (vivaconnect-webhook), que tem o ticketId/canal.
+    return { destino: c.destino, redirect: temFila(c.destino) ? filaText(c.destino, nome) : redirectText(c.destino, nome) };
 }
 
 function plano(d: HubDest, metodo: string, confianca: number, motivo: string, self: HubDest, nome: string | null, falas: string[]): HubPlano {

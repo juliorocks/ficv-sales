@@ -209,7 +209,7 @@ Deno.serve(async (req) => {
                     return jsonRes({
                         replies: [other.redirect], reply: other.redirect,
                         handoff: false, handoff_reason: null, summary: null, sources: [],
-                        otherCompany: { id: other.destino.id, nome: other.destino.nome },
+                        otherCompany: { id: other.destino.id, nome: other.destino.nome, zpro_queue_id: other.destino.zpro_queue_id },
                         dry_run: dryRun,
                     });
                 }

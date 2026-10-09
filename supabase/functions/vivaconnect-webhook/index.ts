@@ -492,6 +492,18 @@ async function aiReply(db: any, settings: any, leadId: number, channelId: number
     if (out.otherCompany) {
         for (const body of blocks) await db.from("vivaconnect_outbox").insert({ lead_id: leadId, channel_id: channelId, kind: "hub_redirect", number: num, body });
         await kickOutbox();
+        // 09/10, achado ao vivo: lead já na Faculdade que muda de assunto pra Igreja no meio
+        // da conversa caía aqui com a MESMA mensagem de número novo do Hub (redirectText) —
+        // bug igual ao do hubRoute(), só que nesta outra rota (checkOtherCompany, lead já
+        // existente). Destino com fila do Z-PRO: move o ticket de verdade, igual lá.
+        if (out.otherCompany.zpro_queue_id) {
+            const { data: lead2 } = await db.from("leads").select("vivaconnect_ticket_id").eq("id", leadId).maybeSingle();
+            if (lead2?.vivaconnect_ticket_id) {
+                const { data: tok } = await db.from("vivaconnect_channels").select("api_id, api_token").eq("id", channelId).single();
+                const r = await zpro(settings.base_url, tok, "/updateticketinfo", { ticketId: Number(lead2.vivaconnect_ticket_id), queueId: out.otherCompany.zpro_queue_id });
+                if (!r.ok) console.error(`vivaconnect-webhook: mover ticket ${lead2.vivaconnect_ticket_id} pra fila ${out.otherCompany.zpro_queue_id}:`, zproErr(r.status, r.data));
+            }
+        }
         const { data: fin } = await db.from("stages").select("id").or("name.ilike.%finaliz%,name.ilike.%encerr%").limit(1).maybeSingle();
         const now = new Date().toISOString();
         const note = `🔀 Transferência de setor — assunto de "${out.otherCompany.nome}", não da Faculdade. Encaminhado com o contato deles.`;
