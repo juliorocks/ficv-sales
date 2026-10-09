@@ -16,7 +16,7 @@ import { withTimeout } from '../../utils/withTimeout'
 import {
   X, Send, Lock, Clock, CheckCircle2, Star, ChevronRight,
   MessageSquare, Shield, Loader2, UserCircle2, AlertCircle,
-  Paperclip, FileText, ImageIcon, Download, XCircle, Mic, MicOff, Play, BookOpen, Trash2, GraduationCap
+  Paperclip, FileText, ImageIcon, Download, XCircle, Mic, MicOff, Play, BookOpen, Trash2, GraduationCap, Bot
 } from 'lucide-react'
 import { AlunoPainelDrawer } from './AlunoPainelDrawer'
 import { formatDistanceToNow, format } from 'date-fns'
@@ -238,6 +238,12 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   // sensível: só quem já lida com cobrança (admin/agent/secretaria/coordenador).
   const [showAlunoPainel, setShowAlunoPainel] = useState(false)
   const canSeeFinanceiro = ['admin', 'agent', 'secretaria', 'coordenador'].includes(String(user?.role ?? ''))
+  // Aba "Histórico do Aluno" — pedido do usuário 09/10: viu o mesmo assunto (cancelamento)
+  // se repetir e perguntou "como vejo o histórico de atendimento dessa aluna?" sem ter como.
+  // Só pra equipe (o aluno já sabe quando ele mesmo escreveu, e "quem atendeu" não faz
+  // sentido pro lado dele).
+  const [activeTab, setActiveTab] = useState<'conversa' | 'historico'>('conversa')
+  const [nestedTicket, setNestedTicket] = useState<Ticket | null>(null)
 
   const [msg, setMsg] = useState('')
   const [kbOpen, setKbOpen] = useState(false)
@@ -729,6 +735,28 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
           </div>
         </DialogHeader>
 
+        {/* Abas (só equipe) — "Conversa" é o chamado atual, "Histórico do Aluno" lista todos
+            os chamados dele (qualquer um, não só este), pra ver se um assunto já se repetiu
+            antes de responder de novo. */}
+        {isStaff && t.aluno_id && (
+          <div className="flex items-center gap-1 px-6 pt-3 shrink-0 border-b border-[var(--border)]">
+            {([['conversa', 'Conversa'], ['historico', 'Histórico do Aluno']] as const).map(([k, label]) => (
+              <button key={k} onClick={() => setActiveTab(k)}
+                className={`px-3 py-2 text-xs font-semibold border-b-2 -mb-px transition-colors ${activeTab === k
+                  ? 'border-[var(--primary)] text-[var(--primary)]'
+                  : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-main)]'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {activeTab === 'historico' && isStaff && t.aluno_id ? (
+          <div className="flex-1 overflow-y-auto p-6">
+            <TicketAlunoHistory alunoId={t.aluno_id} currentTicketId={t.id} onOpenTicket={setNestedTicket} />
+          </div>
+        ) : (
+        <>
         {/* Corpo: coluna do chamado + painel do aluno lado a lado (não é overlay — pedido do
             usuário 03/10, antes um drawer por cima fechava o chamado ao clicar nas abas, porque
             o Dialog do Radix tratava o portal separado como clique "fora" do modal). */}
@@ -1077,14 +1105,83 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
             onClose={() => setShowAlunoPainel(false)} />
         )}
         </div>
+        </>
+        )}
       </DialogContent>
     </Dialog>
+    {nestedTicket && (
+      <TicketDetail ticket={nestedTicket} onClose={() => setNestedTicket(null)} alunoId={alunoId} alunoNome={alunoNome} />
+    )}
     </>
   )
 }
 
 // ── Conversa do WhatsApp que originou o chamado (transferência Comercial → Secretaria) ──
 // Só pra equipe. Lê widechat_messages do lead (WideChat e VivaConnect), recolhida por padrão.
+// ── Histórico do aluno: todos os chamados dele, qualquer assunto/status ─────────────────
+// Pedido do usuário 09/10 ("como vejo o histórico de atendimento dessa aluna?") — viu o
+// mesmo assunto se repetir (cancelamento "resolvido" que na prática não foi) e não tinha
+// como checar rápido se já tinha chamado anterior sobre aquilo, quem atendeu, quanto levou.
+function TicketAlunoHistory({ alunoId, currentTicketId, onOpenTicket }: { alunoId: string; currentTicketId: number; onOpenTicket: (t: Ticket) => void }) {
+  const { data: tickets = [], isLoading } = useQuery<Ticket[]>({
+    queryKey: ['ticket-aluno-historico', alunoId],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('tickets')
+        .select('*, atendente:profiles!tickets_atendente_id_fkey(full_name), curso:courses(name)')
+        .eq('aluno_id', alunoId)
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      return data ?? []
+    },
+  })
+
+  const fmtDur = (start: string, end: string | null) => {
+    if (!end) return '—'
+    const min = Math.max(0, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 60000))
+    if (min < 60) return `${min}min`
+    const h = Math.floor(min / 60)
+    if (h < 24) return `${h}h${min % 60 ? ` ${min % 60}min` : ''}`
+    const d = Math.floor(h / 24)
+    return `${d}d ${h % 24}h`
+  }
+
+  if (isLoading) return <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-[var(--text-muted)]" /></div>
+  if (!tickets.length) return <p className="text-sm text-[var(--text-muted)] text-center py-8">Nenhum chamado anterior deste aluno.</p>
+
+  return (
+    <div className="space-y-2 max-w-3xl">
+      <p className="text-xs text-[var(--text-muted)] mb-3">{tickets.length} chamado(s) no total — clique pra abrir outro.</p>
+      {tickets.map(tk => {
+        const isCurrent = tk.id === currentTicketId
+        const quemAtendeu = (tk as any).atendente?.full_name ?? (tk.ai_resolved ? 'Tutor Virtual (IA)' : '—')
+        return (
+          <button key={tk.id} type="button" disabled={isCurrent} onClick={() => onOpenTicket(tk)}
+            className={`w-full text-left rounded-lg border p-3 transition-colors ${isCurrent
+              ? 'border-[var(--primary)] bg-[var(--primary)]/5 cursor-default'
+              : 'border-[var(--border)] bg-[var(--bg-main)] hover:border-[var(--primary)]/50 cursor-pointer'}`}>
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
+              <span className="text-[11px] font-mono text-[var(--primary)]">{tk.protocolo}</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded border ${STATUS_COLORS[tk.status]}`}>{STATUS_LABELS[tk.status]}</span>
+              {isCurrent && <span className="text-[10px] font-semibold text-[var(--primary)]">chamado atual</span>}
+              {tk.ai_resolved && (
+                <span className="ml-auto flex items-center gap-1 text-[10px] font-semibold text-violet-500">
+                  <Bot className="w-3 h-3" /> resolvido pela IA
+                </span>
+              )}
+            </div>
+            <p className="text-sm font-medium text-[var(--text-main)]">{tk.titulo}</p>
+            <div className="flex items-center gap-3 mt-1.5 text-[11px] text-[var(--text-muted)] flex-wrap">
+              <span className="flex items-center gap-1"><UserCircle2 className="w-3 h-3" /> {quemAtendeu}</span>
+              <span>{format(new Date(tk.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</span>
+              <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {fmtDur(tk.created_at, tk.resolved_at)}</span>
+            </div>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function WhatsappHistory({ leadId }: { leadId: number }) {
   const [open, setOpen] = useState(false)
   const { data: msgs = [] } = useQuery<any[]>({
