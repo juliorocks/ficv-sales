@@ -233,54 +233,46 @@ Deno.serve(async (req) => {
 
             // ── reabertura: mesma regra do widechat-webhook (decisão do usuário 17/09), agora
             // cobrindo Perdido também (28/09, pedido do usuário) ── cliente escreveu num lead
-            // Finalizado/Perdido → volta pra Entrada sem agente; se a fala anterior era de agente
-            // (conversa humana em andamento) → Em Contato, mantém o agente.
+            // Finalizado/Perdido → sempre volta pra IA Atendendo (ou Entrada, sem IA), nunca
+            // direto pra Em Contato com o agente antigo. Motivo (09/10, pedido do usuário):
+            // reabrir pode ser sobre um assunto TOTALMENTE diferente do anterior — presumir
+            // continuação e devolver pro mesmo agente sem perguntar nada é que tava errado.
+            //
+            // Isso reverte uma trava de 07/10 (achado ao vivo: despedida da Thayanne à Gabriela
+            // + "Muito obrigada" dela reabria a IA com uma pergunta de continuação desnecessária
+            // pra um simples agradecimento) — mas o motivo daquele bug não era "reabrir pra IA
+            // está errado", era "a IA não sabia reconhecer agradecimento sem conteúdo novo". A
+            // instrução `reopened` do ai-agent (abaixo) ganhou essa distinção: só pergunta "é
+            // sobre o mesmo assunto ou outro?" quando a fala tiver conteúdo de verdade pra
+            // tratar; se for só cortesia (obrigada/valeu/😊), responde curto e devolve sozinha
+            // pro Finalizado (json.encerrar_cortesia, tratado dentro de aiReply() abaixo) — sem
+            // reviver a trava "quem fechou" que só cobria um caso e quebrava o outro (ver nota
+            // de 07/10 no histórico do commit, mantida aqui só como contexto).
             let reopenNote: string | null = null;
             if (leadExisted && !m.fromMe && lead.stage_id) {
                 const { data: st } = await db.from("stages").select("name").eq("id", lead.stage_id).maybeSingle();
                 const eraPerdido = st?.name ? /perdid/i.test(st.name) : false;
                 if (st?.name && /finaliz|encerr|conclu/i.test(st.name) || eraPerdido) {
-                    const { data: last } = await db.from("widechat_messages").select("origin, raw_data")
-                        .eq("lead_id", lead.id).eq("interno", false).order("created_at", { ascending: false }).limit(1).maybeSingle();
                     const now = new Date().toISOString();
                     patch.stage_entry_date = now;
                     if (eraPerdido) patch.motivo_perda_id = null; // não é mais um lead perdido
-                    // Bug real 07/10: Thayanne clicou "Finalizar" com a Gabriela (mensagem de
-                    // despedida sai com origin='auto', kind='farewell' — quem mandou de verdade foi
-                    // o botão, não a Gabriela nem a IA). 5min depois ela respondeu só "Muito
-                    // obrigada" — a despedida é que ficou sendo a ÚLTIMA mensagem não-interna, então
-                    // `last?.origin === "agent"` dava falso e caía no else: tirava a Thayanne do
-                    // lead (assigned_to_id=null) e jogava direto pra "IA Atendendo", que respondeu
-                    // de novo com uma pergunta de continuação pra uma conversa que já tinha sido
-                    // encerrada de propósito minutos antes. Despedida (farewell) conta igual
-                    // 'agent' aqui — é sempre um encerramento DELIBERADO (clique humano no painel ou
-                    // o cron de desistência depois de 24h parado), nunca o fim de uma IA solta no
-                    // meio de assunto.
-                    const lastWasFarewell = (last as any)?.raw_data?.kind === "farewell";
-                    if (last?.origin === "agent" || lastWasFarewell) {
-                        const { data: ec } = await db.from("stages").select("id").ilike("name", "%contato%")
-                            .order("order", { ascending: true }).limit(1).maybeSingle();
-                        patch.stage_id = ec?.id ?? 1;
-                        reopenNote = `🔁 Reaberto para Em Contato (agente mantido) — cliente retomou a conversa pelo VivaConnect após o atendimento ter sido ${eraPerdido ? "marcado como perdido" : "finalizado"}.`;
+                    patch.assigned_to_id = null;
+                    // ninguém ficou dono desse atendimento → libera a IA de novo (sem isso, o
+                    // handed_off de uma resposta humana antiga travava a IA pra sempre, mesmo
+                    // depois do atendimento finalizado/perdido e reaberto do zero; 28/09)
+                    await db.from("ai_lead_sessions").delete().eq("lead_id", lead.id);
+                    // sem agente e o canal tem "IA responde" ligado → já cai direto em "IA
+                    // Atendendo" (mesma condição de baixo que decide se a IA vai responder
+                    // de verdade); nunca mais passa visualmente por Entrada nesse caso —
+                    // pedido do usuário 29/09: "já pode cair diretamente na coluna IA, primeiro".
+                    const willAi = ch.ai_enabled && !((!!aluno || lead.perfil === "aluno") && ch.purpose === "official") && !m.agentUserId;
+                    if (willAi) {
+                        const { data: ia } = await db.from("stages").select("id").ilike("name", "%ia atend%").maybeSingle();
+                        patch.stage_id = ia?.id ?? 1;
+                        reopenNote = `🔁 Reaberto — a IA volta a atender (${eraPerdido ? "estava marcado como perdido" : "estava finalizado"}).`;
                     } else {
-                        patch.assigned_to_id = null;
-                        // ninguém ficou dono desse atendimento → libera a IA de novo (sem isso, o
-                        // handed_off de uma resposta humana antiga travava a IA pra sempre, mesmo
-                        // depois do atendimento finalizado/perdido e reaberto do zero; 28/09)
-                        await db.from("ai_lead_sessions").delete().eq("lead_id", lead.id);
-                        // sem agente e o canal tem "IA responde" ligado → já cai direto em "IA
-                        // Atendendo" (mesma condição de baixo que decide se a IA vai responder
-                        // de verdade); nunca mais passa visualmente por Entrada nesse caso —
-                        // pedido do usuário 29/09: "já pode cair diretamente na coluna IA, primeiro".
-                        const willAi = ch.ai_enabled && !((!!aluno || lead.perfil === "aluno") && ch.purpose === "official") && !m.agentUserId;
-                        if (willAi) {
-                            const { data: ia } = await db.from("stages").select("id").ilike("name", "%ia atend%").maybeSingle();
-                            patch.stage_id = ia?.id ?? 1;
-                            reopenNote = `🔁 Reaberto — a IA volta a atender (${eraPerdido ? "estava marcado como perdido" : "estava finalizado"}).`;
-                        } else {
-                            patch.stage_id = 1;
-                            reopenNote = `🔁 Reaberto para Entrada (sem agente atribuído) — cliente voltou a escrever pelo VivaConnect após o atendimento ter sido ${eraPerdido ? "marcado como perdido" : "finalizado"}.`;
-                        }
+                        patch.stage_id = 1;
+                        reopenNote = `🔁 Reaberto para Entrada (sem agente atribuído) — cliente voltou a escrever pelo VivaConnect após o atendimento ter sido ${eraPerdido ? "marcado como perdido" : "finalizado"}.`;
                     }
                 }
             }
@@ -507,6 +499,25 @@ async function aiReply(db: any, settings: any, leadId: number, channelId: number
         await db.from("lead_notes").insert({ lead_id: leadId, note, created_at: now });
         await db.from("ai_lead_sessions").delete().eq("lead_id", leadId);
         return `ia:transferência de setor → ${out.otherCompany.nome}`;
+    }
+
+    // Reabertura que era só cortesia (agradecimento/confirmação, sem assunto novo pra
+    // tratar) — pedido do usuário 09/10: a IA responde curto e já devolve pro Finalizado
+    // sozinha, em vez de ficar "pendurada" em IA Atendendo esperando uma próxima fala que
+    // não vai vir. Só a própria IA decide isso (json.encerrar_cortesia), com o contexto
+    // todo da reabertura — ver instrução `reopened` em ai-agent/index.ts.
+    if (out.encerrar_cortesia) {
+        for (const body of blocks) await db.from("vivaconnect_outbox").insert({ lead_id: leadId, channel_id: channelId, kind: "ai_reply", number: num, body });
+        await kickOutbox();
+        const { data: fin } = await db.from("stages").select("id").or("name.ilike.%finaliz%,name.ilike.%encerr%").limit(1).maybeSingle();
+        const now = new Date().toISOString();
+        if (fin) await db.from("leads").update({ stage_id: fin.id, stage_entry_date: now, updated_at: now }).eq("id", leadId);
+        await db.from("lead_notes").insert({ lead_id: leadId, note: "🔁✅ Reaberto só por cortesia (agradecimento) — a IA respondeu e já devolveu pro Finalizado sozinha.", created_at: now });
+        await db.from("ai_lead_sessions").upsert({
+            lead_id: leadId, status: "handed_off", handoff_reason: "Reabertura só por cortesia — reencerrado automaticamente",
+            handed_off_at: now, updated_at: now,
+        });
+        return "ia:cortesia → reencerrado";
     }
 
     for (const body of blocks) {
