@@ -15,8 +15,14 @@ export type HubDest = {
     id: number; nome: string; emoji: string; assuntos: string; is_self: boolean; numero: string | null;
     channel_id: number | null; avisar_destino: boolean; mensagem_redirect: string; mensagem_destino: string;
     ativo: boolean; ordem: number; mensagem_sem_numero?: string | null;
+    // 09/10: 2º modo de encaminhamento — destino SEM número próprio, que atende direto por
+    // uma fila do próprio Z-PRO (mesmo número oficial). Preenchido = usa este modo em vez
+    // do redirecionamento por número (numero/mensagem_redirect/canal da empresa ficam sem
+    // efeito pra esse destino).
+    zpro_queue_id: number | null; mensagem_fila: string;
 };
 export const temNumero = (d: HubDest) => onlyDigits(d.numero).length >= 10;
+export const temFila = (d: HubDest) => d.zpro_queue_id != null;
 export type HubMsg = { de: "contato" | "hub"; texto: string; em: string };
 export type Classificacao = { destino: HubDest | null; confianca: number; motivo: string; metodo: "ia"; resposta: string | null };
 
@@ -54,6 +60,9 @@ function vars(nome: string | null | undefined, extra: Record<string, string> = {
 export function redirectText(d: HubDest, nome: string | null | undefined): string {
     if (!temNumero(d)) return fillTemplate(d.mensagem_sem_numero || SEM_NUMERO_PADRAO, vars(nome, { empresa: d.nome }));
     return fillTemplate(d.mensagem_redirect, vars(nome, { empresa: d.nome, numero: formatNumero(d.numero), link: waLink(d.numero) }));
+}
+export function filaText(d: HubDest, nome: string | null | undefined): string {
+    return fillTemplate(d.mensagem_fila, vars(nome, { empresa: d.nome }));
 }
 export function forwardText(d: HubDest, nome: string | null | undefined, mensagem: string): string {
     const m = mensagem.length > 300 ? `${mensagem.slice(0, 300)}…` : mensagem;
@@ -111,6 +120,7 @@ export async function classify(db: SupabaseClient, dests: HubDest[], historico: 
 export type HubPlano =
     | { acao: "faculdade"; destino: HubDest; metodo: string; confianca: number; motivo: string }
     | { acao: "encaminhar"; destino: HubDest; metodo: string; confianca: number; motivo: string; redirect: string; forward: string | null }
+    | { acao: "encaminhar_fila"; destino: HubDest; metodo: string; confianca: number; motivo: string; aviso: string }
     | { acao: "perguntar"; texto: string; motivo: string }
     | { acao: "ignorar"; motivo: string };
 
@@ -189,6 +199,7 @@ export async function checkOtherCompany(
 
 function plano(d: HubDest, metodo: string, confianca: number, motivo: string, self: HubDest, nome: string | null, falas: string[]): HubPlano {
     if (d.id === self.id) return { acao: "faculdade", destino: d, metodo, confianca, motivo };
+    if (temFila(d)) return { acao: "encaminhar_fila", destino: d, metodo, confianca, motivo, aviso: filaText(d, nome) };
     const ultima = falas.filter((f) => !/^\W*\d\W*$/.test(f.trim())).slice(-2).join(" / ") || falas[falas.length - 1] || "";
     return {
         acao: "encaminhar", destino: d, metodo, confianca, motivo,

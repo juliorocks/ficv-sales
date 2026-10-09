@@ -16,6 +16,7 @@ interface Dest {
     id: number; nome: string; emoji: string; assuntos: string; is_self: boolean; numero: string | null
     channel_id: number | null; avisar_destino: boolean; mensagem_redirect: string; mensagem_destino: string
     ativo: boolean; ordem: number; logo_url: string | null; mensagem_sem_numero: string
+    zpro_queue_id: number | null; mensagem_fila: string
 }
 interface Routing {
     id: number; number: string; contact_name: string | null; status: "perguntando" | "faculdade" | "encaminhado"
@@ -100,11 +101,13 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
     const saveDest = async (d: Dest) => {
         if (!d.nome.trim()) return showError("Dê um nome.")
         if (!d.is_self && d.numero && digits(d.numero).length < 10) return showError(`${d.nome}: número novo incompleto (inclua o DDD) — ou deixe em branco.`)
+        if (!d.is_self && d.zpro_queue_id !== null && !d.zpro_queue_id) return showError(`${d.nome}: preencha o ID da fila no Z-PRO (Configurações > Filas de lá).`)
         setSaving(d.id)
         const { data, error } = await supabase.from("vivaconnect_hub_destinations").update({
             nome: d.nome.trim(), emoji: d.emoji.trim() || "🏢", assuntos: d.assuntos, numero: digits(d.numero) || null,
             channel_id: d.channel_id, avisar_destino: d.avisar_destino, mensagem_redirect: d.mensagem_redirect,
-            mensagem_destino: d.mensagem_destino, mensagem_sem_numero: d.mensagem_sem_numero, ativo: d.ativo, ordem: Number(d.ordem) || 0, updated_at: new Date().toISOString(),
+            mensagem_destino: d.mensagem_destino, mensagem_sem_numero: d.mensagem_sem_numero, ativo: d.ativo, ordem: Number(d.ordem) || 0,
+            zpro_queue_id: d.zpro_queue_id, mensagem_fila: d.mensagem_fila, updated_at: new Date().toISOString(),
         }).eq("id", d.id).select("id")
         setSaving(null)
         if (error || !data?.length) return showError(`Não foi possível salvar: ${error?.message ?? "sessão expirada, recarregue."}`)
@@ -159,8 +162,9 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
                 <CardDescription className="text-sm">
                     O número oficial antigo é de todo o grupo. Quem escrever nele pela 1ª vez passa por uma triagem: a IA entende o assunto e
                     — se for da <b>Faculdade</b>, segue aqui (Híbrido, sem custo Meta); se for de <b>outra empresa</b>, recebe o número novo dela
-                    (e o canal da empresa, se cadastrado, já chama a pessoa); sem assunto claro, a <b>IA pergunta naturalmente</b> (sem menu
-                    numerado). Alunos e leads que já conhecemos não passam pela triagem.
+                    (e o canal da empresa, se cadastrado, já chama a pessoa) <i>ou</i>, pra empresa sem número próprio, é movida direto pra fila
+                    dela dentro do painel do Z-PRO (a equipe de lá assume por lá mesmo, sem a gente entrar na conversa); sem assunto claro, a
+                    <b> IA pergunta naturalmente</b> (sem menu numerado). Alunos e leads que já conhecemos não passam pela triagem.
                 </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -186,14 +190,15 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
                     <p className="text-xs text-muted-foreground">Toda empresa <b>ativa</b> entra na triagem. Com número novo, a pessoa recebe o número; <b>sem número ainda</b>, recebe a mensagem de “sem número” (e nunca vira lead da Faculdade). Os <b>assuntos</b> são o que a IA lê pra decidir — seja específico.</p>
                     {draft.map((d) => {
                         const aberto = open === d.id
-                        const pronto = d.is_self || digits(d.numero).length >= 10
+                        const emFila = d.zpro_queue_id !== null
+                        const pronto = d.is_self || emFila || digits(d.numero).length >= 10
                         return (
                             <div key={d.id} className="rounded-xl border border-[var(--border)]">
                                 <button onClick={() => setOpen(aberto ? null : d.id)} className="w-full flex items-center gap-3 p-3 text-left">
                                     {aberto ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                                     <Logo d={d} />
                                     <span className="font-semibold text-sm text-[var(--text-main)] flex-1">{d.nome}{d.is_self && <span className="ml-2 text-[11px] font-normal text-muted-foreground">fica neste número</span>}</span>
-                                    <span className="text-xs text-muted-foreground font-mono">{d.is_self ? "" : d.numero ? digits(d.numero) : "sem número"}</span>
+                                    <span className="text-xs text-muted-foreground font-mono">{d.is_self ? "" : emFila ? `fila Z-PRO #${d.zpro_queue_id}` : d.numero ? digits(d.numero) : "sem número"}</span>
                                     <span className={`text-[11px] px-2 py-0.5 rounded-full ${d.ativo ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "bg-muted text-muted-foreground"}`}>
                                         {d.ativo ? (pronto ? "na triagem" : "na triagem · sem número") : "desligada"}
                                     </span>
@@ -211,12 +216,29 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
                                                         onChange={(e) => { uploadLogo(d, e.target.files?.[0]); e.target.value = "" }} />
                                                 </label></div>
                                             <div className="space-y-1"><p className={fieldLabel}>Nome</p><Input value={d.nome} onChange={(e) => set(d.id, { nome: e.target.value })} className="bg-muted/20" /></div>
-                                            {!d.is_self && <div className="space-y-1"><p className={fieldLabel}>Número novo (WhatsApp)</p>
+                                            {!d.is_self && !emFila && <div className="space-y-1"><p className={fieldLabel}>Número novo (WhatsApp)</p>
                                                 <Input value={d.numero ?? ""} onChange={(e) => set(d.id, { numero: e.target.value })} placeholder="83 99999-0000" className="bg-muted/20 font-mono" /></div>}
+                                            {!d.is_self && emFila && <div className="space-y-1"><p className={fieldLabel}>Fila no Z-PRO (ID)</p>
+                                                <Input type="number" value={d.zpro_queue_id ?? ""} onChange={(e) => set(d.id, { zpro_queue_id: e.target.value ? Number(e.target.value) : null })} className="bg-muted/20 font-mono" /></div>}
                                         </div>
                                         <div className="space-y-1"><p className={fieldLabel}>Assuntos (a IA lê isto pra decidir)</p>
                                             <textarea className={textareaCls} value={d.assuntos} onChange={(e) => set(d.id, { assuntos: e.target.value })} /></div>
                                         {!d.is_self && (
+                                            <div className="flex items-center gap-3 text-sm rounded-xl border border-[var(--border)] p-3">
+                                                <span className="text-muted-foreground shrink-0">Como encaminhar</span>
+                                                <div className="flex gap-2">
+                                                    <button type="button" onClick={() => set(d.id, { zpro_queue_id: null })}
+                                                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${!emFila ? "bg-primary text-white border-primary" : "border-[var(--border)] text-muted-foreground"}`}>
+                                                        Número novo (WhatsApp próprio)
+                                                    </button>
+                                                    <button type="button" onClick={() => set(d.id, { zpro_queue_id: d.zpro_queue_id ?? 0 })}
+                                                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${emFila ? "bg-primary text-white border-primary" : "border-[var(--border)] text-muted-foreground"}`}>
+                                                        Fila no Z-PRO (mesmo número oficial)
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                        {!d.is_self && !emFila && (
                                             <>
                                                 <div className="space-y-1"><p className={fieldLabel}>Mensagem enquanto a empresa não tem número novo</p>
                                                     <textarea className={textareaCls} value={d.mensagem_sem_numero} onChange={(e) => set(d.id, { mensagem_sem_numero: e.target.value })} />
@@ -243,6 +265,15 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
                                                         <p className="text-[11px] text-muted-foreground">Variáveis: {"{primeiro_nome}"}, {"{nome_virgula}"}, {"{empresa}"}, {"{mensagem}"} (o que a pessoa escreveu no número antigo).</p></div>
                                                 )}
                                             </>
+                                        )}
+                                        {!d.is_self && emFila && (
+                                            <div className="space-y-1"><p className={fieldLabel}>Mensagem ao encaminhar pra fila</p>
+                                                <textarea className={textareaCls} value={d.mensagem_fila} onChange={(e) => set(d.id, { mensagem_fila: e.target.value })} />
+                                                <p className="text-[11px] text-muted-foreground">
+                                                    Enviada na hora, pelo mesmo número — a pessoa não troca de WhatsApp. O ticket é movido pra essa fila dentro do painel do Z-PRO
+                                                    (Configurações &gt; Filas de lá tem o ID certo) e a equipe assume por lá, direto — a gente não entra mais nessa conversa.
+                                                    Variáveis: {"{primeiro_nome}"}, {"{nome_virgula}"}, {"{empresa}"}.
+                                                </p></div>
                                         )}
                                         <div className="flex items-center gap-4">
                                             <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -289,7 +320,7 @@ export function VivaConnectHub({ channels }: { channels: Ch[] }) {
                         <div key={i} className="rounded-lg bg-muted/30 p-3 text-sm space-y-1">
                             <p><span className="text-muted-foreground">Pessoa:</span> “{p.fala}”</p>
                             <p className="font-semibold text-[var(--text-main)]">
-                                → {p.acao === "encaminhar" ? `Encaminha para ${p.destino}` : p.acao === "faculdade" ? `Fica na Faculdade (vira lead${p.metodo === "fallback" ? ", sem assunto claro" : ""})` : p.acao === "perguntar" ? "Pergunta (natural, sem menu)" : "Não responde"}
+                                → {p.acao === "encaminhar" ? `Encaminha para ${p.destino}` : p.acao === "encaminhar_fila" ? `Move pra fila do Z-PRO de ${p.destino} (mesmo número)` : p.acao === "faculdade" ? `Fica na Faculdade (vira lead${p.metodo === "fallback" ? ", sem assunto claro" : ""})` : p.acao === "perguntar" ? "Pergunta (natural, sem menu)" : "Não responde"}
                                 {p.confianca != null && <span className="font-normal text-xs text-muted-foreground"> · {p.metodo} · confiança {Math.round(p.confianca * 100)}%</span>}
                             </p>
                             <p className="text-xs text-muted-foreground">{p.motivo}</p>

@@ -320,7 +320,7 @@ Deno.serve(async (req) => {
                 const now = new Date().toISOString();
                 const msgs: HubMsg[] = [...(sessao?.messages ?? []), { de: "contato", texto, em: now }];
                 if (plano.acao === "perguntar") { msgs.push({ de: "hub", texto: plano.texto, em: now }); sessao = { status: "perguntando", menus: (sessao?.menus ?? 0) + 1, destination_id: null, redirected_at: null, messages: msgs }; }
-                else if (plano.acao === "encaminhar") { sessao = { status: "encaminhado", menus: sessao?.menus ?? 0, destination_id: plano.destino.id, redirected_at: now, messages: msgs }; }
+                else if (plano.acao === "encaminhar" || plano.acao === "encaminhar_fila") { sessao = { status: "encaminhado", menus: sessao?.menus ?? 0, destination_id: plano.destino.id, redirected_at: now, messages: msgs }; }
                 else if (plano.acao === "faculdade") { sessao = { ...(sessao ?? {}), status: "faculdade", messages: msgs }; }
                 else sessao = { ...(sessao ?? { status: "perguntando", menus: 0, destination_id: null, redirected_at: null }), messages: msgs };
                 passos.push({
@@ -328,7 +328,7 @@ Deno.serve(async (req) => {
                     destino: "destino" in plano ? `${plano.destino.emoji} ${plano.destino.nome}` : null,
                     confianca: "confianca" in plano ? plano.confianca : null,
                     metodo: "metodo" in plano ? plano.metodo : null,
-                    envia: plano.acao === "perguntar" ? plano.texto : plano.acao === "encaminhar" ? plano.redirect : null,
+                    envia: plano.acao === "perguntar" ? plano.texto : plano.acao === "encaminhar" ? plano.redirect : plano.acao === "encaminhar_fila" ? plano.aviso : null,
                     avisa_empresa: plano.acao === "encaminhar" ? plano.forward : null,
                 });
             }

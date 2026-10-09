@@ -96,6 +96,20 @@ Deno.serve(async (req) => {
         // número de OUTRA empresa do grupo (só usado pelo Hub pra avisar): nunca vira lead da Faculdade
         if (ch.purpose === "grupo") return await done("ignored:canal de outra empresa do grupo");
 
+        // Ticket já está numa fila do Z-PRO de OUTRA empresa do grupo (ex.: Igreja, roteada
+        // pelo Hub — 09/10) — a equipe de lá atende direto pelo painel do Z-PRO; a gente
+        // nunca mais entra nessa conversa (sem lead, sem IA), nem quando o contato escreve
+        // de novo dias depois. Olha o queueId DE VERDADE do ticket, não o nosso histórico de
+        // roteamento — reflete o estado atual no Z-PRO mesmo que um humano de lá tenha
+        // mudado a fila manualmente, sem depender de IA/classificação de novo a cada mensagem.
+        const ticketQueueId = payload?.ticket?.queueId ?? payload?.contact?.queueId ?? null;
+        if (ticketQueueId != null) {
+            const outrasFilas = await loadDestinations(db);
+            if (outrasFilas.some((d) => !d.is_self && d.zpro_queue_id === Number(ticketQueueId))) {
+                return await done("ignored:fila de outra empresa do grupo no Z-PRO");
+            }
+        }
+
         const m = parseWebhook(payload);
         if (!m) return await done("ignored:sem mensagem reconhecível");
         if (m.event && m.event !== "message") return await done(`ignored:evento ${m.event}`);
@@ -587,6 +601,21 @@ async function hubRoute(db: any, settings: any, ch: any, m: any, soAcumular = fa
         await save({ status: "encaminhado", destination_id: plano.destino.id, metodo: plano.metodo, confianca: plano.confianca, motivo: plano.motivo, redirected_at: now });
         await kickOutbox();
         return { handled: true, outcome: `hub:encaminhado → ${plano.destino.nome}${plano.forward ? " (+ canal da empresa avisado)" : ""}`, backlog: [], routingId: null };
+    }
+    if (plano.acao === "encaminhar_fila") {
+        await enqueue(ch.id, "hub_redirect", plano.aviso);
+        msgs.push({ de: "hub", texto: plano.aviso, em: hubEm });
+        // move o ticket pra fila do Z-PRO da outra empresa (mesmo número) — dali pra frente o
+        // check de ticketQueueId lá em cima já ignora essa conversa pra sempre, mesmo sem
+        // sessão de hub (equipe de lá assume direto pelo painel).
+        if (m.ticketId) {
+            const { data: tok } = await db.from("vivaconnect_channels").select("api_id, api_token").eq("id", ch.id).single();
+            const r = await zpro(settings.base_url, tok, "/updateticketinfo", { ticketId: Number(m.ticketId), queueId: plano.destino.zpro_queue_id });
+            if (!r.ok) console.error(`vivaconnect-webhook: mover ticket ${m.ticketId} pra fila ${plano.destino.zpro_queue_id}:`, zproErr(r.status, r.data));
+        }
+        await save({ status: "encaminhado", destination_id: plano.destino.id, metodo: plano.metodo, confianca: plano.confianca, motivo: plano.motivo, redirected_at: now });
+        await kickOutbox();
+        return { handled: true, outcome: `hub:fila do Z-PRO → ${plano.destino.nome}`, backlog: [], routingId: null };
     }
     if (plano.acao === "perguntar") {
         await enqueue(ch.id, "hub_ask", plano.texto);
