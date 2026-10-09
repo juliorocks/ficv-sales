@@ -334,6 +334,14 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                 .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
         },
         enabled: relatedIds !== undefined,
+        // 09/10, achado ao vivo (Janeide): mensagem nova aparecia na lista da esquerda (outra
+        // tela/query) mas demorava a aparecer na conversa aberta — só trocando de conversa e
+        // voltando (remonta o componente) é que atualizava. A assinatura realtime abaixo é o
+        // caminho rápido, mas WebSocket pode cair/reconectar silenciosamente numa sessão
+        // longa, sem avisar o componente — mesmo motivo que já tinha feito a view de pendências
+        // do Kanban ganhar um poll de segurança por trás do realtime dela. Aqui é a conversa
+        // ABERTA de verdade (mais sensível a atraso que um badge), intervalo mais curto.
+        refetchInterval: 10_000,
     })
 
     // Realtime (só pega escrita no Postgres — SurrealDB não dispara; mantido p/ compat)
