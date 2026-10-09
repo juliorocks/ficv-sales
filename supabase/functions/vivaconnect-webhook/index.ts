@@ -339,8 +339,26 @@ Deno.serve(async (req) => {
             isStudent = /matricul/i.test(st?.name ?? "");
         }
 
-        // ── canal oficial: aluno → link do portal ───────────────────────────
-        if (ch.purpose === "official" && isStudent) {
+        // ── aluno de verdade (QUALQUER canal, não só o oficial) → link do portal, nunca
+        // entra no funil comercial ── pedido do usuário 09/10: "quem já é aluno tem que ser
+        // direcionado ao portal", pra "Matriculado" passar a significar só quem era lead e
+        // virou matrícula de verdade (medir conversão de venda com fidelidade). Antes isso só
+        // rodava no canal oficial — no canal comercial (pool), um aluno que escrevesse caía
+        // na IA de vendas normalmente. Move pra etapa "Aluno" (nunca mexe se já estiver em
+        // Matriculado — conversão de venda real de antes — ou já em Aluno).
+        if (isStudent) {
+            if (lead && lead.stage_id) {
+                const { data: st } = await db.from("stages").select("name").eq("id", lead.stage_id).maybeSingle();
+                if (!/matricul|^aluno$/i.test(st?.name ?? "")) {
+                    const { data: alunoStage } = await db.from("stages").select("id").eq("name", "Aluno").maybeSingle();
+                    if (alunoStage) {
+                        await db.from("leads").update({
+                            stage_id: alunoStage.id, stage_entry_date: new Date().toISOString(),
+                            perfil: "aluno", updated_at: new Date().toISOString(),
+                        }).eq("id", lead.id);
+                    }
+                }
+            }
             if (!settings.student_reply_enabled) return await done("stored:aluno (resposta do portal desligada)", lead?.id ?? null);
             const since = new Date(Date.now() - 24 * 3600_000).toISOString();
             const number = toZproNumber(m.number)!;
@@ -355,14 +373,11 @@ Deno.serve(async (req) => {
         }
 
         // ── canal com "IA responde" marcado: IA de vendas ────────────────────
-        // isStudent só bloqueia a IA de vendas no canal OFICIAL (ali quem é aluno já saiu
-        // acima com o link do portal). Em canal de vendas (pool/marketing), um match de
-        // aluno não deve travar a IA: 29/09, achado ao vivo — dois leads de teste (telefones
-        // reaproveitados de alunos de teste no Sponte, "Teste Thayanne"/"karina canciano")
-        // batiam em match_aluno_by_phone (só últimos 8 dígitos, colisão fácil) e a IA nunca
-        // respondia nem 1x, mesmo com o canal "IA responde" ligado — card ficava preso em
-        // Entrada pra sempre porque advanceAiStage nunca era chamado.
-        if (ch.ai_enabled && lead && !(isStudent && ch.purpose === "official") && !m.agentUserId) {
+        // isStudent (qualquer canal) já saiu mais acima com o link do portal — chegar aqui
+        // já garante que não é aluno. 29/09, achado ao vivo: dois leads de teste batiam em
+        // match_aluno_by_phone por telefone de teste reaproveitado — fixado depois trocando
+        // o match pra DDD + 8 dígitos (phone_ddd8), não só os últimos 8 soltos.
+        if (ch.ai_enabled && lead && !m.agentUserId) {
             const outcome = await aiReply(db, settings, lead.id, ch.id, m.number, leadReopened);
             return await done(`stored:${outcome}`, lead.id);
         }
