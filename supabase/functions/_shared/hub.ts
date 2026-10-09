@@ -171,11 +171,17 @@ export async function planejar(
  *  pastor/oração/dízimo/oferta), mas faltava "igreja" sozinho, "ministério" e "retiro"; Fundação
  *  não tinha NENHUMA palavra sua na lista (doação/projeto social/voluntariado) — qualquer
  *  pergunta sobre doação pra Fundação caía direto na Vivi da Faculdade, igual o caso da Escola.
+ *  09/10: achado ao vivo de novo, mesma família de bug — "Gostaria de saber os horários dos
+ *  CULTOS" (plural) não batia porque \bculto\b exige a palavra EXATA, sem "s" no fim; o lead
+ *  (já tinha histórico antigo de Faculdade) caiu direto na Vivi, que respondeu com a recusa de
+ *  escopo padrão em vez de ir pro classify(). Quase toda palavra solta aqui tinha o mesmo
+ *  problema (membro/batismo/igreja/retiro/escola/oferta/rematrícula/uniforme…) — todas viraram
+ *  singular/plural juntos agora.
  *  Palavras soltas (escola, fundamental, igreja, doação…) têm risco baixo de disparar à toa:
  *  isso só decide se vale chamar o classify() (que ainda decide de verdade, com o contexto todo,
  *  e já protege contra redirecionar a própria Faculdade pra ela mesma) — não redireciona sozinho. */
 export function mentionsOtherCompany(text: string): boolean {
-    return /\bmembro\b|\bmembresia\b|\bbatismo\b|\bculto\b|\bc[eé]lula\b|\bpastor|\bora[çc][ãa]o\b|\bdiz[íi]mo|\boferta\b|\bigreja\b|minist[eé]rio|\bretiro\b|\bescola\b|\binfantil\b|\bfundamental\b|ensino m[eé]dio|\brematr[íi]cula\b|\buniforme\b|material escolar|reuni[ãa]o de pais|\bmeu filho\b|\bminha filha\b|matr[íi]cula (dele|dela|do meu filho|da minha filha|do fundamental|da infantil|no fundamental|na infantil|no m[eé]dio|na m[eé]dio|escolar)|funda[çc][ãa]o|doa[çc][ãa]o|doa[çc][õo]es|projeto(s)? social|projetos sociais|a[çc][ãa]o social|voluntari|parceria(s)? social/i.test(text);
+    return /\bmembros?\b|\bmembresias?\b|\bbatismos?\b|\bcultos?\b|\bc[eé]lulas?\b|\bpastor|\bora[çc][ãa]o\b|\bora[çc][õo]es\b|\bdiz[íi]mo|\bofertas?\b|\bigrejas?\b|minist[eé]rio|\bretiros?\b|\bescolas?\b|\binfanti(l|s)\b|\bfundamental(is)?\b|ensino m[eé]dio|\brematr[íi]culas?\b|\buniformes?\b|materiais? escolar(es)?|reuni[ãa]o de pais|reuni[õo]es de pais|\bmeus? filhos?\b|\bminhas? filhas?\b|matr[íi]cula (dele|dela|do meu filho|da minha filha|do fundamental|da infantil|no fundamental|na infantil|no m[eé]dio|na m[eé]dio|escolar)|funda[çc][ãa]o|doa[çc][ãa]o|doa[çc][õo]es|projeto(s)? socia(l|is)|a[çc][ãa]o social|a[çc][õo]es sociais|voluntari|parceria(s)? socia(l|is)/i.test(text);
 }
 
 /**
