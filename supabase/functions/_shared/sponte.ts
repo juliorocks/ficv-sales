@@ -52,9 +52,19 @@ const decodeEntities = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, "
 export function records(xml: string, tag: string): Record<string, string>[] {
     const out: Record<string, string>[] = [];
     for (const m of xml.matchAll(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, "g"))) {
+        // tira sub-registros aninhados (ex.: <Responsaveis><wsResponsaveis>…</wsResponsaveis>…
+        // </Responsaveis> dentro de <wsAluno>) ANTES de ler os campos simples — sem isso, um
+        // campo de MESMO NOME dentro do sub-registro (ex.: o <Nome> do responsável financeiro)
+        // sobrescrevia o campo do registro pai por último-vence, já que o regex de campo simples
+        // escaneia a string toda sem respeitar profundidade. Achado ao vivo 09/10: o <Nome> do
+        // Responsável Financeiro "vazou" por cima do <Nome> da própria aluna (Vitória Silva da
+        // Pieve → virava "André Luiz Souza Silva"), derrubando ela de verdade no bloqueio de
+        // divergência de nome do Portal. Sponte sempre prefixa sub-registros com "ws" (mesmo
+        // padrão do próprio <wsAluno>/<wsMatricula>/<wsParcela> que já usamos aqui).
+        const flat = m[1].replace(/<ws[A-Za-z]+>[\s\S]*?<\/ws[A-Za-z]+>/g, "");
         const rec: Record<string, string> = {};
         // nomes com dígito importam: Nota1, Recuperacao1, NotaAposRec1, Faltas1… (GetBoletim)
-        for (const f of m[1].matchAll(/<([A-Za-z][A-Za-z0-9]*)>([^<]*)<\/\1>/g)) rec[f[1]] = decodeEntities(f[2]).trim();
+        for (const f of flat.matchAll(/<([A-Za-z][A-Za-z0-9]*)>([^<]*)<\/\1>/g)) rec[f[1]] = decodeEntities(f[2]).trim();
         out.push(rec);
     }
     return out;
