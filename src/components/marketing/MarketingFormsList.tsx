@@ -59,6 +59,23 @@ export function MarketingFormsList({ onEdit, onViewSubmissions }: MarketingForms
         },
     })
 
+    // leads gerados por formulário — conta DISTINCT lead_id (reenvio do mesmo lead não conta
+    // 2x), não o total de preenchimentos (que inclui rejeitado/sem lead_id).
+    const { data: leadCounts } = useQuery<Record<number, number>>({
+        queryKey: ["marketing_forms_lead_counts"],
+        queryFn: async () => {
+            const { data, error } = await supabase.from("marketing_form_submissions")
+                .select("form_id, lead_id").not("lead_id", "is", null).limit(50000)
+            if (error) throw error
+            const byForm = new Map<number, Set<number>>()
+            for (const row of (data ?? []) as { form_id: number; lead_id: number }[]) {
+                if (!byForm.has(row.form_id)) byForm.set(row.form_id, new Set())
+                byForm.get(row.form_id)!.add(row.lead_id)
+            }
+            return Object.fromEntries([...byForm.entries()].map(([formId, leads]) => [formId, leads.size]))
+        },
+    })
+
     const filtered = useMemo(() => {
         if (!forms) return []
         const term = searchTerm.toLowerCase().trim()
@@ -176,6 +193,7 @@ export function MarketingFormsList({ onEdit, onViewSubmissions }: MarketingForms
                             <TableHead>Nome</TableHead>
                             <TableHead>Curso</TableHead>
                             <TableHead>Visualizações</TableHead>
+                            <TableHead>Leads</TableHead>
                             <TableHead>Status</TableHead>
                             <TableHead className="text-right w-[180px]">Ações</TableHead>
                         </TableRow>
@@ -186,6 +204,7 @@ export function MarketingFormsList({ onEdit, onViewSubmissions }: MarketingForms
                                 <TableCell className="font-semibold text-foreground">{form.name}</TableCell>
                                 <TableCell className="text-muted-foreground">{form.courses?.name ?? "—"}</TableCell>
                                 <TableCell className="text-muted-foreground">{form.view_count}</TableCell>
+                                <TableCell className="text-muted-foreground">{leadCounts?.[form.id] ?? 0}</TableCell>
                                 <TableCell>
                                     <button
                                         onClick={(e) => { e.stopPropagation(); toggleMutation.mutate({ id: form.id, ativo: !form.ativo }) }}
@@ -221,7 +240,7 @@ export function MarketingFormsList({ onEdit, onViewSubmissions }: MarketingForms
                             </TableRow>
                         )) : (
                             <TableRow>
-                                <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
+                                <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
                                     Nenhum formulário encontrado.
                                 </TableCell>
                             </TableRow>
