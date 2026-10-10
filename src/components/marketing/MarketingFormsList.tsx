@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import {
     Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
-import { Copy, Edit, ExternalLink, PlusCircle, Search, Trash2 } from "lucide-react"
+import { BarChart3, Copy, Edit, ExternalLink, PlusCircle, Search, Trash2 } from "lucide-react"
 import { showError, showSuccess } from "@/utils/toast"
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
@@ -18,9 +18,10 @@ import { slugify } from "@/utils/marketingForms"
 
 interface MarketingFormsListProps {
     onEdit: (id: number) => void
+    onViewSubmissions: (id: number) => void
 }
 
-export function MarketingFormsList({ onEdit }: MarketingFormsListProps) {
+export function MarketingFormsList({ onEdit, onViewSubmissions }: MarketingFormsListProps) {
     const queryClient = useQueryClient()
     const [isDialogOpen, setIsDialogOpen] = useState(false)
     const [searchTerm, setSearchTerm] = useState("")
@@ -197,6 +198,9 @@ export function MarketingFormsList({ onEdit }: MarketingFormsListProps) {
                                     <div className="flex justify-end gap-1">
                                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onEdit(form.id)} title="Editar">
                                             <Edit className="h-4 w-4" />
+                                        </Button>
+                                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onViewSubmissions(form.id)} title="Ver respostas">
+                                            <BarChart3 className="h-4 w-4" />
                                         </Button>
                                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => window.open(`/f/${form.slug}`, "_blank")} title="Ver formulário público">
                                             <ExternalLink className="h-4 w-4" />

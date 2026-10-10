@@ -89,6 +89,7 @@ import { CampaignsDashboard } from './components/CampaignsDashboard';
 import { NotificationBell } from './components/notifications/NotificationBell';
 import { FollowupsPage } from './components/followups/FollowupsPage';
 import { MarketingFormsList } from './components/marketing/MarketingFormsList';
+import { MarketingFormSubmissions } from './components/marketing/MarketingFormSubmissions';
 import { MarketingFormBuilder } from './components/marketing/MarketingFormBuilder';
 
 const queryClient = new QueryClient({
@@ -196,6 +197,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     const [kanbanDateRange, setKanbanDateRange] = useState<{ start: string; end: string }>({ start: '', end: '' });
     const [historyAgentFilter, setHistoryAgentFilter] = useState<string | null>(null); // agente clicado em "Performance do Período" — pré-filtra Relatórios (Admin)
     const [marketingFormEditId, setMarketingFormEditId] = useState<number | null>(null); // formulário aberto no editor de Marketing > Formulários
+    const [marketingFormSubmissionsId, setMarketingFormSubmissionsId] = useState<number | null>(null); // formulário aberto na tela de Respostas
     const kanbanAssigneeInit = useRef(false); // só aplica o default (perfil logado) uma vez — não sobrescreve se o agente trocar o filtro depois
 
     // Persist activeTab in localStorage
@@ -2073,8 +2075,10 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                     <div className="animate-fade-in">
                         {marketingFormEditId != null ? (
                             <MarketingFormBuilder id={marketingFormEditId} onBack={() => setMarketingFormEditId(null)} />
+                        ) : marketingFormSubmissionsId != null ? (
+                            <MarketingFormSubmissions formId={marketingFormSubmissionsId} onBack={() => setMarketingFormSubmissionsId(null)} />
                         ) : (
-                            <MarketingFormsList onEdit={(id) => setMarketingFormEditId(id)} />
+                            <MarketingFormsList onEdit={(id) => setMarketingFormEditId(id)} onViewSubmissions={(id) => setMarketingFormSubmissionsId(id)} />
                         )}
                     </div>
                 )}
