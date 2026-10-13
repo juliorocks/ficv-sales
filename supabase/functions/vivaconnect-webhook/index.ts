@@ -549,6 +549,38 @@ async function aiReply(db: any, settings: any, leadId: number, channelId: number
         return `ia:transferência de setor → ${out.otherCompany.nome}`;
     }
 
+    // Aluno de verdade que o Sponte não casou pelo telefone (achado ao vivo 13/10, lead
+    // "Annelize Tomé": perguntou sobre mensalidade atrasada, não bateu no match_aluno_by_phone
+    // — caiu aqui, no fluxo comercial, em vez do fluxo dedicado de aluno lá em cima (isStudent)
+    // — que manda pro Portal e PARA). A IA reconhece pelo CONTEÚDO (ver instrução
+    // "aluno_atual" em ai-agent/index.ts) — mesmo tratamento do isStudent: mensagem fixa do
+    // Portal (não o texto livre que a IA escreveu), etapa "Aluno", e para — nunca mais uma
+    // comercial pra essa pessoa.
+    if (out.aluno_atual) {
+        const { data: leadRow } = await db.from("leads").select("nome_completo, stage_id").eq("id", leadId).maybeSingle();
+        if (leadRow?.stage_id) {
+            const { data: st } = await db.from("stages").select("name").eq("id", leadRow.stage_id).maybeSingle();
+            if (!/matricul|^aluno$/i.test(st?.name ?? "")) {
+                const { data: alunoStage } = await db.from("stages").select("id").eq("name", "Aluno").maybeSingle();
+                if (alunoStage) {
+                    await db.from("leads").update({
+                        stage_id: alunoStage.id, stage_entry_date: new Date().toISOString(),
+                        perfil: "aluno", updated_at: new Date().toISOString(),
+                    }).eq("id", leadId);
+                }
+            }
+        }
+        if (settings.student_reply_enabled && String(settings.student_reply_template ?? "").trim()) {
+            await db.from("vivaconnect_outbox").insert({
+                lead_id: leadId, channel_id: channelId, kind: "student_reply", number: num,
+                body: fillTemplate(settings.student_reply_template, { primeiro_nome: firstName(leadRow?.nome_completo ?? "") || "tudo bem" }),
+            });
+            await kickOutbox();
+        }
+        await db.from("ai_lead_sessions").delete().eq("lead_id", leadId);
+        return "ia:aluno (pelo conteúdo) → link do portal, IA parou";
+    }
+
     // Reabertura que era só cortesia (agradecimento/confirmação, sem assunto novo pra
     // tratar) — pedido do usuário 09/10: a IA responde curto e já devolve pro Finalizado
     // sozinha, em vez de ficar "pendurada" em IA Atendendo esperando uma próxima fala que
