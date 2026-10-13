@@ -168,6 +168,18 @@ Deno.serve(async (req) => {
             if (!channelId) return jsonRes({ error: "Nenhum número do VivaConnect disponível (cadastre um canal ativo)." }, 400);
             const { data: ch } = await db.from("vivaconnect_channels").select(CH_COLS).eq("id", channelId).maybeSingle();
             if (!ch?.active) return jsonRes({ error: `Canal ${ch?.name ?? channelId} está desativado.` }, 400);
+            // Janela de 24h da Meta (texto livre): o front já bloqueia isso (WideChatHistory.tsx,
+            // canSendText), mas só no cliente — nada impedia essa action de aceitar um texto fora
+            // da janela se chamada de outro jeito. Achado ao vivo 13/10: um texto saiu daqui sem
+            // erro às 13:48 pro Grioprix (última resposta dele foi 11/10) e a Meta recusou a
+            // entrega (131026/janela) só depois, sem avisar na hora do envio. Template (hsmName)
+            // nunca precisa de janela aberta — é feito pra isso.
+            if (!hsmName && !media && ch.kind === "waba") {
+                const { data: lastInbound } = await db.from("widechat_messages").select("created_at")
+                    .eq("lead_id", leadId).eq("origin", "channel").order("created_at", { ascending: false }).limit(1).maybeSingle();
+                const windowOpen = !!lastInbound && (Date.now() - new Date(lastInbound.created_at).getTime()) < 24 * 3600 * 1000;
+                if (!windowOpen) return jsonRes({ error: "Passaram 24h da última mensagem do cliente — só dá pra enviar um template aprovado." }, 400);
+            }
             // Gestão > VivaConnect > "Quem atende cada canal": sem nenhuma linha pro agente
             // = sem restrição; com pelo menos 1 canal marcado, só pode enviar por eles.
             // Espelha o filtro do Kanban (KanbanBoard.tsx) — aqui é a trava de verdade.

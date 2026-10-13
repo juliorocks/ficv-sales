@@ -96,6 +96,14 @@ export function toZproNumber(raw: unknown): string | null {
         if (/^[6-9]/.test(local)) d = `${ddd}9${local}`;
     }
     if (d.length === 10 || d.length === 11) d = "55" + d;
+    // mesmo caso acima, mas já com "55" na frente (12 dígitos: 55+DDD+local de 8) — achado
+    // ao vivo 13/10 num lead que JÁ tinha conversado antes: número batia "válido" (12-13
+    // dígitos) e passava sem erro, mas a Meta recusava a entrega (131026) porque o número
+    // real no WhatsApp tem o 9º dígito (13 dígitos) e o que mandávamos tinha só 12.
+    if (d.length === 12 && d.startsWith("55")) {
+        const ddd = d.slice(2, 4), local = d.slice(4);
+        if (/^[6-9]/.test(local)) d = `55${ddd}9${local}`;
+    }
     return d;
 }
 
