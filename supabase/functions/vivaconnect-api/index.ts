@@ -496,7 +496,7 @@ async function sendRow(db: any, settings: any, row: any, ch: any) {
         : row.body;
     // Template (HSM): o corpo aprovado pela Meta não pode levar a assinatura "*Fulano:*\n"
     // (quebraria o texto exato que foi aprovado) — só as variáveis mudam, via `components`.
-    const sendVia = (c: any) => row.hsm_template_name
+    const sendVia = (c: any, asVoice = true) => row.hsm_template_name
         ? zpro(settings.base_url, c, "/template", {
             number: row.number,
             templateData: {
@@ -509,12 +509,18 @@ async function sendRow(db: any, settings: any, row: any, ch: any) {
             },
             isClosed: false, validateNumber: false,
         })
-        : row.media_type === "sounds" && row.media_url
+        : row.media_type === "sounds" && row.media_url && asVoice
         ? zpro(settings.base_url, c, "/voice", { ...base, audio: row.media_url })
         : row.media_url
             ? zpro(settings.base_url, c, "/url", { ...base, mediaUrl: row.media_url, body: signedBody || row.file_name || "" })
             : zpro(settings.base_url, c, "", { ...base, body: signedBody });
     let r = await sendVia(execCh);
+    // /voice recusa alguns canais (ERR_CHANNEL_NOT_SUPPORTED, achado 13/10 no FICV 2 — o mesmo
+    // áudio saiu lá em 09/10). Nesse caso manda o arquivo de áudio pelo /url, que já é o caminho
+    // de imagem/arquivo e aceita o mesmo mp3 — chega como anexo de áudio, não como nota de voz.
+    if (!r.ok && row.media_type === "sounds" && row.media_url && /CHANNEL_NOT_SUPPORTED/i.test(zproErr(r.status, r.data))) {
+        r = await sendVia(execCh, false);
+    }
     // canal delegado (Baileys) desconectado no Z-PRO → cai automático pro canal OFICIAL do
     // próprio lead, pra não parar o atendimento (pedido do usuário 13/10)
     if (!r.ok && execCh.id !== ch.id && /NOT_INITIALIZED/i.test(zproErr(r.status, r.data))) {
