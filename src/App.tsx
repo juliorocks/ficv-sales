@@ -72,6 +72,7 @@ import { CourseManagement } from './components/admin/CourseManagement';
 import { LeadSourceManagement } from './components/admin/LeadSourceManagement';
 import { LossReasonManagement } from './components/admin/LossReasonManagement';
 import { QuickRepliesPage } from './components/QuickReplies';
+import { WidechatTemplates } from './components/admin/WidechatTemplates';
 import { AuditLogPage } from './components/admin/AuditLogPage';
 import { WideChatHistory } from './components/kanban/WideChatHistory';
 import { TmaSettingsManagement } from './components/admin/TmaSettingsManagement';
@@ -1001,6 +1002,12 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                             className={`text-[11px] py-1.5 px-3 rounded-lg text-left transition-all ${activeTab === 'kanban-quick-replies' ? 'bg-primary/10 text-primary font-bold' : 'text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text-main)]'}`}
                                         >
                                             Mensagens Rápidas
+                                        </button>
+                                        <button
+                                            onClick={() => setActiveTab('kanban-templates')}
+                                            className={`text-[11px] py-1.5 px-3 rounded-lg text-left transition-all ${activeTab === 'kanban-templates' ? 'bg-primary/10 text-primary font-bold' : 'text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text-main)]'}`}
+                                        >
+                                            Templates WhatsApp
                                         </button>
                                         {profile?.role === 'admin' && (
                                             <button
@@ -2034,6 +2041,12 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {activeTab === 'kanban-quick-replies' && (
                     <div className="animate-fade-in max-w-6xl mx-auto py-6">
                         <QuickRepliesPage />
+                    </div>
+                )}
+
+                {activeTab === 'kanban-templates' && (
+                    <div className="animate-fade-in max-w-6xl mx-auto py-6">
+                        <WidechatTemplates />
                     </div>
                 )}
 
