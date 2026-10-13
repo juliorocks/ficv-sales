@@ -84,6 +84,17 @@ export const onlyDigits = (v: unknown) => String(v ?? "").replace(/\D/g, "");
 export function toZproNumber(raw: unknown): string | null {
     let d = onlyDigits(raw);
     if (d.length < 10 || /^0+$/.test(d)) return null;
+    // DDD(2) + local(8), sem o 55 ainda: celular de antes da expansão pro 9º dígito
+    // (2012-2016) guardado assim mesmo (comum em cadastro puxado do Sponte/formulário
+    // antigo) — se o local já começa em 6-9 (faixa histórica de celular), só falta
+    // acrescentar o 9 novo na frente. Fixo de verdade (local começa em 2-5) não mexe —
+    // continua sendo reconhecido como fixo (ver BR_CELULAR_RE em ticket-emails). Achado
+    // ao vivo 13/10: aluno com número assim nunca batia no formato de celular válido e
+    // ficava sem aviso de chamado por WhatsApp, mesmo sendo celular de verdade.
+    if (d.length === 10) {
+        const ddd = d.slice(0, 2), local = d.slice(2);
+        if (/^[6-9]/.test(local)) d = `${ddd}9${local}`;
+    }
     if (d.length === 10 || d.length === 11) d = "55" + d;
     return d;
 }
