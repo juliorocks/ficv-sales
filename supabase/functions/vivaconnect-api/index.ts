@@ -7,8 +7,10 @@
 //   send_test      { channel_id, number, body } (admin) → envio avulso de teste
 //   chat_context   { lead_id }               (staff)   → pro chat do lead: integração ligada? canais? número fixo?
 //   list_meta_templates {}                   (staff)   → templates aprovados do número oficial, direto da Graph API da Meta
-//   send           { lead_id, body?, media?, channel_id? } (staff) → mensagem do agente pelo CRM
+//   send           { lead_id, body?, media?, channel_id?, hsm_template_name?, hsm_placeholders?, hsm_language? } (staff) → mensagem do agente pelo CRM
 //                    media = { url, type: images|sounds|videos|files, file_name }
+//                    hsm_* = template aprovado (/template no Z-PRO) — hsm_placeholders é a lista de
+//                    valores das variáveis do corpo, na mesma ordem dos {{n}}; hsm_language default pt_BR
 //   message_status { lead_id, body? }        (staff)   → ack da mensagem nossa no Z-PRO (entregue/lida/missing)
 //   media          { message_row_id }        (staff)   → busca no Z-PRO o link de uma mídia RECEBIDA
 //   finish         { lead_id }               (staff)   → fecha o ticket no Z-PRO + lead → Finalizado
@@ -146,7 +148,15 @@ Deno.serve(async (req) => {
             const leadId = Number(body.lead_id);
             const text = String(body.body ?? "").trim();
             const media = body.media && body.media.url ? body.media : null;
-            if (!leadId || (!text && !media)) return jsonRes({ error: "lead_id e mensagem (ou anexo) obrigatórios." }, 400);
+            // Template (HSM) aprovado pela Meta — direto no corpo que o endpoint externo
+            // /template do Z-PRO espera (é a Cloud API da Meta sendo repassada quase crua).
+            const hsmName = String(body.hsm_template_name ?? "").trim();
+            const hsmPlaceholders: string[] = Array.isArray(body.hsm_placeholders) ? body.hsm_placeholders.map(String) : [];
+            const hsmLanguage = String(body.hsm_language ?? "").trim() || "pt_BR";
+            const hsmComponents = hsmName && hsmPlaceholders.length
+                ? [{ type: "body", parameters: hsmPlaceholders.map((v) => ({ type: "text", text: v })) }]
+                : null;
+            if (!leadId || (!text && !media && !hsmName)) return jsonRes({ error: "lead_id e mensagem (ou anexo, ou template) obrigatórios." }, 400);
             if (media && !["images", "sounds", "videos", "files"].includes(media.type)) return jsonRes({ error: "Tipo de mídia inválido." }, 400);
             const { data: lead } = await db.from("leads").select("id, telefone, vivaconnect_channel_id").eq("id", leadId).maybeSingle();
             if (!lead) return jsonRes({ error: "Lead não encontrado." }, 404);
@@ -174,6 +184,7 @@ Deno.serve(async (req) => {
                 lead_id: leadId, channel_id: ch.id, kind: "manual", number, body: text, created_by: createdBy,
                 sender_name: senderName,
                 ...(media ? { media_url: String(media.url), media_type: media.type, file_name: media.file_name ?? null } : {}),
+                ...(hsmName ? { hsm_template_name: hsmName, hsm_language: hsmLanguage, hsm_components: hsmComponents } : {}),
             }).select("*").single();
             if (error) return jsonRes({ error: error.message }, 500);
             const res = await sendRow(db, settings, row, ch);
@@ -483,7 +494,22 @@ async function sendRow(db: any, settings: any, row: any, ch: any) {
     const signedBody = row.sender_name && row.body
         ? `*${row.sender_name}:*\n${row.body}`
         : row.body;
-    const sendVia = (c: any) => row.media_type === "sounds" && row.media_url
+    // Template (HSM): o corpo aprovado pela Meta não pode levar a assinatura "*Fulano:*\n"
+    // (quebraria o texto exato que foi aprovado) — só as variáveis mudam, via `components`.
+    const sendVia = (c: any) => row.hsm_template_name
+        ? zpro(settings.base_url, c, "/template", {
+            number: row.number,
+            templateData: {
+                messaging_product: "whatsapp", to: row.number, type: "template",
+                template: {
+                    name: row.hsm_template_name,
+                    language: { code: row.hsm_language || "pt_BR" },
+                    ...(row.hsm_components ? { components: row.hsm_components } : {}),
+                },
+            },
+            isClosed: false, validateNumber: false,
+        })
+        : row.media_type === "sounds" && row.media_url
         ? zpro(settings.base_url, c, "/voice", { ...base, audio: row.media_url })
         : row.media_url
             ? zpro(settings.base_url, c, "/url", { ...base, mediaUrl: row.media_url, body: signedBody || row.file_name || "" })
