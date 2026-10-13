@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabase"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
-import { AlertCircle, MessageSquare, Send, Loader2, FileText, Smile, Paperclip, Mic, Square, X, Image as ImageIcon, FileAudio, BookOpen, Lock, Reply } from "lucide-react"
+import { AlertCircle, MessageSquare, Send, Loader2, FileText, Smile, Paperclip, Mic, Square, X, Image as ImageIcon, FileAudio, BookOpen, Lock, Reply, Check, CheckCheck } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -170,6 +170,25 @@ interface WideChatMessage {
     provider?: string
     interno?: boolean
     raw_data?: { kind?: string; followup_id?: number } | null
+    // tracinhos de confirmação (✓/✓✓/✓✓ azul), atualizados pelo cron vivaconnect-api
+    // (action=sync_delivery_status, 13/10) — só mensagem NOSSA (origin agent/auto) tem isso
+    delivery_status?: 'sent' | 'delivered' | 'read' | 'failed' | null
+    delivery_error?: string | null
+}
+
+// tracinhos de confirmação (✓/✓✓/✓✓ azul), iguais ao WhatsApp — pedido do usuário 13/10.
+// Sem delivery_status (mensagem antiga, de antes da coluna existir, ou sem ticket/message_id
+// rastreável) não mostra nada, em vez de inventar um estado.
+function DeliveryTick({ status, error }: { status?: WideChatMessage['delivery_status']; error?: string | null }) {
+    if (!status) return null
+    if (status === 'failed') {
+        let msg = 'Falhou'
+        try { const e = error ? JSON.parse(error) : null; msg = e?.details || e?.title || msg } catch { /* texto cru */ }
+        return <span title={`Não entregue: ${msg}`}><AlertCircle className="h-3 w-3 text-red-500 shrink-0" /></span>
+    }
+    if (status === 'read') return <span title="Lida"><CheckCheck className="h-3.5 w-3.5 text-sky-500 shrink-0" /></span>
+    if (status === 'delivered') return <span title="Entregue"><CheckCheck className="h-3.5 w-3.5 text-slate-400 shrink-0" /></span>
+    return <span title="Enviada"><Check className="h-3.5 w-3.5 text-slate-400 shrink-0" /></span>
 }
 
 // emojis mais usados no atendimento — sem dependência de lib
@@ -1226,6 +1245,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                                     <span className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-1 px-1">
                                         {isAgent && msg.sender_name && <span className="font-medium">{msg.sender_name} •</span>}
                                         {fmtHora(msg.created_at)}
+                                        {!isUser && <DeliveryTick status={msg.delivery_status} error={msg.delivery_error} />}
                                         <button type="button"
                                             onClick={() => { setReplyingTo({ autor: isUser ? (leadName || 'o lead') : (msg.sender_name || (isBot ? 'a IA' : 'você')), texto: msg.message || '[mídia]' }); textareaRef.current?.focus() }}
                                             className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-primary" title="Responder citando esta mensagem">

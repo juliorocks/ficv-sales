@@ -23,6 +23,7 @@
 //   run_followups  {}                        (service, cron 15/min) → IA reengaja lead quieto após silêncio
 //   run_followup_giveups {}                  (service, cron 15/min) → encerra sozinho quem esgotou tentativas + Xh sem responder
 //   run_lead_followups {}                    (service, cron 5/min)  → dispara follow-up AGENDADO por humano vencido
+//   sync_delivery_status {}                  (service, cron 1/min)  → atualiza ✓/✓✓/✓✓ azul das mensagens recentes
 //
 // Regras da fila:
 //   - first_message (contato ativo, número Baileys): só dentro da janela de
@@ -445,6 +446,14 @@ Deno.serve(async (req) => {
             return jsonRes(await runLeadFollowups(db, settings));
         }
 
+        // Tracinhos de confirmação (✓/✓✓/✓✓ azul) no chat, iguais ao WhatsApp — pedido do
+        // usuário 13/10. Confere no Z-PRO o ack de quem ainda não chegou a um status final
+        // (read/failed) e grava em widechat_messages.delivery_status pro front pintar.
+        if (action === "sync_delivery_status") {
+            if (caller?.kind !== "service") return jsonRes({ error: "Só o cron." }, 403);
+            return jsonRes(await syncDeliveryStatus(db, settings));
+        }
+
         return jsonRes({ error: `Ação desconhecida: ${action}` }, 400);
     } catch (e) {
         console.error("vivaconnect-api:", e);
@@ -476,6 +485,79 @@ async function resolveExecChannel(db: any, ch: any): Promise<any> {
     if (!ch.send_via_channel_id) return ch;
     const { data: via } = await db.from("vivaconnect_channels").select(CH_COLS).eq("id", ch.send_via_channel_id).maybeSingle();
     return via?.active ? via : ch;
+}
+
+/** Cron (1/min): confere no Z-PRO o ack de mensagens NOSSAS ainda sem status final
+ *  (read/failed) e grava delivery_status — o front pinta ✓/✓✓/✓✓ azul em cima disso. */
+async function syncDeliveryStatus(db: any, settings: any) {
+    const since = new Date(Date.now() - 24 * 3600_000).toISOString();
+    // "delivery_status NOT IN (...)" em SQL vira NULL (não true) pra linha com status NULL —
+    // excluiria do filtro exatamente as mensagens mais comuns (ainda sem nenhuma checagem).
+    // .or() com "is.null" explícito evita essa armadilha.
+    const { data: pending } = await db.from("widechat_messages")
+        .select("id, lead_id, channel_id, delivery_status, created_at, raw_data")
+        .eq("provider", "vivaconnect").in("origin", ["agent", "auto"])
+        .or("delivery_status.is.null,delivery_status.eq.sent,delivery_status.eq.delivered")
+        .gte("created_at", since).order("created_at", { ascending: false }).limit(300);
+    if (!pending?.length) return { checked: 0, updated: 0 };
+
+    // o Z-PRO não devolve o id da mensagem na resposta do envio — não dá pra casar por id.
+    // vivaconnect_outbox (via raw_data.outbox_id) tem o texto REAL que foi mandado (ou o
+    // nome do template); casa pelo mesmo texto que message_status já usa na checagem avulsa,
+    // com o horário mais próximo pra desempatar reenvios idênticos.
+    const outboxIds = [...new Set(pending.map((p: any) => p.raw_data?.outbox_id).filter((v: any) => v != null))];
+    const { data: outboxRows } = outboxIds.length
+        ? await db.from("vivaconnect_outbox").select("id, hsm_template_name, body").in("id", outboxIds)
+        : { data: [] };
+    const outboxById = new Map((outboxRows ?? []).map((o: any) => [o.id, o]));
+
+    const chanIds = [...new Set(pending.map((p: any) => p.channel_id))];
+    const leadIds = [...new Set(pending.map((p: any) => p.lead_id))];
+    const [{ data: chans }, { data: leads }] = await Promise.all([
+        db.from("vivaconnect_channels").select(CH_COLS).in("id", chanIds),
+        db.from("leads").select("id, vivaconnect_ticket_id").in("id", leadIds),
+    ]);
+    const chanById = new Map((chans ?? []).map((c: any) => [c.id, c]));
+    const ticketByLead = new Map((leads ?? []).map((l: any) => [l.id, l.vivaconnect_ticket_id]));
+    const unsign = (s: string) => s.replace(/^\*[^*\n]{1,80}:\*\n/, "");
+
+    const groups = new Map<string, any[]>();
+    let skipped = 0;
+    for (const row of pending) {
+        const ticketId = ticketByLead.get(row.lead_id);
+        const ob = outboxById.get(row.raw_data?.outbox_id);
+        const expected = ob?.hsm_template_name ? `Template API: ${ob.hsm_template_name}.` : String(ob?.body ?? "").trim();
+        if (!ticketId || !expected) { skipped++; continue; }
+        const key = `${row.channel_id}:${ticketId}`;
+        (groups.get(key) ?? groups.set(key, []).get(key)!).push({ ...row, expected });
+    }
+
+    let updated = 0;
+    for (const rows of groups.values()) {
+        const ch = chanById.get(rows[0].channel_id);
+        if (!ch) continue;
+        const execCh = await resolveExecChannel(db, ch);
+        const ticketId = ticketByLead.get(rows[0].lead_id);
+        const r = await zpro(settings.base_url, execCh, "/showAllMessages", { ticket: Number(ticketId) });
+        if (!r.ok) continue;
+        const list = asList(r.data).filter((x: any) => x.fromMe && !String(x.body ?? "").startsWith("*System:*"));
+        for (const row of rows) {
+            const candidates = list.filter((x: any) => unsign(String(x.body ?? "")).trim() === row.expected);
+            if (!candidates.length) continue;
+            const target = new Date(row.created_at).getTime();
+            candidates.sort((a: any, b: any) =>
+                Math.abs(new Date(a.createdAt).getTime() - target) - Math.abs(new Date(b.createdAt).getTime() - target));
+            const hit = candidates[0];
+            const ack = Number(hit.ack ?? 0);
+            const status = ack < 0 || hit.status === "error" ? "failed" : ack >= 3 ? "read" : ack === 2 ? "delivered" : ack === 1 ? "sent" : null;
+            if (!status || status === row.delivery_status) continue;
+            await db.from("widechat_messages").update({
+                delivery_status: status, delivery_error: status === "failed" ? JSON.stringify(hit.statusError ?? null) : null,
+            }).eq("id", row.id);
+            updated++;
+        }
+    }
+    return { checked: pending.length, skipped, updated };
 }
 
 /** Envia UMA linha da fila (já com canal definido). Trava a linha com status 'sending'. */
