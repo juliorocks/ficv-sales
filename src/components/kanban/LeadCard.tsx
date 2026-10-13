@@ -135,7 +135,12 @@ export function LeadCard({ lead, users, leadSources, stages, courses, channels, 
             }
         },
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['leads'] });
+            // NÃO invalida a lista aqui — o lead muda de coluna (Entrada -> Em Contato) assim
+            // que a query recarrega, o que desmonta ESTE card (ele só existe na lista da
+            // coluna Entrada) e derruba o diálogo que acabou de abrir junto, no mesmo tick
+            // (achado ao vivo 13/10: clicar "Atender" não abria o popup — a invalidação batia
+            // antes da pessoa conseguir ver o diálogo). A lista fica com o stage_id antigo
+            // (só nesta aba, só até fechar) — invalida de verdade no onOpenChange do diálogo.
             showSuccess(`Lead atribuído a você.`);
             openEdit('chat');
         },
@@ -339,7 +344,11 @@ export function LeadCard({ lead, users, leadSources, stages, courses, channels, 
                     lead={lead}
                     stages={stages}
                     isOpen={isEditDialogOpen}
-                    onOpenChange={setIsEditDialogOpen}
+                    onOpenChange={(open) => {
+                        setIsEditDialogOpen(open);
+                        // só agora (fechando) atualiza a lista — ver comentário em atenderMutation.
+                        if (!open) queryClient.invalidateQueries({ queryKey: ['leads'] });
+                    }}
                     initialTab={editTab}
                 />
             )}
