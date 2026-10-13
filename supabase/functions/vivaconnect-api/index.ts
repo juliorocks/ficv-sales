@@ -436,7 +436,7 @@ async function resolveExecChannel(db: any, ch: any): Promise<any> {
 
 /** Envia UMA linha da fila (já com canal definido). Trava a linha com status 'sending'. */
 async function sendRow(db: any, settings: any, row: any, ch: any) {
-    const execCh = await resolveExecChannel(db, ch);
+    let execCh = await resolveExecChannel(db, ch);
     // a trava de custo Meta só faz sentido quando a chamada REALMENTE pode cair na API paga —
     // com canal delegado configurado, já sabemos que não vai (é a Baileys por baixo)
     const blocked = execCh.id === ch.id ? hybridBlock(ch, row.kind) : null;
@@ -465,11 +465,19 @@ async function sendRow(db: any, settings: any, row: any, ch: any) {
     const signedBody = row.sender_name && row.body
         ? `*${row.sender_name}:*\n${row.body}`
         : row.body;
-    const r = row.media_type === "sounds" && row.media_url
-        ? await zpro(settings.base_url, execCh, "/voice", { ...base, audio: row.media_url })
+    const sendVia = (c: any) => row.media_type === "sounds" && row.media_url
+        ? zpro(settings.base_url, c, "/voice", { ...base, audio: row.media_url })
         : row.media_url
-            ? await zpro(settings.base_url, execCh, "/url", { ...base, mediaUrl: row.media_url, body: signedBody || row.file_name || "" })
-            : await zpro(settings.base_url, execCh, "", { ...base, body: signedBody });
+            ? zpro(settings.base_url, c, "/url", { ...base, mediaUrl: row.media_url, body: signedBody || row.file_name || "" })
+            : zpro(settings.base_url, c, "", { ...base, body: signedBody });
+    let r = await sendVia(execCh);
+    // canal delegado (Baileys) desconectado no Z-PRO → cai automático pro canal OFICIAL do
+    // próprio lead, pra não parar o atendimento (pedido do usuário 13/10)
+    if (!r.ok && execCh.id !== ch.id && /NOT_INITIALIZED/i.test(zproErr(r.status, r.data))) {
+        await markChannel(db, execCh.id, false, zproErr(r.status, r.data));
+        execCh = ch;
+        r = await sendVia(execCh);
+    }
     const now = new Date().toISOString();
     if (!r.ok) {
         const err = zproErr(r.status, r.data);
