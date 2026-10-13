@@ -15,6 +15,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { corsHeaders, jsonRes } from "../_shared/ai.ts";
 import { ensureAlunoAccountById } from "../_shared/aluno.ts";
 import { sponteBuscarAlunos, sponteBuscarTurmas, sponteRosterTurma } from "../_shared/sponte.ts";
+import { alunoPagamento } from "../_shared/alunoSponte.ts";
 import { boletimFor, overviewFor } from "../_shared/alunoPortalCore.ts";
 
 const TICKET_STAFF_ROLES = ["admin", "agent", "secretaria", "tutor", "coordenador", "atendente", "biblioteca"];
@@ -79,6 +80,21 @@ Deno.serve(async (req) => {
             const result = await overviewFor(db, aluno as any);
             if (!FINANCEIRO_ROLES.includes(caller.role)) (result as any).parcelas = [];
             return jsonRes(result);
+        }
+
+        // Gerar o link de pagamento pelo Painel do Aluno dentro do chamado — pedido do
+        // usuário 13/10: atendente só via "Em aberto" sem link nenhum, e acabava digitando/
+        // colando o link na mão no chat (caso real: boleto com VALOR ERRADO mandado assim,
+        // chamado "Boleto com valor incorreto"). Mesma trava de acesso do financeiro em si.
+        if (action === "aluno_pagamento") {
+            if (!FINANCEIRO_ROLES.includes(caller.role)) return jsonRes({ error: "Sem acesso ao financeiro." }, 403);
+            const alunoId = String(body.aluno_id ?? "");
+            if (!alunoId) return jsonRes({ error: "aluno_id obrigatório." }, 400);
+            const { data: aluno } = await db.from("alunos").select("sponte_aluno_id").eq("id", alunoId).maybeSingle();
+            if (!aluno?.sponte_aluno_id) return jsonRes({ error: "Aluno sem matrícula vinculada ao Sponte." }, 404);
+            const r = await alunoPagamento(aluno.sponte_aluno_id, Number(body.conta_receber_id), Number(body.numero_parcela));
+            if (r.notFound) return jsonRes({ error: "Parcela não encontrada." }, 404);
+            return jsonRes(r);
         }
 
         // Transferir pra OUTRA fila (equipe diferente) — pedido do usuário 05/10 (print da

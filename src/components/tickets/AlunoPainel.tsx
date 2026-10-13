@@ -45,6 +45,7 @@ export interface Overview {
 function staffActionName(action: string): string {
   if (action === 'overview') return 'aluno_overview'
   if (action === 'boletim') return 'aluno_boletim'
+  if (action === 'pagamento') return 'aluno_pagamento'
   throw new Error(`Ação "${action}" não disponível na visão do atendente.`)
 }
 
@@ -285,14 +286,12 @@ export function AlunoFinanceiro() {
   const pagas = parcelas.filter(isPaid).reverse()
 
   const pagar = async (p: Parcela) => {
-    // gerar link de pagamento é só self-service — staff-tickets não expõe essa ação (ver portal())
-    if (targetAlunoId) return
     const k = `${p.conta_receber_id}-${p.numero_parcela}`
     setBusy(k)
     try {
       const r = await portal<{ link?: string; linha_digitavel?: string; indisponivel?: boolean; motivo?: string }>({
         action: 'pagamento', conta_receber_id: p.conta_receber_id, numero_parcela: p.numero_parcela,
-      })
+      }, targetAlunoId)
       if (r.link) { window.open(r.link, '_blank', 'noopener'); setPay((s) => ({ ...s, [k]: { link: r.link } })) }
       else if (r.linha_digitavel) setPay((s) => ({ ...s, [k]: { linha: r.linha_digitavel } }))
       else setPay((s) => ({ ...s, [k]: { msg: r.motivo ?? 'Pagamento online ainda não disponível.' } }))
@@ -320,12 +319,10 @@ export function AlunoFinanceiro() {
             <p className="text-sm font-semibold text-[var(--text-main)]">{brl(paid && p.valor_pago ? p.valor_pago : p.valor)}</p>
             {paid
               ? <span className="text-[11px] text-green-400">Pago</span>
-              : targetAlunoId
-                ? <span className="text-[11px] text-[var(--text-muted)]">Em aberto</span>
-                : <button onClick={() => pagar(p)} disabled={busy === k}
-                    className="text-[11px] text-[var(--primary)] hover:underline inline-flex items-center gap-1">
-                    {busy === k ? <Loader2 className="w-3 h-3 animate-spin" /> : <CreditCard className="w-3 h-3" />} Pagar
-                  </button>}
+              : <button onClick={() => pagar(p)} disabled={busy === k}
+                  className="text-[11px] text-[var(--primary)] hover:underline inline-flex items-center gap-1">
+                  {busy === k ? <Loader2 className="w-3 h-3 animate-spin" /> : <CreditCard className="w-3 h-3" />} Pagar
+                </button>}
           </div>
         </div>
         {st?.link && <a href={st.link} target="_blank" rel="noopener noreferrer" className="text-xs text-[var(--primary)] inline-flex items-center gap-1 mt-1">Abrir página de pagamento <ExternalLink className="w-3 h-3" /></a>}
