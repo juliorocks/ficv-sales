@@ -449,7 +449,7 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
                         </TabsContent>
                         <TabsContent value="chat">
                             <div className="py-2 max-h-[78vh] overflow-y-auto pr-2 space-y-4">
-                                <WideChatHistory widechatContactId={lead.widechat_contact_id || ""} leadId={lead.id} telefone={lead.telefone} leadName={lead.nome_completo} onOpenFollowup={setHighlightFollowupId} />
+                                <WideChatHistory widechatContactId={lead.widechat_contact_id || ""} leadId={lead.id} telefone={lead.telefone} leadName={lead.nome_completo} onOpenFollowup={setHighlightFollowupId} onClose={() => onOpenChange(false)} />
                                 <LeadFollowupPanel lead={lead} users={users || []} highlightFollowupId={highlightFollowupId} />
                             </div>
                         </TabsContent>

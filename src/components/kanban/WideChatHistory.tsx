@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label"
 import { showError, showSuccess } from "@/utils/toast"
 import { extractFnErrorMessage } from "@/utils/functionsError"
+import { withTimeout } from "@/utils/withTimeout"
 import { useAuth } from "@/hooks/use-auth"
 import { KbAskPanel } from "@/components/KbAskPanel"
 import { QuickRepliesMenu } from "@/components/QuickReplies"
@@ -31,7 +32,13 @@ const saudacaoAgora = () => {
     return h < 12 ? "Bom dia" : h < 18 ? "Boa tarde" : "Boa noite"
 }
 
-const tplBody = (t: any) => (Array.isArray(t?.message) ? t.message.join("\n") : String(t?.message ?? ""))
+// templates agora vêm da Graph API da Meta (components[].type==='BODY'), não mais do WideChat
+// (message/tags) — tplBody aceita os dois formatos (13/10)
+const tplBody = (t: any) => {
+    const bodyComp = Array.isArray(t?.components) ? t.components.find((c: any) => c?.type === "BODY") : null
+    if (bodyComp) return String(bodyComp.text ?? "")
+    return Array.isArray(t?.message) ? t.message.join("\n") : String(t?.message ?? "")
+}
 
 function parseTemplate(t: any): { body: string; slots: TplSlot[] } {
     const body = tplBody(t)
@@ -91,6 +98,9 @@ interface WideChatHistoryProps {
     // até o card do follow-up no painel ao lado, ver LeadFollowupPanel). Sem essa prop, o link
     // não aparece (não quebra quem usa este componente sem o painel de follow-up por perto).
     onOpenFollowup?: (followupId: number) => void
+    /** fecha o diálogo/painel que envolve este chat — chamado ao finalizar o atendimento com
+     * sucesso, pra não deixar a tela aberta "esperando" depois que já fechou (ver finishMutation) */
+    onClose?: () => void
 }
 
 // O WideChat mandava a hora em horário de Brasília SEM fuso e o webhook gravava
@@ -165,7 +175,7 @@ interface WideChatMessage {
 // emojis mais usados no atendimento — sem dependência de lib
 const EMOJIS = "😀 😅 😊 🙂 😉 😍 🥰 🤩 😎 🤔 🙌 👏 👍 🙏 💪 ✅ ❌ ⚠️ ℹ️ 📌 📎 📄 📅 ⏰ 💰 💸 🎓 📚 ✏️ 📝 📞 📲 💬 ✨ 🎉 🔥 ❤️ 🧡 💛 💚 💙 💜 🤝 👋 😢 😔 🥳".split(" ")
 
-export function WideChatHistory({ widechatContactId, leadId, telefone, leadName, scrollClassName, onOpenFollowup }: WideChatHistoryProps) {
+export function WideChatHistory({ widechatContactId, leadId, telefone, leadName, scrollClassName, onOpenFollowup, onClose }: WideChatHistoryProps) {
     const queryClient = useQueryClient()
     const { user } = useAuth()
     const scrollRef = useRef<HTMLDivElement>(null)
@@ -473,11 +483,10 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
     const effectiveChannelId = attendance?.channel_id || DEFAULT_CHANNEL_ID
 
     const sendMessageMutation = useMutation({
-        mutationFn: async (arg: string | { hsm_template_name: string; hsm_placeholders: string[]; preview: string } | { media: File; caption: string }) => {
+        mutationFn: async (arg: string | { hsm_template_name: string; hsm_placeholders: string[]; hsm_language?: string; preview: string } | { media: File; caption: string }) => {
             const isHsm = typeof arg === 'object' && 'hsm_template_name' in arg
             const isMedia = typeof arg === 'object' && 'media' in arg
             if (!isHsm && !isMedia && !canSendText) throw new Error("Passaram 24h da última mensagem do cliente — só dá pra enviar um template aprovado.")
-            if (isViva && isHsm) throw new Error("Templates ainda não estão disponíveis pelo VivaConnect.")
 
             let mediaField: Record<string, unknown> | undefined
             if (isMedia) {
@@ -500,7 +509,8 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                         const { data, error } = await supabase.functions.invoke('vivaconnect-api', {
                     body: {
                         action: 'send', lead_id: leadId, channel_id: vcChannel?.id,
-                        body: isMedia ? (arg.caption || '') : (arg as string),
+                        body: isMedia ? (arg.caption || '') : isHsm ? arg.preview : (arg as string),
+                        ...(isHsm ? { hsm_template_name: arg.hsm_template_name, hsm_placeholders: arg.hsm_placeholders, hsm_language: arg.hsm_language } : {}),
                         ...(isMedia && mediaField ? { media: { url: mediaField.public_url, type: mediaField.type, file_name: mediaField.filename } } : {}),
                     },
                 })
@@ -743,10 +753,21 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
     })
 
     // Templates HSM — usados quando a janela de 24h fechou OU quando ainda não existe
-    // nenhum atendimento (inicia a conversa do zero com um template aprovado).
+    // nenhum atendimento (inicia a conversa do zero com um template aprovado). Pelo
+    // VivaConnect, vem direto da Graph API da Meta (vivaconnect-api/list_meta_templates,
+    // 13/10) — o WideChat tinha sessão instável ("conta em disputa com o painel aberto em
+    // outra aba") e nem dava pra ENVIAR por ali mesmo (só listar). Leads que por algum
+    // motivo ainda não estão no VivaConnect continuam no WideChat (legado).
     const { data: hsm, isFetching: hsmLoading, isError: hsmError, refetch: refetchHsm } = useQuery<any[]>({
-        queryKey: ['widechat-hsm', effectiveChannelId],
+        queryKey: isViva ? ['meta-templates'] : ['widechat-hsm', effectiveChannelId],
         queryFn: async () => {
+            if (isViva) {
+                const { data, error } = await supabase.functions.invoke('vivaconnect-api', { body: { action: 'list_meta_templates' } })
+                if (error) throw error
+                if (data?.error) throw new Error(typeof data.error === 'string' ? data.error : 'Falha ao listar templates na Meta.')
+                const raw: any[] = data?.templates ?? []
+                return [...raw].sort((a, b) => String(a.name).localeCompare(String(b.name)))
+            }
             const { data, error } = await supabase.functions.invoke('widechat-api', {
                 body: { action: 'list_hsm', channel_id: effectiveChannelId, attendance_id: attendance?._id },
             })
@@ -857,24 +878,34 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
     // nativo do WideChat pra isso.
     const finishMutation = useMutation({
         mutationFn: async () => {
+            // Achado ao vivo 13/10: sem timeout, uma resposta que se perde na rede (o
+            // backend já tinha terminado — lead "Erika Floriano" foi pro Finalizado de
+            // verdade — mas a resposta nunca chegou no navegador) deixava o botão girando
+            // pra sempre, sem erro e sem fechar a tela.
             if (isViva) {
-                const { data, error } = await supabase.functions.invoke('vivaconnect-api', { body: { action: 'finish', lead_id: leadId } })
+                const { data, error } = await withTimeout(
+                    supabase.functions.invoke('vivaconnect-api', { body: { action: 'finish', lead_id: leadId } }),
+                    30000, "Finalizar",
+                )
                 if (error) throw new Error(await extractFnErrorMessage(error))
                 if (data?.error) throw new Error(data.error)
                 queryClient.invalidateQueries({ queryKey: ['leads'] })
                 return
             }
-            const { data, error } = await supabase.functions.invoke('widechat-api', {
-                body: { action: 'finish_attendance', session_id: sessionId },
-            })
+            const { data, error } = await withTimeout(
+                supabase.functions.invoke('widechat-api', { body: { action: 'finish_attendance', session_id: sessionId } }),
+                30000, "Finalizar",
+            )
             if (error) throw new Error(await extractFnErrorMessage(error))
             if (data?.error) throw new Error(typeof data.error === 'string' ? data.error : JSON.stringify(data.error))
         },
         onSuccess: () => {
             showSuccess(isViva ? 'Atendimento finalizado — lead movido para Finalizado.' : 'Atendimento finalizado no WideChat.')
             queryClient.invalidateQueries({ queryKey: msgKey })
+            queryClient.invalidateQueries({ queryKey: ['leads'] })
+            onClose?.()
         },
-        onError: (e: any) => showError(`Erro ao finalizar: ${e.message}`),
+        onError: (e: any) => showError(`Erro ao finalizar: ${e.message} — confira o Kanban, o atendimento pode já ter sido finalizado mesmo assim.`),
     })
 
     // ── Transferir pra Secretaria: a conversa vira CHAMADO do Portal do Aluno ─────
@@ -921,7 +952,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
     const openTemplate = (t: any) => {
         const { slots } = parseTemplate(t)
         if (slots.length === 0) {
-            sendMessageMutation.mutate({ hsm_template_name: t.name, hsm_placeholders: [], preview: tplBody(t) })
+            sendMessageMutation.mutate({ hsm_template_name: t.name, hsm_placeholders: [], hsm_language: t.language, preview: tplBody(t) })
             return
         }
         setTplForm({
@@ -935,7 +966,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
         if (!tplForm) return
         const { t, slots, values } = tplForm
         const preview = fillTemplate(tplBody(t), slots, values)
-        sendMessageMutation.mutate({ hsm_template_name: t.name, hsm_placeholders: values, preview })
+        sendMessageMutation.mutate({ hsm_template_name: t.name, hsm_placeholders: values, hsm_language: t.language, preview })
         setTplForm(null)
     }
 
@@ -1354,7 +1385,9 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                             {hsmError ? (
                                 <div className="p-4 text-center space-y-2">
                                     <p className="text-xs text-muted-foreground">
-                                        Não consegui carregar os templates do WideChat agora. Costuma ser a sessão da conta em disputa com o painel do WideChat aberto em outra aba.
+                                        {isViva
+                                            ? "Não consegui carregar os templates da Meta agora."
+                                            : "Não consegui carregar os templates do WideChat agora. Costuma ser a sessão da conta em disputa com o painel do WideChat aberto em outra aba."}
                                     </p>
                                     <Button size="sm" variant="outline" onClick={() => refetchHsm()} disabled={hsmLoading}>
                                         {hsmLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null} Tentar de novo
@@ -1369,7 +1402,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                                     </CommandEmpty>
                                     <CommandGroup heading="Templates aprovados">
                                         {(hsm ?? []).map((t: any) => {
-                                            const body = Array.isArray(t.message) ? t.message.join(' ') : String(t.message ?? '')
+                                            const body = tplBody(t)
                                             const nVars = parseTemplate(t).slots.length
                                             return (
                                                 <CommandItem key={t.name} value={`${t.name} ${body}`} onSelect={() => { setHsmOpen(false); openTemplate(t) }} className="flex flex-col items-start gap-0.5">
