@@ -389,7 +389,11 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
     // Padrão sem canal fixo nem escolha manual = o número OFICIAL (09/10, pedido do usuário:
     // 3041-7471 virou o número principal — antes caía no 1º canal "pool", que não é mais o
     // comportamento certo). Sem canal oficial cadastrado, cai no pool como antes.
-    const vcChannel = vcFixedChannel ?? vc?.channels.find((c) => c.id === vcChannelChoice)
+    // Escolha manual do agente (ex.: janela de 24h fechou no WABA e só dá template —
+    // trocar pra um canal sem janela, tipo Baileys, pra continuar em texto livre) tem
+    // prioridade sobre o canal fixo — pedido do usuário 13/10, sempre liberado (o cliente
+    // passa a receber desse outro número a partir da troca).
+    const vcChannel = vc?.channels.find((c) => c.id === vcChannelChoice) ?? vcFixedChannel
         ?? vc?.channels.find((c) => c.purpose === 'official') ?? vc?.channels.find((c) => c.purpose === 'pool') ?? vc?.channels[0] ?? null
     // canal com send_via_channel_id manda de verdade pelo delegado (normalmente a Baileys vinculada)
     // — espelha o execCh do backend (vivaconnect-api/sendRow), senão o aviso de janela aparece à toa
@@ -960,14 +964,18 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                 <div className="flex items-center gap-2 px-3 pt-2 text-[11px] text-muted-foreground bg-[var(--bg-card)]">
                     <span className="font-semibold uppercase tracking-wide">Enviar por</span>
                     <span className="font-semibold text-[var(--text-main)]">VivaConnect</span>
-                    {isViva && (vcFixedChannel
-                        ? <span title="O cliente conversa com esse número — as respostas sempre saem dele">· {vcFixedChannel.name}{vcFixedChannel.phone ? ` (${vcFixedChannel.phone})` : ''}</span>
-                        : (vc?.channels.length ?? 0) > 1
-                            ? <select value={vcChannel?.id ?? ''} onChange={(e) => setVcChannelChoice(Number(e.target.value))}
-                                className="h-6 rounded-md border border-[var(--border)] bg-transparent px-1.5 text-[11px]">
-                                {vc!.channels.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                              </select>
-                            : <span>· {vcChannel?.name}</span>)}
+                    {isViva && ((vc?.channels.length ?? 0) > 1
+                        ? <select value={vcChannel?.id ?? ''} onChange={(e) => setVcChannelChoice(Number(e.target.value))}
+                            title={vcFixedChannel ? "O cliente conversa normalmente por esse número — trocar aqui manda as próximas respostas por outro número." : undefined}
+                            className="h-6 rounded-md border border-[var(--border)] bg-transparent px-1.5 text-[11px]">
+                            {vc!.channels.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                        : <span title="O cliente conversa com esse número — as respostas sempre saem dele">· {vcChannel?.name}</span>)}
+                    {isViva && vcFixedChannel && vcChannel?.id !== vcFixedChannel.id && (
+                        <span className="text-amber-500 font-medium" title="O cliente normalmente conversa por outro número — as próximas respostas saem por este aqui escolhido, não pelo de sempre.">
+                            ⚠️ canal trocado manualmente
+                        </span>
+                    )}
                 </div>
             )}
             {isViva && aiState && (
