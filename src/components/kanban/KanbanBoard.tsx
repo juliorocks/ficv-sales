@@ -17,6 +17,22 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
     const { user, isLoading: isAuthLoading } = useAuth()
     const [columns, setColumns] = useState<Record<string, Lead[]>>({})
     const [orderedStages, setOrderedStages] = useState<Stage[]>([])
+    // Lead com diálogo aberto fica "ancorado" na coluna de onde foi aberto, mesmo que o
+    // próprio clique mude o stage_id dele (ex.: "Atender" já move Entrada -> Em Contato na
+    // hora, pedido do usuário 08/10) — achado ao vivo 13/10: o pin local de KanbanColumn.tsx
+    // só protege contra FILTRO escondendo o lead dentro da MESMA coluna; não segura o card
+    // quando o lead muda de stage de verdade, porque aí ele simplesmente some do array desta
+    // coluna e nasce (desmontado, diálogo fechado) na array da coluna nova. Esse pin aqui é
+    // por BOARD inteiro: leadId -> stage.id de onde foi pinado: lead_id -> stage_id;
+    // chaveada por dentro de newColumns abaixo, não pelo stage_id atual de verdade do lead.
+    const [pinnedLeadStage, setPinnedLeadStage] = useState<Map<number, number>>(new Map())
+    const setLeadPinned = (leadId: number, stageId: number, pinned: boolean) => setPinnedLeadStage((prev) => {
+        const has = prev.get(leadId)
+        if (pinned ? has === stageId : has === undefined) return prev
+        const next = new Map(prev)
+        if (pinned) next.set(leadId, stageId); else next.delete(leadId)
+        return next
+    })
 
     const { data: stages, isLoading: isLoadingStages, error: stagesError, refetch: refetchStages } = useQuery<Stage[]>({
         queryKey: ['stages'],
@@ -291,12 +307,17 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
             const newColumns: Record<string, Lead[]> = {}
             stages.forEach(stage => {
                 newColumns[stage.id] = filteredLeads
-                    .filter(lead => lead.stage_id === stage.id)
+                    .filter(lead => {
+                        const anchor = pinnedLeadStage.get(lead.id)
+                        // pinado = fica SÓ na coluna âncora, não importa o stage_id real agora
+                        // (até o diálogo fechar); sem pin, segue o stage_id de verdade como sempre
+                        return anchor != null ? anchor === stage.id : lead.stage_id === stage.id
+                    })
                     .sort((a, b) => new Date(a.data_entrada).getTime() - new Date(b.data_entrada).getTime())
             })
             setColumns(newColumns)
         }
-    }, [stages, filteredLeads])
+    }, [stages, filteredLeads, pinnedLeadStage])
 
     // Mapa lead_id -> assigned_to_id sempre atualizado, pra consultar dentro do handler
     // realtime abaixo sem recriar a subscription a cada refetch de `leads` (closure fixa
@@ -517,6 +538,7 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
                                     allStages={orderedStages}
                                     pendingByLead={pendingByLead}
                                     aiTouchedLeads={aiTouchedLeads}
+                                    onLeadPinChange={setLeadPinned}
                                 />
                             ))}
                             {provided.placeholder}

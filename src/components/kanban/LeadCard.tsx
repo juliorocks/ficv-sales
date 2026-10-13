@@ -141,6 +141,13 @@ export function LeadCard({ lead, users, leadSources, stages, courses, channels, 
             // (achado ao vivo 13/10: clicar "Atender" não abria o popup — a invalidação batia
             // antes da pessoa conseguir ver o diálogo). A lista fica com o stage_id antigo
             // (só nesta aba, só até fechar) — invalida de verdade no onOpenChange do diálogo.
+            // 13/10 (2ª rodada, achado ao vivo de novo): isso sozinho não bastava — a
+            // subscription realtime de KanbanBoard.tsx (`public:leads-changes`, 800ms debounce)
+            // escuta QUALQUER escrita na tabela leads, inclusive o UPDATE que este próprio
+            // clique acabou de fazer, e invalida ['leads'] por conta própria, sem saber que
+            // esse card tem diálogo aberto. O pin que resolve isso de verdade é o de
+            // KanbanBoard.tsx (pinnedLeadStage) — ancora o card na coluna de onde abriu até o
+            // diálogo fechar, mesmo com stage_id já mudado no banco.
             showSuccess(`Lead atribuído a você.`);
             openEdit('chat');
         },

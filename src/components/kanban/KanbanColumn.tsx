@@ -47,6 +47,9 @@ interface KanbanColumnProps {
     pendingByLead?: Map<number, number>;
     /** leads que já tiveram alguma resposta da IA (ai_lead_sessions.ai_turns > 0) — selo de robô no card */
     aiTouchedLeads?: Set<number>;
+    /** avisa o BOARD (não só esta coluna) que o diálogo de um lead abriu/fechou — pin que
+     * sobrevive a troca de stage_id de verdade (ex.: "Atender"), ver KanbanBoard.tsx */
+    onLeadPinChange?: (leadId: number, stageId: number, pinned: boolean) => void;
 }
 
 type SortOption = {
@@ -55,7 +58,7 @@ type SortOption = {
     direction: 'asc' | 'desc';
 };
 
-export function KanbanColumn({ stage, leads, users, leadSources, courses, channels, stageTotal, index, allStages, pendingByLead, aiTouchedLeads }: KanbanColumnProps) {
+export function KanbanColumn({ stage, leads, users, leadSources, courses, channels, stageTotal, index, allStages, pendingByLead, aiTouchedLeads, onLeadPinChange }: KanbanColumnProps) {
     const queryClient = useQueryClient();
     const { user } = useAuth();
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -326,7 +329,7 @@ export function KanbanColumn({ stage, leads, users, leadSources, courses, channe
                                                         {...provided.dragHandleProps}
                                                         className={`${snapshot.isDragging ? 'shadow-lg ring-2 ring-primary' : ''}`}
                                                     >
-                                                        <LeadCard lead={lead} users={users} leadSources={leadSources} stages={allStages} courses={courses} channels={channels} pending={pendingByLead?.get(lead.id)} aiTouched={aiTouchedLeads?.has(lead.id)} onDialogOpenChange={(open) => setPinned(lead.id, open)} sortKey={sortBy.key} />
+                                                        <LeadCard lead={lead} users={users} leadSources={leadSources} stages={allStages} courses={courses} channels={channels} pending={pendingByLead?.get(lead.id)} aiTouched={aiTouchedLeads?.has(lead.id)} onDialogOpenChange={(open) => { setPinned(lead.id, open); onLeadPinChange?.(lead.id, stage.id, open) }} sortKey={sortBy.key} />
                                                     </div>
                                                 )}
                                             </Draggable>
