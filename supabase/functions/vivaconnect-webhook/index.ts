@@ -436,18 +436,29 @@ async function aiReply(db: any, settings: any, leadId: number, channelId: number
     // decidir — "Devolver para a IA" no painel. Só vale a 1ª vez (!sess); depois que a sessão
     // existe, segue o fluxo normal de handed_off/reactivate que já existe.
     //
-    // EXCETO lead vindo de Formulário de Marketing (leads.from_marketing_form) — ali o
-    // "contato ativo" é só o sistema respondendo ao interesse que a PESSOA demonstrou
-    // preenchendo o formulário, não um disparo frio/proativo nosso. Achado ao vivo 09/10:
-    // três leads do form "Teologia EAD" (Izabella, Dave, Jucimara) perguntaram algo de
-    // verdade e a IA ficou muda esperando um humano — a regra de 06/10 foi pensada pra
-    // campanha de reconexão/disparo frio, não pra quem pediu contato pela LP.
+    // EXCETO quando não é de fato um disparo frio nosso:
+    //  1) lead vindo de Formulário de Marketing (leads.from_marketing_form) — o "contato
+    //     ativo" ali é só o sistema respondendo ao interesse que a PESSOA demonstrou
+    //     preenchendo o formulário. Achado ao vivo 09/10: três leads do form "Teologia EAD"
+    //     (Izabella, Dave, Jucimara) perguntaram algo de verdade e a IA ficou muda esperando
+    //     um humano — a regra de 06/10 foi pensada pra campanha de reconexão/disparo frio,
+    //     não pra quem pediu contato pela LP.
+    //  2) a PESSOA escreveu pra gente primeiro (existe mensagem origin='channel' ANTES do
+    //     first_message ter sido enfileirado) — o gatilho vivaconnect_enqueue_first_message
+    //     dispara pra QUALQUER lead novo do WhatsApp, inclusive quem já mandou mensagem
+    //     inbound de verdade (preferred_contact é setado na criação do lead, não só em
+    //     campanha fria). Achado ao vivo 13/10: lead "Lucia Leal" escreveu primeiro pelo Hub
+    //     oficial ("já preenchi meus dados... quero mais informações"), recebeu a saudação da
+    //     Vivi como resposta, e quando perguntou "Valores do curso" a IA ficou muda do mesmo
+    //     jeito — não é "contato ativo nosso" nenhuma das duas vezes, foi ELA que começou.
     if (!sess) {
-        const { data: activeContact } = await db.from("vivaconnect_outbox").select("id")
+        const { data: activeContact } = await db.from("vivaconnect_outbox").select("id, created_at")
             .eq("lead_id", leadId).eq("kind", "first_message").limit(1).maybeSingle();
         if (activeContact) {
             const { data: leadRow } = await db.from("leads").select("from_marketing_form").eq("id", leadId).maybeSingle();
-            if (!leadRow?.from_marketing_form) {
+            const { data: priorInbound } = await db.from("widechat_messages").select("id")
+                .eq("lead_id", leadId).eq("origin", "channel").lt("created_at", activeContact.created_at).limit(1).maybeSingle();
+            if (!leadRow?.from_marketing_form && !priorInbound) {
                 await markAiHandedOff(db, leadId, "Contato ativo nosso — 1ª resposta do lead aguarda atendimento humano");
                 return "ia:pulou (contato ativo, aguardando humano)";
             }
