@@ -584,7 +584,10 @@ async function runFollowups(db: any, settings: any) {
         const r = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-agent`, {
             method: "POST",
             headers: { "Content-Type": "application/json", "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` },
-            body: JSON.stringify({ action: "followup", lead_id: c.lead_id }),
+            // attempt/max_attempts: pedido do usuário 13/10 — os follow-ups seguidos
+            // ficavam repetindo basicamente a mesma pergunta; com o número da tentativa
+            // a IA varia a abordagem e, na última, já avisa que vai encerrar (ver ai-agent).
+            body: JSON.stringify({ action: "followup", lead_id: c.lead_id, attempt: c.followup_count + 1, max_attempts: ai.followup_max_count }),
             signal: AbortSignal.timeout(30000),
         });
         const res = await r.json().catch(() => ({}));

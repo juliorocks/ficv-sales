@@ -50,6 +50,13 @@ Deno.serve(async (req) => {
             const { data: s } = await db.from("ai_agent_settings").select("*").eq("id", 1).single();
             if (!s) return jsonRes({ error: "Configuração da IA não encontrada." }, 500);
             if (!s.enabled || !s.followup_enabled) return jsonRes({ skipped: true, reason: "follow-up desligado" });
+            // nº desta tentativa (vivaconnect-api manda; sem isso, assume 1ª/única) — pedido do
+            // usuário 13/10: os follow-ups seguidos soavam repetitivos (basicamente a mesma
+            // pergunta reformulada) e o último simplesmente insistia de novo sem avisar que a
+            // conversa ia ser encerrada se não respondesse.
+            const attempt = Number(body.attempt) || 1;
+            const maxAttempts = Number(body.max_attempts) || 1;
+            const isLastAttempt = attempt >= maxAttempts;
             const { data: hist } = await db.from("widechat_messages").select("origin, message")
                 .eq("lead_id", leadId).eq("provider", "vivaconnect").order("created_at", { ascending: false }).limit(20);
             const histMsgs: Msg[] = (hist ?? []).reverse().filter((h: any) => h.message)
@@ -72,6 +79,14 @@ Deno.serve(async (req) => {
                 // campo curso_interesse do formulário nunca é atualizado, então ele "trava" no
                 // 1º curso pra sempre. Agora é só um DADO BRUTO, nunca a fonte de verdade.
                 `O lead${nome ? ` (${nome})` : ""} ficou um tempo sem responder depois da sua última mensagem na conversa abaixo.${curso ? ` Dado de cadastro (pode estar DESATUALIZADO, não confie nele sozinho): curso de interesse informado no formulário = ${curso}.` : ""} Releia o histórico INTEIRO com atenção antes de escrever — ele é a ÚNICA fonte confiável do que está sendo discutido AGORA: se o assunto mudou depois daquele interesse inicial (ex.: o lead já encerrou aquele assunto, foi redirecionado pra outra empresa do grupo, ou passou a falar de outra coisa), retome o assunto MAIS RECENTE da conversa, nunca o do formulário. Se a SUA última mensagem no histórico foi uma pergunta em aberto (ex.: perguntando se é sobre o assunto anterior ou outra coisa), retome EXATAMENTE essa pergunta — não presuma a resposta dela. NUNCA repita nem pergunte se pode enviar algo que JÁ foi enviado ou respondido nesta conversa (ex.: se a grade/ementa/valores já foram mandados, não pergunte "posso te enviar a grade?" de novo — isso prova que você não leu a conversa, é o pior erro possível aqui). Escreva UMA mensagem curta e natural de reengajamento — NUNCA um "oi, tudo bem?" genérico. Retome o assunto específico de vocês com leveza, como quem lembrou de continuar uma conversa, não como cobrança. Ofereça o PRÓXIMO passo que AINDA NÃO foi dado. NÃO se apresente de novo (você já se apresentou nesta conversa). NÃO diga explicitamente "faz um tempo que você não responde" nem nada que soe como pressão.`,
+                // Pedido do usuário 13/10: os follow-ups seguidos (3 tentativas) ficavam
+                // repetindo basicamente a MESMA pergunta reformulada — o histórico abaixo já
+                // tem as tentativas anteriores (origin='auto'), mas o prompt não mandava
+                // comparar com elas nem variar o ângulo.
+                `Esta é a tentativa ${attempt} de ${maxAttempts} de reengajamento (as tentativas anteriores, se houver, já estão no histórico abaixo, como suas próprias mensagens). Se já houve tentativa(s) antes: NÃO repita a mesma pergunta/abordagem de novo, nem com outras palavras — mude o ângulo de verdade (ex.: se já perguntou sobre a data da turma, ofereça outra informação útil, pergunte sobre outra dúvida comum do curso, ou simplifique o pedido pra algo mais fácil de responder com 1 palavra).`,
+                ...(isLastAttempt
+                    ? [`Esta é a ÚLTIMA tentativa (não haverá mais nenhuma depois desta). Escreva num tom de despedida gentil: diga, com leveza (sem soar como ameaça/cobrança), que como não teve retorno você vai encerrar este atendimento por aqui, mas que ele pode retomar quando quiser — e agradeça pelo tempo/interesse. NÃO ofereça fazer mais uma pergunta de acompanhamento depois desta.`]
+                    : []),
                 ...(listAlreadySentIn(histMsgs)
                     ? [`ATENÇÃO: o histórico abaixo já tem uma lista/grade numerada que você (ou a equipe) mandou nesta conversa — ela JÁ foi entregue. Não ofereça mandar de novo, não pergunte "quer receber?"; se for mencionar o curso, vá direto pro próximo passo (valores, matrícula, ou uma dúvida específica ainda sem resposta).`]
                     : []),
