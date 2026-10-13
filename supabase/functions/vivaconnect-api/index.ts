@@ -6,6 +6,7 @@
 //   test_channel   { channel_id }            (admin)   → testa o token e atualiza nome/número/status do Z-PRO
 //   send_test      { channel_id, number, body } (admin) → envio avulso de teste
 //   chat_context   { lead_id }               (staff)   → pro chat do lead: integração ligada? canais? número fixo?
+//   list_meta_templates {}                   (staff)   → templates aprovados do número oficial, direto da Graph API da Meta
 //   send           { lead_id, body?, media?, channel_id? } (staff) → mensagem do agente pelo CRM
 //                    media = { url, type: images|sounds|videos|files, file_name }
 //   message_status { lead_id, body? }        (staff)   → ack da mensagem nossa no Z-PRO (entregue/lida/missing)
@@ -37,6 +38,7 @@ import { corsHeaders, identify, isAdmin, isStaff, jsonRes } from "../_shared/ai.
 import { asList, fillTemplate, firstName, loadSettings, markHumanReplied, parseApiRef, toDiscovered, toZproNumber, zpro, zproErr } from "../_shared/vivaconnect.ts";
 import { mirror, sv } from "../_shared/db.ts";
 import { type HubMsg, filaText, loadDestinations, planejar, redirectText } from "../_shared/hub.ts";
+import { getSecret } from "../_shared/secrets.ts";
 
 const CH_COLS = "id, name, purpose, kind, phone, api_id, api_token, active, daily_limit, zpro_whatsapp_id, last_sent_at, zpro_type, zpro_hybrid_mode, send_via_channel_id";
 
@@ -121,6 +123,22 @@ Deno.serve(async (req) => {
                 lead_channel_id: lead?.vivaconnect_channel_id ?? null,
                 ticket_id: lead?.vivaconnect_ticket_id ?? null,
             });
+        }
+
+        // Templates aprovados do número oficial, direto da Graph API da Meta — a API externa
+        // do Z-PRO não tem endpoint de listagem, só de envio (13/10). Token é o "bmToken" que o
+        // próprio Z-PRO guarda por número (achado via acesso direto ao banco de produção do
+        // Z-PRO), colado no Vault como META_WABA_TOKEN_OFICIAL (Gestão > Integrações).
+        if (action === "list_meta_templates") {
+            const token = await getSecret("META_WABA_TOKEN_OFICIAL");
+            if (!token) return jsonRes({ error: "Token da Meta não configurado (META_WABA_TOKEN_OFICIAL em Gestão > Integrações)." }, 400);
+            const wabaId = "1653396729814045"; // CIDADE VIVA - OFICIAL (Whatsapps#16 no Z-PRO)
+            const r = await fetch(`https://graph.facebook.com/v25.0/${wabaId}/message_templates?limit=100`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) return jsonRes({ error: data?.error?.message ?? `Meta respondeu ${r.status}` }, 502);
+            return jsonRes({ templates: data.data ?? [] });
         }
 
         if (action === "send") {

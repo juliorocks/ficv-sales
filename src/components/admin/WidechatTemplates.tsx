@@ -1,12 +1,13 @@
-// Gestão > Templates WhatsApp — só VISUALIZAÇÃO dos templates aprovados que já estão
-// salvos no WideChat (pedido do usuário 13/10). Reaproveita a mesma ação já usada no
-// seletor de template do chat do lead (widechat-api, action=list_hsm) — nenhuma rota nova
-// no backend, só uma tela dedicada pra ver a lista inteira sem precisar abrir um chat.
+// Gestão > Templates WhatsApp — VISUALIZAÇÃO dos templates aprovados do número oficial
+// (3041-7471), puxados DIRETO da Graph API da Meta (pedido do usuário 13/10).
 //
-// Gerenciar (criar/editar/apagar/consultar aprovação da Meta) não dá: a API externa do
-// Z-PRO só tem endpoint de ENVIO de template já aprovado — gerenciamento de template é
-// recurso do painel nativo de lá (ou da própria Graph API da Meta, com o token da conta de
-// negócios, que não temos guardado aqui ainda).
+// A API externa do Z-PRO não tem endpoint de listagem de templates (só envio de um já
+// aprovado) — confirmado na doc oficial. O painel nativo do Z-PRO consegue mostrar isso
+// porque fala direto com a Meta usando o token da conta de negócios (bmToken) que o Z-PRO
+// guarda por número. Achamos esse token com acesso direto ao banco de produção do Z-PRO
+// (autorizado pelo usuário) e colamos no nosso Vault (META_WABA_TOKEN_OFICIAL) — a edge
+// function vivaconnect-api (action=list_meta_templates) usa ele pra bater direto na Graph
+// API (graph.facebook.com/.../message_templates), sem depender do WideChat nem do Z-PRO.
 import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { AlertCircle, Loader2, MessageSquareText, RefreshCw, Search } from "lucide-react"
@@ -16,41 +17,36 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 
-// mesmo canal padrão que o chat do lead usa quando a conversa ainda não tem um
-// attendance/channel próprio (WideChatHistory.tsx, DEFAULT_CHANNEL_ID)
-const DEFAULT_CHANNEL_ID = "694534a0132843fbb436bd48"
+interface MetaTemplateComponent {
+    type: string
+    text?: string
+    format?: string
+    [k: string]: unknown
+}
 
-interface WcTemplate {
+interface MetaTemplate {
+    id: string
     name: string
-    message?: string | string[]
-    tags?: unknown[]
     language?: string
     category?: string
+    status?: string
+    components?: MetaTemplateComponent[]
     [k: string]: unknown
 }
 
 export function WidechatTemplates() {
     const [search, setSearch] = useState("")
 
-    const { data: templates, isFetching, isError, error, refetch } = useQuery<WcTemplate[]>({
-        queryKey: ["widechat-templates-admin"],
+    const { data: templates, isFetching, isError, error, refetch } = useQuery<MetaTemplate[]>({
+        queryKey: ["meta-templates-admin"],
         queryFn: async () => {
-            const { data, error } = await supabase.functions.invoke("widechat-api", {
-                body: { action: "list_hsm", channel_id: DEFAULT_CHANNEL_ID },
+            const { data, error } = await supabase.functions.invoke("vivaconnect-api", {
+                body: { action: "list_meta_templates" },
             })
             if (error) throw error
-            if (data?.error) throw new Error(typeof data.error === "string" ? data.error : "Falha ao listar templates no WideChat.")
-            const raw: WcTemplate[] = data?.templates ?? []
-            // o WideChat costuma devolver cada template 2x (uma sem `tags`, outra com) —
-            // mesma dedup já usada no seletor do chat (WideChatHistory.tsx)
-            const byName = new Map<string, WcTemplate>()
-            for (const t of raw) {
-                if (!t?.name) continue
-                const prev = byName.get(t.name)
-                const score = Array.isArray(t.tags) ? t.tags.length : 0
-                if (!prev || score > (Array.isArray(prev.tags) ? prev.tags.length : 0)) byName.set(t.name, t)
-            }
-            return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name))
+            if (data?.error) throw new Error(typeof data.error === "string" ? data.error : "Falha ao listar templates na Meta.")
+            const raw: MetaTemplate[] = data?.templates ?? []
+            return [...raw].sort((a, b) => a.name.localeCompare(b.name))
         },
         staleTime: 5 * 60_000,
     })
@@ -58,7 +54,7 @@ export function WidechatTemplates() {
     const term = search.trim().toLowerCase()
     const filtered = (templates ?? []).filter((t) => {
         if (!term) return true
-        const body = Array.isArray(t.message) ? t.message.join(" ") : String(t.message ?? "")
+        const body = t.components?.find((c) => c.type === "BODY")?.text ?? ""
         return t.name.toLowerCase().includes(term) || body.toLowerCase().includes(term)
     })
 
@@ -70,8 +66,9 @@ export function WidechatTemplates() {
                         <MessageSquareText size={22} className="text-primary" /> Templates WhatsApp
                     </CardTitle>
                     <CardDescription className="text-sm">
-                        Templates de mensagem já aprovados pela Meta, puxados direto do WideChat. É só visualização por enquanto — criar, editar ou
-                        acompanhar aprovação de um template novo continua sendo pelo painel nativo (WideChat ou Z-PRO), não tem endpoint pra isso na API.
+                        Templates de mensagem já aprovados pela Meta pro número oficial (3041-7471), puxados direto da Graph API da Meta. É só
+                        visualização por enquanto — criar, editar ou acompanhar aprovação de um template novo continua sendo pelo painel nativo do
+                        Z-PRO (não tem endpoint pra isso na nossa integração).
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -89,8 +86,8 @@ export function WidechatTemplates() {
                         <div className="rounded-xl p-4 text-sm bg-red-500/10 text-red-600 dark:text-red-400 flex items-start gap-2">
                             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                             <div>
-                                <p className="font-medium">Não consegui carregar os templates do WideChat.</p>
-                                <p className="text-xs opacity-80 mt-0.5">{(error as Error)?.message ?? "Costuma ser a sessão da conta em disputa com o painel aberto em outra aba."}</p>
+                                <p className="font-medium">Não consegui carregar os templates da Meta.</p>
+                                <p className="text-xs opacity-80 mt-0.5">{(error as Error)?.message ?? "Tenta recarregar."}</p>
                             </div>
                         </div>
                     )}
@@ -107,16 +104,21 @@ export function WidechatTemplates() {
 
                     <div className="space-y-2">
                         {filtered.map((t) => {
-                            const body = Array.isArray(t.message) ? t.message.join("\n") : String(t.message ?? "")
-                            const nVars = Array.isArray(t.tags) ? t.tags.length : 0
+                            const body = t.components?.find((c) => c.type === "BODY")?.text ?? ""
+                            const header = t.components?.find((c) => c.type === "HEADER")
+                            const nVars = (body.match(/\{\{\s*\d+\s*\}\}/g) ?? []).length
                             return (
-                                <div key={t.name} className="rounded-xl border border-[var(--border)] p-4 space-y-1.5">
+                                <div key={t.id ?? t.name} className="rounded-xl border border-[var(--border)] p-4 space-y-1.5">
                                     <div className="flex items-center gap-2 flex-wrap">
                                         <p className="font-semibold text-sm text-[var(--text-main)]">{t.name}</p>
+                                        {!!t.status && (
+                                            <Badge variant={t.status === "APPROVED" ? "secondary" : "outline"} className="text-[10px]">{t.status}</Badge>
+                                        )}
                                         {nVars > 0 && <Badge variant="secondary" className="text-[10px]">{nVars} variáve{nVars > 1 ? "is" : "l"}</Badge>}
-                                        {!!t.language && <Badge variant="outline" className="text-[10px]">{String(t.language)}</Badge>}
-                                        {!!t.category && <Badge variant="outline" className="text-[10px]">{String(t.category)}</Badge>}
+                                        {!!t.language && <Badge variant="outline" className="text-[10px]">{t.language}</Badge>}
+                                        {!!t.category && <Badge variant="outline" className="text-[10px]">{t.category}</Badge>}
                                     </div>
+                                    {header?.text && <p className="text-sm font-medium text-[var(--text-main)]">{header.text}</p>}
                                     <p className="text-sm text-muted-foreground whitespace-pre-wrap">{body || "(sem corpo de texto)"}</p>
                                 </div>
                             )
