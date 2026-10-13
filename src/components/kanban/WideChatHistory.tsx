@@ -582,13 +582,16 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                         const st = data?.last?.status
                         if (st === 'failed') { showError(`O WhatsApp NÃO entregou a mensagem.${data.last.error ? ` ${data.last.error}` : ''}`); return }
                         if (st === 'delivered' || st === 'read') { showSuccess(st === 'read' ? 'Entregue e lida ✔✔' : 'Entregue no WhatsApp ✔'); return }
-                        if (tries > 0) { window.setTimeout(() => checkViva(tries - 1), 8000); return }
+                        if (tries > 0) { window.setTimeout(() => checkViva(tries - 1), 10000); return }
                         if (st === 'missing') showError('A mensagem não apareceu no WhatsApp. Se era um anexo, tente de novo (arquivo pode não ter sido baixado).')
                     } catch {
-                        if (tries > 0) window.setTimeout(() => checkViva(tries - 1), 8000)
+                        if (tries > 0) window.setTimeout(() => checkViva(tries - 1), 10000)
                     }
                 }
-                window.setTimeout(() => checkViva(3), 5000)
+                // achado ao vivo 13/10: 29s (3 tentativas de 8s) era curto demais — o ack do
+                // Z-PRO às vezes demora mais que isso, e a checagem desistia e mostrava "não
+                // apareceu" pra mensagem que, segundos depois, tinha sido entregue e até lida.
+                window.setTimeout(() => checkViva(7), 6000)
                 return
             }
             const checkDelivery = async (tries: number) => {
