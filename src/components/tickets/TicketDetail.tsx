@@ -1030,10 +1030,10 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                   value={msg}
                   onChange={e => setMsg(e.target.value)}
                   placeholder={interno ? 'Nota interna (não visível ao aluno)...' : 'Digite sua mensagem...'}
-                  className={`resize-none flex-1 bg-[var(--bg-main)] border-[var(--border)] text-[var(--text-main)] ${
+                  className={`resize-none flex-1 min-h-[40px] bg-[var(--bg-main)] border-[var(--border)] text-[var(--text-main)] ${
                     interno ? 'border-amber-500/50' : ''
                   }`}
-                  rows={2}
+                  rows={1}
                   onKeyDown={e => {
                     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
                   }}
