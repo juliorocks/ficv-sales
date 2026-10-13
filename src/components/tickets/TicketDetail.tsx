@@ -1025,20 +1025,22 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
               </div>
             )}
             {!recording && (
-              <div className="flex gap-2 items-start">
+              <div className="flex gap-2 items-end">
                 <Textarea
                   value={msg}
                   onChange={e => setMsg(e.target.value)}
                   placeholder={interno ? 'Nota interna (não visível ao aluno)...' : 'Digite sua mensagem...'}
-                  className={`resize-none flex-1 min-h-[40px] bg-[var(--bg-main)] border-[var(--border)] text-[var(--text-main)] ${
+                  className={`resize-none flex-1 min-h-[56px] bg-[var(--bg-main)] border-[var(--border)] text-[var(--text-main)] ${
                     interno ? 'border-amber-500/50' : ''
                   }`}
-                  rows={1}
+                  rows={2}
                   onKeyDown={e => {
                     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
                   }}
                 />
-                <div className="flex flex-col gap-1.5 self-end">
+                {/* botões na horizontal em vez de empilhados — em coluna (5 ícones) eram bem
+                    mais altos que a caixa de texto e sobrava um vão vazio do lado (13/10) */}
+                <div className="flex gap-1.5 items-end">
                   {isStaff && (
                     <QuickRepliesMenu triggerClassName="h-10 w-10 flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--bg-main)] text-[var(--text-muted)] hover:text-[var(--primary)] hover:border-[var(--primary)] transition-colors"
                       onPick={(content) => setMsg(prev => (prev && !prev.endsWith(' ') ? prev + ' ' : prev) + content)} />
