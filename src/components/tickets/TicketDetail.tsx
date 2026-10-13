@@ -1025,7 +1025,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
               </div>
             )}
             {!recording && (
-              <div className="flex gap-2">
+              <div className="flex gap-2 items-start">
                 <Textarea
                   value={msg}
                   onChange={e => setMsg(e.target.value)}
