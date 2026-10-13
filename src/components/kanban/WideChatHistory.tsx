@@ -571,11 +571,13 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
             // template (o "deu sucesso mas não chegou" era isso).
             showSuccess(isHsm ? 'Template enviado — confirmando a entrega…' : 'Enviado — confirmando a entrega…')
             if (isViva) {
-                const sentBody = typeof variables === 'string' ? variables.trim() : ('caption' in variables ? (variables.caption || '').trim() : '')
+                const sentBody = typeof variables === 'string' ? variables.trim()
+                    : 'caption' in variables ? (variables.caption || '').trim() : ''
+                const templateName = typeof variables === 'object' && 'hsm_template_name' in variables ? variables.hsm_template_name : undefined
                 const checkViva = async (tries: number) => {
                     try {
                         const { data } = await supabase.functions.invoke('vivaconnect-api', {
-                            body: { action: 'message_status', lead_id: leadId, body: sentBody },
+                            body: { action: 'message_status', lead_id: leadId, body: sentBody, template_name: templateName },
                         })
                         const st = data?.last?.status
                         if (st === 'failed') { showError(`O WhatsApp NÃO entregou a mensagem.${data.last.error ? ` ${data.last.error}` : ''}`); return }

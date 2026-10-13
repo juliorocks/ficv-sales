@@ -323,7 +323,10 @@ Deno.serve(async (req) => {
             // NENHUM envio manual de um agente de verdade (só pros meus testes via service role,
             // sem sender_name, que não assina). unsign() tira esse prefixo antes de comparar.
             const unsign = (s: string) => s.replace(/^\*[^*\n]{1,80}:\*\n/, "");
-            const expected = typeof body.body === "string" ? body.body.trim() : null;
+            // template: o Z-PRO grava "Template API: <nome>." no lugar do texto preenchido (13/10)
+            const expected = body.template_name
+                ? `Template API: ${String(body.template_name).trim()}.`
+                : typeof body.body === "string" ? body.body.trim() : null;
             const since = new Date(Date.now() - 10 * 60_000).toISOString();
             const mine = list.filter((x: any) => x.fromMe && !String(x.body ?? "").startsWith("*System:*"))
                 .filter((x: any) => expected == null || (unsign(String(x.body ?? "")).trim() === expected && String(x.createdAt) >= since))
