@@ -163,8 +163,12 @@ Deno.serve(async (req) => {
             if (!lead) return jsonRes({ error: "Lead não encontrado." }, 404);
             const number = toZproNumber(lead.telefone);
             if (!number) return jsonRes({ error: "Lead sem telefone válido." }, 400);
-            // lead já tem número fixo → sempre ele (a conversa do cliente está nesse número)
-            const channelId = lead.vivaconnect_channel_id ?? (Number(body.channel_id) || null)
+            // channel_id explícito (o agente trocou de canal na mão, ex.: janela de 24h fechou
+            // no WABA fixo — pedido do usuário 13/10, troca sempre liberada) tem prioridade
+            // sobre o canal fixo do lead — achado ao vivo 14/10: send ignorava a troca manual
+            // e insistia no canal fixo (WABA), batendo na trava de janela de novo mesmo depois
+            // do agente escolher o Baileys. Sem escolha explícita, cai no fixo de sempre.
+            const channelId = (Number(body.channel_id) || null) ?? lead.vivaconnect_channel_id
                 ?? (await db.rpc("vivaconnect_pick_pool_channel")).data;
             if (!channelId) return jsonRes({ error: "Nenhum número do VivaConnect disponível (cadastre um canal ativo)." }, 400);
             const { data: ch } = await db.from("vivaconnect_channels").select(CH_COLS).eq("id", channelId).maybeSingle();
