@@ -8,9 +8,9 @@
  * QuickRepliesPage = a mesma edição, mas como página cheia (Gestão > Leads (Kanban) > Mensagens
  * Rápidas). As duas usam QuickRepliesEditor por baixo — a lógica de salvar/apagar não duplica.
  */
-import { useState } from "react"
+import { useEffect, useMemo, useState, type RefObject } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Loader2, Pencil, Plus, Settings2, Trash2, Zap } from "lucide-react"
+import { Loader2, Pencil, Plus, Search, Settings2, Trash2, Zap } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -35,23 +35,50 @@ export function useQuickReplies() {
 }
 
 /** Botão (ícone de raio) com a lista de atalhos pra inserir na mensagem + "Gerenciar atalhos". */
+/** Filtra por título OU conteúdo, sem acento/maiúscula atrapalhar. */
+function filterReplies(replies: QuickReply[], query: string): QuickReply[] {
+  const q = query.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+  if (!q) return replies
+  const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+  return replies.filter((r) => norm(r.title).includes(q) || norm(r.content).includes(q))
+}
+
 export function QuickRepliesMenu({ onPick, triggerClassName }: { onPick: (content: string) => void; triggerClassName?: string }) {
   const { data: replies = [] } = useQuickReplies()
   const [managerOpen, setManagerOpen] = useState(false)
+  const [search, setSearch] = useState("")
+  const filtered = useMemo(() => filterReplies(replies, search), [replies, search])
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu onOpenChange={(open) => { if (!open) setSearch("") }}>
         <DropdownMenuTrigger asChild>
           <Button type="button" variant="outline" size="icon" title="Mensagens rápidas"
             className={triggerClassName ?? "rounded-full h-9 w-9 text-slate-600"}>
             <Zap className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-72 max-h-80 overflow-y-auto">
+        <DropdownMenuContent align="start" className="w-72 max-h-96 overflow-y-auto" onCloseAutoFocus={(e) => e.preventDefault()}>
           <DropdownMenuLabel>Mensagens rápidas</DropdownMenuLabel>
+          <div className="px-2 pb-1.5">
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <input
+                autoFocus
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => e.stopPropagation()}
+                placeholder="Buscar…"
+                className="w-full h-8 rounded-md border border-input bg-transparent pl-7 pr-2 text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+            </div>
+          </div>
           <DropdownMenuSeparator />
-          {replies.length === 0 && <div className="px-2 py-3 text-xs text-muted-foreground">Nenhum atalho cadastrado ainda.</div>}
-          {replies.map((q) => (
+          {filtered.length === 0 && (
+            <div className="px-2 py-3 text-xs text-muted-foreground">
+              {replies.length === 0 ? "Nenhum atalho cadastrado ainda." : "Nada encontrado."}
+            </div>
+          )}
+          {filtered.map((q) => (
             <DropdownMenuItem key={q.id} onClick={() => onPick(q.content)} className="flex flex-col items-start gap-0.5">
               <span className="font-medium">{q.title}</span>
               <span className="text-[11px] text-muted-foreground line-clamp-2">{q.content}</span>
@@ -65,6 +92,59 @@ export function QuickRepliesMenu({ onPick, triggerClassName }: { onPick: (conten
       </DropdownMenu>
       <QuickRepliesManagerDialog open={managerOpen} onOpenChange={setManagerOpen} />
     </>
+  )
+}
+
+/**
+ * Digitou "/" (início da mensagem ou depois de um espaço) seguido de texto sem espaço →
+ * mostra a lista de atalhos filtrada por isso, flutuando acima da caixa de texto — pedido
+ * do usuário 14/10: "ao digitar / aparecer essa caixinha com as opções e busca". Clique
+ * troca o "/busca" pelo conteúdo do atalho; Escape só fecha a sugestão (mantém o texto).
+ * Quem usa precisa envolver a textarea numa div com `className="relative"`.
+ */
+export function QuickReplySlash({ value, onChange, textareaRef }: {
+  value: string
+  onChange: (v: string) => void
+  textareaRef: RefObject<HTMLTextAreaElement>
+}) {
+  const { data: replies = [] } = useQuickReplies()
+  const [dismissed, setDismissed] = useState<string | null>(null)
+  const match = value.match(/(?:^|\s)\/(\S*)$/)
+  const query = match?.[1] ?? null
+  const filtered = query !== null ? filterReplies(replies, query) : []
+  const show = query !== null && !!replies.length && dismissed !== value && !!filtered.length
+
+  // Escape fecha a sugestão sem mexer no texto — o foco continua na textarea (não neste
+  // popup), então o teclado precisa ser ouvido no document, não num onKeyDown aqui.
+  useEffect(() => {
+    if (!show) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDismissed(value) }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+  }, [show, value])
+
+  if (!show) return null
+
+  const pick = (content: string) => {
+    const cutAt = value.length - (query as string).length - 1 // posição do "/"
+    onChange(value.slice(0, cutAt) + content + " ")
+    setDismissed(null)
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }
+
+  return (
+    <div
+      role="listbox"
+      className="absolute bottom-full left-0 mb-1.5 w-80 max-h-60 overflow-y-auto rounded-lg border bg-popover text-popover-foreground shadow-lg z-50 py-1"
+    >
+      {filtered.map((q) => (
+        <button key={q.id} type="button" onClick={() => pick(q.content)}
+          className="w-full text-left px-3 py-1.5 hover:bg-accent hover:text-accent-foreground flex flex-col gap-0.5">
+          <span className="text-xs font-medium">{q.title}</span>
+          <span className="text-[11px] text-muted-foreground line-clamp-1">{q.content}</span>
+        </button>
+      ))}
+    </div>
   )
 }
 

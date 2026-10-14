@@ -17,7 +17,7 @@ import { extractFnErrorMessage } from "@/utils/functionsError"
 import { withTimeout } from "@/utils/withTimeout"
 import { useAuth } from "@/hooks/use-auth"
 import { KbAskPanel } from "@/components/KbAskPanel"
-import { QuickRepliesMenu } from "@/components/QuickReplies"
+import { QuickRepliesMenu, QuickReplySlash } from "@/components/QuickReplies"
 
 // ── Templates HSM: variáveis ────────────────────────────────────────────────
 // Um template pode ter variáveis no corpo — numeradas ({{1}}, {{2}}) ou nomeadas
@@ -1369,18 +1369,21 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                                 </PopoverContent>
                             </Popover>
                         </div>
+                        <div className="relative flex-1">
+                        <QuickReplySlash value={newMessage} onChange={setNewMessage} textareaRef={textareaRef} />
                         <textarea
                             ref={textareaRef}
                             value={newMessage}
                             onChange={(e) => setNewMessage(e.target.value)}
                             onKeyDown={handleKeyDown}
                             rows={1}
-                            placeholder={pendingFile ? "Legenda (opcional)…" : "Mensagem…  (Enter envia · Shift/Ctrl+Enter quebra linha)"}
-                            className="flex-1 resize-none bg-white text-slate-800 border border-slate-200 placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary shadow-sm rounded-2xl px-4 py-2 text-sm max-h-32 overflow-y-auto"
+                            placeholder={pendingFile ? "Legenda (opcional)…" : "Mensagem…  (Enter envia · Shift/Ctrl+Enter quebra linha · / mensagens rápidas)"}
+                            className="w-full resize-none bg-white text-slate-800 border border-slate-200 placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary shadow-sm rounded-2xl px-4 py-2 text-sm max-h-32 overflow-y-auto"
                             style={{ height: 'auto', minHeight: '2.25rem' }}
                             onInput={(e) => { const t = e.currentTarget; t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 128) + 'px' }}
                             disabled={sendMessageMutation.isPending || recording || convertingAudio}
                         />
+                        </div>
                         {newMessage.trim() || pendingFile ? (
                             <Button type="submit" size="icon"
                                 className="rounded-full shadow-md bg-primary hover:bg-primary/90 text-white w-9 h-9 shrink-0"

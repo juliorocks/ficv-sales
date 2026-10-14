@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog'
 import { Button } from '../ui/button'
 import { Textarea } from '../ui/textarea'
 import { KbAskPanel } from '../KbAskPanel'
-import { QuickRepliesMenu } from '../QuickReplies'
+import { QuickRepliesMenu, QuickReplySlash } from '../QuickReplies'
 import { Badge } from '../ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { Combobox } from '../ui/combobox'
@@ -253,6 +253,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   const [files, setFiles] = useState<File[]>([])
   const [previews, setPreviews] = useState<string[]>([]) // object URLs para preview local
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const msgTextareaRef = useRef<HTMLTextAreaElement>(null)
   const [uploadProgress, setUploadProgress] = useState<string | null>(null)
 
   // Gravação de áudio
@@ -1026,11 +1027,14 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
             )}
             {!recording && (
               <div className="flex gap-2 items-end">
+                <div className="relative flex-1">
+                <QuickReplySlash value={msg} onChange={setMsg} textareaRef={msgTextareaRef} />
                 <Textarea
+                  ref={msgTextareaRef}
                   value={msg}
                   onChange={e => setMsg(e.target.value)}
-                  placeholder={interno ? 'Nota interna (não visível ao aluno)...' : 'Digite sua mensagem...'}
-                  className={`resize-none flex-1 min-h-[56px] bg-[var(--bg-main)] border-[var(--border)] text-[var(--text-main)] ${
+                  placeholder={interno ? 'Nota interna (não visível ao aluno)...' : 'Digite sua mensagem... (/ mensagens rápidas)'}
+                  className={`resize-none min-h-[56px] bg-[var(--bg-main)] border-[var(--border)] text-[var(--text-main)] ${
                     interno ? 'border-amber-500/50' : ''
                   }`}
                   rows={2}
@@ -1038,6 +1042,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
                   }}
                 />
+                </div>
                 {/* botões na horizontal em vez de empilhados — em coluna (5 ícones) eram bem
                     mais altos que a caixa de texto e sobrava um vão vazio do lado (13/10) */}
                 <div className="flex gap-1.5 items-end">
