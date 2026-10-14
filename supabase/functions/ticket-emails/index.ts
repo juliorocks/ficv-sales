@@ -33,7 +33,17 @@ async function sendTicketWhatsApp(db: any, telefone: string | null | undefined, 
         if (!number || !text || !BR_CELULAR_RE.test(number)) return;
         const { data: settings } = await db.from("vivaconnect_settings").select("enabled").eq("id", 1).maybeSingle();
         if (!settings?.enabled) return;
-        const { data: channelId } = await db.rpc("vivaconnect_pick_pool_channel");
+        // Prefere o canal Baileys (não oficial, sem custo por mensagem da Meta) pro aviso de
+        // chamado — pedido do usuário 14/10, "FICV 2 - Baileys" voltou a ficar ativo. Só cai
+        // pro rateio genérico (vivaconnect_pick_pool_channel, pode pegar um canal WABA pago)
+        // se não tiver nenhum Baileys disponível agora (sem token válido, ou já bateu o
+        // limite diário).
+        const { data: baileysRows } = await db.from("vivaconnect_channel_health")
+            .select("id, first_sent_today, daily_limit").eq("purpose", "pool").eq("kind", "baileys")
+            .eq("active", true).eq("has_token", true)
+            .order("first_sent_today").order("last_sent_at", { ascending: true, nullsFirst: true });
+        const baileys = (baileysRows ?? []).find((c: any) => c.first_sent_today < c.daily_limit);
+        const channelId = baileys?.id ?? (await db.rpc("vivaconnect_pick_pool_channel")).data;
         if (!channelId) return;
 
         // mesma janela de horário comercial do follow-up automático da IA (ai_agent_settings,
