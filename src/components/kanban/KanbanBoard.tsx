@@ -120,10 +120,21 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
                 p_no_owner: !!teamAgentIds?.includes('__unassigned__'),
             });
             if (error) throw error;
-            return Object.fromEntries(((data ?? []) as { stage_id: number; total: number }[]).map((r) => [r.stage_id, r.total]));
+            const out = Object.fromEntries(((data ?? []) as { stage_id: number; total: number }[]).map((r) => [r.stage_id, r.total]));
+            // achado ao vivo 14/10: o selo "Entrada" oscilava entre o total de verdade (ex. 120)
+            // e um número bem menor (22, 1, 0) — o RPC filtra por is_staff(), que depende do
+            // token de auth; quando o token tá em renovação essa checagem falha e a RPC volta
+            // VAZIA (sem erro nenhum pro cliente), e o selo caía pro fallback de
+            // sortedLeads.length (card já carregado na tela, bem menor que o total real).
+            // Board com milhares de leads nunca teria as 6 etapas vazias de verdade ao mesmo
+            // tempo — trata isso como falha transitória (lança erro) pra o React Query manter
+            // o último valor bom em vez de substituir pelo vazio enganoso.
+            if (Object.keys(out).length === 0) throw new Error('leads_stage_counts voltou vazio (provável auth em renovação)');
+            return out;
         },
         enabled: !isAuthLoading && !!user && !searchTerm.trim() && assigneeFilter !== 'unassigned' && !hasDateFilter,
         staleTime: 30 * 1000,
+        retry: 2,
     });
 
     // Restrição de canal do VivaConnect (Gestão > VivaConnect > "Quem atende cada
