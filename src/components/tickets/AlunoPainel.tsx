@@ -89,6 +89,8 @@ function periodoKey(turma: string | null) {
 /** Período escolhido no Início: a aba Notas abre nesse curso e rola até o período. */
 export interface NotasFoco { curso: string; turma_id: number | null }
 
+const DIREITO_NOTAS_DESDE = 202610 // periodoKey("2026.1") — ver filtro em agruparCursos
+
 interface CursoAgrupado { nome: string; turmas: Matricula[]; vigente: boolean; ultima: string }
 // curso_base vem do servidor (o Sponte cria um "curso" por ciclo de entrada); cursos vigentes primeiro,
 // períodos do mais recente pro mais antigo, e a mesma turma em 2 contratos vira 1 período só (fica a situação melhor)
@@ -105,7 +107,16 @@ function agruparCursos(ms: Matricula[]): CursoAgrupado[] {
     por.set(nome, c)
   }
   return [...por.values()]
-    .map((c) => ({ ...c, turmas: c.turmas.sort((x, y) => periodoKey(y.turma) - periodoKey(x.turma) || String(y.data_matricula).localeCompare(String(x.data_matricula))) }))
+    .map((c) => ({
+      ...c,
+      turmas: c.turmas
+        // Direito: períodos antes de 2026.1 vêm de uma base antiga (backup do Prime) que
+        // ainda não subiu pro Sponte — as notas de lá saem erradas/incompletas no Portal e
+        // os alunos estavam estranhando. Pedido do usuário 14/10: esconder só pra Direito
+        // (nenhum outro curso tem esse problema de migração).
+        .filter((t) => !/direito/i.test(c.nome) || periodoKey(t.turma) >= DIREITO_NOTAS_DESDE)
+        .sort((x, y) => periodoKey(y.turma) - periodoKey(x.turma) || String(y.data_matricula).localeCompare(String(x.data_matricula))),
+    }))
     .sort((x, y) => Number(y.vigente) - Number(x.vigente) || y.ultima.localeCompare(x.ultima))
 }
 
