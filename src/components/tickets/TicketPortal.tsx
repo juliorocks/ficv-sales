@@ -107,6 +107,13 @@ function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose, onCreated }:
   const [prioridade, setPrioridade] = useState<TicketPrioridade>('media')
   const [cursoId, setCursoId] = useState<string>('__nenhum__')
   const [saving, setSaving] = useState(false)
+  // pedido do usuário 14/10 ("não é possível travar a quantidade de tickets abertos no
+  // mesmo assunto?" — mesmo aluno reabrindo "boleto sem desconto" 3x em vez de esperar o
+  // chamado já aberto): antes de criar, avisa se já existe um chamado aberto na MESMA
+  // categoria e deixa escolher ver o existente ou abrir mesmo assim (categoria é ampla
+  // — "Financeiro" cobre várias coisas distintas — então não trava, só avisa).
+  const [duplicateTicket, setDuplicateTicket] = useState<Ticket | null>(null)
+  const [confirmDuplicate, setConfirmDuplicate] = useState(false)
 
   const { data: cursos = [] } = useQuery({
     queryKey: ['courses'],
@@ -147,6 +154,14 @@ function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose, onCreated }:
     if (categoria === 'academico' && (!cursoId || cursoId === '__nenhum__')) {
       showError('Para o assunto Acadêmico, escolha o curso — é ele que define a sua turma de tutores.')
       return
+    }
+    if (!confirmDuplicate) {
+      const { data: aberto } = await supabase.from('tickets').select('*')
+        .eq('aluno_id', alunoId).eq('categoria', categoria)
+        .not('status', 'in', '(resolvido,fechado)')
+        .order('created_at', { ascending: false }).limit(1).maybeSingle()
+      setDuplicateTicket(aberto as Ticket | null)
+      if (aberto) return
     }
     setSaving(true)
     try {
@@ -206,7 +221,7 @@ function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose, onCreated }:
             {CATEGORIAS.map(cat => (
               <button
                 key={cat.value}
-                onClick={() => { setCategoria(cat.value); setStep('detalhes') }}
+                onClick={() => { setCategoria(cat.value); setStep('detalhes'); setConfirmDuplicate(false); setDuplicateTicket(null) }}
                 className="flex items-center gap-3 p-3 rounded-lg border border-[var(--border)] hover:border-[var(--primary)] hover:bg-[var(--primary)]/5 transition-all text-left group"
               >
                 <span className="text-2xl">{cat.icon}</span>
@@ -303,6 +318,26 @@ function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose, onCreated }:
                 </SelectContent>
               </Select>
             </div>
+
+            {duplicateTicket && (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm space-y-2">
+                <p className="text-amber-200">
+                  Você já tem o chamado <span className="font-mono">{duplicateTicket.protocolo}</span> aberto nesse mesmo assunto
+                  ("{duplicateTicket.titulo}", {STATUS_LABELS[duplicateTicket.status] ?? duplicateTicket.status}). A equipe já está ciente — pode
+                  continuar por lá em vez de abrir outro.
+                </p>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" className="flex-1"
+                    onClick={() => { onClose(); onCreated?.(duplicateTicket) }}>
+                    Ver chamado existente
+                  </Button>
+                  <Button size="sm" variant="outline" className="flex-1 text-amber-200 border-amber-500/40"
+                    onClick={() => { setConfirmDuplicate(true); setDuplicateTicket(null) }}>
+                    É outro assunto — abrir mesmo assim
+                  </Button>
+                </div>
+              </div>
+            )}
 
             <div className="flex gap-3 pt-2">
               <Button variant="outline" onClick={() => setStep('categoria')} className="flex-1">
