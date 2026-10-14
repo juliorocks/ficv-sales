@@ -533,6 +533,41 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
     }
   }
 
+  // Anexo de mensagem rápida — já está hospedado (bucket próprio, salvo com o atalho), então
+  // pula uploadFiles() inteiro e só referencia a URL, igual sendMessage faria pra um arquivo
+  // de verdade. Pedido do usuário 14/10 ("cadastrar documentos, como PDF, Imagens").
+  async function sendQuickReplyAttachment(reply: { content: string; attachment_url: string; attachment_name: string | null; attachment_mime: string | null }) {
+    setSending(true)
+    try {
+      const role = isStaff ? (user?.role === 'admin' ? 'admin' : 'atendente') : 'aluno'
+      const { error } = await supabase.from('ticket_messages').insert({
+        ticket_id: ticket.id,
+        autor_id: currentUserId,
+        autor_nome: currentUserName,
+        autor_role: role,
+        conteudo: reply.content,
+        interno: isStaff ? interno : false,
+        attachments: [{ name: reply.attachment_name || 'arquivo', url: reply.attachment_url, type: reply.attachment_mime || 'application/octet-stream', size: 0 }],
+      })
+      if (error) throw error
+      if (isStaff && !t.first_response_at) {
+        await supabase.from('tickets').update({
+          first_response_at: new Date().toISOString(), status: 'em_atendimento', atendente_id: currentUserId,
+        }).eq('id', ticket.id)
+      }
+      if (!isStaff && t.status === 'aguardando_aluno') {
+        await supabase.from('tickets').update({ status: 'em_atendimento' }).eq('id', ticket.id)
+      }
+      qc.invalidateQueries({ queryKey: ['ticket-messages', ticket.id] })
+      qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
+      qc.invalidateQueries({ queryKey: ['tickets'] })
+    } catch {
+      showError('Erro ao enviar anexo.')
+    } finally {
+      setSending(false)
+    }
+  }
+
   // Padrão de todas as escritas desta tela (changeStatus/changeQueue/assignTo/assumirConversa):
   // achado ao vivo 05/10 — mesmo bug recorrente de [[project_token_refresh_silent_fail]] (token
   // expirado em refresh → UPDATE filtra 0 linhas sem erro nenhum, ou trava "Salvando..." pra
@@ -1028,7 +1063,8 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
             {!recording && (
               <div className="flex gap-2 items-end">
                 <div className="relative flex-1">
-                <QuickReplySlash value={msg} onChange={setMsg} textareaRef={msgTextareaRef} />
+                <QuickReplySlash value={msg} onChange={setMsg} textareaRef={msgTextareaRef}
+                  onAttachment={(reply) => sendQuickReplyAttachment({ content: reply.content, attachment_url: reply.attachment_url!, attachment_name: reply.attachment_name ?? null, attachment_mime: reply.attachment_mime ?? null })} />
                 <Textarea
                   ref={msgTextareaRef}
                   value={msg}
@@ -1048,7 +1084,9 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                 <div className="flex gap-1.5 items-end">
                   {isStaff && (
                     <QuickRepliesMenu triggerClassName="h-10 w-10 flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--bg-main)] text-[var(--text-muted)] hover:text-[var(--primary)] hover:border-[var(--primary)] transition-colors"
-                      onPick={(content) => setMsg(prev => (prev && !prev.endsWith(' ') ? prev + ' ' : prev) + content)} />
+                      onPick={(reply) => reply.attachment_url
+                        ? sendQuickReplyAttachment({ content: reply.content, attachment_url: reply.attachment_url, attachment_name: reply.attachment_name ?? null, attachment_mime: reply.attachment_mime ?? null })
+                        : setMsg(prev => (prev && !prev.endsWith(' ') ? prev + ' ' : prev) + reply.content)} />
                   )}
                   {isStaff && (
                     <button type="button" onClick={() => setKbOpen(o => !o)} title="Consultar a Base de Conhecimento"

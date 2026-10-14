@@ -17,7 +17,7 @@ import { extractFnErrorMessage } from "@/utils/functionsError"
 import { withTimeout } from "@/utils/withTimeout"
 import { useAuth } from "@/hooks/use-auth"
 import { KbAskPanel } from "@/components/KbAskPanel"
-import { QuickRepliesMenu, QuickReplySlash } from "@/components/QuickReplies"
+import { attachmentKind, QuickRepliesMenu, QuickReplySlash } from "@/components/QuickReplies"
 
 // ── Templates HSM: variáveis ────────────────────────────────────────────────
 // Um template pode ter variáveis no corpo — numeradas ({{1}}, {{2}}) ou nomeadas
@@ -502,10 +502,15 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
     const effectiveChannelId = attendance?.channel_id || DEFAULT_CHANNEL_ID
 
     const sendMessageMutation = useMutation({
-        mutationFn: async (arg: string | { hsm_template_name: string; hsm_placeholders: string[]; hsm_language?: string; preview: string } | { media: File; caption: string }) => {
+        mutationFn: async (arg: string | { hsm_template_name: string; hsm_placeholders: string[]; hsm_language?: string; preview: string } | { media: File; caption: string }
+            | { mediaUrl: string; mediaType: 'images' | 'sounds' | 'videos' | 'files'; fileName: string; caption: string }) => {
             const isHsm = typeof arg === 'object' && 'hsm_template_name' in arg
             const isMedia = typeof arg === 'object' && 'media' in arg
-            if (!isHsm && !isMedia && !canSendText) throw new Error("Passaram 24h da última mensagem do cliente — só dá pra enviar um template aprovado.")
+            // anexo de uma mensagem rápida (já hospedado — sem upload, só referencia a URL que
+            // já existe) — pedido do usuário 14/10: "inserir nas mensagens rápidas a opção de
+            // cadastrar documentos, como PDF, imagens"
+            const isHostedMedia = typeof arg === 'object' && 'mediaUrl' in arg
+            if (!isHsm && !isMedia && !isHostedMedia && !canSendText) throw new Error("Passaram 24h da última mensagem do cliente — só dá pra enviar um template aprovado.")
 
             let mediaField: Record<string, unknown> | undefined
             if (isMedia) {
@@ -522,15 +527,17 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                 // + file:"<url>"). Nosso bucket já é público.
                 const { data: pub } = supabase.storage.from('widechat-attachments').getPublicUrl(path)
                 mediaField = { public_url: pub.publicUrl, filename: file.name, mime_type: mime, type: mediaType, legend: arg.caption || undefined }
+            } else if (isHostedMedia) {
+                mediaField = { public_url: arg.mediaUrl, filename: arg.fileName, type: arg.mediaType, legend: arg.caption || undefined }
             }
 
             if (isViva) {
                         const { data, error } = await supabase.functions.invoke('vivaconnect-api', {
                     body: {
                         action: 'send', lead_id: leadId, channel_id: vcChannel?.id,
-                        body: isMedia ? (arg.caption || '') : isHsm ? arg.preview : (arg as string),
+                        body: (isMedia || isHostedMedia) ? (arg.caption || '') : isHsm ? arg.preview : (arg as string),
                         ...(isHsm ? { hsm_template_name: arg.hsm_template_name, hsm_placeholders: arg.hsm_placeholders, hsm_language: arg.hsm_language } : {}),
-                        ...(isMedia && mediaField ? { media: { url: mediaField.public_url, type: mediaField.type, file_name: mediaField.filename } } : {}),
+                        ...((isMedia || isHostedMedia) && mediaField ? { media: { url: mediaField.public_url, type: mediaField.type, file_name: mediaField.filename } } : {}),
                     },
                 })
                 if (error) {
@@ -555,7 +562,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                     lead_id: leadId,
                     ...(isHsm
                         ? { is_hsm: true, hsm_template_name: arg.hsm_template_name, hsm_placeholders: arg.hsm_placeholders, message: arg.preview }
-                        : isMedia
+                        : (isMedia || isHostedMedia)
                             ? { media: mediaField }
                             : { message: arg }),
                 },
@@ -568,7 +575,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
             await queryClient.cancelQueries({ queryKey: msgKey })
             const previous = queryClient.getQueryData(msgKey)
             const tempId = crypto.randomUUID()
-            const text = typeof arg === 'string' ? arg : ('hsm_template_name' in arg ? arg.preview : `📎 ${arg.media.name}`)
+            const text = typeof arg === 'string' ? arg : ('hsm_template_name' in arg ? arg.preview : `📎 ${'media' in arg ? arg.media.name : arg.fileName}`)
             queryClient.setQueryData(msgKey, (old: any) => [...(old || []), {
                 id: tempId, lead_id: leadId, message_id: tempId, message: text,
                 created_at: new Date().toISOString(), origin: 'agent', type: 'text',
@@ -1334,7 +1341,16 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                                 <Paperclip className="h-4 w-4" />
                             </Button>
                             <QuickRepliesMenu triggerClassName="rounded-full h-9 w-9 text-slate-600"
-                                onPick={(content) => insertAtCursor((newMessage && !newMessage.endsWith(' ') ? ' ' : '') + content)} />
+                                onPick={(reply) => {
+                                    if (reply.attachment_url) {
+                                        sendMessageMutation.mutate({
+                                            mediaUrl: reply.attachment_url, fileName: reply.attachment_name || 'arquivo',
+                                            mediaType: attachmentKind(reply.attachment_mime), caption: reply.content,
+                                        })
+                                    } else {
+                                        insertAtCursor((newMessage && !newMessage.endsWith(' ') ? ' ' : '') + reply.content)
+                                    }
+                                }} />
                             <Popover open={kbOpen} onOpenChange={setKbOpen}>
                                 <PopoverTrigger asChild>
                                     <Button type="button" variant="outline" size="icon" className="rounded-full h-9 w-9 text-slate-600" title="Consultar a Base de Conhecimento">
@@ -1370,7 +1386,11 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                             </Popover>
                         </div>
                         <div className="relative flex-1">
-                        <QuickReplySlash value={newMessage} onChange={setNewMessage} textareaRef={textareaRef} />
+                        <QuickReplySlash value={newMessage} onChange={setNewMessage} textareaRef={textareaRef}
+                            onAttachment={(reply) => sendMessageMutation.mutate({
+                                mediaUrl: reply.attachment_url!, fileName: reply.attachment_name || 'arquivo',
+                                mediaType: attachmentKind(reply.attachment_mime), caption: reply.content,
+                            })} />
                         <textarea
                             ref={textareaRef}
                             value={newMessage}
