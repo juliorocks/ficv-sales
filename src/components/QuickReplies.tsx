@@ -10,7 +10,7 @@
  */
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { FileText, Loader2, Paperclip, Pencil, Plus, Search, Settings2, Trash2, X, Zap } from "lucide-react"
+import { FileAudio, FileText, Loader2, Paperclip, Pencil, Plus, Search, Settings2, Trash2, X, Zap } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -262,20 +262,23 @@ function QuickRepliesEditor() {
           </div>
           <div className="space-y-1">
             <Label>Anexo (opcional)</Label>
-            <input ref={fileInputRef} type="file" className="hidden" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" onChange={handleAttachmentSelect} />
+            <input ref={fileInputRef} type="file" className="hidden" accept="image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx" onChange={handleAttachmentSelect} />
             {editing.attachment_url ? (
-              <div className="flex items-center gap-2 rounded-md border border-input px-2.5 py-2 text-sm">
-                <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                <span className="flex-1 min-w-0 truncate">{editing.attachment_name}</span>
-                <button type="button" title="Remover anexo" className="text-muted-foreground hover:text-destructive shrink-0"
-                  onClick={() => setEditing({ ...editing, attachment_url: null, attachment_name: null, attachment_mime: null })}>
-                  <X className="h-4 w-4" />
-                </button>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 rounded-md border border-input px-2.5 py-2 text-sm">
+                  {editing.attachment_mime?.startsWith("audio/") ? <FileAudio className="h-4 w-4 text-muted-foreground shrink-0" /> : <FileText className="h-4 w-4 text-muted-foreground shrink-0" />}
+                  <span className="flex-1 min-w-0 truncate">{editing.attachment_name}</span>
+                  <button type="button" title="Remover anexo" className="text-muted-foreground hover:text-destructive shrink-0"
+                    onClick={() => setEditing({ ...editing, attachment_url: null, attachment_name: null, attachment_mime: null })}>
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                {editing.attachment_mime?.startsWith("audio/") && <audio src={editing.attachment_url} controls className="w-full h-9" />}
               </div>
             ) : (
               <Button type="button" variant="outline" size="sm" className="gap-1.5" disabled={uploading} onClick={() => fileInputRef.current?.click()}>
                 {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}
-                {uploading ? "Enviando…" : "Anexar PDF ou imagem"}
+                {uploading ? "Enviando…" : "Anexar PDF, imagem ou áudio"}
               </Button>
             )}
             <p className="text-[11px] text-muted-foreground">
