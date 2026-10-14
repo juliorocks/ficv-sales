@@ -223,7 +223,27 @@ Deno.serve(async (req) => {
             }
             const { data: lead } = await db.from("leads").select("id, nome_completo, telefone, vivaconnect_channel_id, vivaconnect_ticket_id").eq("id", leadId).maybeSingle();
             if (!lead) return jsonRes({ error: "Lead não encontrado." }, 404);
-            const chId = msgRow?.channel_id ?? lead.vivaconnect_channel_id;
+            let chId = msgRow?.channel_id ?? lead.vivaconnect_channel_id;
+            // message_status confere a entrega no MESMO canal que a mensagem realmente saiu —
+            // com a troca manual de canal (pedido do usuário 13/10, ex.: Baileys em vez do WABA
+            // fixo do lead), checar sempre o canal fixo olhava o ticket errado no Z-PRO e dava
+            // "missing" pra mensagem que tinha sido entregue certinho (achado ao vivo 14/10).
+            // ticketId da PRÓPRIA resposta do envio (raw_data.response.data.ticketId, gravado
+            // na hora — ver "send" acima): um canal que o contato nunca falou por ele antes
+            // (ex.: trocou pra Baileys agora mesmo) ganha um ticket NOVO lá, e /showticket por
+            // número não encontra esse ticket recém-criado (testado ao vivo: 404
+            // ERR_TICKET_NOT_FOUND mesmo minutos depois) — ticketFor() caía de volta no ticket
+            // do canal fixo (errado) e sempre dava "missing".
+            let ticketIdFromSend: string | null = null;
+            if (action === "message_status" && !msgRow) {
+                const since10 = new Date(Date.now() - 10 * 60_000).toISOString();
+                const { data: recentSent } = await db.from("widechat_messages").select("channel_id, raw_data")
+                    .eq("lead_id", leadId).eq("origin", "agent").not("channel_id", "is", null)
+                    .gte("created_at", since10).order("created_at", { ascending: false }).limit(1).maybeSingle();
+                if (recentSent?.channel_id) chId = recentSent.channel_id;
+                const tid = recentSent?.raw_data?.response?.data?.ticketId;
+                if (tid != null) ticketIdFromSend = String(tid);
+            }
             const { data: ch } = chId ? await db.from("vivaconnect_channels").select(CH_COLS).eq("id", chId).maybeSingle() : { data: null };
             // "Finalizar" não exige canal — um lead que nunca teve conversa de WhatsApp de
             // verdade (ex.: só preencheu formulário) ainda precisa poder ser fechado
@@ -234,7 +254,7 @@ Deno.serve(async (req) => {
             // ticket/mensagens de verdade moram no canal que REALMENTE manda (delegado, se houver)
             // — não no canal "dono" só porque é ele quem recebe (ver resolveExecChannel acima)
             const execCh = ch ? await resolveExecChannel(db, ch) : null;
-            const ticketId = msgRow?.session_id ?? (execCh ? await ticketFor(settings, execCh, lead) : null);
+            const ticketId = msgRow?.session_id ?? ticketIdFromSend ?? (execCh ? await ticketFor(settings, execCh, lead) : null);
 
             if (action === "finish") {
                 if (ticketId && execCh) {
