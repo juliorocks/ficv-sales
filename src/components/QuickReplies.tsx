@@ -135,15 +135,29 @@ export function QuickReplySlash({ value, onChange, textareaRef }: {
   return (
     <div
       role="listbox"
-      className="absolute bottom-full left-0 mb-1.5 w-80 max-h-60 overflow-y-auto rounded-lg border bg-popover text-popover-foreground shadow-lg z-50 py-1"
+      className="absolute bottom-full left-0 mb-1.5 w-80 max-h-72 overflow-y-auto rounded-lg border bg-popover text-popover-foreground shadow-lg z-50"
     >
-      {filtered.map((q) => (
-        <button key={q.id} type="button" onClick={() => pick(q.content)}
-          className="w-full text-left px-3 py-1.5 hover:bg-accent hover:text-accent-foreground flex flex-col gap-0.5">
-          <span className="text-xs font-medium">{q.title}</span>
-          <span className="text-[11px] text-muted-foreground line-clamp-1">{q.content}</span>
-        </button>
-      ))}
+      <div className="sticky top-0 bg-popover px-2 py-1.5 border-b">
+        <div className="relative">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <input
+            autoFocus
+            value={query ?? ""}
+            onChange={(e) => onChange(value.slice(0, value.length - (query ?? "").length - 1) + "/" + e.target.value)}
+            placeholder="Buscar…"
+            className="w-full h-7 rounded-md border border-input bg-transparent pl-7 pr-2 text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+        </div>
+      </div>
+      <div className="py-1">
+        {filtered.map((q) => (
+          <button key={q.id} type="button" onClick={() => pick(q.content)}
+            className="w-full text-left px-3 py-1.5 hover:bg-accent hover:text-accent-foreground flex flex-col gap-0.5">
+            <span className="text-xs font-medium">{q.title}</span>
+            <span className="text-[11px] text-muted-foreground line-clamp-1">{q.content}</span>
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
