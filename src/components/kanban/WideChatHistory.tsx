@@ -606,7 +606,18 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                             body: { action: 'message_status', lead_id: leadId, body: sentBody, template_name: templateName },
                         })
                         const st = data?.last?.status
-                        if (st === 'failed') { showError(`O WhatsApp NÃO entregou a mensagem.${data.last.error ? ` ${data.last.error}` : ''}`); return }
+                        if (st === 'failed') {
+                            // last.error pode vir como objeto (statusError do Z-PRO: {code, title,
+                            // details}), não string — interpolar direto virava "[object Object]"
+                            // no toast (achado ao vivo 16/10, lead "liliamalves": erro real da Meta
+                            // escondido atrás de um texto inútil).
+                            const e = data.last.error
+                            const msg = typeof e === 'string' ? e
+                                : e ? [e.title, e.details, e.code ? `(Meta ${e.code})` : null].filter(Boolean).join(' — ')
+                                : ''
+                            showError(`O WhatsApp NÃO entregou a mensagem.${msg ? ` ${msg}` : ''}`)
+                            return
+                        }
                         if (st === 'delivered' || st === 'read') { showSuccess(st === 'read' ? 'Entregue e lida ✔✔' : 'Entregue no WhatsApp ✔'); return }
                         if (tries > 0) { window.setTimeout(() => checkViva(tries - 1), 10000); return }
                         if (st === 'missing') showError('A mensagem não apareceu no WhatsApp. Se era um anexo, tente de novo (arquivo pode não ter sido baixado).')

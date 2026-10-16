@@ -95,7 +95,15 @@ export function toZproNumber(raw: unknown): string | null {
         const ddd = d.slice(0, 2), local = d.slice(2);
         if (/^[6-9]/.test(local)) d = `${ddd}9${local}`;
     }
-    if (d.length === 10 || d.length === 11) d = "55" + d;
+    // 10 dígitos (fixo de verdade, sem o 9 acrescentado acima) é sempre BR sem o 55 — não
+    // tem outro jeito de ler. 11 dígitos é AMBÍGUO: pode ser celular BR sem o 55 (DDD + 9 +
+    // 8 dígitos — 3º dígito é sempre 9) OU um número de fora que já vem completo (ex.: EUA
+    // "1" + DDD + 7 dígitos = 11 dígitos também). Só prefixa 55 quando bate a cara de
+    // celular BR de verdade; senão assume que já é um número completo, sem mexer. Achado ao
+    // vivo 16/10: aluna com número americano (1 404 503 3781) virava um "55 1404..." que não
+    // existe — a mensagem nunca ia pra lugar nenhum, sem erro nenhum na hora do envio.
+    if (d.length === 10) d = "55" + d;
+    else if (d.length === 11 && d[2] === "9") d = "55" + d;
     // mesmo caso acima, mas já com "55" na frente (12 dígitos: 55+DDD+local de 8) — achado
     // ao vivo 13/10 num lead que JÁ tinha conversado antes: número batia "válido" (12-13
     // dígitos) e passava sem erro, mas a Meta recusava a entrega (131026) porque o número
