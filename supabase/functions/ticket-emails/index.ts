@@ -27,28 +27,29 @@ import { toZproNumber } from "../_shared/vivaconnect.ts";
 // WhatsApp de aluno de verdade, então nem tenta.
 const BR_CELULAR_RE = /^55\d{2}9\d{8}$/;
 
-async function sendTicketWhatsApp(db: any, telefone: string | null | undefined, text: string): Promise<void> {
+// Canal onde o template "ficv_chamado_recebido" foi criado e aprovado (Gestão > VivaConnect
+// > CIDADE VIVA - OFICIAL) — templates da Meta são aprovados POR número/WABA, não dá pra
+// mandar por outro canal (ex.: o Baileys) mesmo que esteja ativo. Achado ao vivo 16/10:
+// usuário decidiu simplificar — só o aviso de ABERTURA vai por WhatsApp (economiza nos
+// templates aprovados/custo Meta), e troca de texto livre pro template APROVADO assim que
+// saiu do PENDING, pra não depender mais do Baileys (que "cai todo dia com restrição").
+const TICKET_NOTICE_CHANNEL_ID = 8;
+const TICKET_NOTICE_TEMPLATE = "ficv_chamado_recebido";
+
+async function sendTicketWhatsApp(db: any, telefone: string | null | undefined, nome: string, protocolo: string, titulo: string, ticketUrl: string): Promise<void> {
     try {
         const number = toZproNumber(telefone);
-        if (!number || !text || !BR_CELULAR_RE.test(number)) return;
+        if (!number || !BR_CELULAR_RE.test(number)) return;
         const { data: settings } = await db.from("vivaconnect_settings").select("enabled").eq("id", 1).maybeSingle();
         if (!settings?.enabled) return;
-        // Prefere o canal Baileys (não oficial, sem custo por mensagem da Meta) pro aviso de
-        // chamado — pedido do usuário 14/10, "FICV 2 - Baileys" voltou a ficar ativo. Só cai
-        // pro rateio genérico (vivaconnect_pick_pool_channel, pode pegar um canal WABA pago)
-        // se não tiver nenhum Baileys disponível agora (sem token válido, ou já bateu o
-        // limite diário).
-        const { data: baileysRows } = await db.from("vivaconnect_channel_health")
-            .select("id, first_sent_today, daily_limit").eq("purpose", "pool").eq("kind", "baileys")
-            .eq("active", true).eq("has_token", true)
-            .order("first_sent_today").order("last_sent_at", { ascending: true, nullsFirst: true });
-        const baileys = (baileysRows ?? []).find((c: any) => c.first_sent_today < c.daily_limit);
-        const channelId = baileys?.id ?? (await db.rpc("vivaconnect_pick_pool_channel")).data;
-        if (!channelId) return;
+        const { data: ch } = await db.from("vivaconnect_channels").select("id, active").eq("id", TICKET_NOTICE_CHANNEL_ID).maybeSingle();
+        if (!ch?.active) return;
 
         // mesma janela de horário comercial do follow-up automático da IA (ai_agent_settings,
         // achado ao vivo 01/10 nesta mesma sessão: "não é legal mandar de madrugada") — fora
-        // da janela, agenda pro próximo horário de abertura em vez de mandar na hora.
+        // da janela, agenda pro próximo horário de abertura em vez de mandar na hora. Template
+        // aprovado não tem restrição de janela de 24h da Meta, só essa de horário comercial
+        // nossa mesmo, por educação.
         const { data: ai } = await db.from("ai_agent_settings").select("followup_window_start, followup_window_end").eq("id", 1).maybeSingle();
         const start = ai?.followup_window_start ?? 8, end = ai?.followup_window_end ?? 20;
         const hour = Number(new Intl.DateTimeFormat("en-US", { hour: "numeric", hourCycle: "h23", timeZone: "America/Sao_Paulo" }).format(new Date()));
@@ -58,7 +59,13 @@ async function sendTicketWhatsApp(db: any, telefone: string | null | undefined, 
             : new Date(Date.now() + (hour < start ? start - hour : 24 - hour + start) * 3600_000);
 
         await db.from("vivaconnect_outbox").insert({
-            lead_id: null, channel_id: channelId, kind: "ticket_notice", number, body: text,
+            lead_id: null, channel_id: TICKET_NOTICE_CHANNEL_ID, kind: "ticket_notice", number,
+            // body não é usado pro envio em si (sendVia manda pelo template quando
+            // hsm_template_name está presente) — só texto legível pra quem olhar a fila/
+            // histórico depois (a coluna é NOT NULL).
+            body: `Template: ${TICKET_NOTICE_TEMPLATE} (${nome}, ${protocolo}, ${titulo})`,
+            hsm_template_name: TICKET_NOTICE_TEMPLATE, hsm_language: "pt_BR",
+            hsm_components: [{ type: "body", parameters: [nome, protocolo, titulo, ticketUrl].map((v) => ({ type: "text", text: v })) }],
             scheduled_at: scheduledAt.toISOString(),
         });
         // dispara o worker agora só se já está na janela (senão fica agendado; o cron do
@@ -203,7 +210,7 @@ Deno.serve(async (req) => {
         // Pedido do usuário 16/10: só o aviso de ABERTURA vai por WhatsApp (template aprovado
         // na Meta cobre só esse caso por enquanto, e evita gastar com mensagem de atualização
         // repetida) — resposta/resolvido/lembrete/transferido ficam só no Portal + e-mail.
-        if (row.kind === "created") await sendTicketWhatsApp(db, al?.telefone, waText);
+        if (row.kind === "created") await sendTicketWhatsApp(db, al?.telefone, nome, t.protocolo, t.titulo, TICKET_URL);
 
         if (!hasEmail) { await finish("skipped", { error: "aluno sem e-mail válido" }); continue; }
         const r = await sendEmail(to, subject, html, replyTo);
