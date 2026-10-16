@@ -13,8 +13,11 @@ export type Channel = {
 // para de atender sem ninguém ter respondido ainda (handoff da própria IA, ou agente só ASSUMIU
 // o ticket sem falar nada) — fica na fila normal, com o botão Atender. "Em Contato" é reservado
 // pra quando um agente de verdade MANDA uma mensagem (pedido explícito do usuário 29/09: "Em
-// Contato é somente quando um agente nosso já respondeu alguma coisa"). Matriculado/Perdido/
-// Finalizado nunca são tocados por essas funções.
+// Contato é somente quando um agente nosso já respondeu alguma coisa"). Matriculado nunca é
+// tocado por essas funções (conversão de venda real — não reabre o funil comercial sozinho).
+// 16/10, ajustado: Finalizado/Aluno TAMBÉM sobem pra Em Contato quando um agente escreve de
+// propósito pra esse lead (reengajamento — ex. oferecer outro curso) — antes ficavam "perdidos"
+// em Finalizado mesmo com a agente conversando ativamente (achado ao vivo: Karina/Thayanne).
 
 /** Sai da etapa "IA Atendendo" (se estiver nela) → volta pra "Entrada" (fila de humano, com o
  *  botão Atender). Não mexe em nenhuma outra etapa. */
@@ -61,9 +64,10 @@ export async function markHumanReplied(db: SupabaseClient, leadId: number, reaso
         await db.from("leads").update({ assigned_to_id: agentId }).eq("id", leadId);
     }
     const { data: st } = await db.from("stages").select("name").eq("id", lead.stage_id).maybeSingle();
-    if (lead.stage_id !== 1 && !/ia atend/i.test(st?.name ?? "")) return;
+    if (/matricul/i.test(st?.name ?? "")) return;
     const { data: ec } = await db.from("stages").select("id").ilike("name", "%contato%").order("order", { ascending: true }).limit(1).maybeSingle();
-    if (ec) await db.from("leads").update({ stage_id: ec.id, stage_entry_date: new Date().toISOString() }).eq("id", leadId);
+    if (!ec || lead.stage_id === ec.id) return;
+    await db.from("leads").update({ stage_id: ec.id, stage_entry_date: new Date().toISOString() }).eq("id", leadId);
 }
 
 /** Depois de uma resposta da IA: sem handoff, 1ª resposta (lead ainda em Entrada) → "IA
