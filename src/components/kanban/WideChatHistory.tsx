@@ -612,10 +612,17 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                             // no toast (achado ao vivo 16/10, lead "liliamalves": erro real da Meta
                             // escondido atrás de um texto inútil).
                             const e = data.last.error
-                            const msg = typeof e === 'string' ? e
-                                : e ? [e.title, e.details, e.code ? `(Meta ${e.code})` : null].filter(Boolean).join(' — ')
+                            const code = typeof e === 'object' && e ? e.code : undefined
+                            // 131049 = limite de engajamento da Meta pra template de MARKETING (mesmo
+                            // código que o fluxo do WideChat já trata com essa dica, ver checkDelivery
+                            // logo abaixo) — vale igual aqui no VivaConnect.
+                            const dica = code === 131049
+                                ? ' A Meta limita quantos templates de MARKETING um número recebe por período. Use um template UTILITY, outro número, ou aguarde ~24h.'
                                 : ''
-                            showError(`O WhatsApp NÃO entregou a mensagem.${msg ? ` ${msg}` : ''}`)
+                            const msg = typeof e === 'string' ? e
+                                : e ? [e.title, e.details, code ? `(Meta ${code})` : null].filter(Boolean).join(' — ')
+                                : ''
+                            showError(`O WhatsApp NÃO entregou a mensagem.${msg ? ` ${msg}` : ''}${dica}`)
                             return
                         }
                         if (st === 'delivered' || st === 'read') { showSuccess(st === 'read' ? 'Entregue e lida ✔✔' : 'Entregue no WhatsApp ✔'); return }
