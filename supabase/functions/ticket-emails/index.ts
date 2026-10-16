@@ -200,7 +200,10 @@ Deno.serve(async (req) => {
 
         // WhatsApp é independente do e-mail (best-effort, nunca lança) — roda mesmo se o
         // aluno não tiver e-mail válido, que é justamente quem mais precisa desse canal.
-        await sendTicketWhatsApp(db, al?.telefone, waText);
+        // Pedido do usuário 16/10: só o aviso de ABERTURA vai por WhatsApp (template aprovado
+        // na Meta cobre só esse caso por enquanto, e evita gastar com mensagem de atualização
+        // repetida) — resposta/resolvido/lembrete/transferido ficam só no Portal + e-mail.
+        if (row.kind === "created") await sendTicketWhatsApp(db, al?.telefone, waText);
 
         if (!hasEmail) { await finish("skipped", { error: "aluno sem e-mail válido" }); continue; }
         const r = await sendEmail(to, subject, html, replyTo);
