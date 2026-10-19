@@ -88,7 +88,7 @@ export const onlyDigits = (v: unknown) => String(v ?? "").replace(/\D/g, "");
 // Aviso de chamado: template UTILITY aprovado no número oficial. Vale sempre que a Baileys não
 // conseguir entregar o texto livre (fora do ar, sem sessão, limite diário) — pedido do usuário 19/10.
 export const TICKET_TEMPLATE_CHANNEL_ID = 8;
-export const TICKET_TEMPLATE_NAME = "ficv_chamado_recebido";
+export const TICKET_TEMPLATE_NAME = "ficv_retomar_atendimento";
 
 export function toZproNumber(raw: unknown): string | null {
     let d = onlyDigits(raw);

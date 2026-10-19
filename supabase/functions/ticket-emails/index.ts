@@ -47,7 +47,8 @@ async function sendTicketWhatsApp(db: any, telefone: string | null | undefined, 
         const baileys = (baileysRows ?? []).find(healthy);
 
         const { data: ch } = await db.from("vivaconnect_channels").select("id, active").eq("id", TICKET_TEMPLATE_CHANNEL_ID).maybeSingle();
-        const templateParams = { hsm_language: "pt_BR", hsm_components: [{ type: "body", parameters: [nome, protocolo, titulo, ticketUrl].map((v) => ({ type: "text", text: v })) }] };
+        // o template tem só {{1}} (primeiro nome): mandar mais valores que as variáveis aprovadas faz a Meta recusar
+        const templateParams = { hsm_language: "pt_BR", hsm_components: [{ type: "body", parameters: [{ type: "text", text: nome }] }] };
         // canal do envio: Baileys (texto livre) se saudável; senão o oficial com template
         const usarBaileys = !!baileys;
         const channelId = usarBaileys ? baileys.id : (ch?.active ? TICKET_TEMPLATE_CHANNEL_ID : null);
@@ -66,7 +67,7 @@ async function sendTicketWhatsApp(db: any, telefone: string | null | undefined, 
 
         await db.from("vivaconnect_outbox").insert({
             lead_id: null, channel_id: channelId, kind: "ticket_notice", number,
-            body: usarBaileys ? texto : `Template: ${TICKET_TEMPLATE_NAME} (${nome}, ${protocolo}, ${titulo})`,
+            body: usarBaileys ? texto : `Template: ${TICKET_TEMPLATE_NAME} (${nome})`,
             // Baileys: texto livre; o template fica guardado só pra fallback (sendRow só usa
             // hsm_template_name quando está preenchido). Oficial: manda o template direto.
             ...(usarBaileys ? {} : { hsm_template_name: TICKET_TEMPLATE_NAME }),
