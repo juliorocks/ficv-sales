@@ -85,6 +85,11 @@ export async function advanceAiStage(db: SupabaseClient, leadId: number, handoff
 export const onlyDigits = (v: unknown) => String(v ?? "").replace(/\D/g, "");
 
 /** Número BR no formato que o Z-PRO espera (55 + DDD + número). */
+// Aviso de chamado: template UTILITY aprovado no número oficial. Vale sempre que a Baileys não
+// conseguir entregar o texto livre (fora do ar, sem sessão, limite diário) — pedido do usuário 19/10.
+export const TICKET_TEMPLATE_CHANNEL_ID = 8;
+export const TICKET_TEMPLATE_NAME = "ficv_chamado_recebido";
+
 export function toZproNumber(raw: unknown): string | null {
     let d = onlyDigits(raw);
     if (d.length < 10 || /^0+$/.test(d)) return null;

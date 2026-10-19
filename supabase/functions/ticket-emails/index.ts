@@ -11,7 +11,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { identify, jsonRes } from "../_shared/ai.ts";
 import { emailLayout, escHtml, portalUrl, sendEmail, ticketReplyAddress } from "../_shared/email.ts";
-import { toZproNumber } from "../_shared/vivaconnect.ts";
+import { TICKET_TEMPLATE_CHANNEL_ID, TICKET_TEMPLATE_NAME, toZproNumber } from "../_shared/vivaconnect.ts";
 
 // Mesmo aviso do e-mail, também por WhatsApp não oficial (canal pool/Baileys, sem custo Meta)
 // — pedido do usuário 02/10: "muita gente não fica abrindo e-mail". Best-effort: nunca lança
@@ -27,29 +27,35 @@ import { toZproNumber } from "../_shared/vivaconnect.ts";
 // WhatsApp de aluno de verdade, então nem tenta.
 const BR_CELULAR_RE = /^55\d{2}9\d{8}$/;
 
-// Canal onde o template "ficv_chamado_recebido" foi criado e aprovado (Gestão > VivaConnect
-// > CIDADE VIVA - OFICIAL) — templates da Meta são aprovados POR número/WABA, não dá pra
-// mandar por outro canal (ex.: o Baileys) mesmo que esteja ativo. Achado ao vivo 16/10:
-// usuário decidiu simplificar — só o aviso de ABERTURA vai por WhatsApp (economiza nos
-// templates aprovados/custo Meta), e troca de texto livre pro template APROVADO assim que
-// saiu do PENDING, pra não depender mais do Baileys (que "cai todo dia com restrição").
-const TICKET_NOTICE_CHANNEL_ID = 8;
-const TICKET_NOTICE_TEMPLATE = "ficv_chamado_recebido";
-
-async function sendTicketWhatsApp(db: any, telefone: string | null | undefined, nome: string, protocolo: string, titulo: string, ticketUrl: string): Promise<void> {
+// Aviso de chamado aberto. Regra (pedido do usuário 19/10, "tem que funcionar sempre"):
+// - Baileys saudável → texto livre pela Baileys (sem custo Meta);
+// - Baileys fora / sem sessão / limite diário → template UTILITY aprovado no número oficial.
+// Se a Baileys falhar no meio do caminho, vivaconnect-api (sendRow) reenvia pelo template
+// usando hsm_components guardado aqui. Best-effort: nunca lança.
+async function sendTicketWhatsApp(db: any, telefone: string | null | undefined, nome: string, protocolo: string, titulo: string, ticketUrl: string, texto: string): Promise<void> {
     try {
         const number = toZproNumber(telefone);
         if (!number || !BR_CELULAR_RE.test(number)) return;
         const { data: settings } = await db.from("vivaconnect_settings").select("enabled").eq("id", 1).maybeSingle();
         if (!settings?.enabled) return;
-        const { data: ch } = await db.from("vivaconnect_channels").select("id, active").eq("id", TICKET_NOTICE_CHANNEL_ID).maybeSingle();
-        if (!ch?.active) return;
+
+        const healthy = (c: any) => c.first_sent_today < c.daily_limit
+            && (!c.last_error_at || (c.last_ok_at && c.last_ok_at >= c.last_error_at));
+        const { data: baileysRows } = await db.from("vivaconnect_channel_health")
+            .select("id, first_sent_today, daily_limit, last_error_at, last_ok_at").eq("purpose", "pool").eq("kind", "baileys")
+            .eq("active", true).eq("has_token", true).order("first_sent_today").limit(5);
+        const baileys = (baileysRows ?? []).find(healthy);
+
+        const { data: ch } = await db.from("vivaconnect_channels").select("id, active").eq("id", TICKET_TEMPLATE_CHANNEL_ID).maybeSingle();
+        const templateParams = { hsm_language: "pt_BR", hsm_components: [{ type: "body", parameters: [nome, protocolo, titulo, ticketUrl].map((v) => ({ type: "text", text: v })) }] };
+        // canal do envio: Baileys (texto livre) se saudável; senão o oficial com template
+        const usarBaileys = !!baileys;
+        const channelId = usarBaileys ? baileys.id : (ch?.active ? TICKET_TEMPLATE_CHANNEL_ID : null);
+        if (!channelId) return;
 
         // mesma janela de horário comercial do follow-up automático da IA (ai_agent_settings,
         // achado ao vivo 01/10 nesta mesma sessão: "não é legal mandar de madrugada") — fora
-        // da janela, agenda pro próximo horário de abertura em vez de mandar na hora. Template
-        // aprovado não tem restrição de janela de 24h da Meta, só essa de horário comercial
-        // nossa mesmo, por educação.
+        // da janela, agenda pro próximo horário de abertura em vez de mandar na hora.
         const { data: ai } = await db.from("ai_agent_settings").select("followup_window_start, followup_window_end").eq("id", 1).maybeSingle();
         const start = ai?.followup_window_start ?? 8, end = ai?.followup_window_end ?? 20;
         const hour = Number(new Intl.DateTimeFormat("en-US", { hour: "numeric", hourCycle: "h23", timeZone: "America/Sao_Paulo" }).format(new Date()));
@@ -59,17 +65,14 @@ async function sendTicketWhatsApp(db: any, telefone: string | null | undefined, 
             : new Date(Date.now() + (hour < start ? start - hour : 24 - hour + start) * 3600_000);
 
         await db.from("vivaconnect_outbox").insert({
-            lead_id: null, channel_id: TICKET_NOTICE_CHANNEL_ID, kind: "ticket_notice", number,
-            // body não é usado pro envio em si (sendVia manda pelo template quando
-            // hsm_template_name está presente) — só texto legível pra quem olhar a fila/
-            // histórico depois (a coluna é NOT NULL).
-            body: `Template: ${TICKET_NOTICE_TEMPLATE} (${nome}, ${protocolo}, ${titulo})`,
-            hsm_template_name: TICKET_NOTICE_TEMPLATE, hsm_language: "pt_BR",
-            hsm_components: [{ type: "body", parameters: [nome, protocolo, titulo, ticketUrl].map((v) => ({ type: "text", text: v })) }],
+            lead_id: null, channel_id: channelId, kind: "ticket_notice", number,
+            body: usarBaileys ? texto : `Template: ${TICKET_TEMPLATE_NAME} (${nome}, ${protocolo}, ${titulo})`,
+            // Baileys: texto livre; o template fica guardado só pra fallback (sendRow só usa
+            // hsm_template_name quando está preenchido). Oficial: manda o template direto.
+            ...(usarBaileys ? {} : { hsm_template_name: TICKET_TEMPLATE_NAME }),
+            ...templateParams,
             scheduled_at: scheduledAt.toISOString(),
         });
-        // dispara o worker agora só se já está na janela (senão fica agendado; o cron do
-        // VivaConnect, de 1 em 1 min, pega sozinho quando chegar a hora)
         if (dentroDaJanela) {
             await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/vivaconnect-api`, {
                 method: "POST",
@@ -110,9 +113,19 @@ Deno.serve(async (req) => {
         if (!rem) await db.from("ticket_email_outbox").insert({ ticket_id: t.id, kind: "reminder" }).then(() => {}, () => {});
     }
 
+    // Cota do Resend (plano com limite diário — estourou 13–16/10 e 322 e-mails de chamado
+    // ficaram "failed" sem nova tentativa). Teto de envios nas últimas 24h, com folga pra
+    // outros envios que compartilham a mesma chave (recuperação de senha, integrações).
+    // Acima disso o restante fica pendente e sai nas próximas rodadas do cron, sem estourar.
+    const RESEND_DAILY_CAP = 60;
+    const since24h = new Date(Date.now() - 24 * 3600_000).toISOString();
+    const { count: sentLast24h } = await db.from("ticket_email_outbox").select("id", { count: "exact", head: true })
+        .eq("status", "sent").gte("sent_at", since24h);
+    let budget = RESEND_DAILY_CAP - (sentLast24h ?? 0);
+
     const { data: due } = await db.from("ticket_email_outbox").select("*")
-        .eq("status", "pending").lte("scheduled_at", new Date().toISOString()).order("scheduled_at").limit(30);
-    const out = { sent: 0, skipped: 0, failed: 0 };
+        .eq("status", "pending").lte("scheduled_at", new Date().toISOString()).order("scheduled_at").limit(Math.max(budget, 0) + 30);
+    const out = { sent: 0, skipped: 0, failed: 0, adiados_cota: 0 };
     const PORTAL_URL = await portalUrl();
 
     for (const row of due ?? []) {
@@ -120,7 +133,10 @@ Deno.serve(async (req) => {
             await db.from("ticket_email_outbox").update({ status, ...extra }).eq("id", row.id);
             out[status === "sent" ? "sent" : status === "skipped" ? "skipped" : "failed"]++;
         };
-        if (Date.now() - new Date(row.created_at).getTime() > 24 * 3600_000) { await finish("skipped", { error: "expirado (>24h na fila)" }); continue; }
+        // prazo conta a partir de quando o envio ficou devido (scheduled_at), não da criação —
+        // e-mail adiado pela cota diária (60/dia) pode levar dias pra sair, então o prazo é longo
+        if (Date.now() - new Date(row.scheduled_at ?? row.created_at).getTime() > 7 * 24 * 3600_000) { await finish("skipped", { error: "expirado (>7 dias na fila)" }); continue; }
+        if (budget <= 0) { out.adiados_cota++; continue; }
         const { data: t } = await db.from("tickets").select("id, protocolo, titulo, categoria, status, aluno_id, aluno_nome, aluno_email, created_at, encerrado_pelo_aluno")
             .eq("id", row.ticket_id).maybeSingle();
         if (!t) { await finish("skipped", { error: "chamado não existe mais" }); continue; }
@@ -210,12 +226,14 @@ Deno.serve(async (req) => {
         // Pedido do usuário 16/10: só o aviso de ABERTURA vai por WhatsApp (template aprovado
         // na Meta cobre só esse caso por enquanto, e evita gastar com mensagem de atualização
         // repetida) — resposta/resolvido/lembrete/transferido ficam só no Portal + e-mail.
-        if (row.kind === "created") await sendTicketWhatsApp(db, al?.telefone, nome, t.protocolo, t.titulo, TICKET_URL);
+        if (row.kind === "created") await sendTicketWhatsApp(db, al?.telefone, nome, t.protocolo, t.titulo, TICKET_URL, waText);
 
         if (!hasEmail) { await finish("skipped", { error: "aluno sem e-mail válido" }); continue; }
         const r = await sendEmail(to, subject, html, replyTo);
+        budget--;
         if (r.ok) await finish("sent", { sent_at: new Date().toISOString(), to_email: to, error: null });
         else if (/não configurada/.test(r.error ?? "")) { out.failed++; break; } // sem chave: deixa na fila pra quando configurar
+        else if (/429|quota/i.test(r.error ?? "")) { out.adiados_cota++; break; } // cota do dia estourou: fica pendente, para a rodada
         else await finish("failed", { to_email: to, error: r.error });
     }
     return jsonRes(out);

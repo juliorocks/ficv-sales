@@ -38,7 +38,7 @@
 //     'vivaconnect'); o webhook ignora o eco.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { corsHeaders, identify, isAdmin, isStaff, jsonRes } from "../_shared/ai.ts";
-import { asList, fillTemplate, firstName, loadSettings, markHumanReplied, parseApiRef, toDiscovered, toZproNumber, zpro, zproErr } from "../_shared/vivaconnect.ts";
+import { asList, fillTemplate, firstName, loadSettings, markHumanReplied, parseApiRef, toDiscovered, toZproNumber, TICKET_TEMPLATE_CHANNEL_ID, TICKET_TEMPLATE_NAME, zpro, zproErr } from "../_shared/vivaconnect.ts";
 import { mirror, sv } from "../_shared/db.ts";
 import { type HubMsg, filaText, loadDestinations, planejar, redirectText } from "../_shared/hub.ts";
 import { getSecret } from "../_shared/secrets.ts";
@@ -655,6 +655,20 @@ async function sendRow(db: any, settings: any, row: any, ch: any) {
         // número do CLIENTE sem WhatsApp/inválido (Z-PRO devolve 500 "reading 'jid'"): falha
         // do destino, não do canal — não tenta de novo nem pinta o número de vermelho
         const badRecipient = /jid|not.*(exist|registered|on whatsapp)|invalid.*number|n[úu]mero inv/i.test(err);
+        // aviso de chamado que saiu pela Baileys (texto livre) e falhou: reenvia pelo template
+        // UTILITY aprovado no oficial — regra pedida 19/10, "tem que funcionar sempre". O
+        // template e os valores ficam guardados em hsm_components desde o enfileiramento.
+        if (!badRecipient && row.kind === "ticket_notice" && !row.hsm_template_name && row.hsm_components) {
+            const { data: tpl } = await db.from("vivaconnect_channels").select(CH_COLS).eq("id", TICKET_TEMPLATE_CHANNEL_ID).maybeSingle();
+            if (tpl?.active && tpl.id !== ch.id) {
+                await markChannel(db, ch.id, false, err);
+                await db.from("vivaconnect_outbox").update({
+                    status: "queued", channel_id: tpl.id, hsm_template_name: TICKET_TEMPLATE_NAME,
+                    hsm_language: row.hsm_language || "pt_BR", error: null, response: r.data, scheduled_at: now,
+                }).eq("id", row.id);
+                return await sendRow(db, settings, { ...row, status: "queued", channel_id: tpl.id, hsm_template_name: TICKET_TEMPLATE_NAME, hsm_language: row.hsm_language || "pt_BR" }, tpl);
+            }
+        }
         // erro de rede/5xx: volta pra fila (até 3 tentativas); 4xx: falha definitiva
         const retry = !badRecipient && (r.status === 0 || r.status >= 500) && (row.attempts ?? 0) + 1 < 3;
         await db.from("vivaconnect_outbox").update({
