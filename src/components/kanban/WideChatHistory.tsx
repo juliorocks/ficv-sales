@@ -1045,8 +1045,19 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                     <span className="font-semibold uppercase tracking-wide">Enviar por</span>
                     <span className="font-semibold text-[var(--text-main)]">VivaConnect</span>
                     {isViva && ((vc?.channels.length ?? 0) > 1
-                        ? <select value={vcChannel?.id ?? ''} onChange={(e) => setVcChannelChoice(Number(e.target.value))}
-                            title={vcFixedChannel ? "O cliente conversa normalmente por esse número — trocar aqui manda as próximas respostas por outro número." : undefined}
+                        ? <select value={vcChannel?.id ?? ''} onChange={async (e) => {
+                                const newId = Number(e.target.value)
+                                setVcChannelChoice(newId)
+                                // Achado ao vivo 19/10 (Thayanne): a troca manual só vivia no estado local
+                                // do componente — fechar e reabrir a conversa voltava pro canal fixo (WABA),
+                                // reabrindo a trava de 24h e escondendo a caixa de mensagem de novo. Agora
+                                // grava em leads.vivaconnect_channel_id — o mesmo campo que o backend já trata
+                                // como "canal fixo" — pra virar permanente, igual o pedido de 13/10 previa.
+                                const { error } = await supabase.from('leads').update({ vivaconnect_channel_id: newId }).eq('id', leadId)
+                                if (error) { showError(`Não consegui salvar a troca de canal: ${error.message}`); return }
+                                queryClient.invalidateQueries({ queryKey: ['vivaconnect-chat-context', String(leadId)] })
+                            }}
+                            title={vcFixedChannel ? "O cliente conversa normalmente por esse número — trocar aqui manda as próximas respostas por outro número, e fica assim de forma permanente." : undefined}
                             className="h-6 rounded-md border border-[var(--border)] bg-transparent px-1.5 text-[11px]">
                             {vc!.channels.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                           </select>
