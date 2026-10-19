@@ -106,7 +106,11 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin, isDar
     if (['resolvido', 'fechado'].includes(t.status) && new Date(t.resolved_at ?? t.updated_at).getTime() < since15) return false
     // sem atendente (ex.: coluna Novos) tem que aparecer pra todo mundo, mesmo com "Meus
     // chamados" ligado — senão ninguém vê os que ainda precisam ser pegos (pedido do usuário 07/10)
-    if (meusChamados && t.atendente_id != null && t.atendente_id !== user?.id) return false
+    // `user?.id` exige a sessão já resolvida — achado ao vivo 19/10: sem o "&& user?.id", um
+    // user ainda não carregado (ou que falhou em resolver, mesmo bug recorrente de sessão)
+    // fazia TODO chamado com atendente (inclusive os da própria pessoa) falhar o "!==" contra
+    // undefined e sumir — "Em atendimento"/"Aguardando aluno" zerados, só "Novos" sobrava.
+    if (meusChamados && user?.id && t.atendente_id != null && t.atendente_id !== user.id) return false
     if (priorityOnly && !alunoRespondeu(t)) return false
     if (dateRange.start && t.created_at.slice(0, 10) < dateRange.start) return false
     if (dateRange.end && t.created_at.slice(0, 10) > dateRange.end) return false

@@ -344,6 +344,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   async function sendAudio(blob: Blob, mimeType: string) {
     setSending(true)
     try {
+      await withTimeout(supabase.auth.getSession(), 8000, 'A sessão').catch(() => {})
       const ext = mimeType.includes('ogg') ? 'ogg' : 'webm'
       const ts = Date.now()
       const path = `${ticket.id}/audio-${ts}.${ext}`
@@ -480,6 +481,12 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
     if (!msg.trim() && files.length === 0) return
     setSending(true)
     try {
+      // mesmo padrão de token-refresh das outras ações desta tela (changeStatus etc.) — essa
+      // aqui nunca tinha ganhado a proteção, apesar de ser a ação mais usada da tela. Achado
+      // ao vivo 19/10: Izabelly levou "Erro ao enviar mensagem" sem conseguir responder um
+      // chamado — RLS de ticket_messages exige autor_id = auth.uid() exato; token expirado
+      // no meio quebra isso sem aviso nenhum até cair aqui.
+      await withTimeout(supabase.auth.getSession(), 8000, 'A sessão').catch(() => {})
       const role = isStaff ? (user?.role === 'admin' ? 'admin' : 'atendente') : 'aluno'
 
       // Faz upload dos arquivos ANTES de inserir a mensagem (paralelo)
@@ -526,8 +533,8 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
       qc.invalidateQueries({ queryKey: ['ticket-messages', ticket.id] })
       qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
       qc.invalidateQueries({ queryKey: ['tickets'] })
-    } catch {
-      showError('Erro ao enviar mensagem.')
+    } catch (e: any) {
+      showError(e?.message ? `Erro ao enviar mensagem: ${e.message}` : 'Erro ao enviar mensagem. Sua sessão pode ter expirado — recarregue a página e tente de novo.')
     } finally {
       setSending(false)
     }
@@ -539,6 +546,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   async function sendQuickReplyAttachment(reply: { content: string; attachment_url: string; attachment_name: string | null; attachment_mime: string | null }) {
     setSending(true)
     try {
+      await withTimeout(supabase.auth.getSession(), 8000, 'A sessão').catch(() => {})
       const role = isStaff ? (user?.role === 'admin' ? 'admin' : 'atendente') : 'aluno'
       const { error } = await supabase.from('ticket_messages').insert({
         ticket_id: ticket.id,
