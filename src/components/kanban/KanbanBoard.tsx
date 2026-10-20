@@ -4,6 +4,7 @@ import { DragDropContext, DropResult, Droppable } from "@hello-pangea/dnd"
 import { supabase } from "@/lib/supabase"
 import { Lead, Stage, User, LeadSource, Course } from "@/types/database"
 import { KanbanColumn } from "./KanbanColumn"
+import { EditLeadDialog } from "./EditLeadDialog"
 import { KanbanSkeleton } from "./KanbanSkeleton"
 import { showError, showSuccess } from "@/utils/toast"
 import { playNewLeadSound, playReplySound } from "@/utils/notificationSound"
@@ -26,6 +27,11 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
     // por BOARD inteiro: leadId -> stage.id de onde foi pinado: lead_id -> stage_id;
     // chaveada por dentro de newColumns abaixo, não pelo stage_id atual de verdade do lead.
     const [pinnedLeadStage, setPinnedLeadStage] = useState<Map<number, number>>(new Map())
+    // Diálogo do lead fica AQUI (um só, no quadro), não dentro do card: o card está dentro da área
+    // de arrastar e pode ser desmontado/movido quando o lead muda de coluna (ex.: "Atender" tira
+    // da Entrada) — e o diálogo caía junto, mesmo com o pin. Também isola as teclas digitadas no
+    // chat de chegarem à área de arrastar.
+    const [dialog, setDialog] = useState<{ lead: Lead; tab: "details" | "chat" } | null>(null)
     const setLeadPinned = (leadId: number, stageId: number, pinned: boolean) => setPinnedLeadStage((prev) => {
         const has = prev.get(leadId)
         if (pinned ? has === stageId : has === undefined) return prev
@@ -550,6 +556,7 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
                                     pendingByLead={pendingByLead}
                                     aiTouchedLeads={aiTouchedLeads}
                                     onLeadPinChange={setLeadPinned}
+                                    onOpenLead={(lead, tab) => setDialog({ lead, tab })}
                                 />
                             ))}
                             {provided.placeholder}
@@ -562,6 +569,19 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
                     )}
                 </Droppable>
             </DragDropContext>
+            {dialog && (
+                <EditLeadDialog
+                    lead={leads?.find((l) => l.id === dialog.lead.id) ?? dialog.lead}
+                    stages={stages ?? []}
+                    isOpen
+                    onOpenChange={(open) => {
+                        if (open) return
+                        setDialog(null)
+                        queryClient.invalidateQueries({ queryKey: ['leads'] })
+                    }}
+                    initialTab={dialog.tab}
+                />
+            )}
         </div>
     )
 }

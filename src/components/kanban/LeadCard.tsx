@@ -36,6 +36,8 @@ interface LeadCardProps {
      * renderizado mesmo se o reordenamento (ex.: "Atender" tira o lead do topo dos "sem
      * atendente") empurrar ele pra fora do corte de `visibleCount` — ver KanbanColumn.tsx */
     onDialogOpenChange?: (open: boolean) => void
+    /** abre o diálogo do lead no quadro (ver KanbanBoard); sem isso, usa o diálogo local */
+    onOpenLead?: (lead: Lead, tab: "details" | "chat") => void
     /** campo que a coluna está usando pra ordenar agora (sortBy.key do KanbanColumn) — o
      * card sempre mostra ESSA data, nunca uma fixa. Sem isso, card e ordenação divergem toda
      * vez que o padrão de ordenação muda (já aconteceu 2x: era data_entrada, virou
@@ -51,12 +53,12 @@ const DATE_FIELD_FALLBACK: Record<string, keyof Lead> = {
     data_entrada: 'data_entrada',
 }
 
-export function LeadCard({ lead, users, leadSources, stages, courses, channels, pending, aiTouched, onDialogOpenChange, sortKey }: LeadCardProps) {
+export function LeadCard({ lead, users, leadSources, stages, courses, channels, pending, aiTouched, onDialogOpenChange, onOpenLead, sortKey }: LeadCardProps) {
     const timeInStage = useTimeInStage(lead.stage_entry_date);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
     const [editTab, setEditTab] = useState<"details" | "chat">("chat");
     const [isLossOpen, setIsLossOpen] = useState(false);
-    const openEdit = (tab: "details" | "chat") => { setEditTab(tab); setIsEditDialogOpen(true); };
+    const openEdit = (tab: "details" | "chat") => { if (onOpenLead) return onOpenLead(lead, tab); setEditTab(tab); setIsEditDialogOpen(true); };
     const { user } = useAuth();
     const queryClient = useQueryClient();
 
@@ -346,7 +348,7 @@ export function LeadCard({ lead, users, leadSources, stages, courses, channels, 
                     </div>
                 )}
             </Card>
-            {isEditDialogOpen && (
+            {!onOpenLead && isEditDialogOpen && (
                 <EditLeadDialog
                     lead={lead}
                     stages={stages}
