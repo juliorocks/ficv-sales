@@ -168,11 +168,7 @@ Deno.serve(async (req) => {
             // sobre o canal fixo do lead — achado ao vivo 14/10: send ignorava a troca manual
             // e insistia no canal fixo (WABA), batendo na trava de janela de novo mesmo depois
             // do agente escolher o Baileys. Sem escolha explícita, cai no fixo de sempre.
-            // Template (HSM) só existe no WABA oficial onde foi aprovado (canal TICKET_TEMPLATE_CHANNEL_ID):
-            // mandar por outro número faz a Meta responder "Template name does not exist" (achado ao vivo
-            // 20/10, lead "Tanisvarde Leite": o seletor caiu no FICV 2 e o ficv_ola não existe lá).
-            const channelId = hsmName ? TICKET_TEMPLATE_CHANNEL_ID
-                : (Number(body.channel_id) || null) ?? lead.vivaconnect_channel_id
+            const channelId = (Number(body.channel_id) || null) ?? lead.vivaconnect_channel_id
                 ?? (await db.rpc("vivaconnect_pick_pool_channel")).data;
             if (!channelId) return jsonRes({ error: "Nenhum número do VivaConnect disponível (cadastre um canal ativo)." }, 400);
             const { data: ch } = await db.from("vivaconnect_channels").select(CH_COLS).eq("id", channelId).maybeSingle();
