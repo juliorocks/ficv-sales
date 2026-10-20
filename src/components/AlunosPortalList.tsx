@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { Search, GraduationCap } from 'lucide-react';
+import { Search, GraduationCap, Eye, Loader2 } from 'lucide-react';
+import { showError } from '../utils/toast';
 
 interface AlunoRow {
     id: string;
@@ -45,6 +46,20 @@ export const AlunosPortalList: React.FC = () => {
         staleTime: 60_000,
     });
 
+    const verComoAluno = useMutation({
+        mutationFn: async (alunoId: string) => {
+            const { data, error } = await supabase.functions.invoke('aluno-view', { body: { action: 'create', aluno_id: alunoId } });
+            if (error) throw new Error(await (error as any).context?.json?.().then((b: any) => b?.error).catch(() => null) ?? error.message);
+            if (data?.error) throw new Error(data.error);
+            return data as { token: string; expires_at: string };
+        },
+        onSuccess: (data) => {
+            window.open(`${window.location.origin}/aluno-visualizacao/${data.token}`, '_blank', 'noopener');
+        },
+        onError: (e: any) => showError(`Não foi possível abrir: ${e.message}`),
+    });
+    const [gerandoPara, setGerandoPara] = useState<string | null>(null);
+
     return (
         <div className="glass-card p-6 mt-6">
             <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
@@ -79,14 +94,15 @@ export const AlunosPortalList: React.FC = () => {
                             <th className="py-3 px-2 font-bold">Último acesso</th>
                             <th className="py-3 px-2 font-bold">App</th>
                             <th className="py-3 px-2 font-bold">Senha</th>
+                            <th className="py-3 px-2 font-bold text-right">Ações</th>
                         </tr>
                     </thead>
                     <tbody>
                         {isLoading && (
-                            <tr><td colSpan={6} className="py-6 text-center text-[var(--text-muted)]">Carregando…</td></tr>
+                            <tr><td colSpan={7} className="py-6 text-center text-[var(--text-muted)]">Carregando…</td></tr>
                         )}
                         {!isLoading && alunos.length === 0 && (
-                            <tr><td colSpan={6} className="py-6 text-center text-[var(--text-muted)]">Nenhum aluno encontrado.</td></tr>
+                            <tr><td colSpan={7} className="py-6 text-center text-[var(--text-muted)]">Nenhum aluno encontrado.</td></tr>
                         )}
                         {alunos.map((a) => (
                             <tr key={a.id} className="border-b border-[var(--border)] last:border-0">
@@ -106,6 +122,16 @@ export const AlunosPortalList: React.FC = () => {
                                     {a.must_change_password
                                         ? <span className="text-amber-500 font-semibold">Ainda o CPF</span>
                                         : <span className="text-[var(--text-muted)]">Trocada</span>}
+                                </td>
+                                <td className="py-3 px-2 text-right">
+                                    <button
+                                        onClick={() => { setGerandoPara(a.id); verComoAluno.mutate(a.id, { onSettled: () => setGerandoPara(null) }) }}
+                                        disabled={gerandoPara === a.id}
+                                        title="Abre o portal deste aluno só para leitura, com link que expira em 15 min"
+                                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--primary)] hover:underline disabled:opacity-60">
+                                        {gerandoPara === a.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5" />}
+                                        Ver como aluno
+                                    </button>
                                 </td>
                             </tr>
                         ))}

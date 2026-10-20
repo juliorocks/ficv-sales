@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import App from './App'
 import { AgentReportPage } from './components/AgentReport'
 import { AlunoPortalPage } from './components/tickets/AlunoPortalPage'
+import { AlunoVisualizacaoRoute } from './components/tickets/AlunoVisualizacao'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { AuthProvider } from './hooks/use-auth'
 import './index.css'
@@ -38,6 +39,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                 ) : (
                 <Routes>
                     <Route path="/relatorio/:token" element={<AgentReportPage />} />
+                    <Route path="/aluno-visualizacao/:token" element={<AlunoVisualizacaoRoute />} />
                     <Route path="/aluno" element={<AlunoPortalPage />} />
                     <Route path="/atendimento" element={<Navigate to="/aluno" replace />} />
                     <Route path="/f/:slug" element={<Suspense fallback={null}><PublicMarketingFormPage /></Suspense>} />

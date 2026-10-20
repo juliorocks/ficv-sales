@@ -14,13 +14,15 @@ import { supabase } from '../../lib/supabase'
 import { AlertCircle, BookOpen, CalendarDays, CheckCircle2, ChevronRight, ChevronsUpDown, Copy, CreditCard, ExternalLink, FileText, GraduationCap, Loader2, Printer, RefreshCw, Wallet } from 'lucide-react'
 import { showError, showSuccess } from '../../utils/toast'
 
-interface AlunoPainelCtx { targetAlunoId?: string }
+interface AlunoPainelCtx { targetAlunoId?: string; readOnly?: boolean }
 const Ctx = createContext<AlunoPainelCtx>({})
 /** Envolve AlunoInicio/AlunoFinanceiro/AlunoNotas pra mostrarem o painel de OUTRO aluno
  * (visão do atendente) em vez do aluno logado. Sem este Provider, comportamento normal. */
-export function AlunoPainelProvider({ alunoId, children }: { alunoId?: string; children: React.ReactNode }) {
-  return <Ctx.Provider value={{ targetAlunoId: alunoId }}>{children}</Ctx.Provider>
+export function AlunoPainelProvider({ alunoId, readOnly, children }: { alunoId?: string; readOnly?: boolean; children: React.ReactNode }) {
+  return <Ctx.Provider value={{ targetAlunoId: alunoId, readOnly: !!readOnly }}>{children}</Ctx.Provider>
 }
+/** Visão por link (admin, só leitura): o alunoId vira "view:<token>" e os dados vêm da aluno-view. */
+export const VIEW_PREFIX = 'view:'
 
 export interface Parcela {
   conta_receber_id: number; numero_parcela: number; vencimento: string | null; valor: number; valor_pago: number | null
@@ -50,8 +52,11 @@ function staffActionName(action: string): string {
 }
 
 async function portal<T>(body: Record<string, unknown>, targetAlunoId?: string): Promise<T> {
-  const fn = targetAlunoId ? 'staff-tickets' : 'aluno-portal'
-  const payload = targetAlunoId ? { ...body, action: staffActionName(String(body.action)), aluno_id: targetAlunoId } : body
+  const isView = !!targetAlunoId?.startsWith(VIEW_PREFIX)
+  const fn = isView ? 'aluno-view' : targetAlunoId ? 'staff-tickets' : 'aluno-portal'
+  const payload = isView
+    ? { ...body, token: targetAlunoId!.slice(VIEW_PREFIX.length) }
+    : targetAlunoId ? { ...body, action: staffActionName(String(body.action)), aluno_id: targetAlunoId } : body
   const { data, error } = await supabase.functions.invoke(fn, { body: payload })
   if (error) {
     const ctx = await (error as any).context?.json?.().catch(() => null)
@@ -167,6 +172,7 @@ function LoadState({ isLoading, error, refetch }: { isLoading: boolean; error: u
 // ── Início ───────────────────────────────────────────────────
 
 export function AlunoInicio({ onGo, onDeclaracao }: { onGo: (tab: 'financeiro' | 'notas' | 'chamados', foco?: NotasFoco) => void; onDeclaracao: () => void }) {
+  const { readOnly } = useContext(Ctx)
   const q = useOverview()
   const foto = useFoto()
   if (!q.data) return <LoadState isLoading={q.isLoading} error={q.error} refetch={q.refetch} />
@@ -268,13 +274,15 @@ export function AlunoInicio({ onGo, onDeclaracao }: { onGo: (tab: 'financeiro' |
         </div>
       )}
 
-      <Box className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 min-w-0">
-          <FileText className="w-4 h-4 text-[var(--text-muted)] shrink-0" />
-          <p className="text-sm text-[var(--text-main)]">Declaração de Matrícula</p>
-        </div>
-        <button onClick={onDeclaracao} className="text-xs text-[var(--primary)] hover:underline shrink-0">Gerar →</button>
-      </Box>
+      {!readOnly && (
+        <Box className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <FileText className="w-4 h-4 text-[var(--text-muted)] shrink-0" />
+            <p className="text-sm text-[var(--text-main)]">Declaração de Matrícula</p>
+          </div>
+          <button onClick={onDeclaracao} className="text-xs text-[var(--primary)] hover:underline shrink-0">Gerar →</button>
+        </Box>
+      )}
 
       <Box className="flex items-center justify-between gap-3">
         <p className="text-sm text-[var(--text-main)]">Precisa de ajuda com algo?</p>
@@ -287,7 +295,7 @@ export function AlunoInicio({ onGo, onDeclaracao }: { onGo: (tab: 'financeiro' |
 // ── Financeiro ───────────────────────────────────────────────
 
 export function AlunoFinanceiro() {
-  const { targetAlunoId } = useContext(Ctx)
+  const { targetAlunoId, readOnly } = useContext(Ctx)
   const q = useOverview()
   const [busy, setBusy] = useState<string | null>(null)
   const [pay, setPay] = useState<Record<string, { link?: string; linha?: string; msg?: string }>>({})
@@ -330,6 +338,7 @@ export function AlunoFinanceiro() {
             <p className="text-sm font-semibold text-[var(--text-main)]">{brl(paid && p.valor_pago ? p.valor_pago : p.valor)}</p>
             {paid
               ? <span className="text-[11px] text-green-400">Pago</span>
+              : readOnly ? <span className="text-[11px] text-[var(--text-muted)]">Em aberto</span>
               : <button onClick={() => pagar(p)} disabled={busy === k}
                   className="text-[11px] text-[var(--primary)] hover:underline inline-flex items-center gap-1">
                   {busy === k ? <Loader2 className="w-3 h-3 animate-spin" /> : <CreditCard className="w-3 h-3" />} Pagar
