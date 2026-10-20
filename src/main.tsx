@@ -25,7 +25,7 @@ const PublicMarketingFormPage = React.lazy(() =>
 // o admin gerou o código (achado ao vivo 08/10: snippet gerado em portal.ficv.edu.br/connect caía
 // no catch-all do portal, que não tem a rota /f e renderizava o login do aluno no lugar do form).
 const isPortalHost = /^portal\./i.test(window.location.hostname)
-const isCrmPath = /^\/(connect|relatorio|f)(\/|$)/.test(window.location.pathname)
+const isCrmPath = /^\/(connect|relatorio|f|aluno-visualizacao)(\/|$)/.test(window.location.pathname)
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>

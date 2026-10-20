@@ -9,7 +9,7 @@
       // nem em /connect (CRM rodando no MESMO domínio portal.*) nem /relatorio (link público
       // de relatório de agente, pode abrir em qualquer domínio) — pedido do usuário 02/10.
       (function () {
-        if (/^\/(connect|relatorio)(\/|$)/.test(location.pathname)) return
+        if (/^\/(connect|relatorio|aluno-visualizacao)(\/|$)/.test(location.pathname)) return
         if (!/^portal\./i.test(location.hostname) && !/^\/(aluno|atendimento)/.test(location.pathname)) return
         var h = document.head
         // iPhone dá zoom sozinho ao tocar num campo com letra < 16px (login do CPF) e a página
