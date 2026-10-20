@@ -168,7 +168,11 @@ Deno.serve(async (req) => {
             // sobre o canal fixo do lead — achado ao vivo 14/10: send ignorava a troca manual
             // e insistia no canal fixo (WABA), batendo na trava de janela de novo mesmo depois
             // do agente escolher o Baileys. Sem escolha explícita, cai no fixo de sempre.
-            const channelId = (Number(body.channel_id) || null) ?? lead.vivaconnect_channel_id
+            // Template (HSM) só existe no WABA oficial onde foi aprovado (canal TICKET_TEMPLATE_CHANNEL_ID):
+            // mandar por outro número faz a Meta responder "Template name does not exist" (achado ao vivo
+            // 20/10, lead "Tanisvarde Leite": o seletor caiu no FICV 2 e o ficv_ola não existe lá).
+            const channelId = hsmName ? TICKET_TEMPLATE_CHANNEL_ID
+                : (Number(body.channel_id) || null) ?? lead.vivaconnect_channel_id
                 ?? (await db.rpc("vivaconnect_pick_pool_channel")).data;
             if (!channelId) return jsonRes({ error: "Nenhum número do VivaConnect disponível (cadastre um canal ativo)." }, 400);
             const { data: ch } = await db.from("vivaconnect_channels").select(CH_COLS).eq("id", channelId).maybeSingle();
@@ -654,7 +658,8 @@ async function sendRow(db: any, settings: any, row: any, ch: any) {
         const err = zproErr(r.status, r.data);
         // número do CLIENTE sem WhatsApp/inválido (Z-PRO devolve 500 "reading 'jid'"): falha
         // do destino, não do canal — não tenta de novo nem pinta o número de vermelho
-        const badRecipient = /jid|not.*(exist|registered|on whatsapp)|invalid.*number|n[úu]mero inv/i.test(err);
+        // "exist" só conta quando fala de número/destinatário: "Template name does not exist" não é destinatário inválido
+        const badRecipient = /jid|(number|phone|recipient|user).*not.*(exist|registered)|not.*(registered|on whatsapp)|invalid.*number|n[úu]mero inv/i.test(err);
         // aviso de chamado que saiu pela Baileys (texto livre) e falhou: reenvia pelo template
         // UTILITY aprovado no oficial — regra pedida 19/10, "tem que funcionar sempre". O
         // template e os valores ficam guardados em hsm_components desde o enfileiramento.
