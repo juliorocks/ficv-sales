@@ -135,7 +135,14 @@ Deno.serve(async (req) => {
         if (action === "list_meta_templates") {
             const token = await getSecret("META_WABA_TOKEN_OFICIAL");
             if (!token) return jsonRes({ error: "Token da Meta não configurado (META_WABA_TOKEN_OFICIAL em Gestão > Integrações)." }, 400);
-            const wabaId = "1653396729814045"; // CIDADE VIVA - OFICIAL (Whatsapps#16 no Z-PRO)
+            // templates são por WABA: lista os do canal pedido (vivaconnect_channels.waba_id);
+            // sem canal, cai no WABA oficial (CIDADE VIVA - OFICIAL)
+            let wabaId = "1653396729814045";
+            const chId = Number(body.channel_id) || null;
+            if (chId) {
+                const { data: chRow } = await db.from("vivaconnect_channels").select("waba_id").eq("id", chId).maybeSingle();
+                if (chRow?.waba_id) wabaId = chRow.waba_id;
+            }
             const r = await fetch(`https://graph.facebook.com/v25.0/${wabaId}/message_templates?limit=100`, {
                 headers: { Authorization: `Bearer ${token}` },
             });

@@ -808,10 +808,11 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
     // outra aba") e nem dava pra ENVIAR por ali mesmo (só listar). Leads que por algum
     // motivo ainda não estão no VivaConnect continuam no WideChat (legado).
     const { data: hsm, isFetching: hsmLoading, isError: hsmError, refetch: refetchHsm } = useQuery<any[]>({
-        queryKey: isViva ? ['meta-templates'] : ['widechat-hsm', effectiveChannelId],
+        queryKey: isViva ? ['meta-templates', vcChannel?.id ?? null] : ['widechat-hsm', effectiveChannelId],
         queryFn: async () => {
             if (isViva) {
-                const { data, error } = await supabase.functions.invoke('vivaconnect-api', { body: { action: 'list_meta_templates' } })
+                // templates do WABA do canal pelo qual a mensagem vai sair (o mesmo do envio)
+                const { data, error } = await supabase.functions.invoke('vivaconnect-api', { body: { action: 'list_meta_templates', channel_id: vcChannel?.id ?? null } })
                 if (error) throw error
                 if (data?.error) throw new Error(typeof data.error === 'string' ? data.error : 'Falha ao listar templates na Meta.')
                 const raw: any[] = data?.templates ?? []
