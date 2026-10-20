@@ -701,7 +701,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   return (
     <>
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-[70vw] w-[70vw] h-[95vh] flex flex-col p-0 bg-[var(--bg-card)] border-[var(--border)]">
+      <DialogContent className="max-w-none w-screen h-[100dvh] rounded-none sm:max-w-[70vw] sm:w-[70vw] sm:h-[95vh] sm:rounded-lg flex flex-col p-0 bg-[var(--bg-card)] border-[var(--border)]">
         {/* Header */}
         <DialogHeader className="px-6 pt-5 pb-4 border-b border-[var(--border)] shrink-0">
           <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -1069,8 +1069,8 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
               </div>
             )}
             {!recording && (
-              <div className="flex gap-2 items-end">
-                <div className="relative flex-1">
+              <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+                <div className="relative flex-1 min-w-0">
                 <QuickReplySlash value={msg} onChange={setMsg} textareaRef={msgTextareaRef}
                   onAttachment={(reply) => sendQuickReplyAttachment({ content: reply.content, attachment_url: reply.attachment_url!, attachment_name: reply.attachment_name ?? null, attachment_mime: reply.attachment_mime ?? null })} />
                 <Textarea
@@ -1078,7 +1078,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                   value={msg}
                   onChange={e => setMsg(e.target.value)}
                   placeholder={interno ? 'Nota interna (não visível ao aluno)...' : 'Digite sua mensagem... (/ mensagens rápidas)'}
-                  className={`resize-none min-h-[56px] bg-[var(--bg-main)] border-[var(--border)] text-[var(--text-main)] ${
+                  className={`resize-none w-full min-h-[56px] text-base sm:text-sm bg-[var(--bg-main)] border-[var(--border)] text-[var(--text-main)] ${
                     interno ? 'border-amber-500/50' : ''
                   }`}
                   rows={2}
@@ -1089,7 +1089,7 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                 </div>
                 {/* botões na horizontal em vez de empilhados — em coluna (5 ícones) eram bem
                     mais altos que a caixa de texto e sobrava um vão vazio do lado (13/10) */}
-                <div className="flex gap-1.5 items-end">
+                <div className="flex gap-1.5 items-center justify-end sm:items-end">
                   {isStaff && (
                     <QuickRepliesMenu triggerClassName="h-10 w-10 flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--bg-main)] text-[var(--text-muted)] hover:text-[var(--primary)] hover:border-[var(--primary)] transition-colors"
                       onPick={(reply) => reply.attachment_url
