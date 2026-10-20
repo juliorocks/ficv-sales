@@ -46,6 +46,18 @@ export const AlunosPortalList: React.FC = () => {
         staleTime: 60_000,
     });
 
+    const { data: totais } = useQuery<{ total: number; acessaram: number }>({
+        queryKey: ['alunos-portal-totais'],
+        queryFn: async () => {
+            const [{ count: total }, { count: acessaram }] = await Promise.all([
+                supabase.from('alunos').select('id', { count: 'exact', head: true }),
+                supabase.from('alunos').select('id', { count: 'exact', head: true }).not('last_login_at', 'is', null),
+            ]);
+            return { total: total ?? 0, acessaram: acessaram ?? 0 };
+        },
+        staleTime: 5 * 60_000,
+    });
+
     const verComoAluno = useMutation({
         mutationFn: async (alunoId: string) => {
             const { data, error } = await supabase.functions.invoke('aluno-view', { body: { action: 'create', aluno_id: alunoId } });
@@ -67,7 +79,12 @@ export const AlunosPortalList: React.FC = () => {
                     <div className="p-2.5 bg-primary/10 rounded-xl text-primary"><GraduationCap size={20} /></div>
                     <div>
                         <h3 className="text-lg font-bold text-[var(--text-main)]">Alunos do Portal</h3>
-                        <p className="text-xs text-[var(--text-muted)]">Contas criadas no Portal do Aluno ({alunos.length} exibidos).</p>
+                        <p className="text-xs text-[var(--text-muted)]">
+                            {totais
+                                ? <><b className="text-[var(--text-main)]">{totais.acessaram}</b> de {totais.total} contas já acessaram o Portal</>
+                                : 'Contas criadas no Portal do Aluno'}
+                            {' · '}{alunos.length} exibidos
+                        </p>
                     </div>
                 </div>
                 <div className="flex items-center gap-3 bg-[var(--bg-card-hover)] p-2.5 rounded-2xl border border-[var(--border)] w-full max-w-sm">
