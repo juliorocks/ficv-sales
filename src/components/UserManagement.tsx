@@ -17,6 +17,7 @@ import {
     KeyRound
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { AlunosPortalList } from './AlunosPortalList';
 
 // Funções: admin/agent = CRM; secretaria/tutor/atendente/biblioteca/coordenador = só Chamados do Portal do Aluno
 // (quem vê o quê: ticket_visible() no banco; filas em Gestão > Filas de Atendimento).
@@ -260,6 +261,8 @@ export const UserManagement: React.FC = () => {
                     </div>
                 </div>
             </div>
+
+            <AlunosPortalList />
 
             {/* Modal de Convite */}
             {isAddingUser && (
