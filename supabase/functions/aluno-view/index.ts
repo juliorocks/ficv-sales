@@ -47,7 +47,7 @@ Deno.serve(async (req) => {
             return j({ token, expires_at: expires });
         }
 
-        if (body.action === "overview" || body.action === "boletim") {
+        if (body.action === "overview" || body.action === "boletim" || body.action === "chamados") {
             const token = String(body.token ?? "");
             if (!token) return j({ error: "Link inválido." }, 404);
             const hash = await sha256(token);
@@ -58,6 +58,12 @@ Deno.serve(async (req) => {
                 .select("id, nome, cpf, email, telefone, ra, sponte_aluno_id, nivel").eq("id", link.aluno_id).maybeSingle();
             if (!aluno?.sponte_aluno_id) return j({ error: "Aluno sem matrícula vinculada ao Sponte." }, 404);
             await db.from("aluno_view_log").insert({ token_hash: hash, aluno_id: aluno.id, created_by: link.created_by, acao: body.action });
+            if (body.action === "chamados") {
+                const { data: tickets } = await db.from("tickets")
+                    .select("protocolo, titulo, status, categoria, created_at, updated_at")
+                    .eq("aluno_id", aluno.id).order("created_at", { ascending: false }).limit(50);
+                return j({ tickets: tickets ?? [] });
+            }
             if (body.action === "boletim") {
                 const r = await boletimFor(aluno.sponte_aluno_id, aluno.email ?? null, body);
                 return j(r.body, r.status);
