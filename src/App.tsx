@@ -33,7 +33,8 @@ import {
     Bot,
     Plug,
     KeyRound,
-    Inbox
+    Inbox,
+    ClipboardCheck
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { reprocessAllAnalyses } from './services/reprocessor';
@@ -89,6 +90,7 @@ import { FollowupsPage } from './components/followups/FollowupsPage';
 import { MarketingFormsList } from './components/marketing/MarketingFormsList';
 import { MarketingFormSubmissions } from './components/marketing/MarketingFormSubmissions';
 import { MarketingFormBuilder } from './components/marketing/MarketingFormBuilder';
+import { CpaAdmin } from './components/cpa/CpaAdmin';
 
 const queryClient = new QueryClient({
     defaultOptions: {
@@ -1031,6 +1033,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                 )}
                             </div>
 
+                            {(profile?.role === 'admin' || profile?.role === 'agent') && <NavItem collapsed={sidebarCollapsed} icon={ClipboardCheck} label="Avaliação CPA" active={activeTab === 'cpa'} onClick={() => setActiveTab('cpa')} />}
                             {(profile?.role === 'admin') && <NavItem collapsed={sidebarCollapsed} icon={Users} label="Agentes" active={activeTab === 'agents'} onClick={() => setActiveTab('agents')} />}
                             {(profile?.role === 'agent') && <NavItem collapsed={sidebarCollapsed} icon={Award} label="Meu Desempenho" active={activeTab === 'performance'} onClick={() => setActiveTab('performance')} />}
                             {(profile?.role === 'admin') && <NavItem collapsed={sidebarCollapsed} icon={Target} label="Metas" active={activeTab === 'goals'} onClick={() => setActiveTab('goals')} />}
@@ -2041,6 +2044,13 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {activeTab === 'kanban-tma' && profile?.role === 'admin' && (
                     <div className="animate-fade-in max-w-6xl mx-auto py-6">
                         <TmaSettingsManagement />
+                    </div>
+                )}
+
+                {/* Avaliação CPA — staff only; não aparece no Portal do Aluno (uso interno até liberar) */}
+                {activeTab === 'cpa' && (profile?.role === 'admin' || profile?.role === 'agent') && (
+                    <div className="animate-fade-in">
+                        <CpaAdmin />
                     </div>
                 )}
 

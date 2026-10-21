@@ -430,3 +430,5 @@ verify_jwt = false
 verify_jwt = false
 [functions.marketing-form-submit]
 verify_jwt = false
+[functions.cpa-form]
+verify_jwt = false

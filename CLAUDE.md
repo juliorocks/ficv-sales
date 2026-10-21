@@ -79,6 +79,7 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 - **Follow-ups** (`followups/`): `FollowupsPage.tsx`, `LeadFollowupPanel.tsx`, `NewFollowupDialog.tsx`.
 - **Notificações**: `notifications/NotificationBell.tsx` (sino da sidebar: follow-ups vencidos + seletor de som).
 - **Marketing** (`marketing/`): construtor e lista de formulários; `PublicMarketingFormPage.tsx` é a página pública.
+- **Avaliação CPA** (`cpa/`, 2026-10-21): `CpaFormPage.tsx` é a pesquisa pública gamificada em `/avaliacao/:token` (um passo por tela, pausas com frase de incentivo, rascunho no localStorage); `CpaAdmin.tsx` é o painel (aba "Avaliação CPA" no menu, admin e agente): KPIs, gráficos (recharts), tabela por pergunta, comentários, CSV + verificação da cadeia. Não aparece no Portal do Aluno.
 - **Admin** (`admin/`): `AiAgentSettings` (Vivi, vendas), `TutorVirtualSettings` (Tutor, alunos), `IntegrationsSettings`
   (chaves, Vault), `VivaConnectSettings` / `VivaConnectHub` / `VivaConnectAgentChannels`, `TicketQueuesSettings`,
   `CourseManagement`, `LeadSourceManagement`, `LossReasonManagement`, `WidechatTemplates`, `UserWidechatConfig`,
@@ -116,6 +117,8 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 | `admin-manage-users` | Criar/gerenciar usuários da equipe |
 | `integrations` | Gestão de credenciais e testes de integração |
 | `openai-models` | Lista modelos disponíveis na OpenAI |
+| `cpa-form` | Avaliação CPA pública (sem JWT): `get` e `submit`. Valida no servidor e grava via `cpa_registrar_resposta` |
+| `cpa-admin` | Avaliação CPA (JWT admin/agente): `forms`, `form`, `stats`, `export` (CSV + SHA-256), `verify` (cadeia), `update_form` e `delete_tests` (admin) |
 
 ### Módulos compartilhados (`supabase/functions/_shared/`)
 
@@ -156,6 +159,7 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 - **Equipe**: `profiles` (19; `role`, `team_id` = departamento), `agent_profiles` (20; score/metas),
   `agent_team` (5; roster do webhook), `teams`, `user_integrations`, `audit_logs`, `app_settings`.
 - **Marketing/Ads**: `marketing_forms`, `marketing_form_submissions`, `sendpulse_forms`, `meta_*`, `google_ads_*`.
+- **Avaliação CPA**: `cpa_formularios` (nivel graduacao/pos, status teste/aberto/encerrado, `token` do link, `populacao_alvo`), `cpa_blocos`, `cpa_perguntas` (escala/escolha/texto; `chave='curso'` alimenta o filtro), `cpa_respostas` (`teste`, `seq`, `respostas` jsonb, `canonico`, `hash_anterior`, `hash`). Oficiais são imutáveis por trigger (`cpa_respostas_oficiais_imutaveis`). Só a service role escreve; leitura direta só staff.
 - **Usar `ai_lead_sessions`, `vivaconnect_*` e `widechat_*` com cuidado**: são tabelas quentes; ver armadilhas.
 
 ## Fluxos principais (o que cada parte faz de fato)
@@ -192,6 +196,7 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
   do departamento e os sem dono só no Comercial.
 - Financeiro (parcelas) é restrito a admin, agent, secretaria e coordenador (`staff-tickets`).
 - Nunca apagar linhas de `agent_team` (o webhook depende delas).
+- **Avaliação CPA (2026-10-21)**: respostas são ANÔNIMAS (nada identifica o respondente). Só respostas com status `aberto` entram na cadeia de hash (`seq` contínuo, `hash = sha256(hash_anterior||'|'||canonico)`) e nos relatórios oficiais. Teste (`status='teste'`) fica fora da cadeia e pode ser apagada. Para alterar um formulário ou apagar teste: admin. Verificação `verify`: recalcula a cadeia e confere `respostas` e `respondido_em` contra o `canonico` gravado. Escala: graduação 0–10, pós 1–10 (como nos resultados de 2025).
 
 ## Armadilhas conhecidas (já custaram tempo — não repetir)
 
@@ -238,6 +243,7 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
   essencial ao porquê.
 
 ## Pendências abertas (atualizado em 2026-10-21)
+- **Avaliação CPA**: (a) conteúdo das perguntas transcrito dos modelos 2024/2025: revisar com a CPA antes de abrir. Opções de curso da pós vieram da tabela `courses` (10 pós). (b) Identidade do respondente: nada é gravado hoje, e não há trava de uma resposta por aluno. Quando entrar no Portal, gravar `respondente_hash` (HMAC de aluno + formulário) em vez do aluno. (c) Sem rate limit no `cpa-form`. (d) Carimbo de tempo ICP-Brasil se o MEC exigir validade jurídica. (e) Teste visual no navegador pendente (formulário mobile e dashboard).
 
 - **Josenaldo Mendes De Oliveira** (CPF 675.594.095-04): nome corrigido localmente e função reimplantada; usuário ainda
   não confirmou que o Portal mostra o nome certo. Corrigir também o nome no Sponte.
