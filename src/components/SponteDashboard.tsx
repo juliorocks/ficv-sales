@@ -168,28 +168,14 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
             .sort((a, b) => b.alunos.length - a.alunos.length);
     }, [agentAttribution.detalhes, selectedAgentDrillDown]);
 
-    // ─── Trigger sync via GitHub Actions workflow_dispatch ────────────────────
+    // ─── Dispara o sync pela edge function (exige staff; o token do GitHub fica no servidor) ───
     const handleSync = async () => {
         setSyncing(true);
         try {
-            const ghToken = import.meta.env.VITE_GITHUB_SYNC_TOKEN;
-            if (!ghToken) throw new Error('VITE_GITHUB_SYNC_TOKEN não configurado');
-            const res = await fetch(
-                'https://api.github.com/repos/juliorocks/ficv-sales/actions/workflows/sync-sponte.yml/dispatches',
-                {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${ghToken}`,
-                        'Accept': 'application/vnd.github+json',
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        ref: 'main',
-                        inputs: { mode: 'full', start_date: dateStart, end_date: dateEnd },
-                    }),
-                }
-            );
-            if (!res.ok) throw new Error(`GitHub API ${res.status}`);
+            const { data, error } = await supabase.functions.invoke('sync-sponte', {
+                body: { mode: 'full', start_date: dateStart, end_date: dateEnd },
+            });
+            if (error || data?.error) throw new Error(data?.error ?? error?.message ?? 'falha');
             showSuccess('Sync iniciado! Os dados serão atualizados em ~2 minutos.');
         } catch (e: any) {
             showError('Erro ao iniciar sync: ' + e.message);

@@ -209,6 +209,10 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 - **Testar login de aluno**: não gerar sessão/JWT real de outro usuário (`admin.generate_link` é bloqueado
   pelo classificador de segurança). Replicar a lógica por acesso de serviço direto, sem impersonar.
 - **Z-PRO**: documentação de terceiros se contradisse (apagar/editar msg). Validar no painel real antes de implementar.
+- **Variável `VITE_*` é pública**: vai pro JavaScript do navegador. Nunca colocar token, chave de serviço ou
+  segredo nela. Chamadas privilegiadas passam por edge function com `identify()` + `isStaff()` (2026-10-21:
+  `VITE_GITHUB_SYNC_TOKEN` expunha dispatch do GitHub; removido).
+- **Entrada de workflow do GitHub**: nunca `${{ github.event.inputs.* }}` dentro de `run:`. Passar por `env:` e validar.
 - **Mensagem do bot lida como do cliente** já apagou lead de verdade (DELETE). Filtrar por `origin`, nunca por texto.
 - **Auth lock do supabase-js** travava `getSession`: usar o `boundedLock` e `useAuth` já existentes.
 - **tsc incremental** trava no Google Drive: se houver cópia lá, não editar. Projeto oficial: `/Users/juliocesar/dev/ficv-sales-1`.
@@ -236,6 +240,7 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 - **Apagar/editar mensagem já enviada no WhatsApp**: sem implementação. Aguardando conferir no painel real do Z-PRO.
 - **VivaConnect Igreja e Fundação**: número placeholder `83999999999`, falta o número real.
 - **Teste em navegador pendente**: som de lead novo / resposta, seletor de nível, selo de contagem com filtro de data.
+- **Segurança (auditoria run-1, 2026-10-21)**: ver `~/security-audit-skill/ficv-sales-1/run-1/`. Pendentes: NV-1 (`profiles.role` autoeditável), NV-2 (`alunos.sponte_aluno_id`), `delete_stage_and_leads` concedida a `authenticated`, `tmsg_insert` sem checar ticket, webhooks sem assinatura.
 - **Segurança**: `.claude/settings.json` (não versionado) tem chaves Supabase escritas nas permissões, incluindo de
   outro project ref (`znypfroagfwohqeyxyqv`). Remover essas linhas e manter `.claude/settings.local.json` fora do git.
 - **Limpeza**: scripts soltos na raiz e `src/utils/*.sql` antigos podem ser movidos ou removidos.

@@ -10,6 +10,9 @@ on:
         default: '90'
         required: false
 
+permissions:
+  contents: read
+
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -32,4 +35,5 @@ jobs:
           SURREAL_PASS: ${{ secrets.SURREAL_PASS }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/sync-google-ads.mjs "${{ github.event.inputs.days_back || '90' }}"
+          INPUT_DAYS_BACK: ${{ github.event.inputs.days_back }}
+        run: node scripts/sync-google-ads.mjs "${INPUT_DAYS_BACK:-90}"

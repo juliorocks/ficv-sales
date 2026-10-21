@@ -82,13 +82,16 @@ export function MarketingFormSubmissions({ formId, onBack }: Props) {
         }))
     }, [submissions])
 
+    // Valor que começa com = + - @ vira fórmula no Excel/Sheets quando o atendente abre o export
+    // (CSV/XLSX injection) — prefixa com ' pra forçar texto.
+    const safeCell = (v: string) => (/^[=+\-@\t\r]/.test(v) ? `'${v}` : v)
     const exportRows = useMemo(() => {
         return rows.map((r) => {
             const row: Record<string, string> = { "Data/Hora": r.dataFmt, "Status": r.statusFmt }
-            for (const c of columns) row[c.label || c.id] = r.payload?.[c.id] ?? ""
-            if (r.utm?.utm_source) row["UTM Source"] = r.utm.utm_source
-            if (r.utm?.utm_medium) row["UTM Medium"] = r.utm.utm_medium
-            if (r.utm?.utm_campaign) row["UTM Campaign"] = r.utm.utm_campaign
+            for (const c of columns) row[c.label || c.id] = safeCell(r.payload?.[c.id] ?? "")
+            if (r.utm?.utm_source) row["UTM Source"] = safeCell(r.utm.utm_source)
+            if (r.utm?.utm_medium) row["UTM Medium"] = safeCell(r.utm.utm_medium)
+            if (r.utm?.utm_campaign) row["UTM Campaign"] = safeCell(r.utm.utm_campaign)
             return row
         })
     }, [rows, columns])
