@@ -1,13 +1,16 @@
 // cpa-admin — painel da Avaliação CPA (staff). Sempre com JWT (verify_jwt padrão).
-//   forms                     -> formulários com contagem de oficiais e de teste
+//   forms                     -> formulários, contagem de oficiais/teste e população ativa (Sponte)
 //   form        { formulario_id }                 -> formulário + blocos + perguntas
 //   stats       { formulario_id, filtros }        -> indicadores do dashboard
 //   export      { formulario_id, filtros }        -> CSV + SHA-256 + resultado da verificação da cadeia
 //   verify      { formulario_id }                 -> recalcula a cadeia de hash das oficiais
-//   update_form { formulario_id, status?, populacao_alvo?, titulo? }   (admin)
+//   update_form { formulario_id, status?, portal_ativo?, titulo? }   (admin)
 //   delete_tests{ formulario_id }                 (admin) apaga só respostas de teste
+//   sync_docentes { offset? }                     (admin) professores titulares pelo Moodle, em lotes
 // filtros: { origem: 'oficial'|'teste'|'todas', curso?: string, de?: 'AAAA-MM-DD', ate?: 'AAAA-MM-DD' }
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
+import { getSecret } from "../_shared/secrets.ts";
+import { nivelDoCurso, slug } from "../_shared/cpa.ts";
 
 const cors = {
     "Access-Control-Allow-Origin": "*",
@@ -50,7 +53,7 @@ function aplicarFiltros(q: Db, formId: number, f: Filtros) {
 
 async function carregarRespostas(db: Db, formId: number, f: Filtros) {
     return await todas(() => aplicarFiltros(
-        db.from("cpa_respostas").select("id, seq, teste, respondido_em, respostas, curso, hash, hash_anterior, canonico"),
+        db.from("cpa_respostas").select("id, seq, teste, respondido_em, respostas, curso, contexto, hash, hash_anterior, canonico"),
         formId, f));
 }
 
@@ -62,18 +65,27 @@ async function carregarPerguntas(db: Db, formId: number) {
     return { blocos: blocos ?? [], perguntas: perguntas ?? [] };
 }
 
-// canonico = seq|timestamp|formulario|oficial|respostas(jsonb). Os 4 primeiros campos não têm '|',
-// o JSON pode ter, então o resto é juntado de volta.
-const ordenarChaves = (v: unknown): unknown => (v && typeof v === "object" && !Array.isArray(v))
-    ? Object.fromEntries(Object.keys(v as object).sort().map((k) => [k, ordenarChaves((v as Record<string, unknown>)[k])]))
-    : v;
+// População ativa = alunos com matrícula Vigente (situação 1 no Sponte). Cada aluno conta uma vez, no
+// nível do curso principal (graduação se tiver qualquer graduação; senão pós), o mesmo critério do Portal.
+async function populacaoAtiva(db: Db) {
+    const linhas = await todas(() => db.from("sponte_matriculas").select("id, aluno_id, nome_curso").eq("situacao_id", 1).not("turma_id", "is", null));
+    const niveisPorAluno = new Map<number, Set<string>>();
+    for (const l of linhas) {
+        if (!niveisPorAluno.has(l.aluno_id)) niveisPorAluno.set(l.aluno_id, new Set());
+        niveisPorAluno.get(l.aluno_id)!.add(nivelDoCurso(l.nome_curso ?? ""));
+    }
+    const pop = { graduacao: 0, pos: 0 };
+    for (const niveis of niveisPorAluno.values()) pop[niveis.has("graduacao") ? "graduacao" : "pos"]++;
+    return pop;
+}
 
 // Cadeia: seq contínuo a partir de 1, hash_anterior = hash da linha anterior, e
 // hash = sha256(hash_anterior || '|' || canonico). Mesma fórmula de cpa_registrar_resposta.
-// Também confere se as colunas (protocolo, data, respostas) ainda batem com o texto que foi hasheado.
+// canonico = seq|timestamp|formulario|oficial|contexto|respostas(jsonb). O contexto não tem '|' (regra do banco).
+// Também confere se as colunas (protocolo, data, contexto, respostas) ainda batem com o texto hasheado.
 async function verificarCadeia(db: Db, formId: number) {
     const linhas = await todas(() => db.from("cpa_respostas")
-        .select("id, seq, hash, hash_anterior, canonico, respostas, respondido_em")
+        .select("id, seq, hash, hash_anterior, canonico, respostas, respondido_em, contexto")
         .eq("formulario_id", formId).eq("teste", false));
     let prev = "";
     let esperado = 1;
@@ -81,9 +93,10 @@ async function verificarCadeia(db: Db, formId: number) {
         const motivo = (m: string) => ({ integra: false, total: linhas.length, primeiro_erro: { seq: r.seq, motivo: m }, cabeca: null });
         if (r.seq !== esperado) return motivo("sequência quebrada");
         if ((r.hash_anterior ?? "") !== prev) return motivo("hash anterior não confere");
-        const [seqTxt, ts, , , ...jsonPartes] = String(r.canonico).split("|");
+        const [seqTxt, ts, , , ctxCanon, ...jsonPartes] = String(r.canonico).split("|");
         if (Number(seqTxt) !== r.seq) return motivo("conteúdo não corresponde ao protocolo");
         if (new Date(ts).getTime() !== new Date(r.respondido_em).getTime()) return motivo("data não corresponde ao texto gravado");
+        if (ctxCanon !== (r.contexto ?? "")) return motivo("contexto alterado após a gravação");
         const json = jsonPartes.join("|");
         if (JSON.stringify(ordenarChaves(JSON.parse(json))) !== JSON.stringify(ordenarChaves(r.respostas))) {
             return motivo("respostas alteradas após a gravação");
@@ -96,14 +109,17 @@ async function verificarCadeia(db: Db, formId: number) {
     return { integra: true, total: linhas.length, primeiro_erro: null, cabeca: linhas.length ? prev : null };
 }
 
+const ordenarChaves = (v: unknown): unknown => (v && typeof v === "object" && !Array.isArray(v))
+    ? Object.fromEntries(Object.keys(v as object).sort().map((k) => [k, ordenarChaves((v as Record<string, unknown>)[k])]))
+    : v;
+
 const media = (xs: number[]) => (xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 100) / 100 : null);
 
 // "Nota alta" = top 10% da escala (9 em 0–10 ou em 1–10); "nota baixa" = metade inferior.
-function estatisticas(form: Db, perguntas: Db[], blocos: Db[], linhas: Db[], todasRespostas: { teste: boolean }[]) {
+function estatisticas(form: Db, perguntas: Db[], blocos: Db[], linhas: Db[], todasRespostas: { teste: boolean }[], docentes: Map<string, string>, populacao: number | null) {
     const porDia = new Map<string, number>();
     const porCurso = new Map<string, number>();
     const comentarios: Db[] = [];
-    let totalNotas = 0;
     const notas: number[] = [];
     let altas = 0;
     let baixas = 0;
@@ -115,7 +131,6 @@ function estatisticas(form: Db, perguntas: Db[], blocos: Db[], linhas: Db[], tod
             const dist = [];
             for (let v = p.escala_min; v <= p.escala_max; v++) dist.push({ valor: v, n: nums.filter((x) => x === v).length });
             notas.push(...nums);
-            totalNotas += nums.length;
             altas += nums.filter((v) => v >= p.escala_max * 0.9).length;
             baixas += nums.filter((v) => v <= p.escala_max * 0.5).length;
             return { id: p.id, bloco_id: p.bloco_id, ordem: p.ordem, texto: p.texto, tipo: p.tipo, n: nums.length, media: media(nums), distribuicao: dist, min: p.escala_min, max: p.escala_max };
@@ -126,16 +141,25 @@ function estatisticas(form: Db, perguntas: Db[], blocos: Db[], linhas: Db[], tod
         }
         for (const l of linhas) {
             const t = String(l.respostas[String(p.id)] ?? "").trim();
-            if (t) comentarios.push({ seq: l.seq, teste: l.teste, curso: l.curso, respondido_em: l.respondido_em, texto: t, pergunta: p.texto });
+            if (t) comentarios.push({ seq: l.seq, teste: l.teste, curso: l.curso, contexto: l.contexto, respondido_em: l.respondido_em, texto: t, pergunta: p.texto });
         }
         return { id: p.id, bloco_id: p.bloco_id, ordem: p.ordem, texto: p.texto, tipo: p.tipo, n: valores.length };
     });
 
+    // por disciplina (contexto "periodo~disciplina"): média das notas de escala de cada resposta
+    const porDisc = new Map<string, { n: number; notas: number[] }>();
+    const escalas = perguntas.filter((p) => p.tipo === "escala");
     for (const l of linhas) {
         const dia = String(l.respondido_em).slice(0, 10);
         porDia.set(dia, (porDia.get(dia) ?? 0) + 1);
         const c = l.curso ?? "(sem curso)";
         porCurso.set(c, (porCurso.get(c) ?? 0) + 1);
+        if (l.contexto) {
+            const d = porDisc.get(l.contexto) ?? { n: 0, notas: [] };
+            d.n++;
+            for (const p of escalas) if (typeof l.respostas[String(p.id)] === "number") d.notas.push(l.respostas[String(p.id)]);
+            porDisc.set(l.contexto, d);
+        }
     }
 
     const porBloco = blocos.map((b) => {
@@ -143,20 +167,24 @@ function estatisticas(form: Db, perguntas: Db[], blocos: Db[], linhas: Db[], tod
         return { ordem: b.ordem, titulo: b.titulo, media: media(medias) };
     });
 
-    const populacao = form.populacao_alvo ?? null;
     const pct = (parte: number, todo: number) => (todo ? Math.round((parte / todo) * 1000) / 10 : null);
     return {
-        formulario: { id: form.id, titulo: form.titulo, nivel: form.nivel, status: form.status, populacao_alvo: populacao },
+        formulario: { id: form.id, titulo: form.titulo, nivel: form.nivel, tipo: form.tipo, status: form.status, portal_ativo: form.portal_ativo },
         totais: {
             respondentes: linhas.length,
+            populacao_ativa: populacao,
             percentual: populacao ? pct(linhas.length, populacao) : null,
             testes: todasRespostas.filter((r) => r.teste).length,
             media_geral: media(notas),
-            pct_notas_altas: pct(altas, totalNotas),
-            pct_notas_baixas: pct(baixas, totalNotas),
+            pct_notas_altas: pct(altas, notas.length),
+            pct_notas_baixas: pct(baixas, notas.length),
         },
         por_dia: [...porDia.entries()].sort().map(([dia, n]) => ({ dia, n })),
         por_curso: [...porCurso.entries()].sort((a, b) => b[1] - a[1]).map(([curso, n]) => ({ curso, n })),
+        por_disciplina: [...porDisc.entries()].map(([contexto, d]) => {
+            const [periodo, disc] = contexto.split("~");
+            return { contexto, periodo, disciplina: disc, docente: docentes.get(`${periodo}~${disc}`) ?? null, n: d.n, media: media(d.notas) };
+        }).sort((a, b) => b.n - a.n),
         blocos: porBloco,
         perguntas: itens,
         comentarios: comentarios.sort((a, b) => String(b.respondido_em).localeCompare(String(a.respondido_em))),
@@ -169,12 +197,52 @@ function csvDe(perguntas: Db[], linhas: Db[]): string {
         const s = v === null || v === undefined ? "" : String(v);
         return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    const cab = ["protocolo", "comprovante", "respondido_em", "origem", "curso", ...perguntas.map((p) => `${p.ordem}. ${p.texto}`)];
+    const cab = ["protocolo", "comprovante", "respondido_em", "origem", "curso", "contexto", ...perguntas.map((p) => `${p.ordem}. ${p.texto}`)];
     const corpo = linhas.map((l) => [
-        l.seq, l.hash, l.respondido_em, l.teste ? "teste" : "oficial", l.curso,
+        l.seq, l.hash, l.respondido_em, l.teste ? "teste" : "oficial", l.curso, l.contexto,
         ...perguntas.map((p) => l.respostas[String(p.id)]),
     ].map(esc).join(";"));
     return "﻿" + [cab.map(esc).join(";"), ...corpo].join("\r\n") + "\r\n";
+}
+
+// Professores titulares no Moodle (papel editingteacher). Tutores/mediadores (edteacher) ficam de fora.
+// Processa em lotes: a função tem limite de tempo, então o painel chama de novo com o offset devolvido.
+const LOTE_CURSOS = 40;
+async function sincronizarDocentes(db: Db, offset: number) {
+    const url = (await getSecret("MOODLE_URL")).replace(/\/+$/, "");
+    const token = await getSecret("MOODLE_TOKEN");
+    if (!url || !token) throw new Error("Moodle não configurado (Gestão > Integrações).");
+    const ws = async (fn: string, params: Record<string, string | number> = {}) => {
+        const qs = new URLSearchParams({ wstoken: token, wsfunction: fn, moodlewsrestformat: "json", ...Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])) });
+        return await (await fetch(`${url}/webservice/rest/server.php?${qs}`)).json();
+    };
+
+    const turmas = await todas(() => db.from("sponte_matriculas").select("id, nome_turma").eq("situacao_id", 1).not("turma_id", "is", null));
+    const periodosAtivos = new Set(turmas.map((t: Db) => slug(t.nome_turma)));
+    const cursos: { id: number; fullname: string }[] = (await ws("core_course_get_courses"));
+    const doPeriodo = (Array.isArray(cursos) ? cursos : []).flatMap((c) => {
+        const m = c.fullname.match(/^(.+? - \d{4}\.\d - (?:P\d+|Modular)) - (.+)$/);
+        if (!m) return [];
+        const periodo = slug(m[1]);
+        return periodosAtivos.has(periodo) ? [{ id: c.id, periodo, disciplina: slug(m[2]) }] : [];
+    });
+
+    const lote = doPeriodo.slice(offset, offset + LOTE_CURSOS);
+    const gravados: Db[] = [];
+    for (const c of lote) {
+        const pessoas = await ws("core_enrol_get_enrolled_users", { courseid: c.id });
+        const docentes = (Array.isArray(pessoas) ? pessoas : [])
+            .filter((p: Db) => (p.roles ?? []).some((r: Db) => r.shortname === "editingteacher"))
+            .map((p: Db) => p.fullname);
+        if (!docentes.length) continue;
+        gravados.push({ periodo: c.periodo, disciplina: c.disciplina, docente: docentes.join(" / "), moodle_course_id: c.id, sincronizado_em: new Date().toISOString() });
+    }
+    if (gravados.length) {
+        const { error } = await db.from("cpa_docentes").upsert(gravados, { onConflict: "periodo,disciplina" });
+        if (error) throw error;
+    }
+    const proximo = offset + LOTE_CURSOS;
+    return { total_cursos: doPeriodo.length, processados: Math.min(proximo, doPeriodo.length), gravados: gravados.length, proximo: proximo < doPeriodo.length ? proximo : null };
 }
 
 Deno.serve(async (req) => {
@@ -197,12 +265,18 @@ Deno.serve(async (req) => {
         if (acao === "forms") {
             const { data: forms, error } = await db.from("cpa_formularios").select("*").order("id");
             if (error) throw error;
+            const pop = await populacaoAtiva(db);
             const contagens = await Promise.all((forms ?? []).map(async (f: Db) => {
                 const { count: oficiais } = await db.from("cpa_respostas").select("id", { count: "exact", head: true }).eq("formulario_id", f.id).eq("teste", false);
                 const { count: testes } = await db.from("cpa_respostas").select("id", { count: "exact", head: true }).eq("formulario_id", f.id).eq("teste", true);
-                return { ...f, oficiais: oficiais ?? 0, testes: testes ?? 0 };
+                return { ...f, oficiais: oficiais ?? 0, testes: testes ?? 0, populacao_ativa: pop[f.nivel as "graduacao" | "pos"] ?? null };
             }));
             return j({ forms: contagens, admin: ehAdmin });
+        }
+
+        if (acao === "sync_docentes") {
+            if (!ehAdmin) return j({ error: "Só admin atualiza professores." }, 403);
+            return j(await sincronizarDocentes(db, Number(body.offset ?? 0)));
         }
 
         if (!Number.isInteger(formId) || formId <= 0) return j({ error: "formulario_id obrigatório." }, 400);
@@ -218,7 +292,10 @@ Deno.serve(async (req) => {
             const { blocos, perguntas } = await carregarPerguntas(db, formId);
             const linhas = await carregarRespostas(db, formId, filtros);
             const todasLinhas = await todas(() => db.from("cpa_respostas").select("id, teste").eq("formulario_id", formId));
-            return j(estatisticas(form, perguntas, blocos, linhas, todasLinhas));
+            const pop = await populacaoAtiva(db);
+            const { data: docs } = await db.from("cpa_docentes").select("periodo, disciplina, docente");
+            const docentes = new Map<string, string>((docs ?? []).map((d: Db) => [`${d.periodo}~${d.disciplina}`, d.docente]));
+            return j(estatisticas(form, perguntas, blocos, linhas, todasLinhas, docentes, pop[form.nivel as "graduacao" | "pos"] ?? null));
         }
 
         if (acao === "export") {
@@ -243,11 +320,7 @@ Deno.serve(async (req) => {
             if (!ehAdmin) return j({ error: "Só admin altera o formulário." }, 403);
             const alt: Db = {};
             if (["teste", "aberto", "encerrado"].includes(body.status)) alt.status = body.status;
-            if (body.populacao_alvo !== undefined) {
-                const n = body.populacao_alvo === null || body.populacao_alvo === "" ? null : Number(body.populacao_alvo);
-                if (n !== null && (!Number.isInteger(n) || n < 0)) return j({ error: "População inválida." }, 400);
-                alt.populacao_alvo = n;
-            }
+            if (typeof body.portal_ativo === "boolean") alt.portal_ativo = body.portal_ativo;
             if (typeof body.titulo === "string" && body.titulo.trim()) alt.titulo = body.titulo.trim();
             if (!Object.keys(alt).length) return j({ error: "Nada para alterar." }, 400);
             const { data, error } = await db.from("cpa_formularios").update(alt).eq("id", formId).select("*").maybeSingle();
@@ -259,6 +332,7 @@ Deno.serve(async (req) => {
             if (!ehAdmin) return j({ error: "Só admin apaga respostas de teste." }, 403);
             const { data, error } = await db.from("cpa_respostas").delete().eq("formulario_id", formId).eq("teste", true).select("id");
             if (error) throw error;
+            await db.from("cpa_participacoes").delete().eq("formulario_id", formId).eq("teste", true);
             return j({ apagadas: (data ?? []).length });
         }
 

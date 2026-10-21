@@ -79,7 +79,7 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 - **Follow-ups** (`followups/`): `FollowupsPage.tsx`, `LeadFollowupPanel.tsx`, `NewFollowupDialog.tsx`.
 - **Notificações**: `notifications/NotificationBell.tsx` (sino da sidebar: follow-ups vencidos + seletor de som).
 - **Marketing** (`marketing/`): construtor e lista de formulários; `PublicMarketingFormPage.tsx` é a página pública.
-- **Avaliação CPA** (`cpa/`, 2026-10-21): `CpaFormPage.tsx` é a pesquisa pública gamificada em `/avaliacao/:token` (um passo por tela, pausas com frase de incentivo, rascunho no localStorage); `CpaAdmin.tsx` é o painel (aba "Avaliação CPA" no menu, admin e agente): KPIs, gráficos (recharts), tabela por pergunta, comentários, CSV + verificação da cadeia. Não aparece no Portal do Aluno.
+- **Avaliação CPA** (`cpa/`, 2026-10-21; Portal em 2026-10-25): `CpaFormFlow` (em `CpaFormPage.tsx`) é o formulário gamificado (um passo por tela, pausas com frase de incentivo, rascunho no localStorage), usado pelo link público `/avaliacao/:token` (`CpaFormPage`) e pelo Portal (`CpaPortalAvaliacao.tsx`: `CpaPortalCard` aparece no Início do aluno só com `portal_ativo` ligado; sem nada ligado não renderiza e não chama o Sponte); `CpaAdmin.tsx` é o painel (aba "Avaliação CPA" no menu, admin e agente): KPIs, gráficos (recharts), tabela por pergunta, comentários, CSV + verificação da cadeia. Não aparece no Portal do Aluno.
 - **Admin** (`admin/`): `AiAgentSettings` (Vivi, vendas), `TutorVirtualSettings` (Tutor, alunos), `IntegrationsSettings`
   (chaves, Vault), `VivaConnectSettings` / `VivaConnectHub` / `VivaConnectAgentChannels`, `TicketQueuesSettings`,
   `CourseManagement`, `LeadSourceManagement`, `LossReasonManagement`, `WidechatTemplates`, `UserWidechatConfig`,
@@ -118,7 +118,8 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 | `integrations` | Gestão de credenciais e testes de integração |
 | `openai-models` | Lista modelos disponíveis na OpenAI |
 | `cpa-form` | Avaliação CPA pública (sem JWT): `get` e `submit`. Valida no servidor e grava via `cpa_registrar_resposta` |
-| `cpa-admin` | Avaliação CPA (JWT admin/agente): `forms`, `form`, `stats`, `export` (CSV + SHA-256), `verify` (cadeia), `update_form` e `delete_tests` (admin) |
+| `cpa-admin` | Avaliação CPA (JWT admin/agente): `forms` (com população ativa do Sponte), `form`, `stats` (inclui por disciplina com professor), `export` (CSV + SHA-256), `verify` (cadeia), `update_form` (admin: status e `portal_ativo`), `delete_tests` (admin) e `sync_docentes` (admin: professor titular pelo Moodle, em lotes) |
+| `cpa-portal` | Avaliação CPA no Portal (JWT do aluno, só o próprio): `pendencias`, `form`, `submit`. Elegibilidade pela matrícula Vigente e pelo boletim do módulo atual |
 
 ### Módulos compartilhados (`supabase/functions/_shared/`)
 
@@ -132,6 +133,7 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
   `nomeDivergeDoHistorico` (trava: nome do Sponte diferente do histórico de matrícula bloqueia criação).
 - `alunoSponte.ts` (overview/boletim do Sponte), `alunoMoodle.ts` (notas e cursos EAD no Moodle),
   `alunoPortalCore.ts` (`overviewFor`, `boletimFor`, usado por aluno-portal e staff-tickets).
+- `cpa.ts`: `slug`, `contextoDisciplina`, `participacaoHash` (HMAC com a service role), `validarRespostas` (usada por cpa-form e cpa-portal).
 - `vivaconnect.ts`: `parseWebhook`, transições de etapa (`advanceAiStage`, `markAiHandedOff`, `markHumanReplied`,
   `moveToEntradaFromAiAttending`). `hub.ts`: triagem/menu do Hub do Grupo. `gh-dispatch.ts`: dispara workflow do GitHub.
 
@@ -159,7 +161,7 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 - **Equipe**: `profiles` (19; `role`, `team_id` = departamento), `agent_profiles` (20; score/metas),
   `agent_team` (5; roster do webhook), `teams`, `user_integrations`, `audit_logs`, `app_settings`.
 - **Marketing/Ads**: `marketing_forms`, `marketing_form_submissions`, `sendpulse_forms`, `meta_*`, `google_ads_*`.
-- **Avaliação CPA**: `cpa_formularios` (nivel graduacao/pos, status teste/aberto/encerrado, `token` do link, `populacao_alvo`), `cpa_blocos`, `cpa_perguntas` (escala/escolha/texto; `chave='curso'` alimenta o filtro), `cpa_respostas` (`teste`, `seq`, `respostas` jsonb, `canonico`, `hash_anterior`, `hash`). Oficiais são imutáveis por trigger (`cpa_respostas_oficiais_imutaveis`). Só a service role escreve; leitura direta só staff.
+- **Avaliação CPA**: `cpa_participacoes` (quem já respondeu cada contexto, só HMAC do aluno; sem policy, só service role), `cpa_docentes` (período + disciplina → professor titular, do Moodle), `cpa_formularios` (nivel graduacao/pos, tipo geral/disciplina, status teste/aberto/encerrado, `token` do link, `portal_ativo` desligado por padrão, `populacao_alvo` não é mais usado), `cpa_blocos`, `cpa_perguntas` (escala/escolha/texto; `chave='curso'` alimenta o filtro), `cpa_respostas` (`teste`, `seq`, `respostas` jsonb, `canonico`, `hash_anterior`, `hash`). Oficiais são imutáveis por trigger (`cpa_respostas_oficiais_imutaveis`). Só a service role escreve; leitura direta só staff.
 - **Usar `ai_lead_sessions`, `vivaconnect_*` e `widechat_*` com cuidado**: são tabelas quentes; ver armadilhas.
 
 ## Fluxos principais (o que cada parte faz de fato)
@@ -196,9 +198,12 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
   do departamento e os sem dono só no Comercial.
 - Financeiro (parcelas) é restrito a admin, agent, secretaria e coordenador (`staff-tickets`).
 - Nunca apagar linhas de `agent_team` (o webhook depende delas).
+- **Avaliação CPA no Portal (2026-10-25)**: aluno ativo = matrícula com `situacao_id = 1` (Vigente) no espelho `sponte_matriculas`; "Pré Matrícula" (situação 6) fica de fora. Principal = graduação se houver, senão pós; avaliação geral só do nível principal. Disciplinas = boletim (`alunoBoletins`) das turmas vigentes, só do módulo atual (sufixo `P<n>` do nome da turma). Contexto da disciplina: `<slug(turma)>~<slug(disciplina)>`. Um aluno responde uma vez por (formulário, contexto); a participação guarda só o HMAC. Professor: papel `editingteacher` no curso do Moodle (`edteacher` = Tutor/Mediador, fora). A ligação é pelo nome do período + disciplina: EAD casa ~6/7 no módulo atual; presencial casa só ~3/11 (nomes divergem, Moodle sem código), então o resto aparece como "não identificado".
 - **Avaliação CPA (2026-10-21)**: respostas são ANÔNIMAS (nada identifica o respondente). Só respostas com status `aberto` entram na cadeia de hash (`seq` contínuo, `hash = sha256(hash_anterior||'|'||canonico)`) e nos relatórios oficiais. Teste (`status='teste'`) fica fora da cadeia e pode ser apagada. Para alterar um formulário ou apagar teste: admin. Verificação `verify`: recalcula a cadeia e confere `respostas` e `respondido_em` contra o `canonico` gravado. Escala: graduação 0–10, pós 1–10 (como nos resultados de 2025).
 
 ## Armadilhas conhecidas (já custaram tempo — não repetir)
+- **Sonda do Sponte**: não publicar função temporária pra inspecionar a API (o classificador de segurança bloqueia, e fica exposta). Consultar local, só leitura, com o token lido do Vault via `integ_get_secret` e imprimindo só nomes de tags. `GetAulasProfessores` aceita no máximo 60 dias por chamada.
+- **Moodle**: `core_enrol_get_enrolled_users` traz o papel em `roles[].shortname`. Professor = `editingteacher`. `edteacher` é tutor.
 
 - **Janela de 24h do WhatsApp**: qualquer lugar que calcula se texto livre é permitido precisa ignorar `provider='email'`
   (resposta por e-mail tem `origin='channel'` e não pode abrir a janela do WhatsApp). Já existe em WideChatHistory e vivaconnect-api.
@@ -243,6 +248,7 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
   essencial ao porquê.
 
 ## Pendências abertas (atualizado em 2026-10-21)
+- **Avaliação CPA no Portal**: (0) professor por disciplina no presencial: casamento por nome falha; resolver com cadastro manual ou código no Moodle. (0b) `ProfessorRegente` do `GetTurmas` vem vazio nas turmas testadas: não usar. (0c) `sync_docentes` ainda não foi chamado pela tela (testado só pela réplica local). (0d) Chave HMAC = service role: trocar a chave muda o "já respondeu" de todo mundo. (0e) Teste visual no celular do Portal pendente.
 - **Avaliação CPA**: (a) conteúdo das perguntas transcrito dos modelos 2024/2025: revisar com a CPA antes de abrir. Opções de curso da pós vieram da tabela `courses` (10 pós). (b) Identidade do respondente: nada é gravado hoje, e não há trava de uma resposta por aluno. Quando entrar no Portal, gravar `respondente_hash` (HMAC de aluno + formulário) em vez do aluno. (c) Sem rate limit no `cpa-form`. (d) Carimbo de tempo ICP-Brasil se o MEC exigir validade jurídica. (e) Teste visual no navegador pendente (formulário mobile e dashboard).
 
 - **Josenaldo Mendes De Oliveira** (CPF 675.594.095-04): nome corrigido localmente e função reimplantada; usuário ainda

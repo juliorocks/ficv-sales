@@ -1,7 +1,7 @@
-// Avaliação CPA — formulário público (/avaliacao/:token). Um passo por tela, estilo Typeform,
-// pensado pro celular: toque na nota e avança sozinho. Pausas entre blocos com a frase de
-// incentivo do banco. O rascunho fica no aparelho (localStorage) pra não perder respostas se
-// o aluno fechar a tela no meio.
+// Avaliação CPA — formulário (um passo por tela, estilo Typeform, pensado pro celular).
+// Dois usos: o link público (/avaliacao/:token, CpaFormPage) e a avaliação dentro do Portal do Aluno
+// (CpaPortalAvaliacao). Os dois passam pelo mesmo núcleo, CpaFormFlow, que recebe os dados prontos e
+// a função de envio. Pausas entre blocos com a frase de incentivo do banco; rascunho no aparelho.
 import { useEffect, useMemo, useState } from "react"
 import { useParams } from "react-router-dom"
 import { AnimatePresence, motion } from "framer-motion"
@@ -10,20 +10,22 @@ import { Button } from "@/components/ui/button"
 
 const FN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cpa-form`
 
-type Pergunta = {
+export type Pergunta = {
     id: number; bloco_id: number; ordem: number; texto: string
     tipo: "escala" | "escolha" | "texto"
     escala_min: number | null; escala_max: number | null
     rotulo_min: string | null; rotulo_max: string | null
     opcoes: string[]; obrigatoria: boolean; chave: string | null
 }
-type Bloco = { id: number; ordem: number; titulo: string; incentivo: string | null }
-type Formulario = { id: number; nivel: string; titulo: string; ano: number; intro: string | null; teste: boolean }
+export type Bloco = { id: number; ordem: number; titulo: string; incentivo: string | null }
+export type Formulario = { id: number; nivel: string; titulo: string; ano: number; intro: string | null; teste: boolean; curso?: string }
+export type Resultado = { ok: true; teste: boolean; protocolo: number | null; comprovante: string }
+export type RespostaEnvio = Resultado | { error: string; pergunta_id?: number }
+
 type Passo =
     | { tipo: "intro" }
     | { tipo: "pergunta"; pergunta: Pergunta; indice: number }
     | { tipo: "pausa"; texto: string }
-type Resultado = { ok: true; teste: boolean; protocolo: number | null; comprovante: string }
 
 function montarPassos(blocos: Bloco[], perguntas: Pergunta[]): Passo[] {
     const passos: Passo[] = [{ tipo: "intro" }]
@@ -38,7 +40,7 @@ function montarPassos(blocos: Bloco[], perguntas: Pergunta[]): Passo[] {
     return passos
 }
 
-// frase de ânimo conforme o avanço (fração de perguntas já vistas)
+// frase de ânimo conforme o avanço (fração de perguntas já respondidas)
 function frasePorProgresso(frac: number): string {
     if (frac < 0.25) return "Ótimo começo!"
     if (frac < 0.5) return "Você está indo bem!"
@@ -47,15 +49,44 @@ function frasePorProgresso(frac: number): string {
     return "Última pergunta!"
 }
 
-const chaveRascunho = (token: string) => `cpa_rascunho_${token}`
-
+// Usado pelo link público: carrega pelo token e envia pelo token.
 export function CpaFormPage() {
     const { token = "" } = useParams<{ token: string }>()
-    const [formulario, setFormulario] = useState<Formulario | null>(null)
-    const [blocos, setBlocos] = useState<Bloco[]>([])
-    const [perguntas, setPerguntas] = useState<Pergunta[]>([])
-    const [carregando, setCarregando] = useState(true)
+    const [dados, setDados] = useState<{ formulario: Formulario; blocos: Bloco[]; perguntas: Pergunta[] } | null>(null)
     const [indisponivel, setIndisponivel] = useState<string | null>(null)
+
+    useEffect(() => {
+        fetch(FN_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get", token }) })
+            .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+            .then(({ ok, d }) => (ok ? setDados(d) : setIndisponivel(d.error ?? "Esta avaliação não está disponível.")))
+            .catch(() => setIndisponivel("Não foi possível carregar a avaliação. Verifique sua conexão."))
+    }, [token])
+
+    if (indisponivel) return <Tela><Aviso texto={indisponivel} /></Tela>
+    if (!dados) return <Tela><Loader2 className="h-8 w-8 animate-spin text-primary" /></Tela>
+
+    return (
+        <CpaFormFlow
+            formulario={dados.formulario} blocos={dados.blocos} perguntas={dados.perguntas}
+            storageKey={`cpa_rascunho_${token}`}
+            enviar={async (valores) => {
+                const r = await fetch(FN_URL, {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ action: "submit", token, respostas: valores }),
+                })
+                return r.json()
+            }}
+        />
+    )
+}
+
+export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar: enviarRemoto }: {
+    formulario: Formulario
+    blocos: Bloco[]
+    perguntas: Pergunta[]
+    storageKey: string
+    enviar: (valores: Record<string, number | string>) => Promise<RespostaEnvio>
+}) {
     const [pos, setPos] = useState(0)
     const [respostas, setRespostas] = useState<Record<string, number | string>>({})
     const [enviando, setEnviando] = useState(false)
@@ -63,46 +94,31 @@ export function CpaFormPage() {
     const [resultado, setResultado] = useState<Resultado | null>(null)
     const [copiado, setCopiado] = useState(false)
 
+    // restaura o rascunho uma vez (no aparelho; nada vai pro servidor até enviar)
     useEffect(() => {
-        fetch(FN_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get", token }) })
-            .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
-            .then(({ ok, d }) => {
-                if (!ok) return setIndisponivel(d.error ?? "Esta avaliação não está disponível.")
-                setFormulario(d.formulario)
-                setBlocos(d.blocos)
-                setPerguntas(d.perguntas)
-                try {
-                    const salvo = JSON.parse(localStorage.getItem(chaveRascunho(token)) ?? "null")
-                    if (salvo?.respostas) setRespostas(salvo.respostas)
-                    if (typeof salvo?.pos === "number") setPos(salvo.pos)
-                } catch { /* sem localStorage: segue sem rascunho */ }
-            })
-            .catch(() => setIndisponivel("Não foi possível carregar a avaliação. Verifique sua conexão."))
-            .finally(() => setCarregando(false))
-    }, [token])
+        try {
+            const salvo = JSON.parse(localStorage.getItem(storageKey) ?? "null")
+            if (salvo?.respostas) setRespostas(salvo.respostas)
+            if (typeof salvo?.pos === "number") setPos(salvo.pos)
+        } catch { /* sem localStorage: segue sem rascunho */ }
+    }, [storageKey])
 
     const passos = useMemo(() => montarPassos(blocos, perguntas), [blocos, perguntas])
     const total = perguntas.length
     const passo = passos[pos]
 
-    // salva o rascunho a cada resposta (no aparelho do aluno; nada vai pro servidor até enviar)
     useEffect(() => {
-        if (!formulario || resultado) return
-        try { localStorage.setItem(chaveRascunho(token), JSON.stringify({ respostas, pos })) } catch { /* ignora */ }
-    }, [respostas, pos, token, formulario, resultado])
+        if (resultado) return
+        try { localStorage.setItem(storageKey, JSON.stringify({ respostas, pos })) } catch { /* ignora */ }
+    }, [respostas, pos, storageKey, resultado])
 
     async function enviar(valores: Record<string, number | string>) {
         setEnviando(true)
         setErro(null)
         try {
-            const r = await fetch(FN_URL, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ action: "submit", token, respostas: valores }),
-            })
-            const d = await r.json()
-            if (!r.ok) {
-                setErro(d.error ?? "Não foi possível enviar.")
+            const d = await enviarRemoto(valores)
+            if ("error" in d) {
+                setErro(d.error)
                 if (d.pergunta_id) {
                     const idx = passos.findIndex((x) => x.tipo === "pergunta" && x.pergunta.id === d.pergunta_id)
                     if (idx >= 0) setPos(idx)
@@ -110,7 +126,7 @@ export function CpaFormPage() {
                 return
             }
             setResultado(d)
-            try { localStorage.removeItem(chaveRascunho(token)) } catch { /* ignora */ }
+            try { localStorage.removeItem(storageKey) } catch { /* ignora */ }
         } catch {
             setErro("Sem conexão. Suas respostas continuam salvas neste aparelho: tente enviar de novo.")
         } finally {
@@ -118,7 +134,7 @@ export function CpaFormPage() {
         }
     }
 
-    // avança; no fim da última pergunta, envia
+    // avança; depois da última pergunta, envia
     function avancar(de: number, valores = respostas) {
         if (de + 1 >= passos.length) return enviar(valores)
         setPos(de + 1)
@@ -128,20 +144,6 @@ export function CpaFormPage() {
         const novas = { ...respostas, [p.id]: valor }
         setRespostas(novas)
         if (p.tipo !== "texto") setTimeout(() => avancar(pos, novas), 260)
-    }
-
-    if (carregando) {
-        return <Tela><Loader2 className="h-8 w-8 animate-spin text-primary" /></Tela>
-    }
-    if (indisponivel || !formulario) {
-        return (
-            <Tela>
-                <div className="text-center space-y-2 max-w-sm">
-                    <p className="text-lg font-semibold">Avaliação indisponível</p>
-                    <p className="text-sm text-muted-foreground">{indisponivel}</p>
-                </div>
-            </Tela>
-        )
     }
 
     if (resultado) {
@@ -228,6 +230,7 @@ export function CpaFormPage() {
                                     </div>
                                     <h1 className="text-2xl font-bold leading-tight">Sua opinião faz a diferença</h1>
                                     <p className="text-base text-muted-foreground">{formulario.intro}</p>
+                                    {formulario.curso && <p className="text-sm font-medium">{formulario.curso}</p>}
                                     <p className="text-sm text-muted-foreground">
                                         São {total} perguntas. Toque na nota que melhor representa a sua experiência.
                                     </p>
@@ -338,6 +341,15 @@ function PerguntaView({ pergunta: p, valor, ultima, enviando, onResponder, onCon
                     </Button>
                 </div>
             )}
+        </div>
+    )
+}
+
+function Aviso({ texto }: { texto: string }) {
+    return (
+        <div className="max-w-sm space-y-2 text-center">
+            <p className="text-lg font-semibold">Avaliação indisponível</p>
+            <p className="text-sm text-muted-foreground">{texto}</p>
         </div>
     )
 }

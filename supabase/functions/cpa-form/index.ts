@@ -3,6 +3,7 @@
 //   submit { token, respostas }  -> valida tudo no servidor e grava pela cpa_registrar_resposta
 // Respostas são anônimas: nada que identifique o respondente é gravado.
 import { pg } from "../_shared/db.ts";
+import { validarRespostas } from "../_shared/cpa.ts";
 
 const cors = {
     "Access-Control-Allow-Origin": "*",
@@ -44,37 +45,18 @@ Deno.serve(async (req) => {
                 .eq("formulario_id", f.id);
             if (errP) throw errP;
 
-            const entrada: Record<string, unknown> = body.respostas && typeof body.respostas === "object" ? body.respostas : {};
-            const limpas: Record<string, number | string> = {};
-            for (const p of perguntas ?? []) {
-                const v = entrada[String(p.id)];
-                const vazia = v === undefined || v === null || (typeof v === "string" && v.trim() === "");
-                if (vazia) {
-                    if (p.obrigatoria) return j({ error: `Responda: ${p.texto}`, pergunta_id: p.id }, 400);
-                    continue;
-                }
-                if (p.tipo === "escala") {
-                    const n = Number(v);
-                    if (!Number.isInteger(n) || n < p.escala_min || n > p.escala_max) {
-                        return j({ error: "Nota fora da escala.", pergunta_id: p.id }, 400);
-                    }
-                    limpas[p.id] = n;
-                } else if (p.tipo === "escolha") {
-                    const op = String(v);
-                    if (!(p.opcoes as string[]).includes(op)) return j({ error: "Opção inválida.", pergunta_id: p.id }, 400);
-                    limpas[p.id] = op;
-                } else {
-                    limpas[p.id] = String(v).trim().slice(0, 2000);
-                }
-            }
+            const entrada = body.respostas && typeof body.respostas === "object" ? body.respostas : {};
+            const v = validarRespostas(perguntas ?? [], entrada);
+            if (!v.ok) return j({ error: v.erro, pergunta_id: v.pergunta_id }, 400);
 
             const perguntaCurso = (perguntas ?? []).find((p) => p.chave === "curso");
-            const curso = perguntaCurso ? (limpas[perguntaCurso.id] as string | undefined) ?? null : null;
+            const curso = perguntaCurso ? (v.limpas[perguntaCurso.id] as string | undefined) ?? null : null;
 
             const { data, error } = await db.rpc("cpa_registrar_resposta", {
                 p_formulario: f.id,
-                p_respostas: limpas,
+                p_respostas: v.limpas,
                 p_curso: curso,
+                p_contexto: "",
             });
             if (error) {
                 if (String(error.message).includes("formulario_fechado")) return j({ error: "Esta avaliação já foi encerrada." }, 409);

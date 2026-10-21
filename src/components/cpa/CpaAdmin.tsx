@@ -16,7 +16,7 @@ const COR_SERIE = "#2a78d6"
 type Filtros = { origem: "oficial" | "teste" | "todas"; curso: string; de: string; ate: string }
 type FormResumo = {
     id: number; nivel: string; tipo: string; titulo: string; ano: number; status: "teste" | "aberto" | "encerrado"
-    token: string; populacao_alvo: number | null; oficiais: number; testes: number
+    token: string; portal_ativo: boolean; populacao_ativa: number | null; oficiais: number; testes: number
 }
 type Pergunta = { id: number; bloco_id: number; ordem: number; texto: string; tipo: string; escala_min?: number; escala_max?: number; opcoes?: string[] }
 
@@ -54,7 +54,11 @@ export function CpaAdmin() {
         queryFn: () => chamar<any>("stats", { formulario_id: atual!.id, filtros: limparFiltros(filtros) }), // eslint-disable-line @typescript-eslint/no-explicit-any
     })
 
-    const opcoesCurso = useMemo(() => (detalhe?.perguntas ?? []).find((p) => p.tipo === "escolha")?.opcoes ?? [], [detalhe])
+    const opcoesCurso = useMemo(() => {
+        const doForm = (detalhe?.perguntas ?? []).find((p) => p.tipo === "escolha")?.opcoes ?? []
+        const vistos = (stats?.por_curso ?? []).map((c: { curso: string }) => c.curso).filter((c: string) => c !== "(sem curso)")
+        return [...new Set([...doForm, ...vistos])]
+    }, [detalhe, stats])
 
     const alterar = useMutation({
         mutationFn: (alt: Record<string, unknown>) => chamar("update_form", { formulario_id: atual!.id, ...alt }),
@@ -65,6 +69,21 @@ export function CpaAdmin() {
     const apagarTestes = useMutation({
         mutationFn: () => chamar<{ apagadas: number }>("delete_tests", { formulario_id: atual!.id }),
         onSuccess: (r) => { qc.invalidateQueries({ queryKey: ["cpa-forms"] }); qc.invalidateQueries({ queryKey: ["cpa-stats"] }); showSuccess(`${r.apagadas} respostas de teste apagadas`) },
+        onError: (e: Error) => showError(e.message),
+    })
+
+    const sincronizarDocentes = useMutation({
+        mutationFn: async () => {
+            let offset = 0
+            let gravados = 0
+            for (;;) {
+                const r = await chamar<{ gravados: number; proximo: number | null }>("sync_docentes", { offset })
+                gravados += r.gravados
+                if (r.proximo === null) return gravados
+                offset = r.proximo
+            }
+        },
+        onSuccess: (n) => { qc.invalidateQueries({ queryKey: ["cpa-stats"] }); showSuccess(`${n} disciplinas com professor titular`) },
         onError: (e: Error) => showError(e.message),
     })
 
@@ -136,6 +155,13 @@ export function CpaAdmin() {
                         </div>
                         {admin && (
                             <div className="space-y-2 text-sm">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-muted-foreground">Portal do aluno:</span>
+                                    <Button size="sm" variant={atual.portal_ativo ? "default" : "outline"} disabled={alterar.isPending}
+                                        onClick={() => { if (!atual.portal_ativo || confirm("Desligar a avaliação no Portal do Aluno?")) alterar.mutate({ portal_ativo: !atual.portal_ativo }) }}>
+                                        {atual.portal_ativo ? "Ligado" : "Desligado"}
+                                    </Button>
+                                </div>
                                 <div className="flex flex-wrap gap-2">
                                     {(["teste", "aberto", "encerrado"] as const).map((s) => (
                                         <Button key={s} size="sm" variant={atual.status === s ? "default" : "outline"} disabled={alterar.isPending} onClick={() => alterar.mutate({ status: s })}>
@@ -143,7 +169,7 @@ export function CpaAdmin() {
                                         </Button>
                                     ))}
                                 </div>
-                                <PopulacaoEditor valor={atual.populacao_alvo} onSalvar={(n) => alterar.mutate({ populacao_alvo: n })} />
+                                <p className="text-xs text-muted-foreground">Base: {atual.populacao_ativa ?? "–"} alunos com matrícula vigente no Sponte.</p>
                                 <Button size="sm" variant="ghost" className="text-destructive" disabled={apagarTestes.isPending || atual.testes === 0}
                                     onClick={() => { if (confirm(`Apagar ${atual.testes} respostas de teste? As oficiais não são afetadas.`)) apagarTestes.mutate() }}>
                                     Apagar respostas de teste ({atual.testes})
@@ -153,7 +179,7 @@ export function CpaAdmin() {
                     </section>
 
                     <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                        <Kpi rotulo="Respondentes (oficiais)" valor={t?.respondentes ?? "–"} sub={t?.percentual != null ? `${t.percentual}% de ${atual.populacao_alvo}` : "Defina a população alvo"} />
+                        <Kpi rotulo="Respondentes (oficiais)" valor={t?.respondentes ?? "–"} sub={t?.percentual != null ? `${t.percentual}% de ${t.populacao_ativa} alunos ativos` : "Sem base de alunos ativos"} />
                         <Kpi rotulo="Média geral" valor={t?.media_geral ?? "–"} sub="média de todas as notas de escala" />
                         <Kpi rotulo="Notas altas" valor={t?.pct_notas_altas != null ? `${t.pct_notas_altas}%` : "–"} sub="top 10% da escala" />
                         <Kpi rotulo="Notas baixas" valor={t?.pct_notas_baixas != null ? `${t.pct_notas_baixas}%` : "–"} sub="metade inferior da escala" />
@@ -191,6 +217,12 @@ export function CpaAdmin() {
                             {exportar.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
                             Exportar CSV + verificação
                         </Button>
+                        {admin && (
+                            <Button variant="outline" onClick={() => sincronizarDocentes.mutate()} disabled={sincronizarDocentes.isPending}>
+                                {sincronizarDocentes.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                                Atualizar professores (Moodle)
+                            </Button>
+                        )}
                         <Button variant="outline" onClick={() => verificar.mutate()} disabled={verificar.isPending}>
                             <ShieldCheck className="mr-2 h-4 w-4" /> Verificar integridade
                         </Button>
@@ -256,6 +288,31 @@ export function CpaAdmin() {
                         </Painel>
                     </section>
 
+                    <Painel titulo="Por disciplina (professor titular pelo Moodle)">
+                        {(stats?.por_disciplina ?? []).length === 0 ? (
+                            <p className="py-6 text-center text-sm text-muted-foreground">Nenhuma avaliação de disciplina no filtro atual.</p>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="w-full min-w-[560px] text-sm">
+                                    <thead className="text-left text-xs text-muted-foreground">
+                                        <tr><th className="py-2 pr-3">Disciplina</th><th className="py-2 pr-3">Período</th><th className="py-2 pr-3">Professor</th><th className="py-2 pr-3 text-right">Respostas</th><th className="py-2 text-right">Média</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        {stats.por_disciplina.map((d: any) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
+                                            <tr key={d.contexto} className="border-t">
+                                                <td className="py-2 pr-3">{d.disciplina.replace(/-/g, " ")}</td>
+                                                <td className="py-2 pr-3 text-xs text-muted-foreground">{d.periodo}</td>
+                                                <td className="py-2 pr-3">{d.docente ?? <span className="text-muted-foreground">não identificado</span>}</td>
+                                                <td className="py-2 pr-3 text-right tabular-nums">{d.n}</td>
+                                                <td className="py-2 text-right tabular-nums">{d.media ?? "–"}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </Painel>
+
                     <Painel titulo="Tabela por pergunta (alternativa textual aos gráficos)">
                         <div className="overflow-x-auto">
                             <table className="w-full min-w-[640px] text-sm">
@@ -315,18 +372,6 @@ function baixar(nome: string, conteudo: string, tipo: string) {
     a.download = nome
     a.click()
     URL.revokeObjectURL(url)
-}
-
-function PopulacaoEditor({ valor, onSalvar }: { valor: number | null; onSalvar: (n: number | null) => void }) {
-    const [txt, setTxt] = useState(valor?.toString() ?? "")
-    return (
-        <div className="flex items-end gap-2">
-            <Campo rotulo="Alunos convidados (população)">
-                <Input type="number" min={0} value={txt} onChange={(e) => setTxt(e.target.value)} className="w-44" />
-            </Campo>
-            <Button size="sm" variant="outline" onClick={() => onSalvar(txt === "" ? null : Number(txt))}>Salvar</Button>
-        </div>
-    )
 }
 
 function Kpi({ rotulo, valor, sub }: { rotulo: string; valor: string | number; sub: string }) {
