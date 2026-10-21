@@ -339,7 +339,11 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
         <>
             <Dialog open={isOpen} onOpenChange={onOpenChange}>
                 {children && <DialogTrigger asChild>{children}</DialogTrigger>}
-                <DialogContent className="w-[96vw] sm:max-w-6xl max-h-[94vh] overflow-y-auto">
+                {/* Atender/mover o lead muda o quadro por trás; foco ou clique que saem do diálogo
+                    não podem fechar a conversa sozinhos (bug recorrente: abria e fechava em ~1s).
+                    Fecha só pelo X, Cancelar ou Esc. */}
+                <DialogContent className="w-[96vw] sm:max-w-6xl max-h-[94vh] overflow-y-auto"
+                    onInteractOutside={(e) => e.preventDefault()}>
                     <DialogHeader>
                         <DialogTitle>Lead: {lead.nome_completo}</DialogTitle>
                         <DialogDescription>Gerencie as informações e o histórico do lead.</DialogDescription>
