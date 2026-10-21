@@ -129,7 +129,7 @@ export const AgentReportPage: React.FC = () => {
     // Computed stats
     const totalConvs = data.length;
     const avgScore = totalConvs > 0 ? data.reduce((a, d) => a + (Number(d.final_score) || 0), 0) / totalConvs : 0;
-    // score_target vem como string do SurrealDB (campo decimal)
+    // score_target vem como string (campo decimal)
     const target = Number(agentProfile?.score_target) || 8.0;
     const onTarget = avgScore >= target;
 

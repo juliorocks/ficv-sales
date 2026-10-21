@@ -1,11 +1,11 @@
 import { serve } from "https://deno.land/std@0.177.1/http/server.ts";
-import { pg, mirror, sv } from "../_shared/db.ts";
+import { pg } from "../_shared/db.ts";
 import { getSecret } from "../_shared/secrets.ts";
 
 // ============================================================================
 // sync-sendpulse-forms — polling (pg_cron ~3 min) dos formulários SendPulse.
 // Allowlist em `sendpulse_forms`. Cada inscrito novo vira lead; inscrito
-// recorrente vira nota + contact_count++. Postgres primário, espelho SurrealDB.
+// recorrente vira nota + contact_count++. grava no Postgres (Supabase).
 // ============================================================================
 
 const corsHeaders = {
@@ -173,17 +173,8 @@ serve(async (req) => {
                 if (courseChanging) {
                     const notaAntiga = `🔁 Reentrada: essa pessoa já tinha demonstrado interesse em ${oldCourseName} anteriormente — agora quer ${cName || 'outro curso'}.`;
                     await db.from('lead_notes').insert({ lead_id: hit.id, note: notaAntiga, created_at: noteAt });
-                    await mirror(`INSERT INTO lead_notes [{ lead_id: leads:⟨${hit.id}⟩, note: ${sv(notaAntiga)}, created_at: d${sv(noteAt)} }] RETURN NONE;`);
                 }
                 await db.from('lead_notes').insert({ lead_id: hit.id, note: nota, created_at: noteAt });
-                await mirror(
-                    `UPDATE leads:⟨${hit.id}⟩ SET contact_count = (contact_count ?? 0) + 1, updated_at = time::now()` +
-                    (isStaleReentry ? `, data_entrada = d${sv(noteAt)}, stage_entry_date = d${sv(noteAt)}` : '') +
-                    (courseId != null && (isStaleReentry || hit.curso == null) ? `, curso_interesse = courses:⟨${courseId}⟩` : '') +
-                    (fillEmail ? `, email = ${sv(email)}` : '') +
-                    (cameFromWidechat ? `, fonte_lead = ${sv(form.form_name)}, source_id = lead_sources:⟨${sourceId}⟩` : '') + `;\n` +
-                    `INSERT INTO lead_notes [{ lead_id: leads:⟨${hit.id}⟩, note: ${sv(nota)}, created_at: d${sv(noteAt)} }] RETURN NONE;`
-                );
                 reentradas++;
                 continue;
             }
@@ -208,14 +199,6 @@ serve(async (req) => {
             if (email) createdByEmail.set(email, leadId);
             if (validPhone(phone)) createdByPhone.set(phone, leadId);
 
-            await mirror(
-                `UPDATE seq:leads SET val = math::max([val, ${leadId}]);\n` +
-                `INSERT INTO leads [{ id:"${leadId}", nome_completo:${sv(newLead.nome_completo)}, email:${sv(newLead.email)}, ` +
-                `telefone:${sv(newLead.telefone)}, stage_id:stages:⟨1⟩, source_id:lead_sources:⟨${sourceId}⟩, ` +
-                `curso_interesse:${courseId != null ? `courses:⟨${courseId}⟩` : 'NONE'}, valor_oportunidade:${valor}, ` +
-                `fonte_lead:${sv(form.form_name)}, observacoes:${sv(obs)}, temperatura:"frio", contact_count:1, ` +
-                `data_entrada:d${sv(dataEntrada)}, stage_entry_date:d${sv(nowIso)} }] RETURN NONE;`
-            );
             summary[form.form_name] = (summary[form.form_name] ?? 0) + 1;
             totalNew++;
         }
@@ -226,7 +209,6 @@ serve(async (req) => {
             if (maxSeen && maxSeen !== form.last_add_date) {
                 await db.from('sendpulse_forms').update({ last_add_date: maxSeen, updated_at: new Date().toISOString() })
                     .eq('book_id', form.book_id);
-                await mirror(`UPDATE sendpulse_forms SET last_add_date = ${sv(maxSeen)}, updated_at = time::now() WHERE book_id = ${Number(form.book_id)};`);
             }
         }
 

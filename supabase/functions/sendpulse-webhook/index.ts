@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.177.1/http/server.ts";
-import { pg, mirror, sv } from "../_shared/db.ts";
+import { pg } from "../_shared/db.ts";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -74,17 +74,9 @@ serve(async (req) => {
             const { data: al } = await db.rpc('match_aluno_by_phone', { p_phone: phone }).maybeSingle();
             if (al) {
                 await db.from('leads').update({ perfil: 'aluno' }).eq('id', leadId);
-                await mirror(`UPDATE leads:⟨${leadId}⟩ SET perfil = 'aluno';`);
             }
         }
 
-        await mirror(
-            `UPDATE seq:leads SET val = math::max([val, ${leadId}]);\n` +
-            `INSERT INTO leads [{ id:"${leadId}", nome_completo:${sv(name)}, email:${sv(email)}, telefone:${sv(phone || "00000000000")}, ` +
-            `stage_id:stages:⟨${firstStageId}⟩, source_id:lead_sources:⟨${sourceId}⟩, fonte_lead:"Site", ` +
-            `observacoes:${sv(observations)}, valor_oportunidade:${courseDefaultVal}, data_entrada:d${sv(now)}, ` +
-            `curso_interesse:${courseId ? `courses:⟨${courseId}⟩` : 'NONE'}, temperatura:"frio" }] RETURN NONE;`
-        );
 
         console.log("Lead criado:", leadId);
         return j({ success: true, lead: { id: leadId, email } });

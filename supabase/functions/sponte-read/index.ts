@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.177.1/http/server.ts";
 import { pg } from "../_shared/db.ts";
 
 // sponte-read — agrega dados do Sponte + messages_logs para o SponteDashboard.
-// Migrado de SurrealDB para Postgres (Supabase). Mesma forma de resposta.
+// Lê do Postgres (Supabase).
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',

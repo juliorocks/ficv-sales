@@ -18,7 +18,7 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 - `src/utils/chunk_*.sql`, `src/utils/migration_data*.sql`, `src/utils/migrate_kb*.sql`,
   `src/utils/ppc_*.sql`, `src/utils/widechat_integration_tables.sql`: SQL legado já aplicado.
 - `build_errors*.txt`, `history.txt`, `*.tsbuildinfo`, `package-lock.json`, `.DS_Store`.
-- `vivaconnect/` (zips e binários do Z-PRO), `surreal/` (legado SurrealDB), `_migration-backups/`,
+- `vivaconnect/` (zips e binários do Z-PRO), `surreal/` (legado SurrealDB, pode ser apagado), `_migration-backups/`,
   `supabase/migrations/_archive_surreal_era/`.
 - Scripts soltos na raiz (`recalculate-scores*.js`, `check-agents.js`, `__tmp_*.mjs`, etc.): utilitários
   antigos, não fazem parte do app.
@@ -56,7 +56,7 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 - `hooks/`: `use-auth.tsx` (sessão + perfil, `user.role`), `use-followups.ts`, `use-kanban-state.ts`,
   `use-debounce.ts`, `use-supabase-search.ts`, `use-time-in-stage.ts`.
 - `lib/supabase.ts` (cliente do Supabase), `lib/extractText.ts`, `lib/confettiPrefs.ts`, `lib/utils.ts`.
-  `lib/surreal.ts` é legado.
+  SurrealDB foi removido do código em 2026-10-21 (não há mais espelho nem cliente).
 - `utils/`: `withTimeout.ts` (usar em toda query de tela), `toast.ts`, `cpf.ts`, `sponteMatch.ts`,
   `matriculaAttribution.ts`, `marketingForms.ts`, `csvProcessor.ts`, `dashboardFilters.tsx`,
   `functionsError.ts` (ler erro de `functions.invoke`), `notificationSound.ts` (som de lead novo / resposta).

@@ -3,8 +3,8 @@ import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { dispatchWorkflow } from "../_shared/gh-dispatch.ts";
 import { identify, isStaff } from "../_shared/ai.ts";
 
-// Thin dispatcher: dispara o workflow sync-sponte.yml (que roda scripts/sync-sponte.mjs com
-// dual-write SurrealDB + Postgres). O trabalho pesado NÃO roda aqui.
+// Thin dispatcher: dispara o workflow sync-sponte.yml (que roda scripts/sync-sponte.mjs e
+// grava no Postgres). O trabalho pesado NÃO roda aqui.
 const cors = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',

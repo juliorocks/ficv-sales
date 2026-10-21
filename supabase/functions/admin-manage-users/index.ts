@@ -9,32 +9,6 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-// ── espelho SurrealDB (transição) — best-effort ──────────────────────────────
-const SURREAL_ENDPOINT = Deno.env.get('SURREAL_ENDPOINT') ?? 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
-const SURREAL_NS = 'ficv', SURREAL_DB = 'salespulse';
-const SURREAL_PASS = Deno.env.get('SURREAL_PASS') ?? '';
-function sq(v: unknown): string {
-    if (v === null || v === undefined) return 'NONE';
-    if (typeof v === 'number' || typeof v === 'boolean') return String(v);
-    return `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
-}
-async function surrealMirror(sqlFn: (esc: typeof sq) => string) {
-    try {
-        const auth = await fetch(`${SURREAL_ENDPOINT}/signin`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json', 'surreal-ns': SURREAL_NS },
-            body: JSON.stringify({ ns: SURREAL_NS, user: 'ficv_admin', pass: SURREAL_PASS }),
-        });
-        const { token } = await auth.json();
-        await fetch(`${SURREAL_ENDPOINT}/sql`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain', 'Authorization': `Bearer ${token}`, 'surreal-ns': SURREAL_NS, 'surreal-db': SURREAL_DB },
-            body: sqlFn(sq),
-        });
-    } catch (e) {
-        console.error('surrealMirror falhou (ignorado):', e);
-    }
-}
-
 serve(async (req) => {
     if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
     const json = (body: unknown, status = 200) =>
@@ -77,7 +51,6 @@ serve(async (req) => {
                 .upsert({ id, email, full_name, role: role ?? 'agent', must_change_password: true }, { onConflict: 'id' });
             if (pErr) throw pErr;
 
-            await surrealMirror(esc => `INSERT INTO profiles [{ id: ${esc(id)}, email: ${esc(email)}, full_name: ${esc(full_name)}, role: ${esc(role ?? 'agent')}, password: crypto::argon2::generate(${esc(password)}), active: true, created_at: time::now() }] RETURN NONE;`);
             return json({ success: true, user: { id, email } });
         }
 
@@ -93,8 +66,6 @@ serve(async (req) => {
             if (error) throw error;
             if (email) await admin.auth.admin.updateUserById(userId, { email }).catch(() => {});
 
-            const sets = Object.entries(patch).map(([k, v]) => `${k} = ${sq(v)}`).join(', ');
-            if (sets) await surrealMirror(() => `UPDATE profiles SET ${sets} WHERE id = profiles:⟨${userId}⟩;`);
             return json({ success: true });
         }
 
@@ -108,7 +79,6 @@ serve(async (req) => {
             // reset = o ADMIN escolheu a senha nova, não a pessoa → troca obrigatória de novo
             // no próximo login (mesma regra do 'create' acima)
             await admin.from('profiles').update({ must_change_password: true }).eq('id', userId);
-            await surrealMirror(esc => `UPDATE profiles SET password = crypto::argon2::generate(${esc(password)}) WHERE id = profiles:⟨${userId}⟩;`);
             return json({ success: true });
         }
 

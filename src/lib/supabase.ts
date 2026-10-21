@@ -50,7 +50,7 @@ if (!isAlunoPortal && typeof window !== 'undefined') {
     } catch { /* storage indisponível */ }
 }
 
-// Cliente Supabase direto — sem o proxy SurrealDB (migração de volta ao Supabase).
+// Cliente Supabase direto.
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
         storageKey: isAlunoPortal ? ALUNO_STORAGE_KEY : CRM_STORAGE_KEY,

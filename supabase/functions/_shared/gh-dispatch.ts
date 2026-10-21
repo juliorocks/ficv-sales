@@ -1,6 +1,6 @@
 // Dispara um workflow do GitHub Actions (workflow_dispatch).
 // Usado pelas edge functions de "Sincronizar agora" — o trabalho real roda na
-// Action (scripts/sync-*.mjs, que já fazem dual-write SurrealDB + Postgres).
+// Action (scripts/sync-*.mjs, que gravam no Postgres).
 
 import { getSecret } from "./secrets.ts";
 

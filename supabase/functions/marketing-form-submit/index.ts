@@ -9,7 +9,6 @@
 // Sempre grava o payload bruto em marketing_form_submissions ANTES de processar
 // (mesmo padrão do vivaconnect-webhook) — é dali que se depura submissão malformada.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
-import { mirror, sv } from "../_shared/db.ts";
 
 const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
@@ -235,15 +234,6 @@ Deno.serve(async (req) => {
             from_marketing_form: true,
         }).eq("id", hit.id);
         await db.from("lead_notes").insert({ lead_id: hit.id, note: nota, created_at: nowIso });
-        await mirror(
-            `UPDATE leads:⟨${hit.id}⟩ SET contact_count = (contact_count ?? 0) + 1, updated_at = time::now()` +
-            (isStaleReentry ? `, data_entrada = d${sv(nowIso)}, stage_entry_date = d${sv(nowIso)}` : "") +
-            (reengageStageId != null ? `, stage_id = stages:⟨${reengageStageId}⟩, stage_entry_date = d${sv(nowIso)}` : "") +
-            (form.course_id != null ? `, curso_interesse = courses:⟨${form.course_id}⟩` : "") +
-            (!hit.email && email ? `, email = ${sv(email)}` : "") +
-            (preferredContact ? `, preferred_contact = ${sv(preferredContact)}` : "") + `;\n` +
-            `INSERT INTO lead_notes [{ lead_id: leads:⟨${hit.id}⟩, note: ${sv(nota)}, created_at: d${sv(nowIso)} }] RETURN NONE;`
-        );
         leadId = hit.id;
     } else {
         const newLead = {
@@ -259,14 +249,6 @@ Deno.serve(async (req) => {
             return j({ ok: false, error: "falha ao registrar" }, 500);
         }
         leadId = created.id;
-        await mirror(
-            `UPDATE seq:leads SET val = math::max([val, ${leadId}]);\n` +
-            `INSERT INTO leads [{ id:"${leadId}", nome_completo:${sv(nome)}, email:${sv(newLead.email)}, ` +
-            `telefone:${sv(newLead.telefone)}, stage_id:stages:⟨1⟩, source_id:lead_sources:⟨${form.source_id}⟩, ` +
-            `curso_interesse:${form.course_id != null ? `courses:⟨${form.course_id}⟩` : "NONE"}, valor_oportunidade:${valor}, ` +
-            `fonte_lead:${sv(form.name)}, observacoes:${sv(obs)}, temperatura:"frio", contact_count:1, ` +
-            `data_entrada:d${sv(nowIso)}, stage_entry_date:d${sv(nowIso)} }] RETURN NONE;`
-        );
     }
 
     await finish(hit ? "updated" : "created", { lead_id: leadId });

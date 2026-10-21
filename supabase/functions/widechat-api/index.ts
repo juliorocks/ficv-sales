@@ -3,9 +3,8 @@ import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 
 // ============================================================================
 // widechat-api — envio de WhatsApp pelo Kanban, via WideChat, no login do agente.
-// Auth: o app manda o token do SurrealDB no header X-Surreal-Token (o app migrou
-// de Supabase Auth p/ SurrealDB). A partir dele achamos o profile do agente e
-// as credenciais em user_integrations (Postgres).
+// Auth: JWT do Supabase do agente logado (Authorization: Bearer), com papel admin/agent
+// em profiles. As credenciais do agente ficam em user_integrations (Postgres).
 //
 // Ações:
 //   attendances  -> GET /user/agents/attendances_plus  (acha o atendimento do lead)

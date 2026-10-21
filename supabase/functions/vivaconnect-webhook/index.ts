@@ -17,7 +17,6 @@
 //    Faculdade segue o fluxo acima; outra empresa recebe o número novo; sem assunto claro →
 //    a IA pergunta de forma natural (nunca um menu numerado).
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
-import { mirror, sv } from "../_shared/db.ts";
 import { advanceAiStage, fillTemplate, findLeadByPhone, firstName, loadSettings, markAiHandedOff, markHumanReplied, parseWebhook, toZproNumber, zpro, zproErr } from "../_shared/vivaconnect.ts";
 import { type HubMsg, loadDestinations, planejar } from "../_shared/hub.ts";
 
@@ -201,12 +200,6 @@ Deno.serve(async (req) => {
             }).select("id, nome_completo, perfil, assigned_to_id, vivaconnect_channel_id, curso_interesse, stage_id").single();
             if (error) throw new Error(`criar lead: ${error.message}`);
             lead = created;
-            await mirror(
-                `UPDATE seq:leads SET val = math::max([val, ${created.id}]);\n` +
-                `INSERT INTO leads [{ id:"${created.id}", nome_completo:${sv(name)}, telefone:${sv(m.number)}, ` +
-                `stage_id:stages:⟨1⟩, fonte_lead:${sv(`VivaConnect — ${ch.name}`)}, temperatura:"frio", ` +
-                `data_entrada:d${sv(now)}, valor_oportunidade:0 }] RETURN NONE;`,
-            );
         }
 
         // precisa estar FORA do if(lead) — usada lá embaixo, já fora do escopo do bloco, na
@@ -281,11 +274,6 @@ Deno.serve(async (req) => {
             if (reopenNote) {
                 const now = String(patch.stage_entry_date);
                 await db.from("lead_notes").insert({ lead_id: lead.id, note: reopenNote, created_at: now });
-                await mirror(
-                    `UPDATE leads SET stage_id = stages:⟨${patch.stage_id}⟩, stage_entry_date = d${sv(now)}` +
-                    `${"assigned_to_id" in patch ? ", assigned_to_id = NONE" : ""} WHERE id = leads:⟨${lead.id}⟩;\n` +
-                    `INSERT INTO lead_notes [{ lead_id: leads:⟨${lead.id}⟩, note: ${sv(reopenNote)}, created_at: d${sv(now)} }] RETURN NONE;`,
-                );
             }
 
             // veio do hub (menu, etc.): leva a conversa da triagem pro chat do lead (contexto da IA/agente)

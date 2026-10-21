@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.177.1/http/server.ts";
-import { pg, mirror, sv, wcToISO } from "../_shared/db.ts";
+import { pg, wcToISO } from "../_shared/db.ts";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -125,8 +125,7 @@ serve(async (req) => {
         // Sem isso, toda mensagem de mídia (recebida OU o eco da que a gente manda)
         // virava "[Mídia]" genérico no histórico.
         const messageText = msgData.message || msgData.interactive?.body?.text || msgData.text || hsmText() || msgData.legend || msgData.filename || "";
-        // link pra abrir/conferir o arquivo depois — achado nos payloads reais (backup
-        // antigo do SurrealDB): mídia recebida traz `content.storage_id`, que vira URL
+        // link pra abrir/conferir o arquivo depois — achado nos payloads reais: mídia recebida traz `content.storage_id`, que vira URL
         // via `{origem}/config/storage/view/{storage_id}` (rota confirmada, é a mesma
         // que o WideChat usa pro link que aparece pro agente no painel nativo deles).
         const mediaUrl: string | undefined = msgData.storage_id
@@ -328,7 +327,6 @@ serve(async (req) => {
                 payload: { channel_id: channelId, event: eventName, wh: webhookEvent, vars: payload.vars, data },
             };
             await db.from('widechat_raw_messages').insert(raw);
-            await mirror(`INSERT INTO widechat_raw_messages [{ session_id:${sv(raw.session_id)}, origin:${sv(raw.origin)}, sender_name:${sv(raw.sender_name)}, message:${sv(raw.message)}, platform_id:${sv(raw.platform_id)}, message_id:${sv(raw.message_id)}, created_at:${sv(raw.created_at)} }] RETURN NONE;`);
         }
 
         if (!isMessage && !isConversationEnd && !isAcceptAttendance)
@@ -393,7 +391,6 @@ serve(async (req) => {
                         await db.from('widechat_messages').delete().eq('lead_id', leadId);
                         await db.from('widechat_atendimentos').delete().eq('lead_id', leadId);
                         await db.from('leads').delete().eq('id', leadId);
-                        await mirror(`DELETE leads:⟨${leadId}⟩; DELETE widechat_messages WHERE lead_id = leads:⟨${leadId}⟩;`);
                         return j({ success: true, ignored: true, reason: `setor não-comercial (${motivoTxt}) — lead ${leadId} removido` });
                     }
                     // tem nota humana → não apaga, move pra Perdido / Transferido de Setor
@@ -404,7 +401,6 @@ serve(async (req) => {
                         await db.from('leads').update({ stage_id: lostStage.id, stage_entry_date: now2, motivo_perda_id: transfMotivo?.id ?? null, updated_at: now2 }).eq('id', leadId);
                         await db.from('lead_notes').insert({ lead_id: leadId, note: `🔀 Movido para Perdido / Transferido de Setor: ${motivoTxt}.`, created_at: now2 });
                         const setMotivo = transfMotivo?.id ? `, motivo_perda_id = motivos_perda:⟨${transfMotivo.id}⟩` : '';
-                        await mirror(`UPDATE leads SET stage_id = stages:⟨${lostStage.id}⟩, stage_entry_date = ${sv(now2)}${setMotivo} WHERE id = leads:⟨${leadId}⟩;`);
                         return j({ success: true, ignored: true, reason: `setor não-comercial (${motivoTxt}) — lead ${leadId} → Perdido` });
                     }
                 }
@@ -420,7 +416,6 @@ serve(async (req) => {
                 contact_id: data?.contact_id ?? null, aceito_em: new Date().toISOString(),
             };
             await db.from('widechat_atendimentos').insert(at);
-            await mirror(`INSERT INTO widechat_atendimentos [{ lead_id:${leadId ? `leads:⟨${leadId}⟩` : 'NONE'}, protocol:${sv(at.protocol)}, widechat_agent_id:${sv(at.widechat_agent_id)}, session_id:${sv(at.session_id)}, contact_id:${sv(at.contact_id)}, aceito_em:${sv(at.aceito_em)} }] RETURN NONE;`);
             return j({ success: true, lead_id: leadId, action: "attendance_accepted" });
         }
 
@@ -484,14 +479,12 @@ serve(async (req) => {
                                 : '🔁 Passaram 24h sem resposta do cliente e o WideChat encerrou a conversa sozinho (timeout). Reaberto para Entrada.',
                             created_at: now,
                         });
-                        await mirror(`UPDATE leads SET stage_id = stages:⟨${destId}⟩, stage_entry_date = ${sv(now)} WHERE id = leads:⟨${leadId}⟩;`);
                     } else {
                         const { data: st } = await db.from('stages').select('id')
                             .or('name.ilike.%finaliz%,name.ilike.%encerr%,name.ilike.%conclu%')
                             .order('order', { ascending: false }).limit(1).maybeSingle();
                         if (st?.id) {
                             await db.from('leads').update({ stage_id: st.id, stage_entry_date: now }).eq('id', leadId);
-                            await mirror(`UPDATE leads SET stage_id = stages:⟨${st.id}⟩, stage_entry_date = ${sv(now)} WHERE id = leads:⟨${leadId}⟩;`);
                         }
                     }
                 }
@@ -556,13 +549,6 @@ serve(async (req) => {
 
         if (wasCreated) {
             // lead nasceu agora pelo Widechat: o próprio contato via WhatsApp já É a confirmação.
-            await mirror(
-                `UPDATE seq:leads SET val = math::max([val, ${leadId}]);\n` +
-                `INSERT INTO leads [{ id:"${leadId}", nome_completo:${sv(leadName)}, telefone:${sv(messagePhone || "00000000000")}, ` +
-                `stage_id:stages:⟨${firstStageId}⟩, source_id:lead_sources:⟨${sourceId}⟩, fonte_lead:"Widechat", ` +
-                `widechat_contact_id:${sv(data?.contact_id ?? null)}, widechat_session_id:${sv(sessionId ?? null)}, ` +
-                `temperatura:"frio", data_entrada:d${sv(now)}, valor_oportunidade:0, status_wide:"ok_wide" }] RETURN NONE;`
-            );
         } else {
             // lead já existia — pode ter vindo antes do formulário do SendPulse (LP → form → link do
             // WhatsApp). Nesse caso NÃO sobrescreve fonte_lead/source_id (preserva a origem/atribuição
@@ -586,13 +572,10 @@ serve(async (req) => {
             // da lista mesmo com data_entrada corrigida.
             if (isStaleReentry) { patch.data_entrada = now; patch.stage_entry_date = now; }
             await db.from('leads').update(patch).eq('id', leadId);
-            const sets = Object.entries(patch).map(([k, v]) => k === 'source_id' ? `source_id = lead_sources:⟨${v}⟩` : `${k} = ${sv(v)}`).join(', ');
-            await mirror(`UPDATE leads SET ${sets} WHERE id = leads:⟨${leadId}⟩;`);
 
             if (justConfirmed) {
                 const nota = `✅ Confirmado contato via WhatsApp (${new Date(now).toLocaleDateString('pt-BR')})`;
                 await db.from('lead_notes').insert({ lead_id: leadId, note: nota, created_at: now });
-                await mirror(`INSERT INTO lead_notes [{ lead_id: leads:⟨${leadId}⟩, note: ${sv(nota)}, created_at: d${sv(now)} }] RETURN NONE;`);
             }
         }
 
@@ -613,7 +596,6 @@ serve(async (req) => {
             }
             if (!already) {
                 await db.from('widechat_messages').insert(msg);
-                await mirror(`INSERT INTO widechat_messages [{ lead_id:leads:⟨${leadId}⟩, session_id:${sv(msg.session_id)}, message_id:${sv(msg.message_id)}, type:${sv(msg.type)}, message:${sv(msg.message)}, origin:${sv(msg.origin)}, sender_name:${sv(msg.sender_name)}, created_at:${sv(msg.created_at)} }] RETURN NONE;`);
             }
 
             // ── CRM inteligente ───────────────────────────────────────────────
@@ -743,13 +725,6 @@ serve(async (req) => {
 
             if (Object.keys(updates).length) {
                 await db.from('leads').update(updates).eq('id', leadId);
-                const sets = Object.entries(updates).map(([k, v]) =>
-                    k === 'assigned_to_id' ? `assigned_to_id = ${v == null ? 'NONE' : `profiles:⟨${v}⟩`}`
-                    : k === 'curso_interesse' ? `curso_interesse = courses:⟨${v}⟩`
-                    : k === 'stage_id' ? `stage_id = stages:⟨${v}⟩`
-                    : k === 'source_id' ? `source_id = lead_sources:⟨${v}⟩`
-                    : `${k} = ${sv(v)}`).join(', ');
-                await mirror(`UPDATE leads SET ${sets} WHERE id = leads:⟨${leadId}⟩;`);
             }
 
             if (reopenedFromFinalizado) {
@@ -757,7 +732,6 @@ serve(async (req) => {
                     ? `🔁 Reaberto para Em Contato (agente mantido) — cliente retomou a conversa direto com quem já estava atendendo, após o atendimento ter sido finalizado.`
                     : `🔁 Reaberto para Entrada (sem agente atribuído) — cliente voltou a escrever após o atendimento ter sido finalizado.`;
                 await db.from('lead_notes').insert({ lead_id: leadId, note: nota, created_at: now });
-                await mirror(`INSERT INTO lead_notes [{ lead_id: leads:⟨${leadId}⟩, note: ${sv(nota)}, created_at: d${sv(now)} }] RETURN NONE;`);
             }
         }
 

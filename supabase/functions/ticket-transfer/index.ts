@@ -12,7 +12,6 @@
 // finaliza a conversa por lá — pelo mesmo canal (WideChat ou VivaConnect) do lead.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { corsHeaders, identify, isStaff, jsonRes } from "../_shared/ai.ts";
-import { mirror, sv } from "../_shared/db.ts";
 import { ensureAlunoAccount } from "../_shared/aluno.ts";
 import { cpfDigits } from "../_shared/sponte.ts";
 import { portalUrl } from "../_shared/email.ts";
@@ -90,7 +89,6 @@ Deno.serve(async (req) => {
         const now = new Date().toISOString();
         const note = `📨 Transferido para a Secretaria por ${agente} — chamado ${ticket.protocolo}${aluno ? " (Portal do Aluno)" : " (por e-mail)"}.`;
         await db.from("lead_notes").insert({ lead_id: leadId, note, created_at: now });
-        await mirror(`INSERT INTO lead_notes [{ lead_id: leads:⟨${leadId}⟩, note: ${sv(note)}, created_at: d${sv(now)} }] RETURN NONE;`);
 
         return jsonRes({
             ok: true, ticket_id: ticket.id, protocolo: ticket.protocolo, portal: !!aluno, email,

@@ -92,7 +92,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
         return () => document.removeEventListener('mousedown', handler);
     }, []);
 
-    // ─── Load data via Edge Function (SurrealDB) ──────────────────────────────
+    // ─── Load data via Edge Function ──────────────────────────────
     const selectedYear = dateStart ? new Date(dateStart + 'T00:00:00').getFullYear() : new Date().getFullYear();
     const yearStart = `${selectedYear}-01-01`;
     const yearEnd   = `${selectedYear}-12-31`;
@@ -127,7 +127,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
         return () => clearInterval(id);
     }, [loadData]);
 
-    // ─── Matrículas por agente — calculado client-side (SurrealDB não tem RPC PostgreSQL)
+    // ─── Matrículas por agente — calculado client-side
     useEffect(() => {
         if (!messagesLogsReady || !matriculas.length) return;
         setAgentAttribution({ porAgente: [], detalhes: [], semAtribuicao: 0, jaExistente: 0 });
@@ -541,7 +541,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                         <div>
                             <p className="text-sm font-bold text-[var(--text-main)]">Buscando dados do Sponte…</p>
                             <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                                Consultando matrículas, parcelas e histórico de atendimentos no SurrealDB. Isso pode levar alguns segundos.
+                                Consultando matrículas, parcelas e histórico de atendimentos no banco. Isso pode levar alguns segundos.
                             </p>
                         </div>
                     </div>

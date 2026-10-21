@@ -373,7 +373,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
         refetchInterval: 10_000,
     })
 
-    // Realtime (só pega escrita no Postgres — SurrealDB não dispara; mantido p/ compat)
+    // Realtime (escritas no Postgres)
     useEffect(() => {
         if (!leadId) return
         const channel = supabase

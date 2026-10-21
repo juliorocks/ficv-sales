@@ -1,6 +1,5 @@
-// Espelho Postgres (Supabase) para os syncs — zero dependência, via PostgREST.
-// Ativo só se SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY estiverem no ambiente.
-// Durante a transição SurrealDB→Supabase os syncs gravam nos dois bancos.
+// Escrita dos syncs no Postgres (Supabase) — zero dependência, via PostgREST.
+// Exige SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY no ambiente.
 
 const URL_ = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -47,7 +46,7 @@ export async function pgRpc(fn, args) {
   return req(`rpc/${fn}`, { method: 'POST', body: JSON.stringify(args || {}) });
 }
 
-// wrapper: roda fn e engole erro (não derruba o sync do SurrealDB se o Postgres falhar)
+// wrapper: roda fn e engole erro (para escritas opcionais)
 export async function pgTry(label, fn) {
   if (!pgEnabled) return;
   try { await fn(); console.log(`  ↳ Postgres: ${label} ok`); }

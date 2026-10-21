@@ -21,7 +21,6 @@
 // Quem chama em produção (futuro vivaconnect-webhook) usa a service role key.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { chatJSON, corsHeaders, ensureLineBreaks, expandForFullList, identify, isAdmin, isStaff, jsonRes, listAlreadySentIn, searchKnowledge, trailingAssistantText, wantsFullCourseList } from "../_shared/ai.ts";
-import { mirror, sv } from "../_shared/db.ts";
 import { fillTemplate, firstName, loadSettings as loadVivaSettings } from "../_shared/vivaconnect.ts";
 import { checkOtherCompany, mentionsOtherCompany, type HubMsg } from "../_shared/hub.ts";
 
@@ -351,7 +350,6 @@ Quando handoff=true, não precisa mencionar consultor/horário em nenhum item de
                     (json.summary ? `\n\nResumo: ${json.summary}` : "");
                 await db.from("lead_notes").insert({ lead_id: leadId, note, created_at: now });
                 await db.from("leads").update({ updated_at: now }).eq("id", leadId);
-                await mirror(`INSERT INTO lead_notes [{ lead_id: leads:⟨${leadId}⟩, note: ${sv(note)}, created_at: d${sv(now)} }] RETURN NONE;`);
             }
         }
 

@@ -39,7 +39,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { corsHeaders, identify, isAdmin, isStaff, jsonRes } from "../_shared/ai.ts";
 import { asList, fillTemplate, firstName, loadSettings, markHumanReplied, parseApiRef, toDiscovered, toZproNumber, TICKET_TEMPLATE_CHANNEL_ID, TICKET_TEMPLATE_NAME, zpro, zproErr } from "../_shared/vivaconnect.ts";
-import { mirror, sv } from "../_shared/db.ts";
 import { type HubMsg, filaText, loadDestinations, planejar, redirectText } from "../_shared/hub.ts";
 import { getSecret } from "../_shared/secrets.ts";
 import { escHtml, leadReplyAddress, sendEmail } from "../_shared/email.ts";
@@ -318,8 +317,6 @@ Deno.serve(async (req) => {
                 if (fin) {
                     await db.from("leads").update({ stage_id: fin.id, stage_entry_date: now, updated_at: now }).eq("id", lead.id);
                     await db.from("lead_notes").insert({ lead_id: lead.id, note, created_at: now });
-                    await mirror(`UPDATE leads SET stage_id = stages:⟨${fin.id}⟩, stage_entry_date = d${sv(now)} WHERE id = leads:⟨${lead.id}⟩;\n` +
-                        `INSERT INTO lead_notes [{ lead_id: leads:⟨${lead.id}⟩, note: ${sv(note)}, created_at: d${sv(now)} }] RETURN NONE;`);
                 }
                 return jsonRes({ ok: true, ticket_closed: !!ticketId });
             }
@@ -354,8 +351,6 @@ Deno.serve(async (req) => {
                 if (fin) {
                     await db.from("leads").update({ stage_id: fin.id, stage_entry_date: now, updated_at: now }).eq("id", lead.id);
                     await db.from("lead_notes").insert({ lead_id: lead.id, note, created_at: now });
-                    await mirror(`UPDATE leads SET stage_id = stages:⟨${fin.id}⟩, stage_entry_date = d${sv(now)} WHERE id = leads:⟨${lead.id}⟩;\n` +
-                        `INSERT INTO lead_notes [{ lead_id: leads:⟨${lead.id}⟩, note: ${sv(note)}, created_at: d${sv(now)} }] RETURN NONE;`);
                 }
                 await db.from("ai_lead_sessions").delete().eq("lead_id", lead.id);
                 return jsonRes({ ok: true, empresa: dest.nome });
@@ -425,8 +420,6 @@ Deno.serve(async (req) => {
             const { error } = await db.from("leads").update({ assigned_to_id: to.id, updated_at: now }).eq("id", leadId);
             if (error) return jsonRes({ error: error.message }, 500);
             await db.from("lead_notes").insert({ lead_id: leadId, note, created_at: now });
-            await mirror(`UPDATE leads SET assigned_to_id = ${sv(to.id)} WHERE id = leads:⟨${leadId}⟩;\n` +
-                `INSERT INTO lead_notes [{ lead_id: leads:⟨${leadId}⟩, note: ${sv(note)}, created_at: d${sv(now)} }] RETURN NONE;`);
             return jsonRes({ ok: true, to: to.full_name });
         }
 
