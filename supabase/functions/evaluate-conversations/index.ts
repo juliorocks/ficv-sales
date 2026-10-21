@@ -68,11 +68,16 @@ async function callAi(messages: { role: string; text: string }[]): Promise<AiRes
 
 const fmtTime = (iso: string) => new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
 
-// Transcrição no formato que o painel de análise já lê (array {role, text, time}); robôs ficam de fora.
+// Histórico completo no formato que o painel já lê ({role, text, time}); robô vira role "bot".
+// A nota não usa essas mensagens antes da entrada do agente (ver evaluateAtendimento).
 function buildTranscript(msgs: FullMsg[]) {
     return msgs
-        .filter((m) => !m.interno && m.origin !== "auto")
-        .map((m) => ({ role: m.origin === "agent" ? "agent" : "client", text: m.message ?? "", time: fmtTime(m.created_at) }));
+        .filter((m) => !m.interno)
+        .map((m) => ({
+            role: m.origin === "agent" ? "agent" : m.origin === "auto" ? "bot" : "client",
+            text: m.message ?? "",
+            time: fmtTime(m.created_at),
+        }));
 }
 
 // Data do atendimento = última mensagem humana do segmento (não o momento da finalização).
@@ -247,6 +252,31 @@ async function runRefresh(db: SupabaseClient, limit: number, offset: number): Pr
     return c;
 }
 
+// Só atualiza a transcrição das linhas novas; a nota e o método não mudam.
+async function runTranscripts(db: SupabaseClient, limit: number, offset: number): Promise<Counts> {
+    const c = emptyCounts();
+    const rows = await fetchAll<{ protocol: string }>((from, to) => db.from("messages_logs")
+        .select("protocol").neq("avaliacao_metodo", "csv").order("protocol", { ascending: true }).range(from, to));
+    for (const row of rows.slice(offset, offset + limit)) {
+        let msgs: FullMsg[] = [];
+        let endIso = "";
+        if (row.protocol.startsWith("lead:")) {
+            const [, idStr, ...rest] = row.protocol.split(":");
+            endIso = rest.join(":");
+            msgs = (await leadSegment(db, Number(idStr), endIso)).msgs;
+        } else if (row.protocol.startsWith("wc:")) {
+            msgs = await fetchAll<FullMsg>((from, to) => db.from("widechat_messages")
+                .select("origin, sender_name, message, created_at, interno, session_id, lead_id")
+                .eq("session_id", row.protocol.slice(3)).order("created_at", { ascending: true }).range(from, to));
+        }
+        if (msgs.length === 0) { c.ignorados++; continue; }
+        const { error } = await db.from("messages_logs").update({ message_content: JSON.stringify(buildTranscript(msgs)) }).eq("protocol", row.protocol);
+        if (error) throw error;
+        c.avaliados++;
+    }
+    return c;
+}
+
 serve(async (req) => {
     if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
     const db = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
@@ -261,6 +291,7 @@ serve(async (req) => {
         if (mode === "backfill_viva") return jsonRes({ mode, offset, ...(await runBackfillViva(db, limit, offset)) });
         if (mode === "backfill_wc") return jsonRes({ mode, ...(await runBackfillWc(db, limit)) });
         if (mode === "refresh") return jsonRes({ mode, offset, ...(await runRefresh(db, limit, offset)) });
+        if (mode === "transcript") return jsonRes({ mode, offset, ...(await runTranscripts(db, limit, offset)) });
         return jsonRes({ error: "mode inválido" }, 400);
     } catch (e) {
         console.error("evaluate-conversations:", e);

@@ -459,6 +459,23 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
         }
     };
 
+    // Painel de análise atualiza ao vivo: cada avaliação nova (cron ao finalizar) recarrega os dados.
+    useEffect(() => {
+        if (!profile) return;
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        const channel = supabase
+            .channel('messages-logs-live')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'messages_logs' }, () => {
+                if (timer) clearTimeout(timer);
+                timer = setTimeout(() => fetchData(profile), 2000);
+            })
+            .subscribe();
+        return () => {
+            if (timer) clearTimeout(timer);
+            supabase.removeChannel(channel);
+        };
+    }, [profile]);
+
     const handleLogout = () => {
         supabase.auth.signOut();
     };

@@ -378,6 +378,7 @@ export const AnalysisDetail: React.FC<AnalysisDetailProps> = ({
                                         transcript.map((msg, i) => {
 
                                             const isAgent = msg.role === 'agent';
+                                            const isBot = (msg.role as string) === 'bot';
 
                                             return (
                                                 <div key={i} className={`flex flex-col ${isAgent ? 'items-end' : 'items-start'}`}>
@@ -385,6 +386,7 @@ export const AnalysisDetail: React.FC<AnalysisDetailProps> = ({
                                                         ? 'bg-primary/10 border border-primary/20 text-[var(--text-main)] rounded-tr-none'
                                                         : 'bg-[var(--bg-card-hover)] border border-[var(--border)] text-[var(--text-main)] rounded-tl-none'
                                                         }`}>
+                                                        {isBot && <span className="block mb-1 text-[9px] font-bold uppercase tracking-widest text-[#8B949E]">🤖 Robô</span>}
                                                         <p className="text-xs leading-relaxed">{msg.text}</p>
                                                         <div className="mt-2 flex items-center justify-between gap-4">
                                                             <span className="text-[8px] text-[#8B949E] font-mono">{msg.time}</span>
