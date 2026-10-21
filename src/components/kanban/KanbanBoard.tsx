@@ -576,6 +576,7 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
                     isOpen
                     onOpenChange={(open) => {
                         if (open) return
+                        console.trace('[diagnóstico] diálogo do lead fechou')
                         setDialog(null)
                         queryClient.invalidateQueries({ queryKey: ['leads'] })
                     }}
