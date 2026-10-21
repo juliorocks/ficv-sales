@@ -240,10 +240,10 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 - **Apagar/editar mensagem já enviada no WhatsApp**: sem implementação. Aguardando conferir no painel real do Z-PRO.
 - **VivaConnect Igreja e Fundação**: número placeholder `83999999999`, falta o número real.
 - **Teste em navegador pendente**: som de lead novo / resposta, seletor de nível, selo de contagem com filtro de data.
-- **Migration `20261021120000_security_hardening_rls.sql`**: commitada, AINDA NÃO aplicada em produção (bloqueio de
-  permissão na execução automática). Aplicar com `supabase db push --linked` e validar com as consultas de `information_schema` do run-1. Testada
-  antes em Postgres local com esquema mínimo: 13 casos de ataque bloqueados, operações legítimas preservadas.
-- **Segurança (auditoria run-1, 2026-10-21)**: ver `~/security-audit-skill/ficv-sales-1/run-1/`. Pendentes: NV-1 (`profiles.role` autoeditável), NV-2 (`alunos.sponte_aluno_id`), `delete_stage_and_leads` concedida a `authenticated`, `tmsg_insert` sem checar ticket, webhooks sem assinatura.
+- **Migration `20261021120000_security_hardening_rls.sql`**: APLICADA em produção em 2026-10-21 (verificada por
+  catálogo: triggers `trg_guard_profile_role`/`trg_guard_aluno_identity`, policies `profiles_ins`/`tmsg_insert`,
+  `delete_stage_and_leads` com `is_admin()`). Testada antes em Postgres local (13 casos de ataque).
+- **Segurança (auditoria run-1, 2026-10-21)**: ver `~/security-audit-skill/ficv-sales-1/run-1/`. Corrigidos em 2026-10-21: NV-1, NV-2, `delete_stage_and_leads`, `tmsg_insert`. Pendentes: webhooks sem assinatura, `matriculas_por_agente` sem checagem, `vivaconnect-api` (fetch de `zUrl`), `kb-fetch-url` (SSRF, só admin).
 - **Segurança**: `.claude/settings.json` (não versionado) tem chaves Supabase escritas nas permissões, incluindo de
   outro project ref (`znypfroagfwohqeyxyqv`). Remover essas linhas e manter `.claude/settings.local.json` fora do git.
 - **Limpeza**: scripts soltos na raiz e `src/utils/*.sql` antigos podem ser movidos ou removidos.
