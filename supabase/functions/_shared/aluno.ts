@@ -10,6 +10,24 @@ export async function findAlunoByCpf(db: any, cpf: string) {
     return (await db.from("alunos").select("id, nome, email, cpf, sponte_aluno_id, nivel").in("cpf", [d, fmtCpf(d)]).limit(1).maybeSingle()).data;
 }
 
+const normNome = (s: string) => (s || "")
+    .normalize("NFD").replace(/\p{Diacritic}/gu, "")
+    .toLowerCase().trim().replace(/\s+/g, " ");
+
+/** Achado ao vivo 08/10: pelo menos 4 contas criadas com o Nome TROCADO — o CPF/AlunoID/RA que
+ *  o GetAlunos devolveu sempre bateu certo (confirmado contra `sponte_matriculas`), só o campo
+ *  Nome vinha errado (erro de digitação da secretaria em outro cadastro do Sponte, não bug
+ *  nosso). Confere o Nome que acabou de vir do Sponte contra o histórico de matrícula já
+ *  sincronizado localmente pro MESMO AlunoID antes de criar a conta — sem matrícula local pra
+ *  esse AlunoID (aluno recém-matriculado, ainda não sincronizado), não tem com o que comparar,
+ *  deixa passar (não dá pra fazer melhor que confiar no Sponte nesse caso). */
+async function nomeDivergeDoHistorico(db: any, alunoId: number, nome: string): Promise<boolean> {
+    const { data } = await db.from("sponte_matriculas").select("aluno").eq("aluno_id", alunoId).limit(50);
+    const historicos = [...new Set((data || []).map((r: any) => normNome(r.aluno)))].filter(Boolean);
+    if (historicos.length === 0) return false;
+    return !historicos.includes(normNome(nome));
+}
+
 /** Garante a conta do aluno. Devolve { aluno } ou { error }. Não mexe em conta existente. */
 export async function ensureAlunoAccount(db: any, cpf: string): Promise<{ aluno?: any; created?: boolean; error?: string }> {
     const d = cpfDigits(cpf);
@@ -24,6 +42,9 @@ export async function ensureAlunoAccount(db: any, cpf: string): Promise<{ aluno?
     }
     const s = await sponteAlunoByCpf(d);
     if (!s) return { error: "CPF não encontrado entre os alunos no Sponte." };
+    if (await nomeDivergeDoHistorico(db, s.aluno_id, s.nome)) {
+        return { error: "Divergência de cadastro no Sponte — contate a secretaria para liberar seu acesso." };
+    }
     const { data: created, error: cErr } = await db.auth.admin.createUser({
         email: `${d}@aluno.ficv.br`, password: d, email_confirm: true,
         user_metadata: { nome: s.nome, sponte_aluno_id: s.aluno_id },

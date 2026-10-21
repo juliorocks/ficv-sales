@@ -48,6 +48,7 @@ Deno.serve(async (req) => {
             const r = await ensureAlunoAccount(db, cpf);
             if (r.error) {
                 await log("first_access", false);
+                if (r.error.includes("Divergência de cadastro")) return j({ error: r.error }, 409);
                 return r.error.includes("Sponte")
                     ? j({ error: "Não encontramos esse CPF entre os alunos da FICV. Procure a secretaria." }, 404)
                     : j({ error: "Não foi possível criar seu acesso agora. Tente de novo em instantes." }, 500);

@@ -67,7 +67,13 @@ export async function overviewFor(db: Db, aluno: AlunoRow) {
     }
 
     return {
-        aluno: { ...sa, nome: sa.nome ?? aluno.nome, ra: sa.ra ?? aluno.ra, email: sa.email ?? aluno.email, celular: sa.celular ?? aluno.telefone, cpf: aluno.cpf ?? null },
+        // nome: LOCAL primeiro, não o do Sponte — achado ao vivo 08/10: o GetAlunos (API) pode
+        // devolver um Nome errado pra um AlunoID mesmo com a grade de administração do Sponte já
+        // certa (CPF/RA/Celular sempre bateram certo nos casos encontrados, só o Nome divergia).
+        // `aluno.nome` já passa pela checagem contra `sponte_matriculas` na criação da conta
+        // ([[nomeDivergeDoHistorico]], _shared/aluno.ts) — mais confiável que confiar cegamente
+        // na resposta ao vivo. Só cai pro nome do Sponte se não tiver nada salvo localmente.
+        aluno: { ...sa, nome: aluno.nome ?? sa.nome, ra: sa.ra ?? aluno.ra, email: sa.email ?? aluno.email, celular: sa.celular ?? aluno.telefone, cpf: aluno.cpf ?? null },
         matriculas: matriculasCompletas, parcelas,
     };
 }
