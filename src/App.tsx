@@ -72,9 +72,7 @@ import { CourseManagement } from './components/admin/CourseManagement';
 import { LeadSourceManagement } from './components/admin/LeadSourceManagement';
 import { LossReasonManagement } from './components/admin/LossReasonManagement';
 import { QuickRepliesPage } from './components/QuickReplies';
-import { WidechatTemplates } from './components/admin/WidechatTemplates';
 import { AuditLogPage } from './components/admin/AuditLogPage';
-import { WideChatHistory } from './components/kanban/WideChatHistory';
 import { TmaSettingsManagement } from './components/admin/TmaSettingsManagement';
 import { AiAgentSettings } from './components/admin/AiAgentSettings';
 import { VivaConnectSettings } from './components/admin/VivaConnectSettings';
@@ -83,7 +81,6 @@ import { SecretariaBoard } from './components/tickets/SecretariaBoard';
 import { AtendimentosView } from './components/kanban/AtendimentosView';
 import { TicketQueuesSettings } from './components/admin/TicketQueuesSettings';
 import { TutorVirtualSettings } from './components/admin/TutorVirtualSettings';
-import { UserWidechatConfig } from './components/admin/UserWidechatConfig';
 import { TicketDashboard } from './components/tickets/TicketDashboard';
 import { SponteDashboard } from './components/SponteDashboard';
 import { CampaignsDashboard } from './components/CampaignsDashboard';
@@ -992,22 +989,10 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                             Motivos de Perda
                                         </button>
                                         <button
-                                            onClick={() => setActiveTab('kanban-chat')}
-                                            className={`text-[11px] py-1.5 px-3 rounded-lg text-left transition-all ${activeTab === 'kanban-chat' ? 'bg-primary/10 text-primary font-bold' : 'text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text-main)]'}`}
-                                        >
-                                            Histórico WideChat
-                                        </button>
-                                        <button
                                             onClick={() => setActiveTab('kanban-quick-replies')}
                                             className={`text-[11px] py-1.5 px-3 rounded-lg text-left transition-all ${activeTab === 'kanban-quick-replies' ? 'bg-primary/10 text-primary font-bold' : 'text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text-main)]'}`}
                                         >
                                             Mensagens Rápidas
-                                        </button>
-                                        <button
-                                            onClick={() => setActiveTab('kanban-templates')}
-                                            className={`text-[11px] py-1.5 px-3 rounded-lg text-left transition-all ${activeTab === 'kanban-templates' ? 'bg-primary/10 text-primary font-bold' : 'text-[var(--text-muted)] hover:bg-white/5 hover:text-[var(--text-main)]'}`}
-                                        >
-                                            Templates WhatsApp
                                         </button>
                                         {profile?.role === 'admin' && (
                                             <button
@@ -1034,7 +1019,6 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                             {(profile?.role === 'admin') && <NavItem collapsed={sidebarCollapsed} icon={Target} label="Metas" active={activeTab === 'goals'} onClick={() => setActiveTab('goals')} />}
                             {(profile?.role === 'admin') && <NavItem collapsed={sidebarCollapsed} icon={FileUp} label="Uploads" active={activeTab === 'uploads'} onClick={() => setActiveTab('uploads')} />}
                             <NavItem collapsed={sidebarCollapsed} icon={BookOpen} label="Base de Conhecimento" active={activeTab === 'knowledge'} onClick={() => setActiveTab('knowledge')} />
-                            <NavItem collapsed={sidebarCollapsed} icon={MessageSquare} label="Meu Widechat" active={activeTab === 'widechat'} onClick={() => setActiveTab('widechat')} />
                             {(profile?.role === 'admin' || profile?.role === 'agent') && (
                                 <NavItem collapsed={sidebarCollapsed} icon={CalendarClock} label="Follow-ups" active={activeTab === 'followups'} onClick={() => setActiveTab('followups')} />
                             )}
@@ -1956,13 +1940,6 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                     </div>
                 )}
 
-                {/* Widechat Credentials Tab */}
-                {activeTab === 'widechat' && (
-                    <div className="animate-fade-in">
-                        <UserWidechatConfig />
-                    </div>
-                )}
-
                 {/* Meu Perfil — cada usuário edita os próprios dados */}
                 {activeTab === 'profile' && (
                     <div className="animate-fade-in">
@@ -2032,21 +2009,9 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                     </div>
                 )}
 
-                {activeTab === 'kanban-chat' && (
-                    <div className="animate-fade-in max-w-6xl mx-auto py-6">
-                        <WideChatHistory widechatContactId="" leadId="" />
-                    </div>
-                )}
-
                 {activeTab === 'kanban-quick-replies' && (
                     <div className="animate-fade-in max-w-6xl mx-auto py-6">
                         <QuickRepliesPage />
-                    </div>
-                )}
-
-                {activeTab === 'kanban-templates' && (
-                    <div className="animate-fade-in max-w-6xl mx-auto py-6">
-                        <WidechatTemplates />
                     </div>
                 )}
 
