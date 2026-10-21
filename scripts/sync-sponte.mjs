@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Sync Sponte CRM → SurrealDB (+ espelho Postgres/Supabase durante a transição)
+// Sync Sponte CRM → Supabase (Postgres via PostgREST)
 // Uso: node scripts/sync-sponte.mjs [full|matriculas|parcelas] [start_date] [end_date]
 
-import { pgUpsert, pgTry, pgEnabled } from './lib/pg-mirror.mjs';
+import { pgUpsert, pgEnabled } from './lib/pg-mirror.mjs';
 
 
 const SPONTE_URL = 'https://api.sponteeducacional.net.br/WSAPIEdu.asmx';
@@ -23,60 +23,11 @@ async function loadSponteToken() {
 }
 const TOKEN = await loadSponteToken();
 
-const SURREAL_ENDPOINT = process.env.SURREAL_ENDPOINT || 'https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud';
-const SURREAL_NS   = 'ficv';
-const SURREAL_DB   = 'salespulse';
-const SURREAL_USER = process.env.SURREAL_USER || 'ficv_admin';
-const SURREAL_PASS = process.env.SURREAL_PASS;
-
 const mode      = process.argv[2] ?? 'full';
 const now       = new Date();
 const year      = now.getFullYear();
 const startDate = process.argv[3] || `${year}-01-01`;
 const endDate   = process.argv[4] || `${year}-12-31`;
-
-// ─── SurrealDB ────────────────────────────────────────────────────────────────
-
-async function surrealAuth() {
-    const res = await fetch(`${SURREAL_ENDPOINT}/signin`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'surreal-ns': SURREAL_NS },
-        body: JSON.stringify({ ns: SURREAL_NS, db: SURREAL_DB, user: SURREAL_USER, pass: SURREAL_PASS }),
-    });
-    if (!res.ok) throw new Error(`SurrealDB auth failed: ${res.status}`);
-    return (await res.json()).token;
-}
-
-async function surrealSQL(token, sql, attempt = 0) {
-    try {
-        const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'text/plain', 'Accept': 'application/json',
-                'Authorization': `Bearer ${token}`,
-                'surreal-ns': SURREAL_NS, 'surreal-db': SURREAL_DB,
-            },
-            body: sql,
-            signal: AbortSignal.timeout(120000),
-        });
-        if (!res.ok) throw new Error(`SurrealDB SQL error ${res.status}: ${await res.text().catch(() => '')}`);
-        return res.json();
-    } catch (e) {
-        if (attempt < 2) {
-            await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
-            return surrealSQL(token, sql, attempt + 1);
-        }
-        throw e;
-    }
-}
-
-function sv(v) {
-    if (v === null || v === undefined) return 'NONE';
-    if (typeof v === 'number') return String(v);
-    return `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
-}
-
-function sid(table, id) { return `${table}:\`${String(id)}\``; }
 
 // ─── SOAP ─────────────────────────────────────────────────────────────────────
 
@@ -131,7 +82,7 @@ function parseBrNumber(s) {
 
 // ─── Sync matrículas ──────────────────────────────────────────────────────────
 
-async function syncMatriculas(token) {
+async function syncMatriculas() {
     console.log(`  Buscando matrículas ${startDate} → ${endDate}...`);
     const xml = await soapCall('GetMatriculas',
         `<sParametrosBusca>DataMatricula=${startDate.replace(/-/g,'/')} e ${endDate.replace(/-/g,'/')}</sParametrosBusca>`);
@@ -163,34 +114,15 @@ async function syncMatriculas(token) {
 
     console.log(`  ${rows.length} matrículas encontradas. Upserting...`);
 
-    let synced = 0;
-    for (let i = 0; i < rows.length; i += 10) {
-        const batch = rows.slice(i, i + 10);
-        const stmts = batch.map(r =>
-            `UPSERT ${sid('sponte_matriculas', r.contrato_id)} CONTENT {` +
-            `contrato_id:${sv(r.contrato_id)},aluno_id:${sv(r.aluno_id)},aluno:${sv(r.aluno)},` +
-            `turma_id:${sv(r.turma_id)},nome_turma:${sv(r.nome_turma)},nome_curso:${sv(r.nome_curso)},` +
-            `curso_id:${sv(r.curso_id)},situacao_id:${sv(r.situacao_id)},situacao:${sv(r.situacao)},` +
-            `data_matricula:${sv(r.data_matricula)},data_inicio:${sv(r.data_inicio)},` +
-            `data_termino:${sv(r.data_termino)},data_encerramento:${sv(r.data_encerramento)},` +
-            `contratante:${sv(r.contratante)},numero_contrato:${sv(r.numero_contrato)},` +
-            `financeiro_lancado:${sv(r.financeiro_lancado)},` +
-            `nome_matriz_curricular:${sv(r.nome_matriz_curricular)},` +
-            `tipo_contrato_id:${sv(r.tipo_contrato_id)},celular:NONE,` +
-            `synced_at:${sv(r.synced_at)}};`
-        ).join('\n');
-        await surrealSQL(token, stmts);
-        synced += batch.length;
-        process.stdout.write(`\r  ${synced}/${rows.length} inseridos...`);
-    }
+    await pgUpsert('sponte_matriculas', rows, 'contrato_id');
+    const synced = rows.length;
     console.log(`\n  ✓ ${synced} matrículas sincronizadas`);
-    await pgTry('sponte_matriculas', () => pgUpsert('sponte_matriculas', rows, 'contrato_id'));
     return synced;
 }
 
 // ─── Sync parcelas ────────────────────────────────────────────────────────────
 
-async function syncParcelas(token) {
+async function syncParcelas() {
     console.log(`  Buscando parcelas ${startDate} → ${endDate}...`);
 
     const chunks = [];
@@ -233,24 +165,8 @@ async function syncParcelas(token) {
             }))
             .filter(r => r.conta_receber_id > 0);
 
-        for (let i = 0; i < rows.length; i += 100) {
-            const batch = rows.slice(i, i + 100);
-            const stmts = batch.map(r => {
-                const recId = sid('sponte_parcelas', `${r.conta_receber_id}_${r.numero_parcela}`);
-                return `UPSERT ${recId} CONTENT {` +
-                    `conta_receber_id:${sv(r.conta_receber_id)},numero_parcela:${sv(r.numero_parcela)},` +
-                    `aluno_id:${sv(r.aluno_id)},situacao_parcela:${sv(r.situacao_parcela)},` +
-                    `data_pagamento:${sv(r.data_pagamento)},vencimento:${sv(r.vencimento)},` +
-                    `valor_parcela:${sv(r.valor_parcela)},valor_pago:${sv(r.valor_pago)},` +
-                    `forma_cobranca:${sv(r.forma_cobranca)},categoria:${sv(r.categoria)},` +
-                    `categoria_id:${sv(r.categoria_id)},sacado:${sv(r.sacado)},` +
-                    `conta_creditar:${sv(r.conta_creditar)},` +
-                    `synced_at:${sv(r.synced_at)}};`;
-            }).join('\n');
-            await surrealSQL(token, stmts);
-            totalSynced += batch.length;
-        }
-        await pgTry(`sponte_parcelas (+${rows.length})`, () => pgUpsert('sponte_parcelas', rows, 'conta_receber_id,numero_parcela'));
+        await pgUpsert('sponte_parcelas', rows, 'conta_receber_id,numero_parcela');
+        totalSynced += rows.length;
         process.stdout.write(`\r  ${totalSynced} parcelas processadas...`);
     }
     console.log(`\n  ✓ ${totalSynced} parcelas sincronizadas`);
@@ -263,11 +179,10 @@ async function syncParcelas(token) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-console.log(`\n🔄 Sync Sponte → SurrealDB${pgEnabled ? ' + Postgres' : ''} | modo=${mode} | ${startDate} → ${endDate}`);
-const token = await surrealAuth();
-console.log('✓ SurrealDB autenticado');
+if (!pgEnabled) throw new Error('SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY não definidos');
+console.log(`\n🔄 Sync Sponte → Supabase | modo=${mode} | ${startDate} → ${endDate}`);
 
-if (mode === 'matriculas' || mode === 'full') await syncMatriculas(token);
-if (mode === 'parcelas'   || mode === 'full') await syncParcelas(token);
+if (mode === 'matriculas' || mode === 'full') await syncMatriculas();
+if (mode === 'parcelas'   || mode === 'full') await syncParcelas();
 
 console.log('\n✅ Sync concluído!');

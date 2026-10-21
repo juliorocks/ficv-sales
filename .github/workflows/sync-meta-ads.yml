@@ -1,4 +1,4 @@
-name: Sync Meta Ads → SurrealDB + Supabase
+name: Sync Meta Ads → Supabase
 
 on:
   schedule:
@@ -22,13 +22,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Sync Meta Ads → SurrealDB + Supabase
+      - name: Sync Meta Ads → Supabase
         env:
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
           META_AD_ACCOUNT_ID: ${{ secrets.META_AD_ACCOUNT_ID }}
-          SURREAL_ENDPOINT: https://heroic-quelea-06frhjc9ott4l61s0fs8nn630s.aws-use2.surreal.cloud
-          SURREAL_USER: ficv_admin
-          SURREAL_PASS: ${{ secrets.SURREAL_PASS }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           INPUT_DATE_PRESET: ${{ github.event.inputs.date_preset }}

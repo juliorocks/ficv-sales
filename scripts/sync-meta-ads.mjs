@@ -1,72 +1,15 @@
 #!/usr/bin/env node
-// Sync Meta Ads → SurrealDB (+ espelho Postgres/Supabase na transição)
+// Sync Meta Ads → Supabase (Postgres via PostgREST).
 
-import { pgUpsert, pgTry } from './lib/pg-mirror.mjs';
+import { pgUpsert, pgEnabled } from './lib/pg-mirror.mjs';
 
 const META_ACCESS_TOKEN = process.env.META_ACCESS_TOKEN;
 const META_AD_ACCOUNT_ID = process.env.META_AD_ACCOUNT_ID; // ex: act_1189439942268233
-const SURREAL_ENDPOINT = process.env.SURREAL_ENDPOINT;
-const SURREAL_NS = 'ficv';
-const SURREAL_DB = 'salespulse';
-const SURREAL_USER = process.env.SURREAL_USER;
-const SURREAL_PASS = process.env.SURREAL_PASS;
 
 const META_BASE = 'https://graph.facebook.com/v21.0';
 const DATE_PRESET = process.argv[2] || 'last_90d';
 
-// ── SurrealDB ────────────────────────────────────────────────────────────────
-
-async function surrealAuth() {
-    const res = await fetch(`${SURREAL_ENDPOINT}/signin`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'surreal-ns': SURREAL_NS },
-        body: JSON.stringify({ ns: SURREAL_NS, user: SURREAL_USER, pass: SURREAL_PASS }),
-    });
-    if (!res.ok) throw new Error(`SurrealDB auth: ${res.status} ${await res.text()}`);
-    return (await res.json()).token;
-}
-
-async function surrealSQL(token, sql) {
-    const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'text/plain',
-            'Accept': 'application/json',
-            'Authorization': `Bearer ${token}`,
-            'surreal-ns': SURREAL_NS,
-            'surreal-db': SURREAL_DB,
-        },
-        body: sql,
-    });
-    if (!res.ok) throw new Error(`SurrealDB SQL ${res.status}: ${await res.text()}`);
-    const data = await res.json();
-    const errs = data.filter(r => r.status === 'ERR');
-    if (errs.length) throw new Error(errs.map(e => e.result).join('; '));
-    return data;
-}
-
-function sv(v) {
-    if (v === null || v === undefined) return 'NONE';
-    if (typeof v === 'boolean') return String(v);
-    if (typeof v === 'number') return String(v);
-    if (typeof v === 'string') {
-        if (/^\d{4}-\d{2}-\d{2}T/.test(v)) return `d"${v}"`;
-        return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
-    }
-    return JSON.stringify(v);
-}
-
-async function upsertBatch(token, table, rows, buildSql) {
-    for (let i = 0; i < rows.length; i += 50) {
-        const batch = rows.slice(i, i + 50);
-        const sql = batch.map(r => buildSql(r)).join('\n');
-        await surrealSQL(token, sql);
-        process.stdout.write(`\r  ${Math.min(i + 50, rows.length)}/${rows.length}...`);
-    }
-    console.log(`\r  ✓ ${rows.length} registros                `);
-}
-
-// ── Meta Ads API ─────────────────────────────────────────────────────────────
+class MetaApiError extends Error {}
 
 async function metaGet(path, params = {}) {
     const url = new URL(`${META_BASE}/${path}`);
@@ -79,20 +22,20 @@ async function metaGet(path, params = {}) {
     while (nextUrl) {
         const res = await fetch(nextUrl);
         const body = await res.json();
-        if (body.error) throw new Error(`Meta API ${path}: ${body.error.message}`);
+        if (body.error) throw new MetaApiError(`Meta API ${path}: ${body.error.message}`);
         if (body.data) rows.push(...body.data);
         nextUrl = body.paging?.next || null;
     }
     return rows;
 }
 
-async function syncAccountStats(token) {
+async function syncAccountStats() {
     console.log('Saldo da conta Meta...');
     const res = await fetch(
-        `https://graph.facebook.com/v21.0/${META_AD_ACCOUNT_ID}?fields=balance,currency,funding_source_details&access_token=${META_ACCESS_TOKEN}`
+        `${META_BASE}/${META_AD_ACCOUNT_ID}?fields=balance,currency,funding_source_details&access_token=${META_ACCESS_TOKEN}`
     );
     const acc = await res.json();
-    if (acc.error) throw new Error(`Meta account: ${acc.error.message}`);
+    if (acc.error) throw new MetaApiError(`Meta account: ${acc.error.message}`);
 
     let prepaidBalance = null;
     const fsd = acc.funding_source_details;
@@ -113,17 +56,15 @@ async function syncAccountStats(token) {
 
     if (prepaidBalance !== null) {
         const now = new Date().toISOString();
-        const sql = `UPDATE meta_account_stats:\`1\` MERGE {balance: ${prepaidBalance}, currency: ${sv(acc.currency ?? 'BRL')}, updated_at: d"${now}"} RETURN NONE;`;
-        await surrealSQL(token, sql);
-        await pgTry('meta_account_stats', () => pgUpsert('meta_account_stats',
-            [{ id: 1, balance: prepaidBalance, currency: acc.currency ?? 'BRL', updated_at: now }], 'id'));
+        await pgUpsert('meta_account_stats',
+            [{ id: 1, balance: prepaidBalance, currency: acc.currency ?? 'BRL', updated_at: now }], 'id');
         console.log(`  ✓ saldo: R$ ${prepaidBalance}`);
     } else {
         console.log('  ⚠️  saldo não detectado na resposta da API');
     }
 }
 
-async function syncCampaigns(token) {
+async function syncCampaigns() {
     console.log('Campanhas Meta...');
     const rows = await metaGet(`${META_AD_ACCOUNT_ID}/campaigns`, {
         fields: 'id,name,objective,status,daily_budget,lifetime_budget,budget_remaining',
@@ -131,22 +72,12 @@ async function syncCampaigns(token) {
     });
     console.log(`  ${rows.length} campanhas`);
     const now = new Date().toISOString();
-    await upsertBatch(token, 'meta_campaigns', rows, r =>
-        `INSERT INTO meta_campaigns (campaign_id, name, objective, status, daily_budget, lifetime_budget, budget_remaining, updated_at) ` +
-        `VALUES (${sv(r.id)}, ${sv(r.name)}, ${sv(r.objective || '')}, ${sv(r.status)}, ` +
-        `${sv(Number(r.daily_budget || 0) / 100)}, ${sv(Number(r.lifetime_budget || 0) / 100)}, ` +
-        `${sv(Number(r.budget_remaining || 0) / 100)}, ${sv(now)}) ` +
-        `ON DUPLICATE KEY UPDATE name=${sv(r.name)}, status=${sv(r.status)}, ` +
-        `daily_budget=${sv(Number(r.daily_budget || 0) / 100)}, ` +
-        `lifetime_budget=${sv(Number(r.lifetime_budget || 0) / 100)}, ` +
-        `budget_remaining=${sv(Number(r.budget_remaining || 0) / 100)}, updated_at=${sv(now)};`
-    );
-    await pgTry('meta_campaigns', () => pgUpsert('meta_campaigns', rows.map(r => ({
+    await pgUpsert('meta_campaigns', rows.map(r => ({
         campaign_id: r.id, name: r.name, objective: r.objective || '', status: r.status,
         daily_budget: Number(r.daily_budget || 0) / 100, lifetime_budget: Number(r.lifetime_budget || 0) / 100,
         budget_remaining: Number(r.budget_remaining || 0) / 100, updated_at: now,
-    })), 'campaign_id'));
-    return rows;
+    })), 'campaign_id');
+    console.log(`  ✓ ${rows.length} campanhas gravadas`);
 }
 
 const LEAD_ACTION_PRIORITY = [
@@ -166,7 +97,7 @@ function computeLeadsCount(actions) {
     return 0;
 }
 
-async function syncInsights(token) {
+async function syncInsights() {
     console.log(`Insights Meta (${DATE_PRESET})...`);
     const rows = await metaGet(`${META_AD_ACCOUNT_ID}/insights`, {
         fields: 'campaign_id,campaign_name,spend,impressions,clicks,reach,frequency,ctr,cpm,actions',
@@ -177,26 +108,16 @@ async function syncInsights(token) {
     });
     console.log(`  ${rows.length} registros`);
     const now = new Date().toISOString();
-    await surrealSQL(token, `DELETE meta_campaign_insights_daily WHERE date >= "${rows[0]?.date_start || ''}" AND date <= "${rows[rows.length - 1]?.date_start || ''}";`);
-    await upsertBatch(token, 'meta_campaign_insights_daily', rows, r =>
-        `INSERT INTO meta_campaign_insights_daily [{` +
-        `campaign_id:${sv(r.campaign_id)},campaign_name:${sv(r.campaign_name)},` +
-        `date:${sv(r.date_start)},spend:${sv(Number(r.spend || 0))},` +
-        `impressions:${sv(Number(r.impressions || 0))},clicks:${sv(Number(r.clicks || 0))},` +
-        `reach:${sv(Number(r.reach || 0))},frequency:${sv(Number(r.frequency || 0))},` +
-        `ctr:${sv(Number(r.ctr || 0))},cpm:${sv(Number(r.cpm || 0))},` +
-        `leads_count:${computeLeadsCount(r.actions)},synced_at:${sv(now)}}] RETURN NONE;`
-    );
-    await pgTry('meta_campaign_insights_daily', () => pgUpsert('meta_campaign_insights_daily', rows.map(r => ({
+    await pgUpsert('meta_campaign_insights_daily', rows.map(r => ({
         campaign_id: r.campaign_id, campaign_name: r.campaign_name, date: r.date_start,
         spend: Number(r.spend || 0), impressions: Number(r.impressions || 0), clicks: Number(r.clicks || 0),
         reach: Number(r.reach || 0), frequency: Number(r.frequency || 0), ctr: Number(r.ctr || 0), cpm: Number(r.cpm || 0),
         leads_count: computeLeadsCount(r.actions), synced_at: now,
-    })), 'campaign_id,date'));
-    return rows;
+    })), 'campaign_id,date');
+    console.log(`  ✓ ${rows.length} registros gravados`);
 }
 
-async function syncDemographics(token) {
+async function syncDemographics() {
     console.log(`Demographics Meta (${DATE_PRESET})...`);
     // Sem level=campaign → agrega automaticamente ao nível da conta (1 linha por data+age+gender)
     const rows = await metaGet(`${META_AD_ACCOUNT_ID}/insights`, {
@@ -209,41 +130,29 @@ async function syncDemographics(token) {
     console.log(`  ${rows.length} registros`);
     if (!rows.length) return;
     const now = new Date().toISOString();
-    const startDate = rows[0]?.date_start || '';
-    const endDate = rows[rows.length - 1]?.date_start || '';
-    await surrealSQL(token, `DELETE meta_demographics_daily WHERE date >= "${startDate}" AND date <= "${endDate}";`);
-    await upsertBatch(token, 'meta_demographics_daily', rows, r =>
-        `INSERT INTO meta_demographics_daily [{` +
-        `date:${sv(r.date_start)},age_range:${sv(r.age)},gender:${sv(r.gender)},` +
-        `spend:${sv(Number(r.spend || 0))},impressions:${sv(Number(r.impressions || 0))},` +
-        `clicks:${sv(Number(r.clicks || 0))},leads_count:0,synced_at:${sv(now)}}] RETURN NONE;`
-    );
-    await pgTry('meta_demographics_daily', () => pgUpsert('meta_demographics_daily', rows.map(r => ({
+    await pgUpsert('meta_demographics_daily', rows.map(r => ({
         date: r.date_start, age_range: r.age || '?', gender: r.gender || '?',
         spend: Number(r.spend || 0), impressions: Number(r.impressions || 0), clicks: Number(r.clicks || 0),
         leads_count: 0, synced_at: now,
-    })), 'date,age_range,gender'));
+    })), 'date,age_range,gender');
+    console.log(`  ✓ ${rows.length} registros gravados`);
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 if (!META_ACCESS_TOKEN) throw new Error('META_ACCESS_TOKEN não definido');
 if (!META_AD_ACCOUNT_ID) throw new Error('META_AD_ACCOUNT_ID não definido');
-if (!SURREAL_ENDPOINT || !SURREAL_USER || !SURREAL_PASS) throw new Error('Variáveis SurrealDB não definidas');
+if (!pgEnabled) throw new Error('SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY não definidos');
 
-console.log('Autenticando SurrealDB...');
-const token = await surrealAuth();
-console.log('✓ SurrealDB ok\n');
-
+// Token expirado ou sem permissão da Meta sai com 0 (aviso). Falha de gravação no banco não.
 try {
-    await syncAccountStats(token);
-    await syncCampaigns(token);
-    await syncInsights(token);
-    await syncDemographics(token);
+    await syncAccountStats();
+    await syncCampaigns();
+    await syncInsights();
+    await syncDemographics();
     console.log('\n✅ Meta Ads sync concluído!');
 } catch (e) {
-    // Token expirado ou sem permissão — loga mas não marca a action como falha.
-    // O token do Graph API Explorer expira em ~1h. Usar System User token permanente.
+    if (!(e instanceof MetaApiError)) throw e;
     console.warn('\n⚠️  Meta Ads API retornou erro:');
     console.warn(e.message);
     if (e.message.includes('OAuthException') || e.message.includes('token') || e.message.includes('190')) {

@@ -1,76 +1,17 @@
 #!/usr/bin/env node
-// Sync Google Ads → SurrealDB (+ espelho Postgres/Supabase na transição)
+// Sync Google Ads → Supabase (Postgres via PostgREST).
 
-import { pgUpsert, pgTry } from './lib/pg-mirror.mjs';
+import { pgUpsert, pgEnabled } from './lib/pg-mirror.mjs';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_ADS_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_ADS_CLIENT_SECRET;
 const GOOGLE_REFRESH_TOKEN = process.env.GOOGLE_ADS_REFRESH_TOKEN;
 const GOOGLE_DEVELOPER_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
 const GOOGLE_CUSTOMER_ID = process.env.GOOGLE_ADS_CUSTOMER_ID; // sem hífens
-const SURREAL_ENDPOINT = process.env.SURREAL_ENDPOINT;
-const SURREAL_NS = 'ficv';
-const SURREAL_DB = 'salespulse';
-const SURREAL_USER = process.env.SURREAL_USER;
-const SURREAL_PASS = process.env.SURREAL_PASS;
 
 const GOOGLE_LOGIN_CUSTOMER_ID = process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID || GOOGLE_CUSTOMER_ID;
 const GADS_BASE = 'https://googleads.googleapis.com/v21';
 const DAYS_BACK = parseInt(process.argv[2] || '90', 10);
-
-// ── SurrealDB ────────────────────────────────────────────────────────────────
-
-async function surrealAuth() {
-    const res = await fetch(`${SURREAL_ENDPOINT}/signin`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'surreal-ns': SURREAL_NS },
-        body: JSON.stringify({ ns: SURREAL_NS, user: SURREAL_USER, pass: SURREAL_PASS }),
-    });
-    if (!res.ok) throw new Error(`SurrealDB auth: ${res.status} ${await res.text()}`);
-    return (await res.json()).token;
-}
-
-async function surrealSQL(token, sql) {
-    const res = await fetch(`${SURREAL_ENDPOINT}/sql`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'text/plain',
-            'Accept': 'application/json',
-            'Authorization': `Bearer ${token}`,
-            'surreal-ns': SURREAL_NS,
-            'surreal-db': SURREAL_DB,
-        },
-        body: sql,
-    });
-    if (!res.ok) throw new Error(`SurrealDB SQL ${res.status}: ${await res.text()}`);
-    const data = await res.json();
-    const errs = data.filter(r => r.status === 'ERR');
-    if (errs.length) throw new Error(errs.map(e => e.result).join('; '));
-    return data;
-}
-
-function sv(v) {
-    if (v === null || v === undefined) return 'NONE';
-    if (typeof v === 'boolean') return String(v);
-    if (typeof v === 'number') return String(v);
-    if (typeof v === 'string') {
-        if (/^\d{4}-\d{2}-\d{2}T/.test(v)) return `d"${v}"`;
-        return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
-    }
-    return JSON.stringify(v);
-}
-
-async function upsertBatch(token, table, rows, buildSql) {
-    for (let i = 0; i < rows.length; i += 50) {
-        const batch = rows.slice(i, i + 50);
-        const sql = batch.map(r => buildSql(r)).join('\n');
-        await surrealSQL(token, sql);
-        process.stdout.write(`\r  ${Math.min(i + 50, rows.length)}/${rows.length}...`);
-    }
-    console.log(`\r  ✓ ${rows.length} registros                `);
-}
-
-// ── Google Ads API ───────────────────────────────────────────────────────────
 
 async function getAccessToken() {
     const res = await fetch('https://oauth2.googleapis.com/token', {
@@ -88,6 +29,8 @@ async function getAccessToken() {
     return body.access_token;
 }
 
+class GadsApiError extends Error {}
+
 async function gadsSearch(accessToken, query) {
     const res = await fetch(`${GADS_BASE}/customers/${GOOGLE_CUSTOMER_ID}/googleAds:search`, {
         method: 'POST',
@@ -100,7 +43,7 @@ async function gadsSearch(accessToken, query) {
         body: JSON.stringify({ query, pageSize: 10000 }),
     });
     const body = await res.json();
-    if (body.error) throw new Error(`Google Ads search: ${JSON.stringify(body.error)}`);
+    if (body.error) throw new GadsApiError(`Google Ads search: ${JSON.stringify(body.error)}`);
     return body.results || [];
 }
 
@@ -114,7 +57,7 @@ function dateRange() {
     };
 }
 
-async function syncCampaigns(sToken, accessToken) {
+async function syncCampaigns(accessToken) {
     console.log('Campanhas Google Ads...');
     const results = await gadsSearch(accessToken, `
         SELECT campaign.id, campaign.name, campaign.status,
@@ -134,19 +77,11 @@ async function syncCampaigns(sToken, accessToken) {
         budget_type: r.campaignBudget?.type || '',
         synced_at: now,
     }));
-    await surrealSQL(sToken, 'DELETE google_ads_campaigns;');
-    await upsertBatch(sToken, 'google_ads_campaigns', rows, r =>
-        `INSERT INTO google_ads_campaigns [{` +
-        `campaign_id:${sv(r.campaign_id)},campaign_name:${sv(r.campaign_name)},` +
-        `status:${sv(r.status)},advertising_channel_type:${sv(r.advertising_channel_type)},` +
-        `budget_amount:${sv(r.budget_amount)},budget_type:${sv(r.budget_type)},` +
-        `synced_at:${sv(r.synced_at)}}] RETURN NONE;`
-    );
-    await pgTry('google_ads_campaigns', () => pgUpsert('google_ads_campaigns', rows, 'campaign_id'));
-    return rows;
+    await pgUpsert('google_ads_campaigns', rows, 'campaign_id');
+    console.log(`  ✓ ${rows.length} campanhas gravadas`);
 }
 
-async function syncInsights(sToken, accessToken) {
+async function syncInsights(accessToken) {
     const { startDate, endDate } = dateRange();
     console.log(`Insights Google Ads (${startDate} → ${endDate})...`);
     const results = await gadsSearch(accessToken, `
@@ -169,37 +104,29 @@ async function syncInsights(sToken, accessToken) {
         conversions: Number(r.metrics.conversions || 0),
         synced_at: now,
     }));
-    await surrealSQL(sToken, `DELETE google_ads_insights_daily WHERE date >= "${startDate}" AND date <= "${endDate}";`);
-    await upsertBatch(sToken, 'google_ads_insights_daily', rows, r =>
-        `INSERT INTO google_ads_insights_daily [{` +
-        `campaign_id:${sv(r.campaign_id)},campaign_name:${sv(r.campaign_name)},` +
-        `date:${sv(r.date)},spend:${sv(r.spend)},impressions:${sv(r.impressions)},` +
-        `clicks:${sv(r.clicks)},conversions:${sv(r.conversions)},` +
-        `synced_at:${sv(r.synced_at)}}] RETURN NONE;`
-    );
-    await pgTry('google_ads_insights_daily', () => pgUpsert('google_ads_insights_daily', rows, 'campaign_id,date'));
+    await pgUpsert('google_ads_insights_daily', rows, 'campaign_id,date');
+    console.log(`  ✓ ${rows.length} registros gravados`);
 }
-
-// ── Main ─────────────────────────────────────────────────────────────────────
 
 if (!GOOGLE_CLIENT_ID) throw new Error('GOOGLE_ADS_CLIENT_ID não definido');
 if (!GOOGLE_CLIENT_SECRET) throw new Error('GOOGLE_ADS_CLIENT_SECRET não definido');
 if (!GOOGLE_REFRESH_TOKEN) throw new Error('GOOGLE_ADS_REFRESH_TOKEN não definido');
 if (!GOOGLE_DEVELOPER_TOKEN) throw new Error('GOOGLE_ADS_DEVELOPER_TOKEN não definido');
 if (!GOOGLE_CUSTOMER_ID) throw new Error('GOOGLE_ADS_CUSTOMER_ID não definido');
-if (!SURREAL_ENDPOINT || !SURREAL_USER || !SURREAL_PASS) throw new Error('Variáveis SurrealDB não definidas');
+if (!pgEnabled) throw new Error('SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY não definidos');
 
-console.log('Autenticando...');
-const [sToken, accessToken] = await Promise.all([surrealAuth(), getAccessToken()]);
-console.log('✓ SurrealDB ok\n✓ Google Ads ok\n');
+console.log('Autenticando no Google Ads...');
+const accessToken = await getAccessToken();
+console.log('✓ Google Ads ok\n');
 
+// Developer token em modo teste devolve erro da API ao acessar contas reais: só esse caso sai
+// com 0. Falha de OAuth ou de gravação no banco continua falhando o workflow.
 try {
-    await syncCampaigns(sToken, accessToken);
-    await syncInsights(sToken, accessToken);
+    await syncCampaigns(accessToken);
+    await syncInsights(accessToken);
     console.log('\n✅ Google Ads sync concluído!');
 } catch (e) {
-    // Developer token em modo teste retorna erro ao acessar contas reais.
-    // Loga o erro mas sai com code 0 para não marcar a action como falha.
+    if (!(e instanceof GadsApiError)) throw e;
     console.warn(`\n⚠️  Google Ads API retornou erro (token possivelmente em modo teste):`);
     console.warn(e.message);
     console.warn('Aguarde aprovação do Basic Access para sincronizar campanhas reais.');
