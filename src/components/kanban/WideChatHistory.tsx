@@ -406,6 +406,19 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
         staleTime: 60_000,
     })
     const vcAvailable = !!vc?.enabled && (vc.channels?.length ?? 0) > 0
+    // E-mail cadastrado no lead: caminho de contato quando o WhatsApp não entrega (número sem
+    // WhatsApp, ou janela de 24h fechada). Pedido 19/10 — não perder o lead.
+    const [emailOpen, setEmailOpen] = useState(false)
+    const [emailBody, setEmailBody] = useState('')
+    const { data: leadEmail } = useQuery<string | null>({
+        queryKey: ['lead-email', String(leadId)],
+        queryFn: async () => {
+            const { data } = await supabase.from('leads').select('email').eq('id', leadId).maybeSingle()
+            return (data?.email ?? '').trim() || null
+        },
+        enabled: !!leadId,
+        staleTime: 60_000,
+    })
     // 09/10, pedido do usuário: a conexão do WideChat com a API Oficial foi desligada de lá
     // e trazida pra cá (Z-PRO) — não existe mais conversa "ao vivo" no WideChat pra proteger
     // trocando de canal no meio do papo (o motivo de antes checar lastProvider). Toda
@@ -488,7 +501,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
     const lastInboundAt = (() => {
         let t = 0
         for (const m of messages ?? []) {
-            if (m.origin === 'channel') {
+            if (m.origin === 'channel' && m.provider !== 'email') {
                 const ts = new Date(m.created_at).getTime()
                 if (!isNaN(ts) && ts > t) t = ts
             }
@@ -498,6 +511,29 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
     const windowOpen = lastInboundAt > 0 && (Date.now() - lastInboundAt) < 24 * 3600 * 1000
     const hasAnyConversation = (messages?.length ?? 0) > 0
     const canSendText = isViva ? (!vcNeedsWindow || windowOpen) : windowOpen
+    // última mensagem NOSSA pelo WhatsApp foi recusada pela Meta (ex.: número sem WhatsApp)
+    const lastWaAgent = [...(messages ?? [])].reverse().find((m) => m.origin === 'agent' && m.provider !== 'email')
+    const lastWaFailed = lastWaAgent?.delivery_status === 'failed'
+
+    const emailMutation = useMutation({
+        mutationFn: async (text: string) => {
+            const { data, error } = await supabase.functions.invoke('vivaconnect-api', { body: { action: 'send_email', lead_id: leadId, body: text } })
+            if (error) {
+                const ctx = await (error as any).context?.json?.().catch(() => null)
+                throw new Error(ctx?.error ?? error.message)
+            }
+            if (data?.error) throw new Error(data.error)
+            return data
+        },
+        onSuccess: () => {
+            setEmailOpen(false)
+            setEmailBody('')
+            setNewMessage('')
+            queryClient.invalidateQueries({ queryKey: msgKey })
+            showSuccess('E-mail enviado — a resposta do cliente volta pra esta conversa.')
+        },
+        onError: (e: any) => showError(`Erro ao enviar e-mail: ${e.message}`),
+    })
     // sem atendimento identificado -> usa o canal padrão pra listar/enviar template.
     const effectiveChannelId = attendance?.channel_id || DEFAULT_CHANNEL_ID
 
@@ -1308,6 +1344,17 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                         <Lock className="w-3 h-3" /> Nota interna
                     </button>
                 </div>
+                {!interno && isViva && leadEmail && (lastWaFailed || !canSendText) && (
+                    <div className="flex items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                        <span>
+                            {lastWaFailed ? 'O WhatsApp não entregou essa conversa. ' : 'A janela do WhatsApp fechou. '}
+                            Dá pra responder por e-mail: <span className="font-mono">{leadEmail}</span>
+                        </span>
+                        <Button size="sm" variant="outline" className="shrink-0 h-7" onClick={() => { setEmailBody(newMessage); setEmailOpen(true) }}>
+                            Enviar por e-mail
+                        </Button>
+                    </div>
+                )}
                 {interno ? (
                     // nota interna não depende da janela de 24h nem de template — é nossa,
                     // nunca sai pelo WhatsApp, então sempre pode ser adicionada
@@ -1500,6 +1547,27 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                     </Popover>
                 )}
             </div>
+
+            <Dialog open={emailOpen} onOpenChange={setEmailOpen}>
+                <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle className="text-base">Enviar por e-mail</DialogTitle>
+                    </DialogHeader>
+                    <p className="text-xs text-muted-foreground">
+                        Para <span className="font-mono">{leadEmail}</span>. A resposta do cliente volta pra esta conversa.
+                    </p>
+                    <textarea value={emailBody} onChange={(e) => setEmailBody(e.target.value)} rows={7}
+                        placeholder="Escreva a mensagem…"
+                        className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm" />
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setEmailOpen(false)}>Cancelar</Button>
+                        <Button disabled={emailMutation.isPending || !emailBody.trim()} onClick={() => emailMutation.mutate(emailBody.trim())}>
+                            {emailMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                            Enviar e-mail
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             <Dialog open={secOpen} onOpenChange={setSecOpen}>
                 <DialogContent className="max-w-md">

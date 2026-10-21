@@ -42,6 +42,7 @@ import { asList, fillTemplate, firstName, loadSettings, markHumanReplied, parseA
 import { mirror, sv } from "../_shared/db.ts";
 import { type HubMsg, filaText, loadDestinations, planejar, redirectText } from "../_shared/hub.ts";
 import { getSecret } from "../_shared/secrets.ts";
+import { escHtml, leadReplyAddress, sendEmail } from "../_shared/email.ts";
 
 const CH_COLS = "id, name, purpose, kind, phone, api_id, api_token, active, daily_limit, zpro_whatsapp_id, last_sent_at, zpro_type, zpro_hybrid_mode, send_via_channel_id";
 
@@ -151,6 +152,33 @@ Deno.serve(async (req) => {
             return jsonRes({ templates: data.data ?? [] });
         }
 
+        // Lead que não tem WhatsApp (ou a janela de 24h fechou): responde pelo e-mail que ele
+        // cadastrou. Resposta dele volta pro histórico (email-inbound, endereço lead-<id>-<sig>).
+        // Conta como resposta humana (IA sai, lead sobe pra Em Contato), igual ao WhatsApp.
+        if (action === "send_email") {
+            const leadId = Number(body.lead_id);
+            const text = String(body.body ?? "").trim();
+            if (!leadId || !text) return jsonRes({ error: "lead_id e mensagem obrigatórios." }, 400);
+            const { data: lead } = await db.from("leads").select("id, nome_completo, email").eq("id", leadId).maybeSingle();
+            if (!lead) return jsonRes({ error: "Lead não encontrado." }, 404);
+            const to = String(lead.email ?? "").trim();
+            if (!to.includes("@")) return jsonRes({ error: "Lead sem e-mail cadastrado." }, 400);
+            const replyTo = await leadReplyAddress(db, leadId);
+            const senderName = createdBy
+                ? ((await db.from("profiles").select("full_name").eq("id", createdBy).maybeSingle()).data?.full_name ?? null)
+                : null;
+            const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#222">${escHtml(text).replace(/\n/g, "<br>")}</div>`;
+            const r = await sendEmail(to, "Faculdade Internacional Cidade Viva", html, replyTo);
+            if (!r.ok) return jsonRes({ error: r.error }, 502);
+            await db.from("widechat_messages").insert({
+                lead_id: leadId, provider: "email", channel_id: null, origin: "agent", type: "text",
+                message: text, message_id: `email-out-${r.id}`, sender_name: senderName,
+                raw_data: { channel: "email", to, resend_id: r.id, reply_to: replyTo }, created_at: new Date().toISOString(),
+            });
+            if (createdBy) await markHumanReplied(db, leadId, "Agente respondeu por e-mail", createdBy);
+            return jsonRes({ ok: true, to });
+        }
+
         if (action === "send") {
             if (!settings.enabled) return jsonRes({ error: "A integração VivaConnect está desligada (Gestão > VivaConnect)." }, 400);
             const leadId = Number(body.lead_id);
@@ -188,7 +216,8 @@ Deno.serve(async (req) => {
             // nunca precisa de janela aberta — é feito pra isso.
             if (!hsmName && !media && ch.kind === "waba") {
                 const { data: lastInbound } = await db.from("widechat_messages").select("created_at")
-                    .eq("lead_id", leadId).eq("origin", "channel").order("created_at", { ascending: false }).limit(1).maybeSingle();
+                    .eq("lead_id", leadId).eq("origin", "channel").neq("provider", "email")
+                    .order("created_at", { ascending: false }).limit(1).maybeSingle();
                 const windowOpen = !!lastInbound && (Date.now() - new Date(lastInbound.created_at).getTime()) < 24 * 3600 * 1000;
                 if (!windowOpen) return jsonRes({ error: "Passaram 24h da última mensagem do cliente — só dá pra enviar um template aprovado." }, 400);
             }

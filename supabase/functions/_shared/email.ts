@@ -74,3 +74,16 @@ export async function parseTicketReplyAddress(db: any, address: string): Promise
     const key = await inboundKey(db);
     return key && (await hmac(key, `ticket:${m[1]}`)) === m[2] ? Number(m[1]) : null;
 }
+// Mesmo esquema pro lead (conversa comercial, quando o WhatsApp não entrega): lead-<id>-<sig>@…
+export async function leadReplyAddress(db: any, leadId: number): Promise<string | null> {
+    const domain = (await getSecret("RESEND_INBOUND_DOMAIN")).trim().replace(/^@/, "");
+    const key = await inboundKey(db);
+    if (!domain || !key) return null;
+    return `lead-${leadId}-${await hmac(key, `lead:${leadId}`)}@${domain}`;
+}
+export async function parseLeadReplyAddress(db: any, address: string): Promise<number | null> {
+    const m = String(address).toLowerCase().match(/lead-(\d+)-([0-9a-f]{12})@/);
+    if (!m) return null;
+    const key = await inboundKey(db);
+    return key && (await hmac(key, `lead:${m[1]}`)) === m[2] ? Number(m[1]) : null;
+}

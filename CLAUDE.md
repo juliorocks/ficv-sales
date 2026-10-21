@@ -162,6 +162,10 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 
 - **Dois canais de WhatsApp**: WideChat (legado, `widechat-*`) e VivaConnect (Z-PRO, `vivaconnect-*`). Os dois
   gravam em `widechat_messages`, diferenciados pela coluna `provider`. A aba Conversas do lead mostra os dois.
+- **E-mail como alternativa ao WhatsApp (2026-10-19)**: `provider='email'`. Envio manual pelo botão "Enviar por e-mail"
+  (aparece quando o WhatsApp recusou a última mensagem ou a janela de 24h fechou; só com `leads.email`) →
+  `vivaconnect-api` action `send_email` (Resend, `sendEmail`). Resposta do cliente chega em `email-inbound`
+  pelo endereço assinado `lead-<id>-<sig>@<RESEND_INBOUND_DOMAIN>` (`leadReplyAddress`) e vira mensagem `origin='channel'`.
 - **Etapas do Kanban**: Entrada → IA Atendendo (Vivi atendendo) → Em Contato (SÓ com resposta humana real enviada).
   Lead novo do WhatsApp entra em Entrada. "Matriculado" é movido pelo sync do Sponte (`situacao_id` 1/6).
   Finalizado: volta pra Entrada em 24h parado (cron + webhook).
@@ -190,6 +194,9 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 - Nunca apagar linhas de `agent_team` (o webhook depende delas).
 
 ## Armadilhas conhecidas (já custaram tempo — não repetir)
+
+- **Janela de 24h do WhatsApp**: qualquer lugar que calcula se texto livre é permitido precisa ignorar `provider='email'`
+  (resposta por e-mail tem `origin='channel'` e não pode abrir a janela do WhatsApp). Já existe em WideChatHistory e vivaconnect-api.
 
 - **Token em refresh**: `UPDATE` que filtra 0 linhas sem erro. Padrão: `getSession()` antes, `withTimeout`, `.select()`
   pra checar se alterou algo. Já reapareceu em TicketDetail (05/10).
