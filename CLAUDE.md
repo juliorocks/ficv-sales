@@ -18,7 +18,7 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 - `src/utils/chunk_*.sql`, `src/utils/migration_data*.sql`, `src/utils/migrate_kb*.sql`,
   `src/utils/ppc_*.sql`, `src/utils/widechat_integration_tables.sql`: SQL legado já aplicado.
 - `build_errors*.txt`, `history.txt`, `*.tsbuildinfo`, `package-lock.json`, `.DS_Store`.
-- `vivaconnect/` (zips e binários do Z-PRO), `surreal/` (legado SurrealDB, pode ser apagado), `_migration-backups/`,
+- `vivaconnect/` (zips e binários do Z-PRO), `_migration-backups/`,
   `supabase/migrations/_archive_surreal_era/`.
 - Scripts soltos na raiz (`recalculate-scores*.js`, `check-agents.js`, `__tmp_*.mjs`, etc.): utilitários
   antigos, não fazem parte do app.
