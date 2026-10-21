@@ -240,6 +240,9 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 - **Apagar/editar mensagem já enviada no WhatsApp**: sem implementação. Aguardando conferir no painel real do Z-PRO.
 - **VivaConnect Igreja e Fundação**: número placeholder `83999999999`, falta o número real.
 - **Teste em navegador pendente**: som de lead novo / resposta, seletor de nível, selo de contagem com filtro de data.
+- **Migration `20261021120000_security_hardening_rls.sql`**: commitada, AINDA NÃO aplicada em produção (bloqueio de
+  permissão na execução automática). Aplicar com `supabase db push --linked` e validar com `/tmp`-free checks. Testada
+  antes em Postgres local com esquema mínimo: 13 casos de ataque bloqueados, operações legítimas preservadas.
 - **Segurança (auditoria run-1, 2026-10-21)**: ver `~/security-audit-skill/ficv-sales-1/run-1/`. Pendentes: NV-1 (`profiles.role` autoeditável), NV-2 (`alunos.sponte_aluno_id`), `delete_stage_and_leads` concedida a `authenticated`, `tmsg_insert` sem checar ticket, webhooks sem assinatura.
 - **Segurança**: `.claude/settings.json` (não versionado) tem chaves Supabase escritas nas permissões, incluindo de
   outro project ref (`znypfroagfwohqeyxyqv`). Remover essas linhas e manter `.claude/settings.local.json` fora do git.
