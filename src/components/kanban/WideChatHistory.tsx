@@ -626,6 +626,10 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
         onSuccess: (_data, variables) => {
             const isHsm = typeof variables === 'object' && 'hsm_template_name' in variables
             queryClient.invalidateQueries({ queryKey: msgKey })
+            // a visão Atendimentos recarrega a cada 15s — sem isso, o lead que acabou de ser
+            // respondido (e subiu pra Em Contato) demora pra mudar de aba na lista
+            queryClient.invalidateQueries({ queryKey: ['inbox-leads'] })
+            queryClient.invalidateQueries({ queryKey: ['leads-stage-counts'] })
             markSeen()
             // O /message/send só confirma que a Meta ACEITOU o pedido — a entrega pode
             // falhar depois (número inválido; erro 131049 pra template de marketing;

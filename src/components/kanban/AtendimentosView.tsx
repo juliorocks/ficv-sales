@@ -75,6 +75,9 @@ export function AtendimentosView({ searchTerm = "", assigneeFilter = "all", team
 
     const [q, setQ] = useState("")
     const [selected, setSelected] = useState<number | null>(null)
+    // guarda a linha da conversa aberta: quando o lead sai da aba atual (ex.: Atender tira da Entrada),
+    // a lista recarrega e ele some dela — sem isso o chat fechava sozinho (achado 22/10)
+    const [selectedRow, setSelectedRow] = useState<any>(null)
     // painel "Detalhes do contato" à direita (lembrado no navegador)
     const [details, setDetails] = useState<boolean>(() => { try { return localStorage.getItem("ficv_inbox_details") === "1" } catch { return false } })
     const toggleDetails = (v: boolean) => { setDetails(v); try { localStorage.setItem("ficv_inbox_details", v ? "1" : "0") } catch { /* sem storage */ } }
@@ -189,7 +192,7 @@ export function AtendimentosView({ searchTerm = "", assigneeFilter = "all", team
         })
     }, [baseList, courseFilter, priorityOnly, priorityFirst, sortBy, isEntradaStage])
 
-    const current = list.find((r) => r.lead_id === selected) ?? null
+    const current = list.find((r) => r.lead_id === selected) ?? (selectedRow?.lead_id === selected ? selectedRow : null)
 
     return (
         <div className="flex h-[calc(100vh-190px)] min-h-[520px] rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] overflow-hidden">
@@ -251,7 +254,7 @@ export function AtendimentosView({ searchTerm = "", assigneeFilter = "all", team
                     {list.map((r) => {
                         const on = r.lead_id === selected
                         return (
-                            <button key={r.lead_id} onClick={() => setSelected(r.lead_id)}
+                            <button key={r.lead_id} onClick={() => { setSelected(r.lead_id); setSelectedRow(r) }}
                                 className={`w-full text-left flex gap-3 px-3 py-3 border-b border-[var(--border)]/60 transition-colors ${on ? "bg-primary/10 border-l-4 border-l-primary" : "hover:bg-[var(--bg-card-hover)] border-l-4 border-l-transparent"}`}>
                                 <div className="relative shrink-0">
                                     <div className="h-10 w-10 rounded-full bg-primary/15 text-primary flex items-center justify-center text-sm font-bold">{initials(r.nome)}</div>
