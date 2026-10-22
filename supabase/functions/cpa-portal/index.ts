@@ -68,7 +68,7 @@ Deno.serve(async (req) => {
         const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
         const { data: { user } } = await db.auth.getUser(jwt);
         if (!user?.email?.endsWith("@aluno.ficv.br")) return j({ error: "Sessão inválida." }, 401);
-        const { data: aluno } = await db.from("alunos").select("sponte_aluno_id").eq("id", user.id).maybeSingle();
+        const { data: aluno } = await db.from("alunos").select("sponte_aluno_id, nome, ra").eq("id", user.id).maybeSingle();
         if (!aluno?.sponte_aluno_id) return j({ error: "Conta não ligada ao Sponte." }, 404);
         const A = Number(aluno.sponte_aluno_id);
         const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -158,7 +158,16 @@ Deno.serve(async (req) => {
                 throw error;
             }
             const linha = Array.isArray(data) ? data[0] : data;
-            return j({ ok: true, teste: linha.out_teste, protocolo: linha.out_seq, comprovante: linha.out_hash });
+            const { data: gravada } = await db.from("cpa_respostas").select("respondido_em").eq("id", linha.out_id).maybeSingle();
+            const item = itensElegiveis.find((x) => x.formulario_id === fid && x.contexto === alvo);
+            return j({
+                ok: true, teste: linha.out_teste, protocolo: linha.out_seq, comprovante: linha.out_hash,
+                formulario: eleg.formulario.titulo,
+                disciplina: item?.disciplina ?? null,
+                turma: item?.turma ?? null,
+                respondido_em: gravada?.respondido_em ?? null,
+                aluno: { nome: aluno.nome ?? null, ra: aluno.ra ?? null },
+            });
         }
 
         return j({ error: "Ação desconhecida." }, 400);

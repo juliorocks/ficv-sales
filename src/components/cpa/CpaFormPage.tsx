@@ -21,9 +21,14 @@ const TINTA = "#13161D"
 // Quem sobe novos JSON só põe na pasta; o glob pega sozinho. Carrega só o arquivo sorteado.
 const carregadoresLottie = import.meta.glob<object>("./lottie/*.json", { import: "default" })
 let ultimaAnimacao: string | null = null // a mesma animação não aparece duas telas seguidas
-function IconeLottie({ className, reserva: Reserva }: { className: string; reserva: React.ComponentType<{ className?: string }> }) {
+function IconeLottie({ className, reserva: Reserva, arquivo }: { className: string; reserva: React.ComponentType<{ className?: string }>; arquivo?: string }) {
     const [dados, setDados] = useState<object | null>(null)
     useEffect(() => {
+        if (arquivo) {
+            let vivo = true
+            carregadoresLottie[`./lottie/${arquivo}`]?.().then((d) => { if (vivo) setDados(d) }).catch(() => {})
+            return () => { vivo = false }
+        }
         const todas = Object.keys(carregadoresLottie)
         const chaves = todas.length > 1 ? todas.filter((k) => k !== ultimaAnimacao) : todas
         if (!chaves.length) return
@@ -32,7 +37,7 @@ function IconeLottie({ className, reserva: Reserva }: { className: string; reser
         ultimaAnimacao = sorteada
         carregadoresLottie[sorteada]().then((d) => { if (vivo) setDados(d) }).catch(() => {})
         return () => { vivo = false }
-    }, [])
+    }, [arquivo])
     if (!dados) return <div className={className}><Reserva className="h-full w-full text-[#C9A84C]" /></div>
     return <div className={className}><Lottie animationData={dados} loop autoplay /></div>
 }
@@ -63,7 +68,11 @@ export type Pergunta = {
 }
 export type Bloco = { id: number; ordem: number; titulo: string; incentivo: string | null }
 export type Formulario = { id: number; nivel: string; titulo: string; ano: number; intro: string | null; teste: boolean; curso?: string }
-export type Resultado = { ok: true; teste: boolean; protocolo: number | null; comprovante: string }
+export type Resultado = {
+    ok: true; teste: boolean; protocolo: number | null; comprovante: string
+    formulario?: string; disciplina?: string | null; turma?: string | null; respondido_em?: string | null
+    aluno?: { nome: string | null; ra: string | null }
+}
 export type RespostaEnvio = Resultado | { error: string; pergunta_id?: number }
 
 type Passo =
@@ -194,30 +203,27 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
 
     if (resultado) {
         return (
-            <Tela>
-                <motion.div initial={{ opacity: 0, scale: 0.94 }} animate={{ opacity: 1, scale: 1 }} className="w-full max-w-md text-center space-y-5">
-                    <IconeLottie className="mx-auto h-32 w-32" reserva={Check} />
+            <div className="min-h-dvh bg-gradient-to-b from-[#FBF6E9] via-background to-background text-foreground">
+                <div className="w-full bg-[#13161D] py-4">
+                    <img src={LOGO_FICV} alt="Faculdade Internacional Cidade Viva" className="mx-auto h-10 w-auto" />
+                </div>
+                <motion.div initial={{ opacity: 0, scale: 0.94 }} animate={{ opacity: 1, scale: 1 }} className="mx-auto w-full max-w-md space-y-5 px-4 py-8 text-center md:max-w-lg">
+                    <IconeLottie className="mx-auto h-40 w-40" reserva={Check} arquivo="Trophy.json" />
                     <h1 className="text-2xl font-bold">Obrigado por participar!</h1>
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-sm text-[var(--text-muted)]">
                         {resultado.teste
                             ? "Resposta de teste registrada. Ela não entra nos relatórios oficiais."
-                            : "Sua avaliação foi registrada de forma anônima."}
+                            : "Sua avaliação foi registrada."}
                     </p>
-                    <div className="glass-card p-6 text-left space-y-2">
-                        {!resultado.teste && resultado.protocolo !== null && (
-                            <p className="text-xs text-muted-foreground">Protocolo nº <span className="font-mono font-semibold text-foreground">{resultado.protocolo}</span></p>
-                        )}
-                        <p className="text-xs text-muted-foreground">Código de comprovante</p>
-                        <p className="break-all font-mono text-[11px] leading-relaxed">{resultado.comprovante}</p>
-                        <Btn
-                            variant="outline" size="sm" className="w-full"
-                            onClick={() => { navigator.clipboard?.writeText(resultado.comprovante); setCopiado(true) }}
-                        >
-                            {copiado ? <><Check className="mr-2 h-4 w-4" /> Copiado</> : <><Copy className="mr-2 h-4 w-4" /> Copiar código</>}
+                    <Comprovante resultado={resultado} />
+                    <div className="flex flex-col gap-2">
+                        <Btn size="lg" className="h-12 w-full text-sm" style={{ background: TINTA }} onClick={() => window.print()}>Salvar comprovante (PDF)</Btn>
+                        <Btn variant="outline" className="h-11 w-full text-sm" onClick={() => { navigator.clipboard?.writeText(resultado.comprovante); setCopiado(true) }}>
+                            {copiado ? <><Check className="mr-2 h-4 w-4" /> Código copiado</> : <><Copy className="mr-2 h-4 w-4" /> Copiar código</>}
                         </Btn>
                     </div>
                 </motion.div>
-            </Tela>
+            </div>
         )
     }
 
@@ -413,6 +419,48 @@ function PerguntaView({ pergunta: p, valor, ultima, enviando, onResponder, onCon
                 </div>
             )}
         </div>
+    )
+}
+
+// Comprovante: só o aluno vê os próprios dados, na tela e no PDF. A resposta gravada não tem nome.
+function Comprovante({ resultado: r }: { resultado: Resultado }) {
+    const quando = r.respondido_em ? new Date(r.respondido_em) : new Date()
+    const data = quando.toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" })
+    const hora = quando.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+    const linha = (rotulo: string, valor: string | null | undefined) => valor ? (
+        <div className="flex justify-between gap-4 py-2 text-sm">
+            <span className="text-[var(--text-muted)]">{rotulo}</span><span className="text-right font-medium">{valor}</span>
+        </div>
+    ) : null
+    return (
+        <>
+            <style>{`@media print {
+                body * { visibility: hidden !important; }
+                #cpa-comprovante, #cpa-comprovante * { visibility: visible !important; }
+                #cpa-comprovante { position: absolute; left: 0; top: 0; width: 100%; box-shadow: none !important; }
+            }`}</style>
+            <div id="cpa-comprovante" className="rounded-2xl bg-[var(--bg-card)] p-6 text-left shadow-[var(--card-shadow)]">
+                <div className="mb-4 flex items-center justify-between">
+                    <img src={LOGO_FICV} alt="FICV" className="h-8 w-auto rounded bg-[#13161D] px-2 py-1" />
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-[#A07E2A]">Comprovante</span>
+                </div>
+                <p className="text-base font-bold">{r.formulario ?? "Avaliação Institucional CPA"}</p>
+                {r.disciplina && <p className="text-sm text-[var(--text-muted)]">{r.disciplina}{r.turma ? ` · ${r.turma}` : ""}</p>}
+                <div className="mt-4 divide-y divide-[var(--border)]">
+                    {linha("Data", data)}
+                    {linha("Hora", hora)}
+                    {linha("Protocolo", r.teste ? "teste" : r.protocolo !== null ? `nº ${r.protocolo}` : null)}
+                    {linha("Aluno", r.aluno?.nome)}
+                    {linha("Matrícula", r.aluno?.ra)}
+                    {!r.aluno?.nome && linha("Identificação", "Resposta anônima")}
+                </div>
+                <p className="mt-4 text-[11px] text-[var(--text-muted)]">Código de verificação</p>
+                <p className="break-all font-mono text-[11px] leading-relaxed">{r.comprovante}</p>
+                <p className="mt-4 text-[11px] text-[var(--text-muted)]">
+                    Este código confirma que a resposta foi registrada na cadeia de integridade da CPA. Ele não revela o conteúdo das respostas.
+                </p>
+            </div>
+        </>
     )
 }
 

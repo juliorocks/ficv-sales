@@ -63,11 +63,14 @@ Deno.serve(async (req) => {
                 throw error;
             }
             const linha = Array.isArray(data) ? data[0] : data;
+            const { data: gravada } = await db.from("cpa_respostas").select("respondido_em").eq("id", linha.out_id).maybeSingle();
             return j({
                 ok: true,
                 teste: linha.out_teste,
                 protocolo: linha.out_seq,
                 comprovante: linha.out_hash,
+                formulario: f.titulo,
+                respondido_em: gravada?.respondido_em ?? null,
             });
         }
 
