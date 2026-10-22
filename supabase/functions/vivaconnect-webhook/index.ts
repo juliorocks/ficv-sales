@@ -181,7 +181,10 @@ Deno.serve(async (req) => {
         // ── Hub do Grupo: contato novo no número antigo do grupo → triagem ──────
         let hubBacklog: HubMsg[] = [];
         let hubRoutingId: number | null = null;
-        if (ch.hub_enabled && !m.fromMe && !aluno && !lead && !m.agentUserId) {
+        // agentUserId NÃO bloqueia a triagem: no número oficial do Grupo o Z-PRO já vem com o
+        // ticket atribuído a um atendente da Igreja (ticket.user), e o bloqueio antigo fazia o
+        // contato pular a triagem e cair no comercial (achado 22/10: Dorivan, Emmanuel, Pr João Batista).
+        if (ch.hub_enabled && !m.fromMe && !aluno && !lead) {
             const r = await hubRouteLocked(db, settings, ch, m, log?.id ?? 0);
             if (r.handled) return await done(r.outcome);
             hubBacklog = r.backlog;
