@@ -54,6 +54,14 @@ async function contexto(db: any, A: number) { // eslint-disable-line @typescript
 }
 
 // formulários com o Portal ligado, do ano mais recente
+// professor titular da disciplina (Moodle, via cpa_docentes). null quando não foi identificado.
+async function docentePorContexto(db: any, contexto: string): Promise<string | null> { // eslint-disable-line @typescript-eslint/no-explicit-any
+    const [periodo, disciplina] = contexto.split("~");
+    if (!periodo || !disciplina) return null;
+    const { data } = await db.from("cpa_docentes").select("docente").eq("periodo", periodo).eq("disciplina", disciplina).maybeSingle();
+    return data?.docente ?? null;
+}
+
 async function formsAbertos(db: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
     const { data } = await db.from("cpa_formularios")
         .select("id, nivel, tipo, titulo, ano, status, intro")
@@ -97,10 +105,11 @@ Deno.serve(async (req) => {
         const respondido = (fid: number, ctx: string) => (feitas ?? []).some((p: any) => p.formulario_id === fid && p.contexto === ctx); // eslint-disable-line @typescript-eslint/no-explicit-any
 
         if (acao === "pendencias") {
+            const docentes = await Promise.all(itensElegiveis.map((i) => docentePorContexto(db, i.contexto)));
             return j({
                 geral: geralForm ? { formulario_id: geralForm.id, titulo: geralForm.titulo, nivel: geralForm.nivel, respondida: respondido(geralForm.id, "") } : null,
-                disciplinas: itensElegiveis.map((i) => ({
-                    formulario_id: i.formulario_id, contexto: i.contexto, disciplina: i.disciplina, turma: i.turma,
+                disciplinas: itensElegiveis.map((i, k) => ({
+                    formulario_id: i.formulario_id, contexto: i.contexto, disciplina: i.disciplina, turma: i.turma, docente: docentes[k],
                     respondida: respondido(i.formulario_id, i.contexto),
                 })),
             });
@@ -128,7 +137,7 @@ Deno.serve(async (req) => {
 
         if (acao === "form") {
             return j({
-                formulario: { id: fid, nivel: eleg.formulario.nivel, titulo: eleg.formulario.titulo, ano: eleg.formulario.ano, intro: eleg.formulario.intro, teste: eleg.formulario.status === "teste", curso: cursoOficial, disciplina: itensElegiveis.find((x) => x.formulario_id === fid && x.contexto === alvo)?.disciplina ?? null, turma: itensElegiveis.find((x) => x.formulario_id === fid && x.contexto === alvo)?.turma ?? null },
+                formulario: { id: fid, nivel: eleg.formulario.nivel, titulo: eleg.formulario.titulo, ano: eleg.formulario.ano, intro: eleg.formulario.intro, teste: eleg.formulario.status === "teste", curso: cursoOficial, disciplina: itensElegiveis.find((x) => x.formulario_id === fid && x.contexto === alvo)?.disciplina ?? null, turma: itensElegiveis.find((x) => x.formulario_id === fid && x.contexto === alvo)?.turma ?? null, docente: alvo ? await docentePorContexto(db, alvo) : null },
                 contexto: alvo,
                 blocos: blocos ?? [],
                 perguntas: (perguntas ?? []).filter((p: any) => p.chave !== "curso"), // eslint-disable-line @typescript-eslint/no-explicit-any

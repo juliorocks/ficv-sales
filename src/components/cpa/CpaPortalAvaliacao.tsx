@@ -13,7 +13,7 @@ import { CpaFormFlow, Bloco, Formulario, Pergunta, Resultado, RespostaEnvio } fr
 
 type Pendencias = {
     geral: { formulario_id: number; titulo: string; nivel: string; respondida: boolean } | null
-    disciplinas: { formulario_id: number; contexto: string; disciplina: string; turma: string; respondida: boolean }[]
+    disciplinas: { formulario_id: number; contexto: string; disciplina: string; turma: string; docente: string | null; respondida: boolean }[]
 }
 type Item = { formulario_id: number; contexto: string; titulo: string; detalhe: string; respondida: boolean }
 
@@ -37,7 +37,7 @@ export function CpaPortalCard() {
 
     const itens: Item[] = [
         ...(data?.geral ? [{ formulario_id: data.geral.formulario_id, contexto: "", titulo: `Avaliação institucional (${data.geral.nivel === "pos" ? "pós" : "graduação"})`, detalhe: "Sua opinião sobre a FICV", respondida: data.geral.respondida }] : []),
-        ...(data?.disciplinas ?? []).map((d) => ({ formulario_id: d.formulario_id, contexto: d.contexto, titulo: d.disciplina, detalhe: d.turma, respondida: d.respondida })),
+        ...(data?.disciplinas ?? []).map((d) => ({ formulario_id: d.formulario_id, contexto: d.contexto, titulo: d.disciplina, detalhe: d.docente ? `${d.turma} · Prof. ${d.docente}` : d.turma, respondida: d.respondida })),
     ]
     if (!itens.length) return null
 
