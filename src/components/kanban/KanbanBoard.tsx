@@ -15,6 +15,7 @@ import { withTimeout } from "@/utils/withTimeout"
 
 export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, teamAgentIds }: { searchTerm: string; assigneeFilter?: string; dateRange?: { start: string; end: string }; teamAgentIds?: string[] }): JSX.Element {
     const queryClient = useQueryClient()
+    useEffect(() => { console.trace('[diagnóstico] quadro montou'); return () => console.trace('[diagnóstico] quadro desmontou') }, [])
     const { user, isLoading: isAuthLoading } = useAuth()
     const [columns, setColumns] = useState<Record<string, Lead[]>>({})
     const [orderedStages, setOrderedStages] = useState<Stage[]>([])
@@ -486,6 +487,7 @@ export function KanbanBoard({ searchTerm, assigneeFilter = 'all', dateRange, tea
     }
 
     if (isAuthLoading || isLoadingStages || isLoadingLeads || isLoadingUsers || isLoadingSources || isLoadingCourses) {
+        console.trace('[diagnóstico] quadro voltou pro carregamento')
         return <KanbanSkeleton />
     }
 
