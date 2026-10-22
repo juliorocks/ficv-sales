@@ -22,7 +22,8 @@ type Pergunta = { id: number; bloco_id: number; ordem: number; texto: string; ti
 
 export function CpaAdmin() {
     const qc = useQueryClient()
-    const [formId, setFormId] = useState<number | null>(null)
+    const [nivel, setNivel] = useState<"graduacao" | "pos">("graduacao")
+    const [tipo, setTipo] = useState<"geral" | "disciplina">("geral")
     const [filtros, setFiltros] = useState<Filtros>({ origem: "oficial", curso: "", de: "", ate: "" })
     const [busca, setBusca] = useState("")
     const [verificacao, setVerificacao] = useState<null | { integra: boolean; total: number; primeiro_erro: { seq: number; motivo: string } | null; cabeca: string | null }>(null)
@@ -34,7 +35,7 @@ export function CpaAdmin() {
     })
     const forms = lista?.forms ?? []
     const admin = !!lista?.admin
-    const atual = forms.find((f) => f.id === (formId ?? forms[0]?.id)) ?? null
+    const atual = forms.find((f) => f.nivel === nivel && f.tipo === tipo) ?? null
 
     const { data: detalhe } = useQuery({
         queryKey: ["cpa-form", atual?.id],
@@ -135,16 +136,25 @@ export function CpaAdmin() {
                     <p className="text-sm text-[var(--text-muted)]">Formulários, respostas, indicadores e comprovação.</p>
                 </div>
                 <div className="flex gap-2">
-                    {forms.map((f) => (
-                        <Btn key={f.id} size="sm" variant={f.id === atual?.id ? "default" : "outline"} onClick={() => setFormId(f.id)}>
-                            {f.nivel === "graduacao" ? "Graduação" : "Pós"} {f.ano}
-                        </Btn>
-                    ))}
+                    <div className="flex gap-2">
+                        {(["graduacao", "pos"] as const).map((n) => (
+                            <Btn key={n} size="sm" variant={nivel === n ? "default" : "outline"} onClick={() => setNivel(n)}>
+                                {n === "graduacao" ? "Graduação" : "Pós"} {forms.find((f) => f.nivel === n)?.ano}
+                            </Btn>
+                        ))}
+                    </div>
                 </div>
             </div>
 
             {atual && (
                 <>
+                    <div className="flex gap-2 pb-2">
+                        {(["geral", "disciplina"] as const).map((t) => (
+                            <Btn key={t} size="sm" variant={tipo === t ? "default" : "ghost"} onClick={() => setTipo(t)}>
+                                {t === "geral" ? "Avaliação geral" : "Avaliação de disciplinas"}
+                            </Btn>
+                        ))}
+                    </div>
                     <div className="flex gap-2 pb-2">
                         <Btn size="sm" variant={aba === "painel" ? "default" : "ghost"} onClick={() => setAba("painel")}>Painel e respostas</Btn>
                         <Btn size="sm" variant={aba === "perguntas" ? "default" : "ghost"} onClick={() => setAba("perguntas")}>Perguntas</Btn>
