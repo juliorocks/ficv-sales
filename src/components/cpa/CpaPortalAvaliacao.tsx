@@ -40,7 +40,7 @@ export function CpaPortalCard() {
     const pendentes = itens.filter((i) => !i.respondida).length
 
     return (
-        <section className="rounded-2xl border bg-card p-4 space-y-3">
+        <section className="glass-card p-6 space-y-4">
             <div className="flex items-center justify-between">
                 <h2 className="flex items-center gap-2 text-sm font-semibold">
                     <ClipboardCheck className="h-4 w-4 text-primary" /> Avaliações
@@ -53,7 +53,7 @@ export function CpaPortalCard() {
                         <button
                             type="button" disabled={i.respondida}
                             onClick={() => setAlvo({ formulario_id: i.formulario_id, contexto: i.contexto, titulo: i.titulo })}
-                            className="flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left text-sm transition-colors hover:border-primary/60 disabled:opacity-60"
+                            className="flex w-full items-center justify-between gap-3 rounded-xl bg-[var(--bg-card-hover)] px-4 py-3 text-left text-sm transition-colors hover:bg-[var(--bg-card)] disabled:opacity-60"
                         >
                             <span className="min-w-0">
                                 <span className="block truncate font-medium">{i.titulo}</span>
