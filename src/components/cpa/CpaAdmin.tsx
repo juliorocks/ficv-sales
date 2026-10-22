@@ -5,7 +5,7 @@ import { useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { supabase } from "@/lib/supabase"
-import { Btn, Cartao, Inp, Rotulo, TICK, TT, COR_GRAFICO } from "./cpaUi"
+import { AvatarDocente, Btn, Cartao, Inp, Rotulo, TICK, TT, COR_GRAFICO } from "./cpaUi"
 import { ClipboardCheck, Download, Loader2, RefreshCw, ShieldCheck, ShieldAlert } from "lucide-react"
 import { showError, showSuccess } from "@/utils/toast"
 import { chamar } from "./cpaApi"
@@ -330,6 +330,8 @@ export function CpaAdmin() {
                         )}
                     </Painel>
 
+                    <ProfessoresFotos />
+
                     <Painel titulo="Tabela por pergunta (alternativa textual aos gráficos)">
                         <div className="overflow-x-auto">
                             <table className="w-full min-w-[640px] text-sm">
@@ -418,5 +420,45 @@ function Campo({ rotulo, children }: { rotulo: string; children: React.ReactNode
             <span className="text-xs text-muted-foreground">{rotulo}</span>
             {children}
         </label>
+    )
+}
+
+// Professores identificados pelo Moodle: a equipe envia a foto de cada um (PNG, JPG ou WebP até 1 MB).
+function ProfessoresFotos() {
+    const qc = useQueryClient()
+    const { data } = useQuery({ queryKey: ["cpa-docentes"], queryFn: () => chamar<{ docentes: { nome: string; foto_path: string | null }[]; admin: boolean }>("docentes", {}) })
+    const enviar = useMutation({
+        mutationFn: async ({ nome, arquivo }: { nome: string; arquivo: File }) => {
+            const imagem = await new Promise<string>((ok, falha) => {
+                const r = new FileReader()
+                r.onload = () => ok(String(r.result))
+                r.onerror = () => falha(r.error)
+                r.readAsDataURL(arquivo)
+            })
+            return chamar("docente_foto", { nome, imagem })
+        },
+        onSuccess: () => { qc.invalidateQueries({ queryKey: ["cpa-docentes"] }); showSuccess("Foto salva") },
+        onError: (e: Error) => showError(e.message),
+    })
+    const lista = data?.docentes ?? []
+    if (!lista.length) return null
+    return (
+        <Painel titulo="Professores e fotos">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {lista.map((d) => (
+                    <div key={d.nome} className="flex items-center gap-3 rounded-xl bg-[var(--bg-card-hover)] p-3">
+                        <AvatarDocente src={d.foto_path ? `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/cpa-docentes/${d.foto_path}` : null} nome={d.nome} tamanho={44} />
+                        <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium">{d.nome}</p>
+                            <label className="cursor-pointer text-xs font-semibold text-primary">
+                                {d.foto_path ? "Trocar foto" : "Enviar foto"}
+                                <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
+                                    onChange={(e) => { const f = e.target.files?.[0]; if (f) enviar.mutate({ nome: d.nome, arquivo: f }); e.target.value = "" }} />
+                            </label>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </Painel>
     )
 }

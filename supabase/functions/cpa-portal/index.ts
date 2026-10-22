@@ -62,6 +62,13 @@ async function docentePorContexto(db: any, contexto: string): Promise<string | n
     return data?.docente ?? null;
 }
 
+// foto enviada pela equipe (bucket público cpa-docentes). null quando não há foto: a tela mostra avatar.
+async function fotoDoDocente(db: any, nome: string): Promise<string | null> { // eslint-disable-line @typescript-eslint/no-explicit-any
+    const { data } = await db.from("cpa_docente_fotos").select("foto_path").eq("nome", nome).maybeSingle();
+    if (!data?.foto_path) return null;
+    return `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/public/cpa-docentes/${data.foto_path}`;
+}
+
 async function formsAbertos(db: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
     const { data } = await db.from("cpa_formularios")
         .select("id, nivel, tipo, titulo, ano, status, intro")
@@ -108,10 +115,11 @@ Deno.serve(async (req) => {
             const docentes = await Promise.all(itensElegiveis.map((i) => docentePorContexto(db, i.contexto)));
             return j({
                 geral: geralForm ? { formulario_id: geralForm.id, titulo: geralForm.titulo, nivel: geralForm.nivel, respondida: respondido(geralForm.id, "") } : null,
-                disciplinas: itensElegiveis.map((i, k) => ({
+                disciplinas: await Promise.all(itensElegiveis.map(async (i, k) => ({
                     formulario_id: i.formulario_id, contexto: i.contexto, disciplina: i.disciplina, turma: i.turma, docente: docentes[k],
+                    docente_foto: docentes[k] ? await fotoDoDocente(db, docentes[k]!) : null,
                     respondida: respondido(i.formulario_id, i.contexto),
-                })),
+                }))),
             });
         }
 
@@ -137,7 +145,7 @@ Deno.serve(async (req) => {
 
         if (acao === "form") {
             return j({
-                formulario: { id: fid, nivel: eleg.formulario.nivel, titulo: eleg.formulario.titulo, ano: eleg.formulario.ano, intro: eleg.formulario.intro, teste: eleg.formulario.status === "teste", curso: cursoOficial, disciplina: itensElegiveis.find((x) => x.formulario_id === fid && x.contexto === alvo)?.disciplina ?? null, turma: itensElegiveis.find((x) => x.formulario_id === fid && x.contexto === alvo)?.turma ?? null, docente: alvo ? await docentePorContexto(db, alvo) : null },
+                formulario: { id: fid, nivel: eleg.formulario.nivel, titulo: eleg.formulario.titulo, ano: eleg.formulario.ano, intro: eleg.formulario.intro, teste: eleg.formulario.status === "teste", curso: cursoOficial, disciplina: itensElegiveis.find((x) => x.formulario_id === fid && x.contexto === alvo)?.disciplina ?? null, turma: itensElegiveis.find((x) => x.formulario_id === fid && x.contexto === alvo)?.turma ?? null, docente: alvo ? await docentePorContexto(db, alvo) : null, docente_foto: alvo && (await docentePorContexto(db, alvo)) ? await fotoDoDocente(db, (await docentePorContexto(db, alvo))!) : null },
                 contexto: alvo,
                 blocos: blocos ?? [],
                 perguntas: (perguntas ?? []).filter((p: any) => p.chave !== "curso"), // eslint-disable-line @typescript-eslint/no-explicit-any

@@ -118,7 +118,7 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 | `integrations` | Gestão de credenciais e testes de integração |
 | `openai-models` | Lista modelos disponíveis na OpenAI |
 | `cpa-form` | Avaliação CPA pública (sem JWT): `get` e `submit`. Valida no servidor e grava via `cpa_registrar_resposta` |
-| `cpa-admin` | Avaliação CPA (JWT admin/agente): `forms` (com população ativa do Sponte), `form`, `stats` (inclui por disciplina com professor), `export` (CSV + SHA-256), `verify` (cadeia), `update_form` (admin: status e `portal_ativo`), `estrutura` (blocos, perguntas e quais já têm resposta), `bloco_salvar`/`bloco_excluir`, `pergunta_salvar`/`pergunta_excluir`, `reordenar` (admin, as ações de escrita), `delete_tests` (admin) e `sync_docentes` (admin: professor titular pelo Moodle, em lotes) |
+| `cpa-admin` | Avaliação CPA (JWT admin/agente): `forms` (com população ativa do Sponte), `form`, `stats` (inclui por disciplina com professor), `export` (CSV + SHA-256), `verify` (cadeia), `update_form` (admin: status e `portal_ativo`), `estrutura` (blocos, perguntas e quais já têm resposta), `bloco_salvar`/`bloco_excluir`, `pergunta_salvar`/`pergunta_excluir`, `reordenar` (admin, as ações de escrita), `docentes` (professores e se têm foto), `docente_foto` (admin: envia foto, até 1 MB), `delete_tests` (admin) e `sync_docentes` (admin: professor titular pelo Moodle, em lotes) |
 | `cpa-portal` | Avaliação CPA no Portal (JWT do aluno, só o próprio): `pendencias`, `form`, `submit`. Elegibilidade pela matrícula Vigente e pelo boletim do módulo atual |
 
 ### Módulos compartilhados (`supabase/functions/_shared/`)
@@ -161,7 +161,7 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 - **Equipe**: `profiles` (19; `role`, `team_id` = departamento), `agent_profiles` (20; score/metas),
   `agent_team` (5; roster do webhook), `teams`, `user_integrations`, `audit_logs`, `app_settings`.
 - **Marketing/Ads**: `marketing_forms`, `marketing_form_submissions`, `sendpulse_forms`, `meta_*`, `google_ads_*`.
-- **Avaliação CPA**: `cpa_participacoes` (quem já respondeu cada contexto, só HMAC do aluno; sem policy, só service role), `cpa_docentes` (período + disciplina → professor titular, do Moodle), `cpa_formularios` (nivel graduacao/pos, tipo geral/disciplina, status teste/aberto/encerrado, `token` do link, `portal_ativo` desligado por padrão, `populacao_alvo` não é mais usado), `cpa_blocos`, `cpa_perguntas` (escala/escolha/texto; `chave='curso'` alimenta o filtro), `cpa_respostas` (`teste`, `seq`, `respostas` jsonb, `canonico`, `hash_anterior`, `hash`). Oficiais são imutáveis por trigger (`cpa_respostas_oficiais_imutaveis`). Só a service role escreve; leitura direta só staff.
+- **Avaliação CPA**: `cpa_docente_fotos` (nome do professor → caminho da foto no bucket público `cpa-docentes`; a foto é enviada pelo painel, pela ação `docente_foto` do `cpa-admin`), `cpa_participacoes` (quem já respondeu cada contexto, só HMAC do aluno; sem policy, só service role), `cpa_docentes` (período + disciplina → professor titular, do Moodle), `cpa_formularios` (nivel graduacao/pos, tipo geral/disciplina, status teste/aberto/encerrado, `token` do link, `portal_ativo` desligado por padrão, `populacao_alvo` não é mais usado), `cpa_blocos`, `cpa_perguntas` (escala/escolha/texto; `chave='curso'` alimenta o filtro), `cpa_respostas` (`teste`, `seq`, `respostas` jsonb, `canonico`, `hash_anterior`, `hash`). Oficiais são imutáveis por trigger (`cpa_respostas_oficiais_imutaveis`). Só a service role escreve; leitura direta só staff.
 - **Usar `ai_lead_sessions`, `vivaconnect_*` e `widechat_*` com cuidado**: são tabelas quentes; ver armadilhas.
 
 ## Fluxos principais (o que cada parte faz de fato)
@@ -203,6 +203,7 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 
 ## Armadilhas conhecidas (já custaram tempo — não repetir)
 - **Sonda do Sponte**: não publicar função temporária pra inspecionar a API (o classificador de segurança bloqueia, e fica exposta). Consultar local, só leitura, com o token lido do Vault via `integ_get_secret` e imprimindo só nomes de tags. `GetAulasProfessores` aceita no máximo 60 dias por chamada.
+- **Moodle (fotos)**: `core_user_get_users_by_field` devolve `profileimageurl`, mas para os professores testados (2026-10-22) é sempre a mesma imagem padrão de 1.128 bytes. Fotos vêm do painel da CPA, não do Moodle.
 - **Moodle**: `core_enrol_get_enrolled_users` traz o papel em `roles[].shortname`. Professor = `editingteacher`. `edteacher` é tutor.
 
 - **Janela de 24h do WhatsApp**: qualquer lugar que calcula se texto livre é permitido precisa ignorar `provider='email'`

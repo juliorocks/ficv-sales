@@ -472,6 +472,30 @@ Deno.serve(async (req) => {
             return j({ ok: true });
         }
 
+        if (acao === "docentes") {
+            // professores identificados (Moodle) e se já têm foto enviada pela equipe
+            const { data: rows } = await db.from("cpa_docentes").select("docente");
+            const nomes = [...new Set((rows ?? []).flatMap((r: Db) => String(r.docente).split(" / ").map((n: string) => n.trim())).filter(Boolean))].sort();
+            const { data: fotos } = await db.from("cpa_docente_fotos").select("nome, foto_path");
+            const mapa = new Map((fotos ?? []).map((f: Db) => [f.nome, f.foto_path]));
+            return j({ docentes: nomes.map((n) => ({ nome: n, foto_path: mapa.get(n) ?? null })), admin: ehAdmin });
+        }
+
+        if (acao === "docente_foto") {
+            if (!ehAdmin) return j({ error: "Só admin envia foto." }, 403);
+            const nome = String(body.nome ?? "").trim();
+            const m = String(body.imagem ?? "").match(/^data:(image\/(png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/);
+            if (!nome || !m) return j({ error: "Envie uma imagem PNG, JPG ou WebP." }, 400);
+            const bytes = Uint8Array.from(atob(m[3]), (c) => c.charCodeAt(0));
+            if (bytes.length > 1_000_000) return j({ error: "Foto acima de 1 MB." }, 400);
+            const path = `${slug(nome)}.${m[2] === "jpeg" ? "jpg" : m[2]}`;
+            const { error: eUp } = await db.storage.from("cpa-docentes").upload(path, bytes, { contentType: m[1], upsert: true });
+            if (eUp) throw eUp;
+            const { error: eDb } = await db.from("cpa_docente_fotos").upsert({ nome, foto_path: path, atualizado_em: new Date().toISOString() }, { onConflict: "nome" });
+            if (eDb) throw eDb;
+            return j({ ok: true, foto_path: path });
+        }
+
         return j({ error: "Ação desconhecida." }, 400);
     } catch (e) {
         console.error("cpa-admin:", e);

@@ -7,7 +7,7 @@ import { useParams } from "react-router-dom"
 import { AnimatePresence, motion } from "framer-motion"
 import { Check, ChevronLeft, ClipboardCheck, Copy, Loader2, Sparkles, Target } from "lucide-react"
 import Lottie from "lottie-react"
-import { Btn } from "./cpaUi"
+import { AvatarDocente, Btn } from "./cpaUi"
 
 const FN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cpa-form`
 
@@ -67,7 +67,7 @@ export type Pergunta = {
     opcoes: string[]; obrigatoria: boolean; chave: string | null
 }
 export type Bloco = { id: number; ordem: number; titulo: string; incentivo: string | null }
-export type Formulario = { id: number; nivel: string; titulo: string; ano: number; intro: string | null; teste: boolean; curso?: string; disciplina?: string | null; turma?: string | null; docente?: string | null }
+export type Formulario = { id: number; nivel: string; titulo: string; ano: number; intro: string | null; teste: boolean; curso?: string; disciplina?: string | null; turma?: string | null; docente?: string | null; docente_foto?: string | null }
 export type Resultado = {
     ok: true; teste: boolean; protocolo: number | null; comprovante: string
     formulario?: string; disciplina?: string | null; turma?: string | null; respondido_em?: string | null
@@ -292,7 +292,15 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
                                     <p className="text-lg font-semibold text-[#13161D]">Sua opinião faz a diferença</p>
                                     <p className="text-base text-muted-foreground">{formulario.intro}</p>
                                     {formulario.disciplina && <p className="text-sm font-semibold text-[#A07E2A]">{formulario.disciplina}{formulario.turma ? ` · ${formulario.turma}` : ""}</p>}
-                                    {formulario.docente && <p className="text-sm text-[var(--text-muted)]">Professor(a): <span className="font-medium text-[var(--text-main)]">{formulario.docente}</span></p>}
+                                    {formulario.docente && (
+                                        <div className="flex items-center gap-3 rounded-2xl bg-[var(--bg-card)] p-3 shadow-[var(--card-shadow)]">
+                                            <AvatarDocente src={formulario.docente_foto} nome={formulario.docente} tamanho={52} />
+                                            <div className="min-w-0">
+                                                <p className="text-[11px] uppercase tracking-wider text-[var(--text-muted)]">Professor(a)</p>
+                                                <p className="font-semibold">{formulario.docente}</p>
+                                            </div>
+                                        </div>
+                                    )}
                                     {formulario.curso && <p className="text-sm font-medium">{formulario.curso}</p>}
                                     <p className="text-sm text-muted-foreground">
                                         São {total} perguntas. Toque na nota que melhor representa a sua experiência.

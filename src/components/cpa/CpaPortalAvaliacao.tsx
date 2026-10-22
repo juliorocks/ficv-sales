@@ -8,14 +8,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ClipboardCheck, Check, Loader2, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { extractFnErrorMessage } from "@/utils/functionsError"
-import { Btn } from "./cpaUi"
+import { AvatarDocente, Btn } from "./cpaUi"
 import { CpaFormFlow, Bloco, Formulario, Pergunta, Resultado, RespostaEnvio } from "./CpaFormPage"
 
 type Pendencias = {
     geral: { formulario_id: number; titulo: string; nivel: string; respondida: boolean } | null
-    disciplinas: { formulario_id: number; contexto: string; disciplina: string; turma: string; docente: string | null; respondida: boolean }[]
+    disciplinas: { formulario_id: number; contexto: string; disciplina: string; turma: string; docente: string | null; docente_foto: string | null; respondida: boolean }[]
 }
-type Item = { formulario_id: number; contexto: string; titulo: string; detalhe: string; respondida: boolean }
+type Item = { formulario_id: number; contexto: string; titulo: string; detalhe: string; foto?: string | null; respondida: boolean }
 
 const TINTA = "#13161D"
 
@@ -37,7 +37,7 @@ export function CpaPortalCard() {
 
     const itens: Item[] = [
         ...(data?.geral ? [{ formulario_id: data.geral.formulario_id, contexto: "", titulo: `Avaliação institucional (${data.geral.nivel === "pos" ? "pós" : "graduação"})`, detalhe: "Sua opinião sobre a FICV", respondida: data.geral.respondida }] : []),
-        ...(data?.disciplinas ?? []).map((d) => ({ formulario_id: d.formulario_id, contexto: d.contexto, titulo: d.disciplina, detalhe: d.docente ? `${d.turma} · Prof. ${d.docente}` : d.turma, respondida: d.respondida })),
+        ...(data?.disciplinas ?? []).map((d) => ({ formulario_id: d.formulario_id, contexto: d.contexto, titulo: d.disciplina, detalhe: d.docente ? `${d.turma} · Prof. ${d.docente}` : d.turma, foto: d.docente_foto, respondida: d.respondida })),
     ]
     if (!itens.length) return null
 
@@ -65,7 +65,8 @@ export function CpaPortalCard() {
                 {itens.map((i) => (
                     <li key={`${i.formulario_id}|${i.contexto}`}>
                         <div className="flex w-full items-center justify-between gap-3 rounded-xl bg-[var(--bg-card-hover)] px-4 py-3 text-sm">
-                            <span className="min-w-0">
+                            {i.foto !== undefined && <AvatarDocente src={i.foto} nome={i.detalhe} tamanho={36} />}
+                            <span className="min-w-0 flex-1">
                                 <span className="block truncate font-medium">{i.titulo}</span>
                                 <span className="block truncate text-xs text-[var(--text-muted)]">{i.detalhe}</span>
                             </span>
@@ -103,7 +104,8 @@ function CpaFila({ itens, onFechar }: { itens: Item[]; onFechar: () => void }) {
             <div className="flex min-h-dvh flex-col items-center justify-center px-6 text-center">
                 <p className="text-[11px] font-bold uppercase tracking-widest text-[#A07E2A]">Parte {i + 1} de {itens.length}</p>
                 <h2 className="mt-3 text-2xl font-bold">{atual.titulo}</h2>
-                <p className="mt-2 text-sm text-[var(--text-muted)]">{atual.detalhe}</p>
+                <div className="mt-6"><AvatarDocente src={atual.foto} nome={atual.detalhe} tamanho={88} /></div>
+                <p className="mt-3 text-sm text-[var(--text-muted)]">{atual.detalhe}</p>
                 <Btn size="lg" className="mt-8 h-12 w-full max-w-sm text-sm" style={{ background: TINTA }} onClick={() => setTransicao(false)}>Começar</Btn>
             </div>
         )

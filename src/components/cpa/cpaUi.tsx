@@ -1,6 +1,7 @@
 // Peças visuais da Avaliação CPA, no padrão do CRM: cartões sem borda (glass-card), botões em pílula
 // (btn-primary / btn-pill), campos com fundo --bg-card-hover e rótulos pequenos em maiúsculas.
 import React from "react"
+import { User } from "lucide-react"
 
 type BtnProps = React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "default" | "outline" | "ghost" | "primary"; size?: "sm" | "lg" }
 
@@ -29,3 +30,14 @@ export const Rotulo = ({ children }: { children: React.ReactNode }) => (
 export const TT = { contentStyle: { background: "var(--bg-card)", border: "none", borderRadius: 12, boxShadow: "var(--card-shadow)", color: "var(--text-main)", fontSize: 12 } }
 export const TICK = { fontSize: 11, fill: "#8B949E" }
 export const COR_GRAFICO = "#5551FF"
+
+// Foto do professor (enviada pela equipe) ou avatar padrão quando não há foto.
+export function AvatarDocente({ src, nome, tamanho = 64 }: { src?: string | null; nome?: string | null; tamanho?: number }) {
+    const medida = { width: tamanho, height: tamanho }
+    if (src) return <img src={src} alt={nome ?? "Professor(a)"} style={medida} className="shrink-0 rounded-full object-cover shadow-[var(--card-shadow)]" />
+    return (
+        <div style={medida} className="flex shrink-0 items-center justify-center rounded-full bg-[var(--bg-card-hover)] text-[var(--text-muted)] shadow-[var(--card-shadow)]">
+            <User style={{ width: tamanho * 0.5, height: tamanho * 0.5 }} />
+        </div>
+    )
+}
