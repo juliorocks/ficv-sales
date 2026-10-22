@@ -265,8 +265,8 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
                             key={pos}
                             initial={{ opacity: 0, y: 36 }}
                             animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -36 }}
-                            transition={{ duration: 0.22 }}
+                            exit={{ opacity: 0, y: -36, transition: { duration: 0.18 } }}
+                            transition={{ y: { type: "spring", stiffness: 260, damping: 14 }, opacity: { duration: 0.2 } }}
                         >
                             {passo?.tipo === "intro" && (
                                 <div className="space-y-6">
