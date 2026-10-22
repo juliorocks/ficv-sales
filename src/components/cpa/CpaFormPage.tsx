@@ -20,13 +20,16 @@ const TINTA = "#13161D"
 // Ícone animado (Lottie): sorteia um dos arquivos de src/components/cpa/lottie a cada tela.
 // Quem sobe novos JSON só põe na pasta; o glob pega sozinho. Carrega só o arquivo sorteado.
 const carregadoresLottie = import.meta.glob<object>("./lottie/*.json", { import: "default" })
+let ultimaAnimacao: string | null = null // a mesma animação não aparece duas telas seguidas
 function IconeLottie({ className, reserva: Reserva }: { className: string; reserva: React.ComponentType<{ className?: string }> }) {
     const [dados, setDados] = useState<object | null>(null)
     useEffect(() => {
-        const chaves = Object.keys(carregadoresLottie)
+        const todas = Object.keys(carregadoresLottie)
+        const chaves = todas.length > 1 ? todas.filter((k) => k !== ultimaAnimacao) : todas
         if (!chaves.length) return
         let vivo = true
         const sorteada = chaves[Math.floor(Math.random() * chaves.length)]
+        ultimaAnimacao = sorteada
         carregadoresLottie[sorteada]().then((d) => { if (vivo) setDados(d) }).catch(() => {})
         return () => { vivo = false }
     }, [])
