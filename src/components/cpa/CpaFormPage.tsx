@@ -369,17 +369,28 @@ function PerguntaView({ pergunta: p, valor, ultima, enviando, onResponder, onCon
 
             {p.tipo === "escolha" && (
                 <div className="space-y-2">
-                    {p.opcoes.map((op) => (
-                        <button
-                            key={op} type="button" onClick={() => onResponder(op)} disabled={enviando}
-                            className={`flex w-full items-center justify-between rounded-xl px-4 py-3 text-left text-sm transition-all active:scale-[0.99] ${
-                                valor === op ? "bg-primary/10 font-semibold text-primary shadow-[var(--card-shadow)]" : "bg-[var(--bg-card)] shadow-[var(--card-shadow)] hover:bg-[var(--bg-card-hover)]"
-                            }`}
-                        >
-                            {op}
-                            {valor === op && <Check className="h-4 w-4 text-primary" />}
-                        </button>
-                    ))}
+                    {p.opcoes.map((op, i) => {
+                        // até 5 opções ordenadas (ex.: Muito baixo → Muito alto) usam a mesma escala de cor das notas
+                        const ordinal = p.opcoes.length <= 5
+                        const marcado = valor === op
+                        const matiz = matizNota(i, 0, p.opcoes.length - 1)
+                        const estilo = !ordinal ? undefined : marcado
+                            ? { background: `hsl(${matiz} 70% 40%)`, color: "#fff" }
+                            : { background: `hsl(${matiz} 75% 93%)`, color: `hsl(${matiz} 65% 28%)` }
+                        return (
+                            <button
+                                key={op} type="button" onClick={() => onResponder(op)} disabled={enviando}
+                                aria-pressed={marcado} style={estilo}
+                                className={`flex w-full items-center justify-between rounded-xl px-4 py-3 text-left text-sm font-medium transition-all active:scale-[0.99] ${
+                                    ordinal ? (marcado ? "scale-[1.02] shadow-lg" : "shadow-[var(--card-shadow)]")
+                                        : marcado ? "bg-primary/10 font-semibold text-primary shadow-[var(--card-shadow)]" : "bg-[var(--bg-card)] shadow-[var(--card-shadow)] hover:bg-[var(--bg-card-hover)]"
+                                }`}
+                            >
+                                {op}
+                                {marcado && <Check className="h-4 w-4" />}
+                            </button>
+                        )
+                    })}
                 </div>
             )}
 
