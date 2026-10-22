@@ -7,7 +7,7 @@
 //   vigentes, com o módulo atual (sufixo "P<n>" do nome da turma).
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { alunoBoletins } from "../_shared/alunoSponte.ts";
-import { contextoDisciplina, cursoRotulo, nivelDoCurso, participacaoHash, validarRespostas } from "../_shared/cpa.ts";
+import { contextoDisciplina, cursoRotulo, nivelDoCurso, participacaoHash, slug, validarRespostas } from "../_shared/cpa.ts";
 
 const cors = {
     "Access-Control-Allow-Origin": "*",
@@ -119,12 +119,19 @@ Deno.serve(async (req) => {
             .eq("formulario_id", fid).order("ordem");
         const { data: blocos } = await db.from("cpa_blocos").select("id, ordem, titulo, incentivo").eq("formulario_id", fid).order("ordem");
 
+        // o curso no Portal vem da matrícula: a pergunta de curso não é mostrada ao aluno, e o valor gravado
+        // é a opção oficial do formulário (o nome do Sponte vem com outra grafia: "Pós Graduação Em ...")
+        const perguntaCurso = (perguntas ?? []).find((p: any) => p.chave === "curso"); // eslint-disable-line @typescript-eslint/no-explicit-any
+        const cursoOficial: string = perguntaCurso
+            ? ((perguntaCurso.opcoes as string[] | null)?.find((o) => slug(o) === slug(eleg.curso)) ?? eleg.curso)
+            : eleg.curso;
+
         if (acao === "form") {
             return j({
-                formulario: { id: fid, nivel: eleg.formulario.nivel, titulo: eleg.formulario.titulo, ano: eleg.formulario.ano, intro: eleg.formulario.intro, teste: eleg.formulario.status === "teste", curso: eleg.curso },
+                formulario: { id: fid, nivel: eleg.formulario.nivel, titulo: eleg.formulario.titulo, ano: eleg.formulario.ano, intro: eleg.formulario.intro, teste: eleg.formulario.status === "teste", curso: cursoOficial },
                 contexto: alvo,
                 blocos: blocos ?? [],
-                perguntas: perguntas ?? [],
+                perguntas: (perguntas ?? []).filter((p: any) => p.chave !== "curso"), // eslint-disable-line @typescript-eslint/no-explicit-any
             });
         }
 
@@ -132,8 +139,7 @@ Deno.serve(async (req) => {
             if (respondido(fid, alvo)) return j({ error: "Você já respondeu esta avaliação." }, 409);
             const v = validarRespostas(perguntas ?? [], body.respostas && typeof body.respostas === "object" ? body.respostas : {}, { pularCurso: true });
             if (!v.ok) return j({ error: v.erro, pergunta_id: v.pergunta_id }, 400);
-            const perguntaCurso = (perguntas ?? []).find((p: any) => p.chave === "curso"); // eslint-disable-line @typescript-eslint/no-explicit-any
-            if (perguntaCurso) v.limpas[perguntaCurso.id] = eleg.curso; // curso vem da matrícula, não do aluno
+            if (perguntaCurso) v.limpas[perguntaCurso.id] = cursoOficial; // curso vem da matrícula, não do aluno
 
             const hash = hashes.get(`${fid}|${alvo}`)!;
             const { error: errPart } = await db.from("cpa_participacoes").insert({
@@ -144,7 +150,7 @@ Deno.serve(async (req) => {
                 throw errPart;
             }
             const { data, error } = await db.rpc("cpa_registrar_resposta", {
-                p_formulario: fid, p_respostas: v.limpas, p_curso: eleg.curso, p_contexto: alvo,
+                p_formulario: fid, p_respostas: v.limpas, p_curso: cursoOficial, p_contexto: alvo,
             });
             if (error) {
                 await db.from("cpa_participacoes").delete().eq("formulario_id", fid).eq("contexto", alvo).eq("respondente_hash", hash);
