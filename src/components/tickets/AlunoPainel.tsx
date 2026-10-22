@@ -121,7 +121,7 @@ function agruparCursos(ms: Matricula[]): CursoAgrupado[] {
         // os alunos estavam estranhando. Pedido do usuário 14/10: esconder só pra Direito
         // (nenhum outro curso tem esse problema de migração).
         .filter((t) => !/direito/i.test(c.nome) || periodoKey(t.turma) >= DIREITO_NOTAS_DESDE)
-        .sort((x, y) => periodoKey(y.turma) - periodoKey(x.turma) || String(y.data_matricula).localeCompare(String(x.data_matricula))),
+        .sort((x, y) => rankSituacao(x.situacao) - rankSituacao(y.situacao) || periodoKey(y.turma) - periodoKey(x.turma) || String(y.data_matricula).localeCompare(String(x.data_matricula))),
     }))
     .sort((x, y) => Number(y.vigente) - Number(x.vigente) || y.ultima.localeCompare(x.ultima))
 }
