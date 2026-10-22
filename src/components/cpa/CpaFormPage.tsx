@@ -5,7 +5,8 @@
 import { useEffect, useMemo, useState } from "react"
 import { useParams } from "react-router-dom"
 import { AnimatePresence, motion } from "framer-motion"
-import { Check, ChevronLeft, Copy, Loader2, Sparkles } from "lucide-react"
+import { BookOpen, Check, ChevronLeft, ClipboardCheck, Copy, GraduationCap, Loader2, MessageSquare, Sparkles, Target } from "lucide-react"
+import Lottie from "lottie-react"
 import { Btn } from "./cpaUi"
 
 const FN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cpa-form`
@@ -15,6 +16,21 @@ const LOGO_FICV = "https://siteficv.vercel.app/images/test-logo.png"
 const OURO = "#C9A84C"
 const OURO_CLARO = "#E2C878"
 const TINTA = "#13161D"
+
+// Ícone animado (Lottie) por tela. Os arquivos ficam em public/cpa/lottie/<nome>.json; enquanto não
+// existirem, aparece o ícone estático de reserva. Nomes: avaliacao, curso, gestao, ensino, metas,
+// resposta, melhoria, obrigado.
+const ICONE_BLOCO = ["gestao", "ensino", "metas", "resposta"]
+function IconeLottie({ nome, className, reserva: Reserva }: { nome: string; className: string; reserva: React.ComponentType<{ className?: string }> }) {
+    const [dados, setDados] = useState<object | null>(null)
+    useEffect(() => {
+        let vivo = true
+        fetch(`/cpa/lottie/${nome}.json`).then((r) => (r.ok ? r.json() : null)).then((d) => { if (vivo && d) setDados(d) }).catch(() => {})
+        return () => { vivo = false }
+    }, [nome])
+    if (!dados) return <div className={className}><Reserva className="h-full w-full text-[#C9A84C]" /></div>
+    return <div className={className}><Lottie animationData={dados} loop autoplay /></div>
+}
 
 // cor da nota do vermelho (mínimo) ao verde (máximo), passando pelo amarelo
 const matizNota = (n: number, min: number, max: number) => (max === min ? 120 : Math.round(((n - min) / (max - min)) * 120))
@@ -175,9 +191,7 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
         return (
             <Tela>
                 <motion.div initial={{ opacity: 0, scale: 0.94 }} animate={{ opacity: 1, scale: 1 }} className="w-full max-w-md text-center space-y-5">
-                    <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                        <Check className="h-8 w-8" />
-                    </div>
+                    <IconeLottie nome="obrigado" className="mx-auto h-32 w-32" reserva={Check} />
                     <h1 className="text-2xl font-bold">Obrigado por participar!</h1>
                     <p className="text-sm text-muted-foreground">
                         {resultado.teste
@@ -208,10 +222,10 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
 
     return (
         <div className="min-h-dvh bg-gradient-to-b from-[#FBF6E9] via-background to-background text-foreground">
-            <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col px-4 pb-8 pt-5">
-                <div className="flex justify-center pb-2">
-                    <img src={LOGO_FICV} alt="Faculdade Internacional Cidade Viva" className="h-9 w-auto" />
-                </div>
+            <div className="w-full bg-[#13161D] py-4">
+                <img src={LOGO_FICV} alt="Faculdade Internacional Cidade Viva" className="mx-auto h-10 w-auto" />
+            </div>
+            <div className="mx-auto flex min-h-[calc(100dvh-4.5rem)] w-full max-w-md flex-col px-4 pb-8 pt-5 md:max-w-2xl lg:max-w-3xl">
                 <header className="flex items-center gap-3">
                     {pos > 0 && passo?.tipo !== "intro" ? (
                         <button
@@ -243,9 +257,9 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
                     </p>
                 )}
 
-                <div className="flex flex-1 flex-col py-4">
-                {passo?.tipo === "pergunta" && anterior && <Previa texto={anterior} lado="anterior" />}
-                <div className="flex flex-1 flex-col justify-center py-6">
+                <div className="flex flex-1 flex-col justify-center py-4">
+                {passo?.tipo === "pergunta" && anterior && <div className="mb-4"><Previa texto={anterior} lado="anterior" /></div>}
+                <div className="flex flex-col py-2">
                     <AnimatePresence mode="wait">
                         <motion.div
                             key={pos}
@@ -256,6 +270,7 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
                         >
                             {passo?.tipo === "intro" && (
                                 <div className="space-y-6">
+                                    <IconeLottie nome="avaliacao" className="mx-auto h-36 w-36" reserva={ClipboardCheck} />
                                     <div className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold" style={{ background: "#FBF0CF", color: "#7A5C12" }}>
                                         <Sparkles className="h-3.5 w-3.5" /> Avaliação Institucional CPA · {formulario.ano}
                                     </div>
@@ -272,7 +287,7 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
 
                             {passo?.tipo === "pausa" && (
                                 <div className="space-y-6 text-center">
-                                    <Sparkles className="mx-auto h-10 w-10 text-primary" />
+                                    <IconeLottie nome="melhoria" className="mx-auto h-28 w-28" reserva={Sparkles} />
                                     <p className="text-xl font-semibold">{passo.texto}</p>
                                     <Btn size="lg" className="h-12 w-full text-base" style={{ background: TINTA }} onClick={() => setPos(pos + 1)}>Continuar</Btn>
                                 </div>
@@ -291,6 +306,7 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
                                         avancar(pos, novas)
                                     }}
                                     frase={frasePorProgresso(respondidas / Math.max(total, 1))}
+                                    icone={ICONE_BLOCO[Math.max(0, blocos.findIndex((b) => b.id === passo.pergunta.bloco_id))] ?? "resposta"}
                                 />
                             )}
 
@@ -298,14 +314,14 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
                         </motion.div>
                     </AnimatePresence>
                 </div>
-                {passo?.tipo === "pergunta" && proxima && <div className="mt-2"><Previa texto={proxima} lado="proxima" /></div>}
+                {passo?.tipo === "pergunta" && proxima && <div className="mt-4"><Previa texto={proxima} lado="proxima" /></div>}
                 </div>
             </div>
         </div>
     )
 }
 
-function PerguntaView({ pergunta: p, valor, ultima, enviando, onResponder, onContinuar, frase }: {
+function PerguntaView({ pergunta: p, valor, ultima, enviando, onResponder, onContinuar, frase, icone }: {
     pergunta: Pergunta
     valor: number | string | undefined
     ultima: boolean
@@ -313,12 +329,16 @@ function PerguntaView({ pergunta: p, valor, ultima, enviando, onResponder, onCon
     onResponder: (v: number | string) => void
     onContinuar: (valor: string) => void
     frase: string
+    icone: string
 }) {
     const [texto, setTexto] = useState(typeof valor === "string" ? valor : "")
 
     return (
         <div className="space-y-6">
-            <p className="text-xs font-medium uppercase tracking-wide text-primary">{frase}</p>
+            <div className="flex items-center gap-3">
+                <IconeLottie nome={icone} className="h-14 w-14 shrink-0" reserva={Target} />
+                <p className="text-xs font-semibold uppercase tracking-wide text-[#A07E2A]">{frase}</p>
+            </div>
             <h2 className="text-xl font-semibold leading-snug">{p.texto}</h2>
 
             {p.tipo === "escala" && (

@@ -44,6 +44,7 @@
     "date-fns": "^4.1.0",
     "dotenv": "^17.3.1",
     "framer-motion": "^11.5.4",
+    "lottie-react": "^2.4.2",
     "lucide-react": "^0.577.0",
     "mammoth": "^1.12.3",
     "papaparse": "^5.4.1",
