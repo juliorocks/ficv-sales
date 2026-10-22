@@ -104,8 +104,8 @@ function escala10(v: string | null): string | null {
 // presente mesmo vazio, e SEM DisciplinaID — com DisciplinaID=0 a API devolve erro "02"; só
 // manda numa disciplina específica (DisciplinaID=X) se quiser UMA; vazio devolve TODAS as
 // disciplinas da turma de uma vez, uma chamada só (sem precisar de N chamadas por disciplina).
-async function avaliacoesPorDisciplina(A: number, turma: number): Promise<Map<number, Avaliacao[]>> {
-    const map = new Map<number, Avaliacao[]>();
+async function avaliacoesPorDisciplina(A: number, turma: number): Promise<Map<number, { nome: string; avaliacoes: Avaliacao[] }>> {
+    const map = new Map<number, { nome: string; avaliacoes: Avaliacao[] }>();
     let x: string;
     try {
         x = await sponteCall("GetNotaParcial", { nCursoID: 0, nTurmaID: turma, nAlunoID: A, sParametrosBusca: "" });
@@ -119,7 +119,8 @@ async function avaliacoesPorDisciplina(A: number, turma: number): Promise<Map<nu
             nome: (a[1].match(/<NomeAvaliacao>([^<]*)</) ?? [])[1] ?? "",
             nota: escala10((a[1].match(/<Nota>([^<]*)</) ?? [])[1] ?? null) ?? "",
         })).filter((a) => a.nome && a.nota);
-        if (avaliacoes.length) map.set(discId, avaliacoes);
+        const nomeDisc = (bloco[1].match(/<NomeDisciplina>([^<]*)</) ?? [])[1] ?? "";
+        if (avaliacoes.length) map.set(discId, { nome: nomeDisc, avaliacoes });
     }
     return map;
 }
@@ -129,7 +130,16 @@ async function boletimDaTurma(A: number, turma: number): Promise<Disciplina[]> {
         sponteCall("GetBoletim", { nAlunoID: A, nTurmaID: turma, nDisciplinaID: 0, nModulo: 0 }),
         avaliacoesPorDisciplina(A, turma),
     ]);
-    return records(xb, "NotasBoletim").map((r) => {
+    // GetBoletim só lista disciplina que já tem nota consolidada; turma Modular com AV1 lançada
+    // em várias disciplinas (ex.: aluno 9740, turma 1406) mostrava uma só. Acrescenta as que
+    // só existem no detalhe por avaliação (GetNotaParcial).
+    const boletim = records(xb, "NotasBoletim");
+    const jaVeio = new Set(boletim.map((r) => Number(r.DisciplinaID)));
+    const extras: Disciplina[] = [...porDisciplina.entries()].filter(([id]) => !jaVeio.has(id)).map(([, d]) => ({
+        disciplina: d.nome, modulo: null, notas: [], media: null, faltas: null, situacao: null,
+        avaliacoes: d.avaliacoes, exame_final: null,
+    }));
+    return [...boletim.map((r) => {
         const notasRaw = [1, 2, 3, 4].map((i) => notaDe(r, i)).filter((v): v is string => !!v);
         // o Sponte da FICV não preenche Media/MediaFinal — com uma nota só, ela é o resultado
         const mediaRaw = n(r.MediaFinal) ?? n(r.Media) ?? (notasRaw.length === 1 ? notasRaw[0] : null);
@@ -141,10 +151,10 @@ async function boletimDaTurma(A: number, turma: number): Promise<Disciplina[]> {
             disciplina: r.Disciplina, modulo: Number(r.Modulo) || null,
             notas: notasRaw.map((v) => escala10(v)!), media: escala10(mediaRaw),
             faltas: n(r.TotalFaltas), situacao: n(r.SituacaoDidatica),
-            avaliacoes: porDisciplina.get(Number(r.DisciplinaID)) ?? null,
+            avaliacoes: porDisciplina.get(Number(r.DisciplinaID))?.avaliacoes ?? null,
             exame_final: exameRaw && brNum(exameRaw) > 0 ? exameRaw : null,
         };
-    });
+    }), ...extras];
 }
 
 /** Boletim de uma turma — só se a turma for de uma matrícula do próprio aluno. */

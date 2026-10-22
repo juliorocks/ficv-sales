@@ -203,6 +203,7 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 
 ## Armadilhas conhecidas (já custaram tempo — não repetir)
 - **Sonda do Sponte**: não publicar função temporária pra inspecionar a API (o classificador de segurança bloqueia, e fica exposta). Consultar local, só leitura, com o token lido do Vault via `integ_get_secret` e imprimindo só nomes de tags. `GetAulasProfessores` aceita no máximo 60 dias por chamada.
+- **Sponte — notas (2026-10-22)**: `GetBoletim` só lista disciplina que já tem nota consolidada. Turma Modular com AV1 lançada em várias disciplinas (ex.: aluno 9740, turma 1406) aparecia com uma só. O boletim agora soma as disciplinas que só existem em `GetNotaParcial`.
 - **Moodle (fotos)**: `core_user_get_users_by_field` devolve `profileimageurl`, mas para os professores testados (2026-10-22) é sempre a mesma imagem padrão de 1.128 bytes. Fotos vêm do painel da CPA, não do Moodle.
 - **Moodle**: `core_enrol_get_enrolled_users` traz o papel em `roles[].shortname`. Professor = `editingteacher`. `edteacher` é tutor.
 
