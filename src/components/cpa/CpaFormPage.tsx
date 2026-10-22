@@ -10,6 +10,29 @@ import { Btn } from "./cpaUi"
 
 const FN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cpa-form`
 
+// marca FICV: mesmo logo do Login e do Portal; dourado e preto dos materiais do Portal
+const LOGO_FICV = "https://siteficv.vercel.app/images/test-logo.png"
+const OURO = "#C9A84C"
+const OURO_CLARO = "#E2C878"
+const TINTA = "#13161D"
+
+// cor da nota do vermelho (mínimo) ao verde (máximo), passando pelo amarelo
+const matizNota = (n: number, min: number, max: number) => (max === min ? 120 : Math.round(((n - min) / (max - min)) * 120))
+
+// prévia em cinza: pergunta anterior some para cima, a próxima some para baixo (sem revelar tudo)
+const mascara = (lado: "anterior" | "proxima") => {
+    const g = lado === "anterior" ? "linear-gradient(to bottom, transparent, black 70%)" : "linear-gradient(to bottom, black 30%, transparent)"
+    return { maskImage: g, WebkitMaskImage: g }
+}
+function Previa({ texto, lado }: { texto: string; lado: "anterior" | "proxima" }) {
+    const trecho = lado === "proxima" ? texto.split(" ").slice(0, 7).join(" ") + "…" : texto
+    return (
+        <div aria-hidden className="pointer-events-none select-none px-1 text-sm font-medium leading-snug text-neutral-400 grayscale" style={mascara(lado)}>
+            {trecho}
+        </div>
+    )
+}
+
 export type Pergunta = {
     id: number; bloco_id: number; ordem: number; texto: string
     tipo: "escala" | "escolha" | "texto"
@@ -106,6 +129,8 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
     const passos = useMemo(() => montarPassos(blocos, perguntas), [blocos, perguntas])
     const total = perguntas.length
     const passo = passos[pos]
+    const anterior = (() => { for (let i = pos - 1; i >= 0; i--) { const q = passos[i]; if (q.tipo === "pergunta") return q.pergunta.texto } return null })()
+    const proxima = (() => { for (let i = pos + 1; i < passos.length; i++) { const q = passos[i]; if (q.tipo === "pergunta") return q.pergunta.texto } return null })()
 
     useEffect(() => {
         if (resultado) return
@@ -182,8 +207,11 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
     const ultimoPasso = pos === passos.length - 1
 
     return (
-        <div className="min-h-dvh bg-gradient-to-b from-primary/10 via-background to-background text-foreground">
+        <div className="min-h-dvh bg-gradient-to-b from-[#FBF6E9] via-background to-background text-foreground">
             <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col px-4 pb-8 pt-5">
+                <div className="flex justify-center pb-2">
+                    <img src={LOGO_FICV} alt="Faculdade Internacional Cidade Viva" className="h-9 w-auto" />
+                </div>
                 <header className="flex items-center gap-3">
                     {pos > 0 && passo?.tipo !== "intro" ? (
                         <button
@@ -196,9 +224,10 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
                     <div className="flex-1">
                         <div className="h-2 overflow-hidden rounded-full bg-muted">
                             <motion.div
-                                className="h-full rounded-full bg-primary"
+                                className="h-full rounded-full"
                                 initial={false}
                                 animate={{ width: `${Math.round(fracao * 100)}%` }}
+                                style={{ background: `linear-gradient(90deg, ${OURO}, ${OURO_CLARO})` }}
                                 transition={{ type: "spring", stiffness: 120, damping: 20 }}
                             />
                         </div>
@@ -214,6 +243,8 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
                     </p>
                 )}
 
+                <div className="flex flex-1 flex-col py-4">
+                {passo?.tipo === "pergunta" && anterior && <Previa texto={anterior} lado="anterior" />}
                 <div className="flex flex-1 flex-col justify-center py-6">
                     <AnimatePresence mode="wait">
                         <motion.div
@@ -225,16 +256,17 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
                         >
                             {passo?.tipo === "intro" && (
                                 <div className="space-y-6">
-                                    <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-                                        <Sparkles className="h-3.5 w-3.5" /> {formulario.titulo} {formulario.ano}
+                                    <div className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold" style={{ background: "#FBF0CF", color: "#7A5C12" }}>
+                                        <Sparkles className="h-3.5 w-3.5" /> Avaliação Institucional CPA · {formulario.ano}
                                     </div>
-                                    <h1 className="text-2xl font-bold leading-tight">Sua opinião faz a diferença</h1>
+                                    <h1 className="bg-gradient-to-r from-[#C9A84C] to-[#E2C878] bg-clip-text text-3xl font-extrabold leading-tight text-transparent">{formulario.titulo}</h1>
+                                    <p className="text-lg font-semibold text-[#13161D]">Sua opinião faz a diferença</p>
                                     <p className="text-base text-muted-foreground">{formulario.intro}</p>
                                     {formulario.curso && <p className="text-sm font-medium">{formulario.curso}</p>}
                                     <p className="text-sm text-muted-foreground">
                                         São {total} perguntas. Toque na nota que melhor representa a sua experiência.
                                     </p>
-                                    <Btn size="lg" className="h-12 w-full text-base" onClick={() => setPos(1)}>Começar</Btn>
+                                    <Btn size="lg" className="h-12 w-full text-base" style={{ background: TINTA }} onClick={() => setPos(1)}>Começar</Btn>
                                 </div>
                             )}
 
@@ -242,7 +274,7 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
                                 <div className="space-y-6 text-center">
                                     <Sparkles className="mx-auto h-10 w-10 text-primary" />
                                     <p className="text-xl font-semibold">{passo.texto}</p>
-                                    <Btn size="lg" className="h-12 w-full text-base" onClick={() => setPos(pos + 1)}>Continuar</Btn>
+                                    <Btn size="lg" className="h-12 w-full text-base" style={{ background: TINTA }} onClick={() => setPos(pos + 1)}>Continuar</Btn>
                                 </div>
                             )}
 
@@ -265,6 +297,8 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
                             {erro && <p role="alert" className="mt-4 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{erro}</p>}
                         </motion.div>
                     </AnimatePresence>
+                </div>
+                {passo?.tipo === "pergunta" && proxima && <div className="mt-2"><Previa texto={proxima} lado="proxima" /></div>}
                 </div>
             </div>
         </div>
@@ -292,19 +326,22 @@ function PerguntaView({ pergunta: p, valor, ultima, enviando, onResponder, onCon
                     <div className="grid grid-cols-6 gap-2">
                         {Array.from({ length: (p.escala_max ?? 10) - (p.escala_min ?? 0) + 1 }, (_, i) => (p.escala_min ?? 0) + i).map((n) => {
                             const marcado = valor === n
+                            const matiz = matizNota(n, p.escala_min ?? 0, p.escala_max ?? 10)
                             return (
                                 <button
                                     key={n} type="button" onClick={() => onResponder(n)} disabled={enviando}
-                                    className={`h-12 rounded-xl text-base font-semibold transition-all active:scale-95 ${
-                                        marcado ? "scale-105 bg-primary text-primary-foreground shadow-md" : "bg-[var(--bg-card)] shadow-[var(--card-shadow)] hover:bg-[var(--bg-card-hover)]"
-                                    }`}
+                                    aria-pressed={marcado}
+                                    className={`h-12 rounded-xl text-base font-bold transition-all active:scale-95 ${marcado ? "scale-105 shadow-lg" : "shadow-[var(--card-shadow)]"}`}
+                                    style={marcado
+                                        ? { background: `hsl(${matiz} 70% 40%)`, color: "#fff" }
+                                        : { background: `hsl(${matiz} 75% 93%)`, color: `hsl(${matiz} 65% 28%)` }}
                                 >
                                     {n}
                                 </button>
                             )
                         })}
                     </div>
-                    <div className="flex justify-between text-xs text-muted-foreground">
+                    <div className="flex justify-between text-xs text-[var(--text-muted)]">
                         <span>{p.rotulo_min}</span><span>{p.rotulo_max}</span>
                     </div>
                 </div>
