@@ -43,7 +43,7 @@ const mascara = (lado: "anterior" | "proxima") => {
 function Previa({ texto, lado }: { texto: string; lado: "anterior" | "proxima" }) {
     const trecho = lado === "proxima" ? texto.split(" ").slice(0, 7).join(" ") + "…" : texto
     return (
-        <div aria-hidden className="pointer-events-none select-none px-1 text-sm font-medium leading-snug text-neutral-400 grayscale" style={mascara(lado)}>
+        <div aria-hidden className="pointer-events-none select-none rounded-2xl bg-[var(--bg-card)] px-5 py-4 text-sm font-medium leading-snug text-neutral-400 grayscale shadow-[var(--card-shadow)]" style={mascara(lado)}>
             {trecho}
         </div>
     )
@@ -258,7 +258,7 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
                 )}
 
                 <div className="flex flex-1 flex-col justify-center py-4">
-                {passo?.tipo === "pergunta" && anterior && <div className="mb-4"><Previa texto={anterior} lado="anterior" /></div>}
+                {passo?.tipo === "pergunta" && anterior && <div className="mb-6"><Previa texto={anterior} lado="anterior" /></div>}
                 <div className="flex flex-col py-2">
                     <AnimatePresence mode="wait">
                         <motion.div
@@ -314,7 +314,7 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
                         </motion.div>
                     </AnimatePresence>
                 </div>
-                {passo?.tipo === "pergunta" && proxima && <div className="mt-4"><Previa texto={proxima} lado="proxima" /></div>}
+                {passo?.tipo === "pergunta" && proxima && <div className="mt-6"><Previa texto={proxima} lado="proxima" /></div>}
                 </div>
             </div>
         </div>
@@ -334,7 +334,7 @@ function PerguntaView({ pergunta: p, valor, ultima, enviando, onResponder, onCon
     const [texto, setTexto] = useState(typeof valor === "string" ? valor : "")
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 rounded-3xl bg-[var(--bg-card)] p-6 shadow-[0_12px_40px_-12px_rgba(19,22,29,0.22)]">
             <div className="flex items-center gap-3">
                 <IconeLottie nome={icone} className="h-14 w-14 shrink-0" reserva={Target} />
                 <p className="text-xs font-semibold uppercase tracking-wide text-[#A07E2A]">{frase}</p>
