@@ -16,7 +16,7 @@
  * últimos 60 dias — por isso os números batiam diferente do Kanban).
  */
 import { useEffect, useMemo, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { formatDistanceToNowStrict } from "date-fns"
 import { ptBR } from "date-fns/locale"
 import { Check, ChevronDown, GraduationCap, Loader2, MessageSquare, PencilLine } from "lucide-react"
@@ -78,6 +78,7 @@ export function AtendimentosView({ searchTerm = "", assigneeFilter = "all", team
     // guarda a linha da conversa aberta: quando o lead sai da aba atual (ex.: Atender tira da Entrada),
     // a lista recarrega e ele some dela — sem isso o chat fechava sozinho (achado 22/10)
     const [selectedRow, setSelectedRow] = useState<any>(null)
+    const queryClient = useQueryClient()
     // painel "Detalhes do contato" à direita (lembrado no navegador)
     const [details, setDetails] = useState<boolean>(() => { try { return localStorage.getItem("ficv_inbox_details") === "1" } catch { return false } })
     const toggleDetails = (v: boolean) => { setDetails(v); try { localStorage.setItem("ficv_inbox_details", v ? "1" : "0") } catch { /* sem storage */ } }
@@ -309,7 +310,8 @@ export function AtendimentosView({ searchTerm = "", assigneeFilter = "all", team
                         </header>
                         <div className="flex-1 overflow-y-auto p-3">
                             <WideChatHistory key={current.lead_id} widechatContactId={current.widechat_contact_id ?? ""} leadId={current.lead_id}
-                                telefone={current.telefone} leadName={current.nome} scrollClassName="h-[calc(100vh-420px)] min-h-[300px]" onOpenFollowup={openFollowup} />
+                                telefone={current.telefone} leadName={current.nome} scrollClassName="h-[calc(100vh-420px)] min-h-[300px]" onOpenFollowup={openFollowup}
+                                onClose={() => { setSelected(null); setSelectedRow(null); queryClient.invalidateQueries({ queryKey: ["inbox-leads"] }) }} />
                         </div>
                     </>
                 )}
