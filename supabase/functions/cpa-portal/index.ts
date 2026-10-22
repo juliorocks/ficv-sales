@@ -128,7 +128,7 @@ Deno.serve(async (req) => {
 
         if (acao === "form") {
             return j({
-                formulario: { id: fid, nivel: eleg.formulario.nivel, titulo: eleg.formulario.titulo, ano: eleg.formulario.ano, intro: eleg.formulario.intro, teste: eleg.formulario.status === "teste", curso: cursoOficial },
+                formulario: { id: fid, nivel: eleg.formulario.nivel, titulo: eleg.formulario.titulo, ano: eleg.formulario.ano, intro: eleg.formulario.intro, teste: eleg.formulario.status === "teste", curso: cursoOficial, disciplina: itensElegiveis.find((x) => x.formulario_id === fid && x.contexto === alvo)?.disciplina ?? null, turma: itensElegiveis.find((x) => x.formulario_id === fid && x.contexto === alvo)?.turma ?? null },
                 contexto: alvo,
                 blocos: blocos ?? [],
                 perguntas: (perguntas ?? []).filter((p: any) => p.chave !== "curso"), // eslint-disable-line @typescript-eslint/no-explicit-any

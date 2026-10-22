@@ -67,7 +67,7 @@ export type Pergunta = {
     opcoes: string[]; obrigatoria: boolean; chave: string | null
 }
 export type Bloco = { id: number; ordem: number; titulo: string; incentivo: string | null }
-export type Formulario = { id: number; nivel: string; titulo: string; ano: number; intro: string | null; teste: boolean; curso?: string }
+export type Formulario = { id: number; nivel: string; titulo: string; ano: number; intro: string | null; teste: boolean; curso?: string; disciplina?: string | null; turma?: string | null }
 export type Resultado = {
     ok: true; teste: boolean; protocolo: number | null; comprovante: string
     formulario?: string; disciplina?: string | null; turma?: string | null; respondido_em?: string | null
@@ -133,14 +133,16 @@ export function CpaFormPage() {
     )
 }
 
-export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar: enviarRemoto }: {
+export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar: enviarRemoto, aoConcluir, pularIntro }: {
     formulario: Formulario
     blocos: Bloco[]
     perguntas: Pergunta[]
     storageKey: string
     enviar: (valores: Record<string, number | string>) => Promise<RespostaEnvio>
+    aoConcluir?: (r: Resultado) => void // na fila do Portal: não mostra o comprovante no meio
+    pularIntro?: boolean // na fila a tela de título já apresentou a parte
 }) {
-    const [pos, setPos] = useState(0)
+    const [pos, setPos] = useState(pularIntro ? 1 : 0)
     const [respostas, setRespostas] = useState<Record<string, number | string>>({})
     const [enviando, setEnviando] = useState(false)
     const [erro, setErro] = useState<string | null>(null)
@@ -180,8 +182,9 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
                 }
                 return
             }
-            setResultado(d)
             try { localStorage.removeItem(storageKey) } catch { /* ignora */ }
+            if (aoConcluir) return aoConcluir(d)
+            setResultado(d)
         } catch {
             setErro("Sem conexão. Suas respostas continuam salvas neste aparelho: tente enviar de novo.")
         } finally {
@@ -288,6 +291,7 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
                                     <h1 className="bg-gradient-to-r from-[#C9A84C] to-[#E2C878] bg-clip-text text-3xl font-extrabold leading-tight text-transparent">{formulario.titulo}</h1>
                                     <p className="text-lg font-semibold text-[#13161D]">Sua opinião faz a diferença</p>
                                     <p className="text-base text-muted-foreground">{formulario.intro}</p>
+                                    {formulario.disciplina && <p className="text-sm font-semibold text-[#A07E2A]">{formulario.disciplina}{formulario.turma ? ` · ${formulario.turma}` : ""}</p>}
                                     {formulario.curso && <p className="text-sm font-medium">{formulario.curso}</p>}
                                     <p className="text-sm text-muted-foreground">
                                         São {total} perguntas. Toque na nota que melhor representa a sua experiência.
