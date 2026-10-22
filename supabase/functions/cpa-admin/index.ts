@@ -59,8 +59,8 @@ async function carregarRespostas(db: Db, formId: number, f: Filtros) {
 
 async function carregarPerguntas(db: Db, formId: number) {
     const [{ data: blocos }, { data: perguntas }] = await Promise.all([
-        db.from("cpa_blocos").select("id, ordem, titulo").eq("formulario_id", formId).order("ordem"),
-        db.from("cpa_perguntas").select("id, bloco_id, ordem, texto, tipo, escala_min, escala_max, opcoes").eq("formulario_id", formId).order("ordem"),
+        db.from("cpa_blocos").select("id, ordem, titulo, incentivo").eq("formulario_id", formId).order("ordem"),
+        db.from("cpa_perguntas").select("id, bloco_id, ordem, texto, tipo, escala_min, escala_max, rotulo_min, rotulo_max, opcoes, obrigatoria, chave").eq("formulario_id", formId).order("ordem"),
     ]);
     return { blocos: blocos ?? [], perguntas: perguntas ?? [] };
 }
@@ -245,6 +245,48 @@ async function sincronizarDocentes(db: Db, offset: number) {
     return { total_cursos: doPeriodo.length, processados: Math.min(proximo, doPeriodo.length), gravados: gravados.length, proximo: proximo < doPeriodo.length ? proximo : null };
 }
 
+// Perguntas que já têm resposta gravada (oficial ou teste). Depois de respondida, a estrutura não muda.
+async function perguntasRespondidas(db: Db, formId: number): Promise<Set<string>> {
+    const linhas = await todas(() => db.from("cpa_respostas").select("id, respostas").eq("formulario_id", formId));
+    const s = new Set<string>();
+    for (const l of linhas) for (const [k, v] of Object.entries(l.respostas ?? {})) if (v !== null && v !== "") s.add(k);
+    return s;
+}
+
+const TIPOS = ["escala", "escolha", "texto"];
+const diferentes = (a: unknown, b: unknown) => JSON.stringify(a ?? null) !== JSON.stringify(b ?? null);
+
+// Valida e normaliza uma pergunta vinda do editor. Devolve o registro pronto pra gravar ou o erro.
+function normalizarPergunta(p: Db): { ok: true; reg: Db } | { ok: false; erro: string } {
+    const texto = String(p.texto ?? "").trim();
+    if (!texto || texto.length > 500) return { ok: false, erro: "Texto da pergunta: 1 a 500 caracteres." };
+    if (!TIPOS.includes(p.tipo)) return { ok: false, erro: "Tipo inválido." };
+    const reg: Db = {
+        texto, tipo: p.tipo, bloco_id: Number(p.bloco_id), obrigatoria: p.obrigatoria !== false,
+        chave: p.chave === "curso" ? "curso" : null,
+        escala_min: null, escala_max: null, rotulo_min: null, rotulo_max: null, opcoes: [],
+    };
+    if (!Number.isInteger(reg.bloco_id)) return { ok: false, erro: "Bloco inválido." };
+    if (p.tipo === "escala") {
+        const mn = Number(p.escala_min), mx = Number(p.escala_max);
+        if (!Number.isInteger(mn) || !Number.isInteger(mx) || mn >= mx || mx - mn > 10) return { ok: false, erro: "Escala: mínimo < máximo, no máximo 10 valores." };
+        reg.escala_min = mn; reg.escala_max = mx;
+        reg.rotulo_min = String(p.rotulo_min ?? "").trim() || null;
+        reg.rotulo_max = String(p.rotulo_max ?? "").trim() || null;
+    }
+    if (p.tipo === "escolha") {
+        const ops = (Array.isArray(p.opcoes) ? p.opcoes : []).map((o: unknown) => String(o).trim()).filter(Boolean);
+        if (ops.length < 2 || new Set(ops).size !== ops.length) return { ok: false, erro: "Escolha: pelo menos 2 opções, sem repetir." };
+        reg.opcoes = ops;
+    }
+    return { ok: true, reg };
+}
+
+async function proximaOrdem(db: Db, tabela: "cpa_perguntas" | "cpa_blocos", formId: number): Promise<number> {
+    const { data } = await db.from(tabela).select("ordem").eq("formulario_id", formId).order("ordem", { ascending: false }).limit(1);
+    return ((data?.[0]?.ordem as number | undefined) ?? 0) + 1;
+}
+
 Deno.serve(async (req) => {
     if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
     const db: Db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
@@ -334,6 +376,100 @@ Deno.serve(async (req) => {
             if (error) throw error;
             await db.from("cpa_participacoes").delete().eq("formulario_id", formId).eq("teste", true);
             return j({ apagadas: (data ?? []).length });
+        }
+
+        if (acao === "estrutura") {
+            // formulário inteiro pro editor: blocos, perguntas e quais perguntas já têm resposta
+            const { blocos, perguntas } = await carregarPerguntas(db, formId);
+            const respondidas = [...(await perguntasRespondidas(db, formId))];
+            return j({ form, blocos, perguntas, respondidas });
+        }
+
+        if (acao.startsWith("bloco_") || acao.startsWith("pergunta_") || acao === "reordenar") {
+            if (!ehAdmin) return j({ error: "Só admin altera as perguntas." }, 403);
+        }
+
+        if (acao === "bloco_salvar") {
+            const b = body.bloco ?? {};
+            const titulo = String(b.titulo ?? "").trim();
+            if (!titulo || titulo.length > 200) return j({ error: "Título do bloco: 1 a 200 caracteres." }, 400);
+            const incentivo = String(b.incentivo ?? "").trim() || null;
+            if (b.id) {
+                const { data, error } = await db.from("cpa_blocos").update({ titulo, incentivo }).eq("id", Number(b.id)).eq("formulario_id", formId).select("*").maybeSingle();
+                if (error) throw error;
+                if (!data) return j({ error: "Bloco não encontrado neste formulário." }, 404);
+                return j({ bloco: data });
+            }
+            const ordem = await proximaOrdem(db, "cpa_blocos", formId);
+            const { data, error } = await db.from("cpa_blocos").insert({ formulario_id: formId, ordem, titulo, incentivo }).select("*").single();
+            if (error) throw error;
+            return j({ bloco: data });
+        }
+
+        if (acao === "bloco_excluir") {
+            const bid = Number(body.bloco_id);
+            const { count } = await db.from("cpa_perguntas").select("id", { count: "exact", head: true }).eq("bloco_id", bid);
+            if (count) return j({ error: "Esse bloco ainda tem perguntas. Mova ou exclua as perguntas primeiro." }, 400);
+            const { error } = await db.from("cpa_blocos").delete().eq("id", bid).eq("formulario_id", formId);
+            if (error) throw error;
+            return j({ ok: true });
+        }
+
+        if (acao === "pergunta_salvar") {
+            const norm = normalizarPergunta(body.pergunta ?? {});
+            if (!norm.ok) return j({ error: norm.erro }, 400);
+            const reg = norm.reg;
+            const { data: bl } = await db.from("cpa_blocos").select("id").eq("id", reg.bloco_id).eq("formulario_id", formId).maybeSingle();
+            if (!bl) return j({ error: "Bloco não pertence a este formulário." }, 400);
+            if (reg.chave === "curso") {
+                const { count } = await db.from("cpa_perguntas").select("id", { count: "exact", head: true }).eq("formulario_id", formId).eq("chave", "curso").neq("id", Number(body.pergunta?.id ?? 0));
+                if (count) return j({ error: "Já existe uma pergunta de curso neste formulário." }, 400);
+            }
+            const id = Number(body.pergunta?.id ?? 0);
+            if (id) {
+                const { data: atual } = await db.from("cpa_perguntas").select("*").eq("id", id).eq("formulario_id", formId).maybeSingle();
+                if (!atual) return j({ error: "Pergunta não encontrada neste formulário." }, 404);
+                const respondidas = await perguntasRespondidas(db, formId);
+                if (respondidas.has(String(id))) {
+                    const estrutura = atual.tipo !== reg.tipo || atual.escala_min !== reg.escala_min || atual.escala_max !== reg.escala_max
+                        || diferentes(atual.opcoes, reg.opcoes) || atual.chave !== reg.chave;
+                    if (estrutura) return j({ error: "Esta pergunta já tem respostas: não dá pra mudar tipo, escala, opções ou o papel de curso. Só texto, rótulos e obrigatoriedade." }, 400);
+                }
+                const { data, error } = await db.from("cpa_perguntas").update({ ...reg, ordem: atual.ordem }).eq("id", id).eq("formulario_id", formId).select("*").single();
+                if (error) throw error;
+                return j({ pergunta: data });
+            }
+            const ordem = await proximaOrdem(db, "cpa_perguntas", formId);
+            const { data, error } = await db.from("cpa_perguntas").insert({ ...reg, formulario_id: formId, ordem }).select("*").single();
+            if (error) throw error;
+            return j({ pergunta: data });
+        }
+
+        if (acao === "pergunta_excluir") {
+            const id = Number(body.pergunta_id);
+            const respondidas = await perguntasRespondidas(db, formId);
+            if (respondidas.has(String(id))) return j({ error: "Esta pergunta já tem respostas: não pode ser excluída (use o status 'encerrado' se precisar tirar do ar)." }, 400);
+            const { error } = await db.from("cpa_perguntas").delete().eq("id", id).eq("formulario_id", formId);
+            if (error) throw error;
+            return j({ ok: true });
+        }
+
+        if (acao === "reordenar") {
+            // itens: [{ kind: 'bloco'|'pergunta', id, ordem, bloco_id? }]. Duas fases: a unicidade de ordem
+            // (formulario_id, ordem) não aceita trocas diretas, então primeiro joga tudo pra valores negativos.
+            const itens: Db[] = Array.isArray(body.itens) ? body.itens : [];
+            const tabela = (i: Db) => (i.kind === "bloco" ? "cpa_blocos" : "cpa_perguntas");
+            for (let i = 0; i < itens.length; i++) {
+                const { error } = await db.from(tabela(itens[i])).update({ ordem: -(i + 1) }).eq("id", Number(itens[i].id)).eq("formulario_id", formId);
+                if (error) throw error;
+            }
+            for (const it of itens) {
+                const alt: Db = { ordem: Number(it.ordem) };
+                if (it.kind === "pergunta" && it.bloco_id) alt.bloco_id = Number(it.bloco_id);
+                const { error } = await db.from(tabela(it)).update(alt).eq("id", Number(it.id)).eq("formulario_id", formId);
+                if (error) throw error;
+            }
+            return j({ ok: true });
         }
 
         return j({ error: "Ação desconhecida." }, 400);

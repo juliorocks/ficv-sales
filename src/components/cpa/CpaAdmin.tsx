@@ -5,11 +5,12 @@ import { useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { supabase } from "@/lib/supabase"
-import { extractFnErrorMessage } from "@/utils/functionsError"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Download, Loader2, RefreshCw, ShieldCheck, ShieldAlert } from "lucide-react"
 import { showError, showSuccess } from "@/utils/toast"
+import { chamar } from "./cpaApi"
+import { CpaEditor } from "./CpaEditor"
 
 const COR_SERIE = "#2a78d6"
 
@@ -20,13 +21,6 @@ type FormResumo = {
 }
 type Pergunta = { id: number; bloco_id: number; ordem: number; texto: string; tipo: string; escala_min?: number; escala_max?: number; opcoes?: string[] }
 
-async function chamar<T>(action: string, body: Record<string, unknown>): Promise<T> {
-    const { data, error } = await supabase.functions.invoke("cpa-admin", { body: { action, ...body } })
-    if (error) throw new Error(await extractFnErrorMessage(error, "Erro na Avaliação CPA"))
-    if (data?.error) throw new Error(data.error)
-    return data as T
-}
-
 export function CpaAdmin() {
     const qc = useQueryClient()
     const [formId, setFormId] = useState<number | null>(null)
@@ -34,6 +28,7 @@ export function CpaAdmin() {
     const [busca, setBusca] = useState("")
     const [verificacao, setVerificacao] = useState<null | { integra: boolean; total: number; primeiro_erro: { seq: number; motivo: string } | null; cabeca: string | null }>(null)
 
+    const [aba, setAba] = useState<"painel" | "perguntas">("painel")
     const { data: lista, isLoading: carregandoForms, error: erroForms } = useQuery({
         queryKey: ["cpa-forms"],
         queryFn: () => chamar<{ forms: FormResumo[]; admin: boolean }>("forms", {}),
@@ -147,6 +142,15 @@ export function CpaAdmin() {
 
             {atual && (
                 <>
+                    <div className="flex gap-2 border-b pb-2">
+                        <Button size="sm" variant={aba === "painel" ? "default" : "ghost"} onClick={() => setAba("painel")}>Painel e respostas</Button>
+                        <Button size="sm" variant={aba === "perguntas" ? "default" : "ghost"} onClick={() => setAba("perguntas")}>Perguntas</Button>
+                    </div>
+
+                    {aba === "perguntas" && <CpaEditor formId={atual.id} admin={admin} />}
+
+                    {aba === "painel" && (
+                    <>
                     <section className="grid gap-3 rounded-xl border bg-card p-4 md:grid-cols-2">
                         <div className="space-y-2 text-sm">
                             <p><span className="text-muted-foreground">Status:</span> <b>{rotuloStatus(atual.status)}</b></p>
@@ -351,6 +355,8 @@ export function CpaAdmin() {
                             {comentariosFiltrados.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">Nenhum comentário.</p>}
                         </div>
                     </Painel>
+                    </>
+                    )}
                 </>
             )}
         </div>
