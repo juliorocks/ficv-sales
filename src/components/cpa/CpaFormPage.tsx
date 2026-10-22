@@ -17,17 +17,19 @@ const OURO = "#C9A84C"
 const OURO_CLARO = "#E2C878"
 const TINTA = "#13161D"
 
-// Ícone animado (Lottie) por tela. Os arquivos ficam em public/cpa/lottie/<nome>.json; enquanto não
-// existirem, aparece o ícone estático de reserva. Nomes: avaliacao, curso, gestao, ensino, metas,
-// resposta, melhoria, obrigado.
-const ICONE_BLOCO = ["gestao", "ensino", "metas", "resposta"]
-function IconeLottie({ nome, className, reserva: Reserva }: { nome: string; className: string; reserva: React.ComponentType<{ className?: string }> }) {
+// Ícone animado (Lottie): sorteia um dos arquivos de src/components/cpa/lottie a cada tela.
+// Quem sobe novos JSON só põe na pasta; o glob pega sozinho. Carrega só o arquivo sorteado.
+const carregadoresLottie = import.meta.glob<object>("./lottie/*.json", { import: "default" })
+function IconeLottie({ className, reserva: Reserva }: { className: string; reserva: React.ComponentType<{ className?: string }> }) {
     const [dados, setDados] = useState<object | null>(null)
     useEffect(() => {
+        const chaves = Object.keys(carregadoresLottie)
+        if (!chaves.length) return
         let vivo = true
-        fetch(`/cpa/lottie/${nome}.json`).then((r) => (r.ok ? r.json() : null)).then((d) => { if (vivo && d) setDados(d) }).catch(() => {})
+        const sorteada = chaves[Math.floor(Math.random() * chaves.length)]
+        carregadoresLottie[sorteada]().then((d) => { if (vivo) setDados(d) }).catch(() => {})
         return () => { vivo = false }
-    }, [nome])
+    }, [])
     if (!dados) return <div className={className}><Reserva className="h-full w-full text-[#C9A84C]" /></div>
     return <div className={className}><Lottie animationData={dados} loop autoplay /></div>
 }
@@ -191,7 +193,7 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
         return (
             <Tela>
                 <motion.div initial={{ opacity: 0, scale: 0.94 }} animate={{ opacity: 1, scale: 1 }} className="w-full max-w-md text-center space-y-5">
-                    <IconeLottie nome="obrigado" className="mx-auto h-32 w-32" reserva={Check} />
+                    <IconeLottie className="mx-auto h-32 w-32" reserva={Check} />
                     <h1 className="text-2xl font-bold">Obrigado por participar!</h1>
                     <p className="text-sm text-muted-foreground">
                         {resultado.teste
@@ -270,7 +272,7 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
                         >
                             {passo?.tipo === "intro" && (
                                 <div className="space-y-6">
-                                    <IconeLottie nome="avaliacao" className="mx-auto h-36 w-36" reserva={ClipboardCheck} />
+                                    <IconeLottie className="mx-auto h-36 w-36" reserva={ClipboardCheck} />
                                     <div className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold" style={{ background: "#FBF0CF", color: "#7A5C12" }}>
                                         <Sparkles className="h-3.5 w-3.5" /> Avaliação Institucional CPA · {formulario.ano}
                                     </div>
@@ -287,7 +289,7 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
 
                             {passo?.tipo === "pausa" && (
                                 <div className="space-y-6 text-center">
-                                    <IconeLottie nome="melhoria" className="mx-auto h-28 w-28" reserva={Sparkles} />
+                                    <IconeLottie className="mx-auto h-28 w-28" reserva={Sparkles} />
                                     <p className="text-xl font-semibold">{passo.texto}</p>
                                     <Btn size="lg" className="h-12 w-full text-base" style={{ background: TINTA }} onClick={() => setPos(pos + 1)}>Continuar</Btn>
                                 </div>
@@ -306,7 +308,6 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
                                         avancar(pos, novas)
                                     }}
                                     frase={frasePorProgresso(respondidas / Math.max(total, 1))}
-                                    icone={ICONE_BLOCO[Math.max(0, blocos.findIndex((b) => b.id === passo.pergunta.bloco_id))] ?? "resposta"}
                                 />
                             )}
 
@@ -321,7 +322,7 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
     )
 }
 
-function PerguntaView({ pergunta: p, valor, ultima, enviando, onResponder, onContinuar, frase, icone }: {
+function PerguntaView({ pergunta: p, valor, ultima, enviando, onResponder, onContinuar, frase }: {
     pergunta: Pergunta
     valor: number | string | undefined
     ultima: boolean
@@ -329,14 +330,13 @@ function PerguntaView({ pergunta: p, valor, ultima, enviando, onResponder, onCon
     onResponder: (v: number | string) => void
     onContinuar: (valor: string) => void
     frase: string
-    icone: string
 }) {
     const [texto, setTexto] = useState(typeof valor === "string" ? valor : "")
 
     return (
         <div className="space-y-6 rounded-3xl bg-[var(--bg-card)] p-6 shadow-[0_12px_40px_-12px_rgba(19,22,29,0.22)]">
             <div className="flex items-center gap-3">
-                <IconeLottie nome={icone} className="h-14 w-14 shrink-0" reserva={Target} />
+                <IconeLottie className="h-14 w-14 shrink-0" reserva={Target} />
                 <p className="text-xs font-semibold uppercase tracking-wide text-[#A07E2A]">{frase}</p>
             </div>
             <h2 className="text-xl font-semibold leading-snug">{p.texto}</h2>
