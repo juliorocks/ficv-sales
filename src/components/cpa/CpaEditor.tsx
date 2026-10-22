@@ -4,8 +4,8 @@
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowDown, ArrowUp, Loader2, Pencil, Plus, Trash2, X } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { Btn } from "./cpaUi"
+import { Inp } from "./cpaUi"
 import { showError, showSuccess } from "@/utils/toast"
 import { chamar, BlocoAdmin, PerguntaAdmin } from "./cpaApi"
 
@@ -78,12 +78,12 @@ export function CpaEditor({ formId, admin }: { formId: number; admin: boolean })
                 </p>
                 {admin && (
                     <div className="flex gap-2">
-                        <Button size="sm" variant="outline" onClick={() => setEdicao({ tipo: "bloco", bloco: { titulo: "", incentivo: "" } })}>
+                        <Btn size="sm" variant="outline" onClick={() => setEdicao({ tipo: "bloco", bloco: { titulo: "", incentivo: "" } })}>
                             <Plus className="mr-1 h-4 w-4" /> Bloco
-                        </Button>
-                        <Button size="sm" onClick={() => setEdicao({ tipo: "pergunta", pergunta: { tipo: "escala", escala_min: 0, escala_max: 10, obrigatoria: true, bloco_id: blocos[0]?.id } })}>
+                        </Btn>
+                        <Btn size="sm" onClick={() => setEdicao({ tipo: "pergunta", pergunta: { tipo: "escala", escala_min: 0, escala_max: 10, obrigatoria: true, bloco_id: blocos[0]?.id } })}>
                             <Plus className="mr-1 h-4 w-4" /> Pergunta
-                        </Button>
+                        </Btn>
                     </div>
                 )}
             </div>
@@ -97,8 +97,8 @@ export function CpaEditor({ formId, admin }: { formId: number; admin: boolean })
             {blocos.map((b, bi) => {
                 const ps = perguntasDo(b.id)
                 return (
-                    <section key={b.id} className="rounded-xl border bg-card">
-                        <header className="flex items-start justify-between gap-3 border-b p-3">
+                    <section key={b.id} className="glass-card">
+                        <header className="flex items-start justify-between gap-3 p-4">
                             <div className="min-w-0">
                                 <h3 className="text-sm font-semibold">{bi + 1}. {b.titulo}</h3>
                                 {b.incentivo && <p className="text-xs text-muted-foreground">Pausa: “{b.incentivo}”</p>}
@@ -167,9 +167,9 @@ function FormBloco({ valor, salvando, onSalvar }: { valor: Partial<BlocoAdmin>; 
     const [incentivo, setIncentivo] = useState(valor.incentivo ?? "")
     return (
         <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); onSalvar({ id: valor.id, titulo, incentivo }) }}>
-            <Campo rotulo="Título do bloco"><Input value={titulo} onChange={(e) => setTitulo(e.target.value)} maxLength={200} required /></Campo>
+            <Campo rotulo="Título do bloco"><Inp value={titulo} onChange={(e) => setTitulo(e.target.value)} maxLength={200} required /></Campo>
             <Campo rotulo="Frase de incentivo (aparece na pausa depois do bloco; opcional)">
-                <Input value={incentivo} onChange={(e) => setIncentivo(e.target.value)} maxLength={200} />
+                <Inp value={incentivo} onChange={(e) => setIncentivo(e.target.value)} maxLength={200} />
             </Campo>
             <Rodape salvando={salvando} />
         </form>
@@ -199,16 +199,16 @@ function FormPergunta({ valor, blocos, travada, salvando, onSalvar }: {
         }}>
             <Campo rotulo="Texto da pergunta">
                 <textarea value={f.texto} onChange={(e) => set("texto", e.target.value)} rows={3} maxLength={500} required
-                    className="w-full rounded-md border bg-background p-2 text-sm" />
+                    className="w-full rounded-lg bg-[var(--bg-card-hover)] p-3 text-sm text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-primary/40" />
             </Campo>
             <div className="grid grid-cols-2 gap-3">
                 <Campo rotulo="Bloco">
-                    <select className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={f.bloco_id} onChange={(e) => set("bloco_id", Number(e.target.value))}>
+                    <select className="h-9 w-full rounded-lg bg-[var(--bg-card-hover)] px-3 text-sm text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-primary/40" value={f.bloco_id} onChange={(e) => set("bloco_id", Number(e.target.value))}>
                         {blocos.map((b) => <option key={b.id} value={b.id}>{b.titulo}</option>)}
                     </select>
                 </Campo>
                 <Campo rotulo="Tipo">
-                    <select className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={f.tipo} disabled={travada} onChange={(e) => set("tipo", e.target.value)}>
+                    <select className="h-9 w-full rounded-lg bg-[var(--bg-card-hover)] px-3 text-sm text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-primary/40" value={f.tipo} disabled={travada} onChange={(e) => set("tipo", e.target.value)}>
                         <option value="escala">Nota (escala)</option>
                         <option value="escolha">Escolha única</option>
                         <option value="texto">Texto livre</option>
@@ -217,21 +217,21 @@ function FormPergunta({ valor, blocos, travada, salvando, onSalvar }: {
             </div>
             {f.tipo === "escala" && (
                 <div className="grid grid-cols-2 gap-3">
-                    <Campo rotulo="Nota mínima"><Input type="number" value={f.escala_min} disabled={travada} onChange={(e) => set("escala_min", Number(e.target.value))} /></Campo>
-                    <Campo rotulo="Nota máxima"><Input type="number" value={f.escala_max} disabled={travada} onChange={(e) => set("escala_max", Number(e.target.value))} /></Campo>
-                    <Campo rotulo="Rótulo da nota mínima"><Input value={f.rotulo_min} onChange={(e) => set("rotulo_min", e.target.value)} /></Campo>
-                    <Campo rotulo="Rótulo da nota máxima"><Input value={f.rotulo_max} onChange={(e) => set("rotulo_max", e.target.value)} /></Campo>
+                    <Campo rotulo="Nota mínima"><Inp type="number" value={f.escala_min} disabled={travada} onChange={(e) => set("escala_min", Number(e.target.value))} /></Campo>
+                    <Campo rotulo="Nota máxima"><Inp type="number" value={f.escala_max} disabled={travada} onChange={(e) => set("escala_max", Number(e.target.value))} /></Campo>
+                    <Campo rotulo="Rótulo da nota mínima"><Inp value={f.rotulo_min} onChange={(e) => set("rotulo_min", e.target.value)} /></Campo>
+                    <Campo rotulo="Rótulo da nota máxima"><Inp value={f.rotulo_max} onChange={(e) => set("rotulo_max", e.target.value)} /></Campo>
                 </div>
             )}
             {f.tipo === "escolha" && (
                 <Campo rotulo="Opções (uma por linha)">
                     <textarea value={f.opcoes} disabled={travada} onChange={(e) => set("opcoes", e.target.value)} rows={5}
-                        className="w-full rounded-md border bg-background p-2 text-sm disabled:opacity-60" />
+                        className="w-full rounded-lg bg-[var(--bg-card-hover)] p-3 text-sm text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60" />
                 </Campo>
             )}
             <div className="grid grid-cols-2 gap-3">
                 <Campo rotulo="Papel da pergunta">
-                    <select className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={f.chave} disabled={travada} onChange={(e) => set("chave", e.target.value)}>
+                    <select className="h-9 w-full rounded-lg bg-[var(--bg-card-hover)] px-3 text-sm text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-primary/40" value={f.chave} disabled={travada} onChange={(e) => set("chave", e.target.value)}>
                         <option value="">Pergunta comum</option>
                         <option value="curso">Curso (alimenta o filtro de curso)</option>
                     </select>
@@ -249,7 +249,7 @@ function FormPergunta({ valor, blocos, travada, salvando, onSalvar }: {
 function Dialogo({ titulo, onFechar, children }: { titulo: string; onFechar: () => void; children: React.ReactNode }) {
     return (
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4" onClick={onFechar}>
-            <div className="mt-10 w-full max-w-lg rounded-xl border bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mt-10 w-full max-w-lg glass-card p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
                 <div className="mb-4 flex items-center justify-between">
                     <h2 className="text-sm font-semibold">{titulo}</h2>
                     <button type="button" aria-label="Fechar" onClick={onFechar}><X className="h-4 w-4" /></button>
@@ -263,7 +263,7 @@ function Dialogo({ titulo, onFechar, children }: { titulo: string; onFechar: () 
 function Rodape({ salvando }: { salvando: boolean }) {
     return (
         <div className="flex justify-end pt-2">
-            <Button type="submit" disabled={salvando}>{salvando && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Salvar</Button>
+            <Btn type="submit" disabled={salvando}>{salvando && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Salvar</Btn>
         </div>
     )
 }

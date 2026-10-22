@@ -5,14 +5,13 @@ import { useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { supabase } from "@/lib/supabase"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Download, Loader2, RefreshCw, ShieldCheck, ShieldAlert } from "lucide-react"
+import { Btn, Cartao, Inp, Rotulo, TICK, TT, COR_GRAFICO } from "./cpaUi"
+import { ClipboardCheck, Download, Loader2, RefreshCw, ShieldCheck, ShieldAlert } from "lucide-react"
 import { showError, showSuccess } from "@/utils/toast"
 import { chamar } from "./cpaApi"
 import { CpaEditor } from "./CpaEditor"
 
-const COR_SERIE = "#2a78d6"
+const COR_SERIE = COR_GRAFICO
 
 type Filtros = { origem: "oficial" | "teste" | "todas"; curso: string; de: string; ate: string }
 type FormResumo = {
@@ -128,56 +127,60 @@ export function CpaAdmin() {
 
             <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
-                    <h1 className="text-xl font-bold">Avaliação Institucional (CPA)</h1>
-                    <p className="text-sm text-muted-foreground">Uso interno. Não aparece no Portal do Aluno.</p>
+                    <div className="mb-2 flex items-center gap-2 text-primary">
+                        <ClipboardCheck size={14} />
+                        <span className="text-[10px] font-bold uppercase tracking-widest">Uso interno · não aparece no Portal do Aluno</span>
+                    </div>
+                    <h2 className="mb-2 text-3xl font-bold tracking-tight text-[var(--text-main)]">Avaliação Institucional (CPA)</h2>
+                    <p className="text-sm text-[var(--text-muted)]">Formulários, respostas, indicadores e comprovação.</p>
                 </div>
                 <div className="flex gap-2">
                     {forms.map((f) => (
-                        <Button key={f.id} size="sm" variant={f.id === atual?.id ? "default" : "outline"} onClick={() => setFormId(f.id)}>
+                        <Btn key={f.id} size="sm" variant={f.id === atual?.id ? "default" : "outline"} onClick={() => setFormId(f.id)}>
                             {f.nivel === "graduacao" ? "Graduação" : "Pós"} {f.ano}
-                        </Button>
+                        </Btn>
                     ))}
                 </div>
             </div>
 
             {atual && (
                 <>
-                    <div className="flex gap-2 border-b pb-2">
-                        <Button size="sm" variant={aba === "painel" ? "default" : "ghost"} onClick={() => setAba("painel")}>Painel e respostas</Button>
-                        <Button size="sm" variant={aba === "perguntas" ? "default" : "ghost"} onClick={() => setAba("perguntas")}>Perguntas</Button>
+                    <div className="flex gap-2 pb-2">
+                        <Btn size="sm" variant={aba === "painel" ? "default" : "ghost"} onClick={() => setAba("painel")}>Painel e respostas</Btn>
+                        <Btn size="sm" variant={aba === "perguntas" ? "default" : "ghost"} onClick={() => setAba("perguntas")}>Perguntas</Btn>
                     </div>
 
                     {aba === "perguntas" && <CpaEditor formId={atual.id} admin={admin} />}
 
                     {aba === "painel" && (
                     <>
-                    <section className="grid gap-3 rounded-xl border bg-card p-4 md:grid-cols-2">
+                    <section className="grid gap-4 glass-card p-6 md:grid-cols-2">
                         <div className="space-y-2 text-sm">
-                            <p><span className="text-muted-foreground">Status:</span> <b>{rotuloStatus(atual.status)}</b></p>
+                            <p><span className="text-[var(--text-muted)]">Status:</span> <b>{rotuloStatus(atual.status)}</b></p>
                             <p className="break-all text-xs text-muted-foreground">Link de aplicação: <span className="font-mono text-foreground">{link}</span></p>
-                            <Button size="sm" variant="outline" onClick={() => { navigator.clipboard?.writeText(link); showSuccess("Link copiado") }}>Copiar link</Button>
+                            <Btn size="sm" variant="outline" onClick={() => { navigator.clipboard?.writeText(link); showSuccess("Link copiado") }}>Copiar link</Btn>
                         </div>
                         {admin && (
                             <div className="space-y-2 text-sm">
                                 <div className="flex flex-wrap items-center gap-2">
-                                    <span className="text-muted-foreground">Portal do aluno:</span>
-                                    <Button size="sm" variant={atual.portal_ativo ? "default" : "outline"} disabled={alterar.isPending}
+                                    <span className="text-[var(--text-muted)]">Portal do aluno:</span>
+                                    <Btn size="sm" variant={atual.portal_ativo ? "default" : "outline"} disabled={alterar.isPending}
                                         onClick={() => { if (!atual.portal_ativo || confirm("Desligar a avaliação no Portal do Aluno?")) alterar.mutate({ portal_ativo: !atual.portal_ativo }) }}>
                                         {atual.portal_ativo ? "Ligado" : "Desligado"}
-                                    </Button>
+                                    </Btn>
                                 </div>
                                 <div className="flex flex-wrap gap-2">
                                     {(["teste", "aberto", "encerrado"] as const).map((s) => (
-                                        <Button key={s} size="sm" variant={atual.status === s ? "default" : "outline"} disabled={alterar.isPending} onClick={() => alterar.mutate({ status: s })}>
+                                        <Btn key={s} size="sm" variant={atual.status === s ? "default" : "outline"} disabled={alterar.isPending} onClick={() => alterar.mutate({ status: s })}>
                                             {rotuloStatus(s)}
-                                        </Button>
+                                        </Btn>
                                     ))}
                                 </div>
                                 <p className="text-xs text-muted-foreground">Base: {atual.populacao_ativa ?? "–"} alunos com matrícula vigente no Sponte.</p>
-                                <Button size="sm" variant="ghost" className="text-destructive" disabled={apagarTestes.isPending || atual.testes === 0}
+                                <Btn size="sm" variant="ghost" className="text-destructive" disabled={apagarTestes.isPending || atual.testes === 0}
                                     onClick={() => { if (confirm(`Apagar ${atual.testes} respostas de teste? As oficiais não são afetadas.`)) apagarTestes.mutate() }}>
                                     Apagar respostas de teste ({atual.testes})
-                                </Button>
+                                </Btn>
                             </div>
                         )}
                     </section>
@@ -189,9 +192,9 @@ export function CpaAdmin() {
                         <Kpi rotulo="Notas baixas" valor={t?.pct_notas_baixas != null ? `${t.pct_notas_baixas}%` : "–"} sub="metade inferior da escala" />
                     </section>
 
-                    <section className="grid gap-3 rounded-xl border bg-card p-4 md:grid-cols-5">
+                    <section className="grid gap-3 glass-card p-6 md:grid-cols-5">
                         <Campo rotulo="Origem">
-                            <select className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={filtros.origem}
+                            <select className="h-9 w-full rounded-lg bg-[var(--bg-card-hover)] px-3 text-sm text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-primary/40" value={filtros.origem}
                                 onChange={(e) => setFiltros({ ...filtros, origem: e.target.value as Filtros["origem"] })}>
                                 <option value="oficial">Oficiais</option>
                                 <option value="teste">Teste</option>
@@ -200,36 +203,36 @@ export function CpaAdmin() {
                         </Campo>
                         {atual.nivel === "pos" && (
                             <Campo rotulo="Curso">
-                                <select className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={filtros.curso}
+                                <select className="h-9 w-full rounded-lg bg-[var(--bg-card-hover)] px-3 text-sm text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-primary/40" value={filtros.curso}
                                     onChange={(e) => setFiltros({ ...filtros, curso: e.target.value })}>
                                     <option value="">Todos</option>
                                     {opcoesCurso.map((c) => <option key={c} value={c}>{c}</option>)}
                                 </select>
                             </Campo>
                         )}
-                        <Campo rotulo="De"><Input type="date" value={filtros.de} onChange={(e) => setFiltros({ ...filtros, de: e.target.value })} /></Campo>
-                        <Campo rotulo="Até"><Input type="date" value={filtros.ate} onChange={(e) => setFiltros({ ...filtros, ate: e.target.value })} /></Campo>
+                        <Campo rotulo="De"><Inp type="date" value={filtros.de} onChange={(e) => setFiltros({ ...filtros, de: e.target.value })} /></Campo>
+                        <Campo rotulo="Até"><Inp type="date" value={filtros.ate} onChange={(e) => setFiltros({ ...filtros, ate: e.target.value })} /></Campo>
                         <div className="flex items-end gap-2">
-                            <Button size="sm" variant="outline" onClick={() => refetch()} disabled={isFetching}>
+                            <Btn size="sm" variant="outline" onClick={() => refetch()} disabled={isFetching}>
                                 <RefreshCw className={`mr-2 h-4 w-4 ${isFetching ? "animate-spin" : ""}`} /> Atualizar
-                            </Button>
+                            </Btn>
                         </div>
                     </section>
 
-                    <section className="flex flex-wrap items-center gap-3 rounded-xl border bg-card p-4">
-                        <Button onClick={() => exportar.mutate()} disabled={exportar.isPending}>
+                    <section className="flex flex-wrap items-center gap-3 glass-card p-6">
+                        <Btn onClick={() => exportar.mutate()} disabled={exportar.isPending}>
                             {exportar.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
                             Exportar CSV + verificação
-                        </Button>
+                        </Btn>
                         {admin && (
-                            <Button variant="outline" onClick={() => sincronizarDocentes.mutate()} disabled={sincronizarDocentes.isPending}>
+                            <Btn variant="outline" onClick={() => sincronizarDocentes.mutate()} disabled={sincronizarDocentes.isPending}>
                                 {sincronizarDocentes.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                                 Atualizar professores (Moodle)
-                            </Button>
+                            </Btn>
                         )}
-                        <Button variant="outline" onClick={() => verificar.mutate()} disabled={verificar.isPending}>
+                        <Btn variant="outline" onClick={() => verificar.mutate()} disabled={verificar.isPending}>
                             <ShieldCheck className="mr-2 h-4 w-4" /> Verificar integridade
-                        </Button>
+                        </Btn>
                         {verificacao && (
                             <span className={`flex items-center gap-2 text-sm ${verificacao.integra ? "text-emerald-700" : "text-red-700"}`}>
                                 {verificacao.integra ? <ShieldCheck className="h-4 w-4" /> : <ShieldAlert className="h-4 w-4" />}
@@ -244,10 +247,10 @@ export function CpaAdmin() {
                         <Painel titulo="Respostas por dia">
                             <ResponsiveContainer width="100%" height={220}>
                                 <LineChart data={stats?.por_dia ?? []} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                                    <CartesianGrid stroke="rgba(128,128,128,0.2)" vertical={false} />
-                                    <XAxis dataKey="dia" tick={{ fontSize: 11 }} />
-                                    <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                                    <Tooltip />
+                                    <CartesianGrid stroke="rgba(139,148,158,0.18)" vertical={false} />
+                                    <XAxis dataKey="dia" tick={TICK} />
+                                    <YAxis allowDecimals={false} tick={TICK} />
+                                    <Tooltip {...TT} />
                                     <Line type="monotone" dataKey="n" name="Respostas" stroke={COR_SERIE} strokeWidth={2} dot={{ r: 3 }} />
                                 </LineChart>
                             </ResponsiveContainer>
@@ -255,10 +258,10 @@ export function CpaAdmin() {
                         <Painel titulo="Média por bloco (0 a escala máxima)">
                             <ResponsiveContainer width="100%" height={220}>
                                 <BarChart data={stats?.blocos ?? []} layout="vertical" margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
-                                    <CartesianGrid stroke="rgba(128,128,128,0.2)" horizontal={false} />
-                                    <XAxis type="number" domain={[0, t?.escala_max ?? 10]} tick={{ fontSize: 11 }} />
-                                    <YAxis type="category" dataKey="titulo" width={150} tick={{ fontSize: 11 }} />
-                                    <Tooltip />
+                                    <CartesianGrid stroke="rgba(139,148,158,0.18)" horizontal={false} />
+                                    <XAxis type="number" domain={[0, t?.escala_max ?? 10]} tick={TICK} />
+                                    <YAxis type="category" dataKey="titulo" width={150} tick={TICK} />
+                                    <Tooltip {...TT} />
                                     <Bar dataKey="media" name="Média" fill={COR_SERIE} radius={[0, 4, 4, 0]} />
                                 </BarChart>
                             </ResponsiveContainer>
@@ -269,8 +272,8 @@ export function CpaAdmin() {
                         <Painel titulo="Média por pergunta de escala">
                             <ResponsiveContainer width="100%" height={Math.max(220, escala.length * 22)}>
                                 <BarChart data={escala} layout="vertical" margin={{ top: 4, right: 16, left: 4, bottom: 0 }}>
-                                    <XAxis type="number" domain={[0, 10]} tick={{ fontSize: 11 }} />
-                                    <YAxis type="category" dataKey="ordem" width={36} tick={{ fontSize: 11 }} tickFormatter={(v) => `P${v}`} />
+                                    <XAxis type="number" domain={[0, 10]} tick={TICK} />
+                                    <YAxis type="category" dataKey="ordem" width={36} tick={TICK} tickFormatter={(v) => `P${v}`} />
                                     <Tooltip formatter={(v: number) => [v, "Média"]} labelFormatter={(v) => `P${v}`} />
                                     <Bar dataKey="media" name="Média" fill={COR_SERIE} radius={[0, 4, 4, 0]} />
                                 </BarChart>
@@ -282,9 +285,9 @@ export function CpaAdmin() {
                             ) : (
                                 <ResponsiveContainer width="100%" height={Math.max(180, (stats?.por_curso ?? []).length * 30)}>
                                     <BarChart data={stats.por_curso} layout="vertical" margin={{ top: 4, right: 24, left: 4, bottom: 0 }}>
-                                        <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
-                                        <YAxis type="category" dataKey="curso" width={220} tick={{ fontSize: 11 }} />
-                                        <Tooltip />
+                                        <XAxis type="number" allowDecimals={false} tick={TICK} />
+                                        <YAxis type="category" dataKey="curso" width={220} tick={TICK} />
+                                        <Tooltip {...TT} />
                                         <Bar dataKey="n" name="Respostas" fill={COR_SERIE} radius={[0, 4, 4, 0]} />
                                     </BarChart>
                                 </ResponsiveContainer>
@@ -298,15 +301,15 @@ export function CpaAdmin() {
                         ) : (
                             <div className="overflow-x-auto">
                                 <table className="w-full min-w-[560px] text-sm">
-                                    <thead className="text-left text-xs text-muted-foreground">
+                                    <thead className="text-left text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
                                         <tr><th className="py-2 pr-3">Disciplina</th><th className="py-2 pr-3">Período</th><th className="py-2 pr-3">Professor</th><th className="py-2 pr-3 text-right">Respostas</th><th className="py-2 text-right">Média</th></tr>
                                     </thead>
                                     <tbody>
                                         {stats.por_disciplina.map((d: any) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
-                                            <tr key={d.contexto} className="border-t">
+                                            <tr key={d.contexto}>
                                                 <td className="py-2 pr-3">{d.disciplina.replace(/-/g, " ")}</td>
                                                 <td className="py-2 pr-3 text-xs text-muted-foreground">{d.periodo}</td>
-                                                <td className="py-2 pr-3">{d.docente ?? <span className="text-muted-foreground">não identificado</span>}</td>
+                                                <td className="py-2 pr-3">{d.docente ?? <span className="text-[var(--text-muted)]">não identificado</span>}</td>
                                                 <td className="py-2 pr-3 text-right tabular-nums">{d.n}</td>
                                                 <td className="py-2 text-right tabular-nums">{d.media ?? "–"}</td>
                                             </tr>
@@ -320,12 +323,12 @@ export function CpaAdmin() {
                     <Painel titulo="Tabela por pergunta (alternativa textual aos gráficos)">
                         <div className="overflow-x-auto">
                             <table className="w-full min-w-[640px] text-sm">
-                                <thead className="text-left text-xs text-muted-foreground">
+                                <thead className="text-left text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
                                     <tr><th className="py-2 pr-3">#</th><th className="py-2 pr-3">Pergunta</th><th className="py-2 pr-3 text-right">n</th><th className="py-2 pr-3 text-right">Média</th><th className="py-2">Distribuição</th></tr>
                                 </thead>
                                 <tbody>
                                     {(stats?.perguntas ?? []).map((p: any) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
-                                        <tr key={p.id} className="border-t align-top">
+                                        <tr key={p.id} className="align-top">
                                             <td className="py-2 pr-3 text-xs text-muted-foreground">{p.ordem}</td>
                                             <td className="py-2 pr-3">{p.texto}</td>
                                             <td className="py-2 pr-3 text-right tabular-nums">{p.n}</td>
@@ -342,10 +345,10 @@ export function CpaAdmin() {
                     </Painel>
 
                     <Painel titulo={`Comentários (${comentariosFiltrados.length})`}>
-                        <Input placeholder="Buscar nos comentários" value={busca} onChange={(e) => setBusca(e.target.value)} className="mb-3" />
+                        <Inp placeholder="Buscar nos comentários" value={busca} onChange={(e) => setBusca(e.target.value)} className="mb-3" />
                         <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
                             {comentariosFiltrados.map((c: any) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
-                                <div key={`${c.seq}-${c.respondido_em}-${c.texto.slice(0, 12)}`} className="rounded-lg border p-3 text-sm">
+                                <div key={`${c.seq}-${c.respondido_em}-${c.texto.slice(0, 12)}`} className="rounded-xl bg-[var(--bg-card-hover)] p-4 text-sm">
                                     <p className="mb-1 text-xs text-muted-foreground">
                                         {c.teste ? "teste" : `protocolo ${c.seq}`} · {new Date(c.respondido_em).toLocaleString("pt-BR")}{c.curso ? ` · ${c.curso}` : ""}
                                     </p>
@@ -382,18 +385,18 @@ function baixar(nome: string, conteudo: string, tipo: string) {
 
 function Kpi({ rotulo, valor, sub }: { rotulo: string; valor: string | number; sub: string }) {
     return (
-        <div className="rounded-xl border bg-card p-4">
-            <p className="text-xs text-muted-foreground">{rotulo}</p>
-            <p className="mt-1 text-2xl font-bold tabular-nums">{valor}</p>
-            <p className="mt-1 text-xs text-muted-foreground">{sub}</p>
-        </div>
+        <Cartao>
+            <p className="mb-6 text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)]">{rotulo}</p>
+            <h3 className="mb-1 text-2xl font-bold tabular-nums text-[var(--text-main)]">{valor}</h3>
+            <p className="text-[10px] text-[var(--text-muted)]">{sub}</p>
+        </Cartao>
     )
 }
 
 function Painel({ titulo, children }: { titulo: string; children: React.ReactNode }) {
     return (
-        <div className="rounded-xl border bg-card p-4">
-            <h2 className="mb-3 text-sm font-semibold">{titulo}</h2>
+        <div className="glass-card p-6">
+            <Rotulo>{titulo}</Rotulo>
             {children}
         </div>
     )

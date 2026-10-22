@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useParams } from "react-router-dom"
 import { AnimatePresence, motion } from "framer-motion"
 import { Check, ChevronLeft, Copy, Loader2, Sparkles } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { Btn } from "./cpaUi"
 
 const FN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cpa-form`
 
@@ -159,18 +159,18 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
                             ? "Resposta de teste registrada. Ela não entra nos relatórios oficiais."
                             : "Sua avaliação foi registrada de forma anônima."}
                     </p>
-                    <div className="rounded-xl border bg-card p-4 text-left space-y-2">
+                    <div className="glass-card p-6 text-left space-y-2">
                         {!resultado.teste && resultado.protocolo !== null && (
                             <p className="text-xs text-muted-foreground">Protocolo nº <span className="font-mono font-semibold text-foreground">{resultado.protocolo}</span></p>
                         )}
                         <p className="text-xs text-muted-foreground">Código de comprovante</p>
                         <p className="break-all font-mono text-[11px] leading-relaxed">{resultado.comprovante}</p>
-                        <Button
+                        <Btn
                             variant="outline" size="sm" className="w-full"
                             onClick={() => { navigator.clipboard?.writeText(resultado.comprovante); setCopiado(true) }}
                         >
                             {copiado ? <><Check className="mr-2 h-4 w-4" /> Copiado</> : <><Copy className="mr-2 h-4 w-4" /> Copiar código</>}
-                        </Button>
+                        </Btn>
                     </div>
                 </motion.div>
             </Tela>
@@ -234,7 +234,7 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
                                     <p className="text-sm text-muted-foreground">
                                         São {total} perguntas. Toque na nota que melhor representa a sua experiência.
                                     </p>
-                                    <Button size="lg" className="h-12 w-full text-base" onClick={() => setPos(1)}>Começar</Button>
+                                    <Btn size="lg" className="h-12 w-full text-base" onClick={() => setPos(1)}>Começar</Btn>
                                 </div>
                             )}
 
@@ -242,7 +242,7 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
                                 <div className="space-y-6 text-center">
                                     <Sparkles className="mx-auto h-10 w-10 text-primary" />
                                     <p className="text-xl font-semibold">{passo.texto}</p>
-                                    <Button size="lg" className="h-12 w-full text-base" onClick={() => setPos(pos + 1)}>Continuar</Button>
+                                    <Btn size="lg" className="h-12 w-full text-base" onClick={() => setPos(pos + 1)}>Continuar</Btn>
                                 </div>
                             )}
 
@@ -295,8 +295,8 @@ function PerguntaView({ pergunta: p, valor, ultima, enviando, onResponder, onCon
                             return (
                                 <button
                                     key={n} type="button" onClick={() => onResponder(n)} disabled={enviando}
-                                    className={`h-12 rounded-xl border text-base font-semibold transition-all active:scale-95 ${
-                                        marcado ? "scale-105 border-primary bg-primary text-primary-foreground shadow-md" : "bg-card hover:border-primary/60"
+                                    className={`h-12 rounded-xl text-base font-semibold transition-all active:scale-95 ${
+                                        marcado ? "scale-105 bg-primary text-primary-foreground shadow-md" : "bg-[var(--bg-card)] shadow-[var(--card-shadow)] hover:bg-[var(--bg-card-hover)]"
                                     }`}
                                 >
                                     {n}
@@ -315,8 +315,8 @@ function PerguntaView({ pergunta: p, valor, ultima, enviando, onResponder, onCon
                     {p.opcoes.map((op) => (
                         <button
                             key={op} type="button" onClick={() => onResponder(op)} disabled={enviando}
-                            className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left text-sm transition-all active:scale-[0.99] ${
-                                valor === op ? "border-primary bg-primary/10 font-semibold" : "bg-card hover:border-primary/60"
+                            className={`flex w-full items-center justify-between rounded-xl px-4 py-3 text-left text-sm transition-all active:scale-[0.99] ${
+                                valor === op ? "bg-primary/10 font-semibold text-primary shadow-[var(--card-shadow)]" : "bg-[var(--bg-card)] shadow-[var(--card-shadow)] hover:bg-[var(--bg-card-hover)]"
                             }`}
                         >
                             {op}
@@ -331,14 +331,14 @@ function PerguntaView({ pergunta: p, valor, ultima, enviando, onResponder, onCon
                     <textarea
                         value={texto} onChange={(e) => setTexto(e.target.value)} rows={6} maxLength={2000}
                         placeholder="Escreva aqui (opcional)"
-                        className="w-full rounded-xl border bg-card p-3 text-sm outline-none focus:border-primary"
+                        className="w-full rounded-xl bg-[var(--bg-card-hover)] p-3 text-sm text-[var(--text-main)] outline-none focus:ring-2 focus:ring-primary/40"
                     />
-                    <Button
+                    <Btn
                         size="lg" className="h-12 w-full text-base" disabled={enviando}
                         onClick={() => onContinuar(texto.trim())}
                     >
                         {enviando ? <Loader2 className="h-5 w-5 animate-spin" /> : ultima ? "Enviar respostas" : "Continuar"}
-                    </Button>
+                    </Btn>
                 </div>
             )}
         </div>
