@@ -67,7 +67,7 @@ export function CpaPortalCard() {
                 ))}
             </ul>
             {alvo && (
-                <div className="fixed inset-0 z-50 overflow-y-auto bg-background">
+                <div className="fixed inset-x-0 top-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 overflow-y-auto bg-background sm:bottom-0">
                     <button type="button" aria-label="Fechar" onClick={() => { setAlvo(null); qc.invalidateQueries({ queryKey: ["cpa-portal-pendencias"] }) }}
                         className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-muted">
                         <X className="h-4 w-4" />
