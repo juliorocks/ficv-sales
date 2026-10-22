@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useParams } from "react-router-dom"
 import { AnimatePresence, motion } from "framer-motion"
-import { BookOpen, Check, ChevronLeft, ClipboardCheck, Copy, GraduationCap, Loader2, MessageSquare, Sparkles, Target } from "lucide-react"
+import { Check, ChevronLeft, ClipboardCheck, Copy, Loader2, Sparkles, Target } from "lucide-react"
 import Lottie from "lottie-react"
 import { Btn } from "./cpaUi"
 
