@@ -104,7 +104,7 @@ export function CpaPortalCard() {
                 </div>
             </section>
             {fila && createPortal(
-                <div className="fixed inset-x-0 top-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 overflow-y-auto bg-background sm:bottom-0">
+                <div className="fixed inset-x-0 top-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 overflow-hidden bg-background sm:bottom-0">
                     <button type="button" aria-label="Fechar" onClick={fechar}
                         className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-muted">
                         <X className="h-4 w-4" />
@@ -128,7 +128,7 @@ function CpaFila({ itens, onFechar }: { itens: Item[]; onFechar: () => void }) {
     const atual = itens[i]
     if (transicao) {
         return (
-            <div className="flex min-h-dvh flex-col items-center justify-center px-6 text-center">
+            <div className="flex h-full flex-col items-center justify-center overflow-y-auto px-6 text-center">
                 <p className="text-[11px] font-bold uppercase tracking-widest text-[#A07E2A]">Parte {i + 1} de {itens.length}</p>
                 <h2 className="mt-3 text-2xl font-bold">{atual.titulo}</h2>
                 {atual.foto !== undefined && <div className="mt-6"><AvatarDocente src={atual.foto} nome={atual.detalhe} tamanho={88} /></div>}
@@ -154,7 +154,7 @@ function CpaFila({ itens, onFechar }: { itens: Item[]; onFechar: () => void }) {
 
 function Conclusao({ comprovantes, onFechar }: { comprovantes: Resultado[]; onFechar: () => void }) {
     return (
-        <div className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center space-y-5 px-6 py-8 text-center">
+        <div className="mx-auto flex h-full max-w-md flex-col items-center justify-center space-y-5 overflow-y-auto px-6 py-8 text-center">
             <h2 className="text-2xl font-bold">Obrigado por participar!</h2>
             <p className="text-sm text-[var(--text-muted)]">Suas respostas foram registradas de forma anônima.</p>
             <div className="w-full space-y-2 text-left">
@@ -176,8 +176,8 @@ function CpaPortalAvaliacao({ formulario_id, contexto, aoConcluir }: { formulari
         queryFn: () => portal<{ formulario: Formulario; blocos: Bloco[]; perguntas: Pergunta[] }>({ action: "form", formulario_id, contexto }),
         retry: false,
     })
-    if (isLoading) return <div className="flex h-dvh items-center justify-center"><Loader2 className="h-7 w-7 animate-spin text-primary" /></div>
-    if (error || !data) return <div className="flex h-dvh items-center justify-center p-6 text-center text-sm text-[var(--text-muted)]">{(error as Error)?.message ?? "Avaliação indisponível."}</div>
+    if (isLoading) return <div className="flex h-full items-center justify-center"><Loader2 className="h-7 w-7 animate-spin text-primary" /></div>
+    if (error || !data) return <div className="flex h-full items-center justify-center p-6 text-center text-sm text-[var(--text-muted)]">{(error as Error)?.message ?? "Avaliação indisponível."}</div>
 
     return (
         <CpaFormFlow
@@ -185,6 +185,7 @@ function CpaPortalAvaliacao({ formulario_id, contexto, aoConcluir }: { formulari
             storageKey={`cpa_portal_${formulario_id}_${contexto}`}
             aoConcluir={aoConcluir}
             pularIntro
+            embutido
             enviar={async (valores): Promise<RespostaEnvio> => {
                 const { data: d, error: e } = await supabase.functions.invoke("cpa-portal", {
                     body: { action: "submit", formulario_id, contexto, respostas: valores },

@@ -2,7 +2,7 @@
 // Dois usos: o link público (/avaliacao/:token, CpaFormPage) e a avaliação dentro do Portal do Aluno
 // (CpaPortalAvaliacao). Os dois passam pelo mesmo núcleo, CpaFormFlow, que recebe os dados prontos e
 // a função de envio. Pausas entre blocos com a frase de incentivo do banco; rascunho no aparelho.
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useParams } from "react-router-dom"
 import { AnimatePresence, motion } from "framer-motion"
 import { Check, ChevronLeft, ClipboardCheck, Copy, Loader2, Sparkles, Target } from "lucide-react"
@@ -133,7 +133,7 @@ export function CpaFormPage() {
     )
 }
 
-export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar: enviarRemoto, aoConcluir, pularIntro }: {
+export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar: enviarRemoto, aoConcluir, pularIntro, embutido }: {
     formulario: Formulario
     blocos: Bloco[]
     perguntas: Pergunta[]
@@ -141,6 +141,7 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
     enviar: (valores: Record<string, number | string>) => Promise<RespostaEnvio>
     aoConcluir?: (r: Resultado) => void // na fila do Portal: não mostra o comprovante no meio
     pularIntro?: boolean // na fila a tela de título já apresentou a parte
+    embutido?: boolean // dentro de uma janela do Portal: ocupa a altura da janela, não a da tela
 }) {
     const [pos, setPos] = useState(pularIntro ? 1 : 0)
     const [respostas, setRespostas] = useState<Record<string, number | string>>({})
@@ -148,6 +149,19 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
     const [erro, setErro] = useState<string | null>(null)
     const [resultado, setResultado] = useState<Resultado | null>(null)
     const [copiado, setCopiado] = useState(false)
+    const miolo = useRef<HTMLDivElement>(null)
+    const cartao = useRef<HTMLDivElement>(null)
+    const [cabemPrevias, setCabemPrevias] = useState(true)
+    useEffect(() => {
+        const medir = () => {
+            if (miolo.current && cartao.current) setCabemPrevias(miolo.current.clientHeight - cartao.current.offsetHeight >= 220)
+        }
+        medir()
+        const ro = new ResizeObserver(medir)
+        if (miolo.current) ro.observe(miolo.current)
+        if (cartao.current) ro.observe(cartao.current)
+        return () => ro.disconnect()
+    }, [pos])
 
     // restaura o rascunho uma vez (no aparelho; nada vai pro servidor até enviar)
     useEffect(() => {
@@ -235,44 +249,45 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
     const ultimoPasso = pos === passos.length - 1
 
     return (
-        <div className="min-h-dvh bg-gradient-to-b from-[#FBF6E9] via-background to-background text-foreground">
-            <div className="w-full bg-[#13161D] py-4">
-                <img src={LOGO_FICV} alt="Faculdade Internacional Cidade Viva" className="mx-auto h-10 w-auto" />
+        <div className={`flex ${embutido ? "h-full" : "h-dvh"} flex-col overflow-hidden bg-gradient-to-b from-[#FBF6E9] via-background to-background text-foreground`}>
+            {/* topo fixo: logo, progresso e, na avaliação de disciplina, o cartão do professor. Só o miolo rola, e só se precisar. */}
+            <div className="w-full shrink-0 bg-[#13161D] py-3">
+                <img src={LOGO_FICV} alt="Faculdade Internacional Cidade Viva" className="mx-auto h-9 w-auto" />
             </div>
-            <div className="mx-auto flex min-h-[calc(100dvh-4.5rem)] w-full max-w-md flex-col px-4 pb-8 pt-5 md:max-w-2xl lg:max-w-3xl">
-                <header className="flex items-center gap-3">
-                    {pos > 0 && passo?.tipo !== "intro" ? (
-                        <button
-                            type="button" aria-label="Voltar" onClick={() => setPos(pos - 1)}
-                            className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"
-                        >
-                            <ChevronLeft className="h-5 w-5" />
-                        </button>
-                    ) : <div className="h-9 w-9" />}
-                    <div className="flex-1">
-                        <div className="h-2 overflow-hidden rounded-full bg-muted">
-                            <motion.div
-                                className="h-full rounded-full"
-                                initial={false}
-                                animate={{ width: `${Math.round(fracao * 100)}%` }}
-                                style={{ background: `linear-gradient(90deg, ${OURO}, ${OURO_CLARO})` }}
-                                transition={{ type: "spring", stiffness: 120, damping: 20 }}
-                            />
-                        </div>
+            <div className="mx-auto w-full max-w-md shrink-0 px-4 pt-3 md:max-w-2xl lg:max-w-3xl">
+            <header className="flex items-center gap-3">
+                {pos > 0 && passo?.tipo !== "intro" ? (
+                    <button
+                        type="button" aria-label="Voltar" onClick={() => setPos(pos - 1)}
+                        className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"
+                    >
+                        <ChevronLeft className="h-5 w-5" />
+                    </button>
+                ) : <div className="h-9 w-9" />}
+                <div className="flex-1">
+                    <div className="h-2 overflow-hidden rounded-full bg-muted">
+                        <motion.div
+                            className="h-full rounded-full"
+                            initial={false}
+                            animate={{ width: `${Math.round(fracao * 100)}%` }}
+                            style={{ background: `linear-gradient(90deg, ${OURO}, ${OURO_CLARO})` }}
+                            transition={{ type: "spring", stiffness: 120, damping: 20 }}
+                        />
                     </div>
-                    <span className="min-w-[3rem] text-right text-xs font-medium text-muted-foreground">
-                        {passo?.tipo === "pergunta" ? `${passo.indice}/${total}` : ""}
-                    </span>
-                </header>
+                </div>
+                <span className="min-w-[3rem] text-right text-xs font-medium text-muted-foreground">
+                    {passo?.tipo === "pergunta" ? `${passo.indice}/${total}` : ""}
+                </span>
+            </header>
 
                 {formulario.teste && (
-                    <p className="mt-3 rounded-md bg-amber-100 px-3 py-1.5 text-center text-xs text-amber-900">
+                    <p className="mt-2 rounded-md bg-amber-100 px-3 py-1 text-center text-[11px] text-amber-900">
                         Modo teste: estas respostas não entram nos relatórios oficiais.
                     </p>
                 )}
 
                 {formulario.disciplina && passo?.tipo !== "intro" && (
-                    <div className="mt-3 flex items-center gap-3 rounded-2xl bg-[var(--bg-card)] px-4 py-3 shadow-[var(--card-shadow)]">
+                    <div className="mt-2 flex items-center gap-3 rounded-2xl bg-[var(--bg-card)] px-4 py-2.5 shadow-[var(--card-shadow)]">
                         <AvatarDocente src={formulario.docente_foto} nome={formulario.docente} tamanho={40} />
                         <div className="min-w-0">
                             <p className="truncate text-sm font-semibold">{formulario.disciplina}</p>
@@ -280,73 +295,76 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
                         </div>
                     </div>
                 )}
-                <div className="flex flex-1 flex-col justify-center py-4">
-                {passo?.tipo === "pergunta" && anterior && <div className="mb-6"><Previa texto={anterior} lado="anterior" /></div>}
-                <div className="flex flex-col py-2">
-                    <AnimatePresence mode="wait">
-                        <motion.div
-                            key={pos}
-                            initial={{ opacity: 0, y: 36 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -36, transition: { duration: 0.18 } }}
-                            transition={{ y: { type: "spring", stiffness: 260, damping: 14 }, opacity: { duration: 0.2 } }}
-                        >
-                            {passo?.tipo === "intro" && (
-                                <div className="space-y-6">
-                                    <IconeLottie className="mx-auto h-36 w-36" reserva={ClipboardCheck} />
-                                    <div className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold" style={{ background: "#FBF0CF", color: "#7A5C12" }}>
-                                        <Sparkles className="h-3.5 w-3.5" /> Avaliação Institucional CPA · {formulario.ano}
-                                    </div>
-                                    <h1 className="bg-gradient-to-r from-[#C9A84C] to-[#E2C878] bg-clip-text text-3xl font-extrabold leading-tight text-transparent">{formulario.titulo}</h1>
-                                    <p className="text-lg font-semibold text-[#13161D]">Sua opinião faz a diferença</p>
-                                    <p className="text-base text-muted-foreground">{formulario.intro}</p>
-                                    {formulario.disciplina && <p className="text-sm font-semibold text-[#A07E2A]">{formulario.disciplina}{formulario.turma ? ` · ${formulario.turma}` : ""}</p>}
-                                    {formulario.docente && (
-                                        <div className="flex items-center gap-3 rounded-2xl bg-[var(--bg-card)] p-3 shadow-[var(--card-shadow)]">
-                                            <AvatarDocente src={formulario.docente_foto} nome={formulario.docente} tamanho={52} />
-                                            <div className="min-w-0">
-                                                <p className="text-[11px] uppercase tracking-wider text-[var(--text-muted)]">Professor(a)</p>
-                                                <p className="font-semibold">{formulario.docente}</p>
-                                            </div>
+            </div>
+
+            <div ref={miolo} className="min-h-0 flex-1 overflow-y-auto">
+                <div className="mx-auto flex min-h-full w-full max-w-md flex-col justify-center px-4 py-3 md:max-w-2xl lg:max-w-3xl">
+                    {passo?.tipo === "pergunta" && anterior && cabemPrevias && <div className="mb-4"><Previa texto={anterior} lado="anterior" /></div>}
+                    <div ref={cartao} className="flex flex-col">
+                        <AnimatePresence mode="wait">
+                            <motion.div
+                                key={pos}
+                                initial={{ opacity: 0, y: 36 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -36, transition: { duration: 0.18 } }}
+                                transition={{ y: { type: "spring", stiffness: 260, damping: 14 }, opacity: { duration: 0.2 } }}
+                            >
+                                {passo?.tipo === "intro" && (
+                                    <div className="space-y-6">
+                                        <IconeLottie className="mx-auto h-36 w-36" reserva={ClipboardCheck} />
+                                        <div className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold" style={{ background: "#FBF0CF", color: "#7A5C12" }}>
+                                            <Sparkles className="h-3.5 w-3.5" /> Avaliação Institucional CPA · {formulario.ano}
                                         </div>
-                                    )}
-                                    {formulario.curso && <p className="text-sm font-medium">{formulario.curso}</p>}
-                                    <p className="text-sm text-muted-foreground">
-                                        São {total} perguntas. Toque na nota que melhor representa a sua experiência.
-                                    </p>
-                                    <Btn size="lg" className="h-12 w-full text-base" style={{ background: TINTA }} onClick={() => setPos(1)}>Começar</Btn>
-                                </div>
-                            )}
+                                        <h1 className="bg-gradient-to-r from-[#C9A84C] to-[#E2C878] bg-clip-text text-3xl font-extrabold leading-tight text-transparent">{formulario.titulo}</h1>
+                                        <p className="text-lg font-semibold text-[#13161D]">Sua opinião faz a diferença</p>
+                                        <p className="text-base text-muted-foreground">{formulario.intro}</p>
+                                        {formulario.disciplina && <p className="text-sm font-semibold text-[#A07E2A]">{formulario.disciplina}{formulario.turma ? ` · ${formulario.turma}` : ""}</p>}
+                                        {formulario.docente && (
+                                            <div className="flex items-center gap-3 rounded-2xl bg-[var(--bg-card)] p-3 shadow-[var(--card-shadow)]">
+                                                <AvatarDocente src={formulario.docente_foto} nome={formulario.docente} tamanho={52} />
+                                                <div className="min-w-0">
+                                                    <p className="text-[11px] uppercase tracking-wider text-[var(--text-muted)]">Professor(a)</p>
+                                                    <p className="font-semibold">{formulario.docente}</p>
+                                                </div>
+                                            </div>
+                                        )}
+                                        {formulario.curso && <p className="text-sm font-medium">{formulario.curso}</p>}
+                                        <p className="text-sm text-muted-foreground">
+                                            São {total} perguntas. Toque na nota que melhor representa a sua experiência.
+                                        </p>
+                                        <Btn size="lg" className="h-12 w-full text-base" style={{ background: TINTA }} onClick={() => setPos(1)}>Começar</Btn>
+                                    </div>
+                                )}
 
-                            {passo?.tipo === "pausa" && (
-                                <div className="space-y-6 text-center">
-                                    <IconeLottie className="mx-auto h-28 w-28" reserva={Sparkles} />
-                                    <p className="text-xl font-semibold">{passo.texto}</p>
-                                    <Btn size="lg" className="h-12 w-full text-base" style={{ background: TINTA }} onClick={() => setPos(pos + 1)}>Continuar</Btn>
-                                </div>
-                            )}
+                                {passo?.tipo === "pausa" && (
+                                    <div className="space-y-6 text-center">
+                                        <IconeLottie className="mx-auto h-28 w-28" reserva={Sparkles} />
+                                        <p className="text-xl font-semibold">{passo.texto}</p>
+                                        <Btn size="lg" className="h-12 w-full text-base" style={{ background: TINTA }} onClick={() => setPos(pos + 1)}>Continuar</Btn>
+                                    </div>
+                                )}
 
-                            {passo?.tipo === "pergunta" && (
-                                <PerguntaView
-                                    pergunta={passo.pergunta}
-                                    valor={respostas[passo.pergunta.id]}
-                                    ultima={ultimoPasso}
-                                    enviando={enviando}
-                                    onResponder={(v) => responder(passo.pergunta, v)}
-                                    onContinuar={(v) => {
-                                        const novas = { ...respostas, [passo.pergunta.id]: v }
-                                        setRespostas(novas)
-                                        avancar(pos, novas)
-                                    }}
-                                    frase={frasePorProgresso(respondidas / Math.max(total, 1))}
-                                />
-                            )}
+                                {passo?.tipo === "pergunta" && (
+                                    <PerguntaView
+                                        pergunta={passo.pergunta}
+                                        valor={respostas[passo.pergunta.id]}
+                                        ultima={ultimoPasso}
+                                        enviando={enviando}
+                                        onResponder={(v) => responder(passo.pergunta, v)}
+                                        onContinuar={(v) => {
+                                            const novas = { ...respostas, [passo.pergunta.id]: v }
+                                            setRespostas(novas)
+                                            avancar(pos, novas)
+                                        }}
+                                        frase={frasePorProgresso(respondidas / Math.max(total, 1))}
+                                    />
+                                )}
 
-                            {erro && <p role="alert" className="mt-4 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{erro}</p>}
-                        </motion.div>
-                    </AnimatePresence>
-                </div>
-                {passo?.tipo === "pergunta" && proxima && <div className="mt-6"><Previa texto={proxima} lado="proxima" /></div>}
+                                {erro && <p role="alert" className="mt-4 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{erro}</p>}
+                            </motion.div>
+                        </AnimatePresence>
+                    </div>
+                    {passo?.tipo === "pergunta" && proxima && cabemPrevias && <div className="mt-4"><Previa texto={proxima} lado="proxima" /></div>}
                 </div>
             </div>
         </div>
