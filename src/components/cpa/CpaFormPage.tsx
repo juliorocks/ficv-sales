@@ -271,6 +271,15 @@ export function CpaFormFlow({ formulario, blocos, perguntas, storageKey, enviar:
                     </p>
                 )}
 
+                {formulario.disciplina && passo?.tipo !== "intro" && (
+                    <div className="mt-3 flex items-center gap-3 rounded-2xl bg-[var(--bg-card)] px-4 py-3 shadow-[var(--card-shadow)]">
+                        <AvatarDocente src={formulario.docente_foto} nome={formulario.docente} tamanho={40} />
+                        <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold">{formulario.disciplina}</p>
+                            <p className="truncate text-xs text-[var(--text-muted)]">{formulario.docente ? `Prof. ${formulario.docente}` : "Professor(a) a definir"}</p>
+                        </div>
+                    </div>
+                )}
                 <div className="flex flex-1 flex-col justify-center py-4">
                 {passo?.tipo === "pergunta" && anterior && <div className="mb-6"><Previa texto={anterior} lado="anterior" /></div>}
                 <div className="flex flex-col py-2">

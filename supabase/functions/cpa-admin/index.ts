@@ -9,7 +9,7 @@
 //   sync_docentes { offset? }                     (admin) professores titulares pelo Moodle, em lotes
 // filtros: { origem: 'oficial'|'teste'|'todas', curso?: string, de?: 'AAAA-MM-DD', ate?: 'AAAA-MM-DD' }
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
-import { getSecret } from "../_shared/secrets.ts";
+import { partirCurso, professoresDoCurso, semestreAtual, todosOsCursos } from "../_shared/cpaMoodle.ts";
 import { nivelDoCurso, slug } from "../_shared/cpa.ts";
 
 const cors = {
@@ -205,44 +205,43 @@ function csvDe(perguntas: Db[], linhas: Db[]): string {
     return "﻿" + [cab.map(esc).join(";"), ...corpo].join("\r\n") + "\r\n";
 }
 
-// Professores titulares no Moodle (papel editingteacher). Tutores/mediadores (edteacher) ficam de fora.
+// Professores titulares das disciplinas ativas no Moodle (papel editingteacher; edteacher é tutor/mediador).
 // Processa em lotes: a função tem limite de tempo, então o painel chama de novo com o offset devolvido.
+// Linhas preenchidas à mão (origem 'manual') nunca são sobrescritas. Disciplina sem professor no Moodle
+// (as pós) entra com docente nulo e aparece no painel para a equipe preencher.
 const LOTE_CURSOS = 40;
-async function sincronizarDocentes(db: Db, offset: number) {
-    const url = (await getSecret("MOODLE_URL")).replace(/\/+$/, "");
-    const token = await getSecret("MOODLE_TOKEN");
-    if (!url || !token) throw new Error("Moodle não configurado (Gestão > Integrações).");
-    const ws = async (fn: string, params: Record<string, string | number> = {}) => {
-        const qs = new URLSearchParams({ wstoken: token, wsfunction: fn, moodlewsrestformat: "json", ...Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])) });
-        return await (await fetch(`${url}/webservice/rest/server.php?${qs}`)).json();
-    };
-
-    const turmas = await todas(() => db.from("sponte_matriculas").select("id, nome_turma").eq("situacao_id", 1).not("turma_id", "is", null));
-    const periodosAtivos = new Set(turmas.map((t: Db) => slug(t.nome_turma)));
-    const cursos: { id: number; fullname: string }[] = (await ws("core_course_get_courses"));
-    const doPeriodo = (Array.isArray(cursos) ? cursos : []).flatMap((c) => {
-        const m = c.fullname.match(/^(.+? - \d{4}\.\d - (?:P\d+|Modular)) - (.+)$/);
-        if (!m) return [];
-        const periodo = slug(m[1]);
-        return periodosAtivos.has(periodo) ? [{ id: c.id, periodo, disciplina: slug(m[2]) }] : [];
+async function sincronizarDocentes(db: Db, offset: number, semestre: string) {
+    const agora = Math.floor(Date.now() / 1000);
+    const ativos = (await todosOsCursos()).flatMap((c) => {
+        const p = partirCurso(c.fullname);
+        if (!p || c.hidden || (c.enddate && c.enddate < agora)) return [];
+        if (p.nivel === "graduacao" ? p.semestre !== semestre : !(c.startdate && c.startdate <= agora)) return [];
+        return [{ id: c.id, periodo: slug(p.periodo_nome), disciplina: slug(p.disciplina_nome), periodo_nome: p.periodo_nome, disciplina_nome: p.disciplina_nome }];
     });
+    const unicos = [...new Map(ativos.map((a) => [`${a.periodo}~${a.disciplina}`, a])).values()];
 
-    const lote = doPeriodo.slice(offset, offset + LOTE_CURSOS);
-    const gravados: Db[] = [];
-    for (const c of lote) {
-        const pessoas = await ws("core_enrol_get_enrolled_users", { courseid: c.id });
-        const docentes = (Array.isArray(pessoas) ? pessoas : [])
-            .filter((p: Db) => (p.roles ?? []).some((r: Db) => r.shortname === "editingteacher"))
-            .map((p: Db) => p.fullname);
-        if (!docentes.length) continue;
-        gravados.push({ periodo: c.periodo, disciplina: c.disciplina, docente: docentes.join(" / "), moodle_course_id: c.id, sincronizado_em: new Date().toISOString() });
-    }
-    if (gravados.length) {
-        const { error } = await db.from("cpa_docentes").upsert(gravados, { onConflict: "periodo,disciplina" });
+    const { data: manuais } = await db.from("cpa_docentes").select("periodo, disciplina").eq("origem", "manual");
+    const travados = new Set((manuais ?? []).map((m: Db) => `${m.periodo}~${m.disciplina}`));
+    const lote = unicos.slice(offset, offset + LOTE_CURSOS).filter((c) => !travados.has(`${c.periodo}~${c.disciplina}`));
+
+    const gravar = await Promise.all(lote.map(async (c) => {
+        let docentes: string[] = [];
+        try { docentes = await professoresDoCurso(c.id); } catch { /* Moodle falhou nesse curso: segue sem professor */ }
+        return {
+            periodo: c.periodo, disciplina: c.disciplina, docente: docentes.join(" / ") || null, moodle_course_id: c.id, origem: "moodle",
+            periodo_nome: c.periodo_nome, disciplina_nome: c.disciplina_nome, sincronizado_em: new Date().toISOString(),
+        };
+    }));
+    if (gravar.length) {
+        const { error } = await db.from("cpa_docentes").upsert(gravar, { onConflict: "periodo,disciplina" });
         if (error) throw error;
     }
     const proximo = offset + LOTE_CURSOS;
-    return { total_cursos: doPeriodo.length, processados: Math.min(proximo, doPeriodo.length), gravados: gravados.length, proximo: proximo < doPeriodo.length ? proximo : null };
+    return {
+        total_cursos: unicos.length, processados: Math.min(proximo, unicos.length),
+        com_professor: gravar.filter((g) => g.docente).length, sem_professor: gravar.filter((g) => !g.docente).length,
+        proximo: proximo < unicos.length ? proximo : null,
+    };
 }
 
 // Perguntas que já têm resposta gravada (oficial ou teste). Depois de respondida, a estrutura não muda.
@@ -318,7 +317,8 @@ Deno.serve(async (req) => {
 
         if (acao === "sync_docentes") {
             if (!ehAdmin) return j({ error: "Só admin atualiza professores." }, 403);
-            return j(await sincronizarDocentes(db, Number(body.offset ?? 0)));
+            const { data: fd } = await db.from("cpa_formularios").select("semestre").eq("tipo", "disciplina").not("semestre", "is", null).limit(1);
+            return j(await sincronizarDocentes(db, Number(body.offset ?? 0), fd?.[0]?.semestre ?? semestreAtual()));
         }
 
         if (!Number.isInteger(formId) || formId <= 0) return j({ error: "formulario_id obrigatório." }, 400);
@@ -364,6 +364,7 @@ Deno.serve(async (req) => {
             if (["teste", "aberto", "encerrado"].includes(body.status)) alt.status = body.status;
             if (typeof body.portal_ativo === "boolean") alt.portal_ativo = body.portal_ativo;
             if (typeof body.titulo === "string" && body.titulo.trim()) alt.titulo = body.titulo.trim();
+            if (body.semestre === null || /^\d{4}\.[12]$/.test(String(body.semestre ?? ""))) { if (body.semestre !== undefined) alt.semestre = body.semestre; }
             if (!Object.keys(alt).length) return j({ error: "Nada para alterar." }, 400);
             const { data, error } = await db.from("cpa_formularios").update(alt).eq("id", formId).select("*").maybeSingle();
             if (error) throw error;
@@ -494,6 +495,36 @@ Deno.serve(async (req) => {
             const { error: eDb } = await db.from("cpa_docente_fotos").upsert({ nome, foto_path: path, atualizado_em: new Date().toISOString() }, { onConflict: "nome" });
             if (eDb) throw eDb;
             return j({ ok: true, foto_path: path });
+        }
+
+        if (acao === "disciplinas_docentes") {
+            // disciplinas ativas conhecidas (sync do Moodle ou vistas no Portal), com professor e origem
+            const out: Db[] = [];
+            for (let from = 0; ; from += 1000) {
+                const { data, error } = await db.from("cpa_docentes")
+                    .select("periodo, disciplina, periodo_nome, disciplina_nome, docente, origem")
+                    .not("periodo_nome", "is", null).order("periodo").order("disciplina").range(from, from + 999);
+                if (error) throw error;
+                out.push(...(data ?? []));
+                if ((data ?? []).length < 1000) break;
+            }
+            return j({ disciplinas: out, admin: ehAdmin });
+        }
+
+        if (acao === "docente_definir") {
+            if (!ehAdmin) return j({ error: "Só admin define o professor." }, 403);
+            const periodo = String(body.periodo ?? "").trim();
+            const disciplina = String(body.disciplina ?? "").trim();
+            if (!/^[a-z0-9-]+$/.test(periodo) || !/^[a-z0-9-]+$/.test(disciplina)) return j({ error: "Disciplina inválida." }, 400);
+            const docente = String(body.docente ?? "").trim().slice(0, 200);
+            // com nome: vira manual (a sincronização não sobrescreve). Sem nome: volta pro Moodle.
+            const alt = docente
+                ? { docente, origem: "manual", sincronizado_em: new Date().toISOString() }
+                : { docente: null, origem: "moodle", sincronizado_em: new Date().toISOString() };
+            const { data, error } = await db.from("cpa_docentes").update(alt).eq("periodo", periodo).eq("disciplina", disciplina).select("periodo");
+            if (error) throw error;
+            if (!(data ?? []).length) return j({ error: "Disciplina não encontrada. Atualize os professores primeiro." }, 404);
+            return j({ ok: true });
         }
 
         return j({ error: "Ação desconhecida." }, 400);

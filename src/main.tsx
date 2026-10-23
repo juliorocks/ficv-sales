@@ -46,6 +46,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                     <Route path="/aluno-visualizacao/:token" element={<AlunoVisualizacaoRoute />} />
                     <Route path="/aluno" element={<AlunoPortalPage />} />
                     <Route path="/atendimento" element={<Navigate to="/aluno" replace />} />
+                    <Route path="/avaliacao" element={<AlunoPortalPage />} />
                     <Route path="/avaliacao/:token" element={<Suspense fallback={null}><CpaFormPage /></Suspense>} />
                     <Route path="/f/:slug" element={<Suspense fallback={null}><PublicMarketingFormPage /></Suspense>} />
                     <Route path="/*" element={<App />} />

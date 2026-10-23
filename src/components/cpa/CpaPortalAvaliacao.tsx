@@ -3,7 +3,7 @@
 // nada e nem chama o Sponte.
 // O aluno responde tudo de uma vez: a avaliação geral e cada disciplina pendente, em sequência, cada
 // uma separada por uma tela de título. Cada parte é gravada à parte (uma resposta por formulário/disciplina).
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ClipboardCheck, Check, Loader2, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
@@ -39,9 +39,21 @@ export function CpaPortalCard() {
         ...(data?.geral ? [{ formulario_id: data.geral.formulario_id, contexto: "", titulo: `Avaliação institucional (${data.geral.nivel === "pos" ? "pós" : "graduação"})`, detalhe: "Sua opinião sobre a FICV", respondida: data.geral.respondida }] : []),
         ...(data?.disciplinas ?? []).map((d) => ({ formulario_id: d.formulario_id, contexto: d.contexto, titulo: d.disciplina, detalhe: d.docente ? `${d.turma} · Prof. ${d.docente}` : d.turma, foto: d.docente_foto, respondida: d.respondida })),
     ]
-    if (!itens.length) return null
-
     const pendentes = itens.filter((i) => !i.respondida)
+
+    // o link único /avaliacao abre a fila direto, depois do login
+    const veioDoLink = window.location.pathname.replace(/\/+$/, "") === "/avaliacao"
+    const [abriuSozinho, setAbriuSozinho] = useState(false)
+    useEffect(() => {
+        if (veioDoLink && !abriuSozinho && data && pendentes.length) { setFila(pendentes); setAbriuSozinho(true) }
+    }, [veioDoLink, abriuSozinho, data, pendentes.length]) // eslint-disable-line react-hooks/exhaustive-deps
+
+    if (!itens.length) {
+        return veioDoLink && data ? (
+            <section className="glass-card p-6 text-center text-sm text-[var(--text-muted)]">Não há avaliações abertas para você no momento.</section>
+        ) : null
+    }
+
 
     function fechar() {
         setFila(null)
@@ -104,7 +116,7 @@ function CpaFila({ itens, onFechar }: { itens: Item[]; onFechar: () => void }) {
             <div className="flex min-h-dvh flex-col items-center justify-center px-6 text-center">
                 <p className="text-[11px] font-bold uppercase tracking-widest text-[#A07E2A]">Parte {i + 1} de {itens.length}</p>
                 <h2 className="mt-3 text-2xl font-bold">{atual.titulo}</h2>
-                <div className="mt-6"><AvatarDocente src={atual.foto} nome={atual.detalhe} tamanho={88} /></div>
+                {atual.foto !== undefined && <div className="mt-6"><AvatarDocente src={atual.foto} nome={atual.detalhe} tamanho={88} /></div>}
                 <p className="mt-3 text-sm text-[var(--text-muted)]">{atual.detalhe}</p>
                 <Btn size="lg" className="mt-8 h-12 w-full max-w-sm text-sm" style={{ background: TINTA }} onClick={() => setTransicao(false)}>Começar</Btn>
             </div>

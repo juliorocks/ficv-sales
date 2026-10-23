@@ -16,7 +16,7 @@ const COR_SERIE = COR_GRAFICO
 type Filtros = { origem: "oficial" | "teste" | "todas"; curso: string; de: string; ate: string }
 type FormResumo = {
     id: number; nivel: string; tipo: string; titulo: string; ano: number; status: "teste" | "aberto" | "encerrado"
-    token: string; portal_ativo: boolean; populacao_ativa: number | null; oficiais: number; testes: number
+    token: string; portal_ativo: boolean; semestre: string | null; populacao_ativa: number | null; oficiais: number; testes: number
 }
 type Pergunta = { id: number; bloco_id: number; ordem: number; texto: string; tipo: string; escala_min?: number; escala_max?: number; opcoes?: string[] }
 
@@ -55,8 +55,9 @@ export function CpaAdmin() {
         return [...new Set([...doForm, ...vistos])]
     }, [detalhe, stats])
 
+    const doNivel = forms.filter((f) => f.nivel === nivel)
     const alterar = useMutation({
-        mutationFn: (alt: Record<string, unknown>) => chamar("update_form", { formulario_id: atual!.id, ...alt }),
+        mutationFn: (alt: Record<string, unknown>) => Promise.all(doNivel.map((f) => chamar("update_form", { formulario_id: f.id, ...alt }))),
         onSuccess: () => { qc.invalidateQueries({ queryKey: ["cpa-forms"] }); showSuccess("Formulário atualizado") },
         onError: (e: Error) => showError(e.message),
     })
@@ -70,15 +71,22 @@ export function CpaAdmin() {
     const sincronizarDocentes = useMutation({
         mutationFn: async () => {
             let offset = 0
-            let gravados = 0
+            let com = 0
+            let sem = 0
             for (;;) {
-                const r = await chamar<{ gravados: number; proximo: number | null }>("sync_docentes", { offset })
-                gravados += r.gravados
-                if (r.proximo === null) return gravados
+                const r = await chamar<{ com_professor: number; sem_professor: number; proximo: number | null }>("sync_docentes", { offset })
+                com += r.com_professor
+                sem += r.sem_professor
+                if (r.proximo === null) return { com, sem }
                 offset = r.proximo
             }
         },
-        onSuccess: (n) => { qc.invalidateQueries({ queryKey: ["cpa-stats"] }); showSuccess(`${n} disciplinas com professor titular`) },
+        onSuccess: (r) => {
+            qc.invalidateQueries({ queryKey: ["cpa-stats"] })
+            qc.invalidateQueries({ queryKey: ["cpa-disc-docentes"] })
+            qc.invalidateQueries({ queryKey: ["cpa-docentes"] })
+            showSuccess(`${r.com} disciplinas com professor, ${r.sem} sem professor (preencha abaixo)`)
+        },
         onError: (e: Error) => showError(e.message),
     })
 
@@ -119,7 +127,8 @@ export function CpaAdmin() {
     if (carregandoForms) return <div className="flex justify-center p-12"><Loader2 className="h-6 w-6 animate-spin" /></div>
     if (erroForms) return <p className="p-6 text-sm text-destructive">{(erroForms as Error).message}</p>
 
-    const link = atual ? `${window.location.origin}/avaliacao/${atual.token}` : ""
+    const link = `${window.location.origin}/avaliacao`
+    const linkTeste = atual ? `${window.location.origin}/avaliacao/${atual.token}` : ""
     const t = stats?.totais
     const escala = (stats?.perguntas ?? []).filter((p: any) => p.tipo === "escala") // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -167,8 +176,12 @@ export function CpaAdmin() {
                     <section className="grid gap-4 glass-card p-6 md:grid-cols-2">
                         <div className="space-y-2 text-sm">
                             <p><span className="text-[var(--text-muted)]">Status:</span> <b>{rotuloStatus(atual.status)}</b></p>
-                            <p className="break-all text-xs text-muted-foreground">Link de aplicação: <span className="font-mono text-foreground">{link}</span></p>
-                            <Btn size="sm" variant="outline" onClick={() => { navigator.clipboard?.writeText(link); showSuccess("Link copiado") }}>Copiar link</Btn>
+                            <p className="text-xs text-[var(--text-muted)]">Link único do aluno (pede o login do Portal e abre a avaliação geral e as disciplinas em sequência):</p>
+                            <p className="break-all font-mono text-xs">{link}</p>
+                            <div className="flex flex-wrap gap-2">
+                                <Btn size="sm" variant="outline" onClick={() => { navigator.clipboard?.writeText(link); showSuccess("Link copiado") }}>Copiar link do aluno</Btn>
+                                <Btn size="sm" variant="ghost" onClick={() => { navigator.clipboard?.writeText(linkTeste); showSuccess("Link de teste copiado") }}>Copiar link de teste desta parte</Btn>
+                            </div>
                         </div>
                         {admin && (
                             <div className="space-y-2 text-sm">
@@ -186,7 +199,8 @@ export function CpaAdmin() {
                                         </Btn>
                                     ))}
                                 </div>
-                                <p className="text-xs text-muted-foreground">Base: {atual.populacao_ativa ?? "–"} alunos com matrícula vigente no Sponte.</p>
+                                <p className="text-xs text-muted-foreground">Status e Portal valem para a avaliação geral e a de disciplinas deste nível. Base: {atual.populacao_ativa ?? "–"} alunos com matrícula vigente no Sponte.</p>
+                                <SemestreCampo valor={doNivel.find((f) => f.tipo === "disciplina")?.semestre ?? null} salvando={alterar.isPending} onSalvar={(v) => alterar.mutate({ semestre: v })} />
                                 <Btn size="sm" variant="ghost" className="text-destructive" disabled={apagarTestes.isPending || atual.testes === 0}
                                     onClick={() => { if (confirm(`Apagar ${atual.testes} respostas de teste? As oficiais não são afetadas.`)) apagarTestes.mutate() }}>
                                     Apagar respostas de teste ({atual.testes})
@@ -330,6 +344,8 @@ export function CpaAdmin() {
                         )}
                     </Painel>
 
+                    <ProfessoresPorDisciplina admin={admin} />
+
                     <ProfessoresFotos />
 
                     <Painel titulo="Tabela por pergunta (alternativa textual aos gráficos)">
@@ -458,6 +474,71 @@ function ProfessoresFotos() {
                         </div>
                     </div>
                 ))}
+            </div>
+        </Painel>
+    )
+}
+
+// Semestre das disciplinas: vazio = automático (julho em diante é .2, antes é .1).
+function SemestreCampo({ valor, salvando, onSalvar }: { valor: string | null; salvando: boolean; onSalvar: (v: string | null) => void }) {
+    const [txt, setTxt] = useState(valor ?? "")
+    const automatico = `${new Date().getFullYear()}.${new Date().getMonth() >= 6 ? 2 : 1}`
+    const valido = txt === "" || /^\d{4}\.[12]$/.test(txt)
+    return (
+        <div className="flex items-end gap-2">
+            <label className="block space-y-1">
+                <span className="text-xs text-[var(--text-muted)]">Semestre das disciplinas</span>
+                <Inp value={txt} onChange={(e) => setTxt(e.target.value)} placeholder={`automático (${automatico})`} className="w-48" />
+            </label>
+            <Btn size="sm" variant="outline" disabled={!valido || salvando} onClick={() => onSalvar(txt === "" ? null : txt)}>Salvar</Btn>
+        </div>
+    )
+}
+
+// Professor de cada disciplina ativa. Vem do Moodle; onde não há (as pós), a equipe preenche aqui.
+// O que for preenchido à mão não é sobrescrito pela atualização do Moodle.
+type LinhaDisc = { periodo: string; disciplina: string; periodo_nome: string; disciplina_nome: string; docente: string | null; origem: "moodle" | "manual" }
+function ProfessoresPorDisciplina({ admin }: { admin: boolean }) {
+    const qc = useQueryClient()
+    const [soSem, setSoSem] = useState(true)
+    const [busca, setBusca] = useState("")
+    const { data } = useQuery({ queryKey: ["cpa-disc-docentes"], queryFn: () => chamar<{ disciplinas: LinhaDisc[] }>("disciplinas_docentes", {}) })
+    const definir = useMutation({
+        mutationFn: (x: { periodo: string; disciplina: string; docente: string }) => chamar("docente_definir", x),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ["cpa-disc-docentes"] })
+            qc.invalidateQueries({ queryKey: ["cpa-docentes"] })
+            qc.invalidateQueries({ queryKey: ["cpa-stats"] })
+            showSuccess("Professor salvo")
+        },
+        onError: (e: Error) => showError(e.message),
+    })
+    const todas = data?.disciplinas ?? []
+    if (!todas.length) return null
+    const semProf = todas.filter((d) => !d.docente).length
+    const q = busca.trim().toLowerCase()
+    const lista = todas.filter((d) => (!soSem || !d.docente) && (!q || `${d.disciplina_nome} ${d.periodo_nome} ${d.docente ?? ""}`.toLowerCase().includes(q)))
+    return (
+        <Painel titulo={`Professores por disciplina · ${semProf} de ${todas.length} sem professor`}>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+                <Btn size="sm" variant={soSem ? "default" : "outline"} onClick={() => setSoSem(!soSem)}>Só sem professor</Btn>
+                <Inp value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar disciplina, período ou professor" className="max-w-sm" />
+            </div>
+            <div className="max-h-[440px] space-y-2 overflow-y-auto pr-1">
+                {lista.slice(0, 100).map((d) => (
+                    <div key={`${d.periodo}~${d.disciplina}`} className="grid items-center gap-2 rounded-xl bg-[var(--bg-card-hover)] p-3 md:grid-cols-[1fr_minmax(0,18rem)]">
+                        <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">{d.disciplina_nome}</p>
+                            <p className="truncate text-xs text-[var(--text-muted)]">{d.periodo_nome}{d.origem === "manual" ? " · preenchido à mão" : ""}</p>
+                        </div>
+                        <Inp
+                            defaultValue={d.docente ?? ""} disabled={!admin} placeholder="Nome do professor"
+                            onBlur={(e) => { const v = e.target.value.trim(); if (v !== (d.docente ?? "")) definir.mutate({ periodo: d.periodo, disciplina: d.disciplina, docente: v }) }}
+                        />
+                    </div>
+                ))}
+                {lista.length === 0 && <p className="py-4 text-center text-sm text-[var(--text-muted)]">Nada para mostrar.</p>}
+                {lista.length > 100 && <p className="py-2 text-center text-xs text-[var(--text-muted)]">Mostrando 100 de {lista.length}. Use a busca para filtrar.</p>}
             </div>
         </Painel>
     )
