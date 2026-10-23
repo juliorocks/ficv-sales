@@ -28,11 +28,25 @@ async function completarTurmasComMoodle(turmas: TurmaBoletim[], uid: number, cur
                 if (!d.media && m.media) (d as any).media = m.media;
             }
         }
+        // O Sponte só lista disciplina com nota consolidada; no EAD o resto já tem nota no Moodle
+        // (achado 23/10: aluno de pós com 5 disciplinas de 10,0 no Moodle e 2 no Portal).
+        if (t.turma && EAD_RE.test(t.turma)) {
+            const chave = (s: string) => norm(s).replace(/^\d+\s+/, "");
+            const tem = new Set(t.disciplinas.map((d) => chave(d.disciplina)));
+            const doMoodle = await moodleDisciplinasDoPeriodo(uid, cursos, t.turma);
+            for (const s of doMoodle) {
+                if (tem.has(chave(s.disciplina)) || (!s.avaliacoes?.length && !s.media)) continue;
+                (t as any).disciplinas.push({ ...s, disciplina: s.disciplina.replace(/^\d+\s+/, "") });
+            }
+        }
     }
 }
 
+const EAD_RE = /\bEAD\b/i;
+const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+
 async function completarComMoodle(turmas: TurmaBoletim[], email: string | null) {
-    const precisa = turmas.some((t) => t.disciplinas.some((d) => !d.avaliacoes?.length) || (t.disciplinas.length === 0 && t.turma));
+    const precisa = turmas.some((t) => t.disciplinas.some((d) => !d.avaliacoes?.length) || (t.disciplinas.length === 0 && t.turma) || (t.turma && EAD_RE.test(t.turma)));
     if (!precisa) return;
     const uid = await moodleUserId(email);
     if (!uid) return;
