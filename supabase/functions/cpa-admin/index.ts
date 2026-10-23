@@ -330,6 +330,14 @@ Deno.serve(async (req) => {
             return j({ form, blocos, perguntas });
         }
 
+        if (acao === "testadores") {
+            // contas dos alunos de teste (só nome e matrícula, para o painel mostrar quem está na lista)
+            const ids: number[] = form.alunos_teste ?? [];
+            if (!ids.length) return j({ alunos: [] });
+            const { data } = await db.from("alunos").select("sponte_aluno_id, nome, ra").in("sponte_aluno_id", ids);
+            return j({ alunos: data ?? [] });
+        }
+
         if (acao === "stats") {
             const { blocos, perguntas } = await carregarPerguntas(db, formId);
             const linhas = await carregarRespostas(db, formId, filtros);
@@ -364,11 +372,20 @@ Deno.serve(async (req) => {
             if (["teste", "aberto", "encerrado"].includes(body.status)) alt.status = body.status;
             if (typeof body.portal_ativo === "boolean") alt.portal_ativo = body.portal_ativo;
             if (typeof body.titulo === "string" && body.titulo.trim()) alt.titulo = body.titulo.trim();
+            let naoEncontrados: string[] = [];
+            if (Array.isArray(body.alunos_teste_cpf)) {
+                // o CPF está guardado com pontuação em alunos: compara só os dígitos
+                const cpfs: string[] = [...new Set<string>(body.alunos_teste_cpf.map((c: unknown) => String(c).replace(/\D/g, "")).filter((c: string) => c.length === 11))];
+                const contas = await todas(() => db.from("alunos").select("id, sponte_aluno_id, cpf").not("sponte_aluno_id", "is", null));
+                const porCpf = new Map<string, number>(contas.map((a: Db) => [String(a.cpf).replace(/\D/g, ""), Number(a.sponte_aluno_id)]));
+                alt.alunos_teste = cpfs.filter((c) => porCpf.has(c)).map((c) => porCpf.get(c)!);
+                naoEncontrados = cpfs.filter((c) => !porCpf.has(c));
+            }
             if (body.semestre === null || /^\d{4}\.[12]$/.test(String(body.semestre ?? ""))) { if (body.semestre !== undefined) alt.semestre = body.semestre; }
             if (!Object.keys(alt).length) return j({ error: "Nada para alterar." }, 400);
             const { data, error } = await db.from("cpa_formularios").update(alt).eq("id", formId).select("*").maybeSingle();
             if (error) throw error;
-            return j({ form: data });
+            return j({ form: data, nao_encontrados: naoEncontrados });
         }
 
         if (acao === "delete_tests") {

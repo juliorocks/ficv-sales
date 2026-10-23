@@ -16,55 +16,67 @@ const COR_SERIE = COR_GRAFICO
 type Filtros = { origem: "oficial" | "teste" | "todas"; curso: string; de: string; ate: string }
 type FormResumo = {
     id: number; nivel: string; tipo: string; titulo: string; ano: number; status: "teste" | "aberto" | "encerrado"
-    token: string; portal_ativo: boolean; semestre: string | null; populacao_ativa: number | null; oficiais: number; testes: number
+    token: string; portal_ativo: boolean; semestre: string | null; alunos_teste?: number[]; populacao_ativa: number | null; oficiais: number; testes: number
 }
 type Pergunta = { id: number; bloco_id: number; ordem: number; texto: string; tipo: string; escala_min?: number; escala_max?: number; opcoes?: string[] }
+type Cadeia = { integra: boolean; total: number; primeiro_erro: { seq: number; motivo: string } | null; cabeca: string | null }
+
+// uma avaliação por nível reúne a geral e a de disciplinas: mesmo link, mesmo status, mesmos resultados
+function useStats(form: FormResumo | null, filtros: Filtros) {
+    return useQuery({
+        queryKey: ["cpa-stats", form?.id, filtros],
+        enabled: !!form,
+        queryFn: () => chamar<any>("stats", { formulario_id: form!.id, filtros: limparFiltros(filtros) }), // eslint-disable-line @typescript-eslint/no-explicit-any
+    })
+}
 
 export function CpaAdmin() {
     const qc = useQueryClient()
     const [nivel, setNivel] = useState<"graduacao" | "pos">("graduacao")
-    const [tipo, setTipo] = useState<"geral" | "disciplina">("geral")
     const [filtros, setFiltros] = useState<Filtros>({ origem: "oficial", curso: "", de: "", ate: "" })
-    const [busca, setBusca] = useState("")
-    const [verificacao, setVerificacao] = useState<null | { integra: boolean; total: number; primeiro_erro: { seq: number; motivo: string } | null; cabeca: string | null }>(null)
-
+    const [verificacao, setVerificacao] = useState<null | { geral: Cadeia | null; disc: Cadeia | null }>(null)
     const [aba, setAba] = useState<"painel" | "perguntas">("painel")
+
     const { data: lista, isLoading: carregandoForms, error: erroForms } = useQuery({
         queryKey: ["cpa-forms"],
         queryFn: () => chamar<{ forms: FormResumo[]; admin: boolean }>("forms", {}),
     })
     const forms = lista?.forms ?? []
     const admin = !!lista?.admin
-    const atual = forms.find((f) => f.nivel === nivel && f.tipo === tipo) ?? null
+    const doNivel = forms.filter((f) => f.nivel === nivel)
+    const geral = doNivel.find((f) => f.tipo === "geral") ?? null
+    const disc = doNivel.find((f) => f.tipo === "disciplina") ?? null
+    const partes = [geral, disc].filter((f): f is FormResumo => !!f)
 
     const { data: detalhe } = useQuery({
-        queryKey: ["cpa-form", atual?.id],
-        enabled: !!atual,
-        queryFn: () => chamar<{ perguntas: Pergunta[] }>("form", { formulario_id: atual!.id }),
+        queryKey: ["cpa-form", geral?.id],
+        enabled: !!geral,
+        queryFn: () => chamar<{ perguntas: Pergunta[] }>("form", { formulario_id: geral!.id }),
     })
-
-    const { data: stats, isFetching, refetch } = useQuery({
-        queryKey: ["cpa-stats", atual?.id, filtros],
-        enabled: !!atual,
-        queryFn: () => chamar<any>("stats", { formulario_id: atual!.id, filtros: limparFiltros(filtros) }), // eslint-disable-line @typescript-eslint/no-explicit-any
-    })
+    const { data: statsGeral, isFetching: carregandoG, refetch: refazerG } = useStats(geral, filtros)
+    const { data: statsDisc, isFetching: carregandoD, refetch: refazerD } = useStats(disc, filtros)
 
     const opcoesCurso = useMemo(() => {
         const doForm = (detalhe?.perguntas ?? []).find((p) => p.tipo === "escolha")?.opcoes ?? []
-        const vistos = (stats?.por_curso ?? []).map((c: { curso: string }) => c.curso).filter((c: string) => c !== "(sem curso)")
+        const vistos = [...(statsGeral?.por_curso ?? []), ...(statsDisc?.por_curso ?? [])].map((c: { curso: string }) => c.curso).filter((c: string) => c !== "(sem curso)")
         return [...new Set([...doForm, ...vistos])]
-    }, [detalhe, stats])
+    }, [detalhe, statsGeral, statsDisc])
 
-    const doNivel = forms.filter((f) => f.nivel === nivel)
     const alterar = useMutation({
-        mutationFn: (alt: Record<string, unknown>) => Promise.all(doNivel.map((f) => chamar("update_form", { formulario_id: f.id, ...alt }))),
-        onSuccess: () => { qc.invalidateQueries({ queryKey: ["cpa-forms"] }); showSuccess("Formulário atualizado") },
+        mutationFn: (alt: Record<string, unknown>) => Promise.all(partes.map((f) => chamar<{ nao_encontrados?: string[] }>("update_form", { formulario_id: f.id, ...alt }))),
+        onSuccess: (r) => {
+            qc.invalidateQueries({ queryKey: ["cpa-forms"] })
+            qc.invalidateQueries({ queryKey: ["cpa-testadores"] })
+            const nao = r[0]?.nao_encontrados ?? []
+            if (nao.length) showError(`CPF sem conta no Portal: ${nao.join(", ")}`)
+            else showSuccess("Atualizado")
+        },
         onError: (e: Error) => showError(e.message),
     })
 
     const apagarTestes = useMutation({
-        mutationFn: () => chamar<{ apagadas: number }>("delete_tests", { formulario_id: atual!.id }),
-        onSuccess: (r) => { qc.invalidateQueries({ queryKey: ["cpa-forms"] }); qc.invalidateQueries({ queryKey: ["cpa-stats"] }); showSuccess(`${r.apagadas} respostas de teste apagadas`) },
+        mutationFn: async () => (await Promise.all(partes.map((f) => chamar<{ apagadas: number }>("delete_tests", { formulario_id: f.id })))).reduce((n, r) => n + r.apagadas, 0),
+        onSuccess: (n) => { qc.invalidateQueries({ queryKey: ["cpa-forms"] }); qc.invalidateQueries({ queryKey: ["cpa-stats"] }); showSuccess(`${n} respostas de teste apagadas`) },
         onError: (e: Error) => showError(e.message),
     })
 
@@ -91,46 +103,54 @@ export function CpaAdmin() {
     })
 
     const verificar = useMutation({
-        mutationFn: () => chamar<NonNullable<typeof verificacao>>("verify", { formulario_id: atual!.id }),
+        mutationFn: async () => ({
+            geral: geral ? await chamar<Cadeia>("verify", { formulario_id: geral.id }) : null,
+            disc: disc ? await chamar<Cadeia>("verify", { formulario_id: disc.id }) : null,
+        }),
         onSuccess: (r) => setVerificacao(r),
         onError: (e: Error) => showError(e.message),
     })
 
     const exportar = useMutation({
-        mutationFn: () => chamar<any>("export", { formulario_id: atual!.id, filtros: limparFiltros(filtros) }), // eslint-disable-line @typescript-eslint/no-explicit-any
-        onSuccess: (r) => {
-            const base = `cpa_${atual!.nivel}_${atual!.ano}_${filtros.origem}`
-            baixar(`${base}.csv`, r.csv, "text/csv;charset=utf-8")
-            const c = r.cadeia
+        mutationFn: async () => Promise.all(partes.map(async (f) => ({ f, r: await chamar<any>("export", { formulario_id: f.id, filtros: limparFiltros(filtros) }) }))), // eslint-disable-line @typescript-eslint/no-explicit-any
+        onSuccess: (rs) => {
+            const base = `cpa_${nivel}_${geral?.ano ?? ""}`
+            const sec = (f: FormResumo, r: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
+                const c = r.cadeia
+                return [
+                    `== ${f.tipo === "geral" ? "Avaliação geral" : "Avaliação de disciplinas"} ==`,
+                    `Linhas no CSV: ${r.linhas}`,
+                    `SHA-256 do CSV: ${r.sha256}`,
+                    `Cadeia de integridade das respostas oficiais: ${c.integra ? "ÍNTEGRA" : "ADULTERADA"} (${c.total} respostas)`,
+                    c.integra ? `Hash da última resposta oficial: ${c.cabeca ?? "-"}` : `Primeiro erro: protocolo ${c.primeiro_erro?.seq} - ${c.primeiro_erro?.motivo}`,
+                ]
+            }
+            for (const { f, r } of rs) baixar(`${base}_${f.tipo === "geral" ? "geral" : "disciplinas"}_${filtros.origem}.csv`, r.csv, "text/csv;charset=utf-8")
+            const primeiro = rs[0].r
             const relatorio = [
-                `Avaliação Institucional CPA - ${atual!.titulo} ${atual!.ano}`,
-                `Gerado em: ${r.gerado_em}`,
-                `Gerado por: ${r.gerado_por}`,
+                `Avaliação Institucional CPA - ${nivel === "graduacao" ? "Graduação" : "Pós-Graduação"} ${geral?.ano ?? ""}`,
+                `Gerado em: ${primeiro.gerado_em}`,
+                `Gerado por: ${primeiro.gerado_por}`,
                 `Filtros: origem=${filtros.origem}${filtros.curso ? `, curso=${filtros.curso}` : ""}${filtros.de ? `, de=${filtros.de}` : ""}${filtros.ate ? `, até=${filtros.ate}` : ""}`,
-                `Linhas no CSV: ${r.linhas}`,
-                `SHA-256 do CSV: ${r.sha256}`,
-                `Cadeia de integridade das respostas oficiais: ${c.integra ? "ÍNTEGRA" : "ADULTERADA"} (${c.total} respostas)`,
-                c.integra ? `Hash da última resposta oficial: ${c.cabeca ?? "-"}` : `Primeiro erro: protocolo ${c.primeiro_erro?.seq} - ${c.primeiro_erro?.motivo}`,
+                "",
+                ...rs.flatMap(({ f, r }) => [...sec(f, r), ""]),
             ].join("\r\n") + "\r\n"
-            baixar(`${base}_verificacao.txt`, relatorio, "text/plain;charset=utf-8")
-            showSuccess("Relatório exportado")
+            baixar(`${base}_${filtros.origem}_verificacao.txt`, relatorio, "text/plain;charset=utf-8")
+            showSuccess("Relatório exportado (geral, disciplinas e verificação)")
         },
         onError: (e: Error) => showError(e.message),
     })
-
-    const comentariosFiltrados = useMemo(() => {
-        const q = busca.trim().toLowerCase()
-        const lista2 = stats?.comentarios ?? []
-        return q ? lista2.filter((c: any) => c.texto.toLowerCase().includes(q)) : lista2 // eslint-disable-line @typescript-eslint/no-explicit-any
-    }, [stats, busca])
 
     if (carregandoForms) return <div className="flex justify-center p-12"><Loader2 className="h-6 w-6 animate-spin" /></div>
     if (erroForms) return <p className="p-6 text-sm text-destructive">{(erroForms as Error).message}</p>
 
     const link = `${window.location.origin}/avaliacao`
-    const linkTeste = atual ? `${window.location.origin}/avaliacao/${atual.token}` : ""
-    const t = stats?.totais
-    const escala = (stats?.perguntas ?? []).filter((p: any) => p.tipo === "escala") // eslint-disable-line @typescript-eslint/no-explicit-any
+    const tg = statsGeral?.totais
+    const td = statsDisc?.totais
+    const testes = partes.reduce((n, f) => n + f.testes, 0)
+    const atualizando = carregandoG || carregandoD
+    const veredito = verificacao && [verificacao.geral, verificacao.disc].filter((c): c is Cadeia => !!c)
+    const falha = veredito?.find((c) => !c.integra)
 
     return (
         <div className="space-y-6 p-4 md:p-6">
@@ -139,81 +159,86 @@ export function CpaAdmin() {
                 <div>
                     <div className="mb-2 flex items-center gap-2 text-primary">
                         <ClipboardCheck size={14} />
-                        <span className="text-[10px] font-bold uppercase tracking-widest">Uso interno · não aparece no Portal do Aluno</span>
+                        <span className="text-[10px] font-bold uppercase tracking-widest">Uso interno · aparece no Portal só quando você ligar</span>
                     </div>
                     <h2 className="mb-2 text-3xl font-bold tracking-tight text-[var(--text-main)]">Avaliação Institucional (CPA)</h2>
-                    <p className="text-sm text-[var(--text-muted)]">Formulários, respostas, indicadores e comprovação.</p>
+                    <p className="text-sm text-[var(--text-muted)]">Uma avaliação por nível: a geral e as disciplinas ativas do aluno, em um link só.</p>
                 </div>
                 <div className="flex gap-2">
-                    <div className="flex gap-2">
-                        {(["graduacao", "pos"] as const).map((n) => (
-                            <Btn key={n} size="sm" variant={nivel === n ? "default" : "outline"} onClick={() => setNivel(n)}>
-                                {n === "graduacao" ? "Graduação" : "Pós"} {forms.find((f) => f.nivel === n)?.ano}
-                            </Btn>
-                        ))}
-                    </div>
+                    {(["graduacao", "pos"] as const).map((n) => (
+                        <Btn key={n} size="sm" variant={nivel === n ? "default" : "outline"} onClick={() => setNivel(n)}>
+                            {n === "graduacao" ? "Graduação" : "Pós"} {forms.find((f) => f.nivel === n)?.ano}
+                        </Btn>
+                    ))}
                 </div>
             </div>
 
-            {atual && (
+            {geral && (
                 <>
-                    <div className="flex gap-2 pb-2">
-                        {(["geral", "disciplina"] as const).map((t) => (
-                            <Btn key={t} size="sm" variant={tipo === t ? "default" : "ghost"} onClick={() => setTipo(t)}>
-                                {t === "geral" ? "Avaliação geral" : "Avaliação de disciplinas"}
-                            </Btn>
-                        ))}
-                    </div>
                     <div className="flex gap-2 pb-2">
                         <Btn size="sm" variant={aba === "painel" ? "default" : "ghost"} onClick={() => setAba("painel")}>Painel e respostas</Btn>
                         <Btn size="sm" variant={aba === "perguntas" ? "default" : "ghost"} onClick={() => setAba("perguntas")}>Perguntas</Btn>
                     </div>
 
-                    {aba === "perguntas" && <CpaEditor formId={atual.id} admin={admin} />}
+                    {aba === "perguntas" && (
+                        <div className="space-y-8">
+                            <div className="space-y-3">
+                                <Rotulo>Avaliação geral</Rotulo>
+                                <CpaEditor formId={geral.id} admin={admin} />
+                            </div>
+                            {disc && (
+                                <div className="space-y-3">
+                                    <Rotulo>Avaliação de disciplinas (repetida para cada disciplina ativa do aluno)</Rotulo>
+                                    <CpaEditor formId={disc.id} admin={admin} />
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     {aba === "painel" && (
                     <>
                     <section className="grid gap-4 glass-card p-6 md:grid-cols-2">
                         <div className="space-y-2 text-sm">
-                            <p><span className="text-[var(--text-muted)]">Status:</span> <b>{rotuloStatus(atual.status)}</b></p>
-                            <p className="text-xs text-[var(--text-muted)]">Link único do aluno (pede o login do Portal e abre a avaliação geral e as disciplinas em sequência):</p>
+                            <p><span className="text-[var(--text-muted)]">Status:</span> <b>{rotuloStatus(geral.status)}</b></p>
+                            <p className="text-xs text-[var(--text-muted)]">Link único do aluno. Pede o login do Portal e abre a avaliação geral e as disciplinas em sequência. É o mesmo link para teste e para valer.</p>
                             <p className="break-all font-mono text-xs">{link}</p>
-                            <div className="flex flex-wrap gap-2">
-                                <Btn size="sm" variant="outline" onClick={() => { navigator.clipboard?.writeText(link); showSuccess("Link copiado") }}>Copiar link do aluno</Btn>
-                                <Btn size="sm" variant="ghost" onClick={() => { navigator.clipboard?.writeText(linkTeste); showSuccess("Link de teste copiado") }}>Copiar link de teste desta parte</Btn>
-                            </div>
+                            <Btn size="sm" variant="outline" onClick={() => { navigator.clipboard?.writeText(link); showSuccess("Link copiado") }}>Copiar link</Btn>
+                            {admin && geral.status === "teste" && !geral.portal_ativo && (
+                                <p className="text-xs text-[var(--text-muted)]">Em teste, só os alunos de teste (ao lado) veem a avaliação. Respostas de teste não entram nos relatórios oficiais.</p>
+                            )}
                         </div>
                         {admin && (
-                            <div className="space-y-2 text-sm">
+                            <div className="space-y-3 text-sm">
                                 <div className="flex flex-wrap items-center gap-2">
                                     <span className="text-[var(--text-muted)]">Portal do aluno:</span>
-                                    <Btn size="sm" variant={atual.portal_ativo ? "default" : "outline"} disabled={alterar.isPending}
-                                        onClick={() => { if (!atual.portal_ativo || confirm("Desligar a avaliação no Portal do Aluno?")) alterar.mutate({ portal_ativo: !atual.portal_ativo }) }}>
-                                        {atual.portal_ativo ? "Ligado" : "Desligado"}
+                                    <Btn size="sm" variant={geral.portal_ativo ? "default" : "outline"} disabled={alterar.isPending}
+                                        onClick={() => { if (!geral.portal_ativo || confirm("Desligar a avaliação no Portal do Aluno?")) alterar.mutate({ portal_ativo: !geral.portal_ativo }) }}>
+                                        {geral.portal_ativo ? "Ligado para todos" : "Desligado"}
                                     </Btn>
                                 </div>
                                 <div className="flex flex-wrap gap-2">
                                     {(["teste", "aberto", "encerrado"] as const).map((s) => (
-                                        <Btn key={s} size="sm" variant={atual.status === s ? "default" : "outline"} disabled={alterar.isPending} onClick={() => alterar.mutate({ status: s })}>
+                                        <Btn key={s} size="sm" variant={geral.status === s ? "default" : "outline"} disabled={alterar.isPending} onClick={() => alterar.mutate({ status: s })}>
                                             {rotuloStatus(s)}
                                         </Btn>
                                     ))}
                                 </div>
-                                <p className="text-xs text-muted-foreground">Status e Portal valem para a avaliação geral e a de disciplinas deste nível. Base: {atual.populacao_ativa ?? "–"} alunos com matrícula vigente no Sponte.</p>
-                                <SemestreCampo valor={doNivel.find((f) => f.tipo === "disciplina")?.semestre ?? null} salvando={alterar.isPending} onSalvar={(v) => alterar.mutate({ semestre: v })} />
-                                <Btn size="sm" variant="ghost" className="text-destructive" disabled={apagarTestes.isPending || atual.testes === 0}
-                                    onClick={() => { if (confirm(`Apagar ${atual.testes} respostas de teste? As oficiais não são afetadas.`)) apagarTestes.mutate() }}>
-                                    Apagar respostas de teste ({atual.testes})
+                                <p className="text-xs text-[var(--text-muted)]">Status e Portal valem para a geral e as disciplinas deste nível. Base: {geral.populacao_ativa ?? "–"} alunos com matrícula vigente no Sponte.</p>
+                                <SemestreCampo valor={disc?.semestre ?? null} salvando={alterar.isPending} onSalvar={(v) => alterar.mutate({ semestre: v })} />
+                                <AlunosTeste geral={geral} salvando={alterar.isPending} onSalvar={(cpfs) => alterar.mutate({ alunos_teste_cpf: cpfs })} />
+                                <Btn size="sm" variant="ghost" className="text-destructive" disabled={apagarTestes.isPending || testes === 0}
+                                    onClick={() => { if (confirm(`Apagar ${testes} respostas de teste (geral e disciplinas)? As oficiais não são afetadas.`)) apagarTestes.mutate() }}>
+                                    Apagar respostas de teste ({testes})
                                 </Btn>
                             </div>
                         )}
                     </section>
 
                     <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                        <Kpi rotulo="Respondentes (oficiais)" valor={t?.respondentes ?? "–"} sub={t?.percentual != null ? `${t.percentual}% de ${t.populacao_ativa} alunos ativos` : "Sem base de alunos ativos"} />
-                        <Kpi rotulo="Média geral" valor={t?.media_geral ?? "–"} sub="média de todas as notas de escala" />
-                        <Kpi rotulo="Notas altas" valor={t?.pct_notas_altas != null ? `${t.pct_notas_altas}%` : "–"} sub="top 10% da escala" />
-                        <Kpi rotulo="Notas baixas" valor={t?.pct_notas_baixas != null ? `${t.pct_notas_baixas}%` : "–"} sub="metade inferior da escala" />
+                        <Kpi rotulo="Respondentes (avaliação geral)" valor={tg?.respondentes ?? "–"} sub={tg?.percentual != null ? `${tg.percentual}% de ${tg.populacao_ativa} alunos ativos` : "Sem base de alunos ativos"} />
+                        <Kpi rotulo="Disciplinas avaliadas" valor={td?.respondentes ?? "–"} sub="uma resposta por aluno e disciplina" />
+                        <Kpi rotulo="Média da avaliação geral" valor={tg?.media_geral ?? "–"} sub={tg?.pct_notas_altas != null ? `${tg.pct_notas_altas}% de notas altas` : "sem respostas"} />
+                        <Kpi rotulo="Média das disciplinas" valor={td?.media_geral ?? "–"} sub={td?.pct_notas_altas != null ? `${td.pct_notas_altas}% de notas altas` : "sem respostas"} />
                     </section>
 
                     <section className="grid gap-3 glass-card p-6 md:grid-cols-5">
@@ -225,20 +250,18 @@ export function CpaAdmin() {
                                 <option value="todas">Todas</option>
                             </select>
                         </Campo>
-                        {atual.nivel === "pos" && (
-                            <Campo rotulo="Curso">
-                                <select className="h-9 w-full rounded-lg bg-[var(--bg-card-hover)] px-3 text-sm text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-primary/40" value={filtros.curso}
-                                    onChange={(e) => setFiltros({ ...filtros, curso: e.target.value })}>
-                                    <option value="">Todos</option>
-                                    {opcoesCurso.map((c) => <option key={c} value={c}>{c}</option>)}
-                                </select>
-                            </Campo>
-                        )}
+                        <Campo rotulo="Curso">
+                            <select className="h-9 w-full rounded-lg bg-[var(--bg-card-hover)] px-3 text-sm text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-primary/40" value={filtros.curso}
+                                onChange={(e) => setFiltros({ ...filtros, curso: e.target.value })}>
+                                <option value="">Todos</option>
+                                {opcoesCurso.map((c) => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                        </Campo>
                         <Campo rotulo="De"><Inp type="date" value={filtros.de} onChange={(e) => setFiltros({ ...filtros, de: e.target.value })} /></Campo>
                         <Campo rotulo="Até"><Inp type="date" value={filtros.ate} onChange={(e) => setFiltros({ ...filtros, ate: e.target.value })} /></Campo>
                         <div className="flex items-end gap-2">
-                            <Btn size="sm" variant="outline" onClick={() => refetch()} disabled={isFetching}>
-                                <RefreshCw className={`mr-2 h-4 w-4 ${isFetching ? "animate-spin" : ""}`} /> Atualizar
+                            <Btn size="sm" variant="outline" onClick={() => { refazerG(); refazerD() }} disabled={atualizando}>
+                                <RefreshCw className={`mr-2 h-4 w-4 ${atualizando ? "animate-spin" : ""}`} /> Atualizar
                             </Btn>
                         </div>
                     </section>
@@ -257,138 +280,191 @@ export function CpaAdmin() {
                         <Btn variant="outline" onClick={() => verificar.mutate()} disabled={verificar.isPending}>
                             <ShieldCheck className="mr-2 h-4 w-4" /> Verificar integridade
                         </Btn>
-                        {verificacao && (
-                            <span className={`flex items-center gap-2 text-sm ${verificacao.integra ? "text-emerald-700" : "text-red-700"}`}>
-                                {verificacao.integra ? <ShieldCheck className="h-4 w-4" /> : <ShieldAlert className="h-4 w-4" />}
-                                {verificacao.integra
-                                    ? `Íntegra: ${verificacao.total} respostas oficiais, sem alteração.`
-                                    : `ADULTERADA no protocolo ${verificacao.primeiro_erro?.seq}: ${verificacao.primeiro_erro?.motivo}.`}
+                        {veredito && (
+                            <span className={`flex items-center gap-2 text-sm ${falha ? "text-red-700" : "text-emerald-700"}`}>
+                                {falha ? <ShieldAlert className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
+                                {falha
+                                    ? `ADULTERADA no protocolo ${falha.primeiro_erro?.seq}: ${falha.primeiro_erro?.motivo}.`
+                                    : `Íntegra: ${veredito.reduce((n, c) => n + c.total, 0)} respostas oficiais (geral e disciplinas), sem alteração.`}
                             </span>
                         )}
                     </section>
 
-                    <section className="grid gap-4 lg:grid-cols-2">
-                        <Painel titulo="Respostas por dia">
-                            <ResponsiveContainer width="100%" height={220}>
-                                <LineChart data={stats?.por_dia ?? []} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                                    <CartesianGrid stroke="rgba(139,148,158,0.18)" vertical={false} />
-                                    <XAxis dataKey="dia" tick={TICK} />
-                                    <YAxis allowDecimals={false} tick={TICK} />
-                                    <Tooltip {...TT} />
-                                    <Line type="monotone" dataKey="n" name="Respostas" stroke={COR_SERIE} strokeWidth={2} dot={{ r: 3 }} />
-                                </LineChart>
-                            </ResponsiveContainer>
-                        </Painel>
-                        <Painel titulo="Média por bloco (0 a escala máxima)">
-                            <ResponsiveContainer width="100%" height={220}>
-                                <BarChart data={stats?.blocos ?? []} layout="vertical" margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
-                                    <CartesianGrid stroke="rgba(139,148,158,0.18)" horizontal={false} />
-                                    <XAxis type="number" domain={[0, t?.escala_max ?? 10]} tick={TICK} />
-                                    <YAxis type="category" dataKey="titulo" width={150} tick={TICK} />
-                                    <Tooltip {...TT} />
-                                    <Bar dataKey="media" name="Média" fill={COR_SERIE} radius={[0, 4, 4, 0]} />
-                                </BarChart>
-                            </ResponsiveContainer>
-                        </Painel>
-                    </section>
-
-                    <section className="grid gap-4 lg:grid-cols-2">
-                        <Painel titulo="Média por pergunta de escala">
-                            <ResponsiveContainer width="100%" height={Math.max(220, escala.length * 22)}>
-                                <BarChart data={escala} layout="vertical" margin={{ top: 4, right: 16, left: 4, bottom: 0 }}>
-                                    <XAxis type="number" domain={[0, 10]} tick={TICK} />
-                                    <YAxis type="category" dataKey="ordem" width={36} tick={TICK} tickFormatter={(v) => `P${v}`} />
-                                    <Tooltip formatter={(v: number) => [v, "Média"]} labelFormatter={(v) => `P${v}`} />
-                                    <Bar dataKey="media" name="Média" fill={COR_SERIE} radius={[0, 4, 4, 0]} />
-                                </BarChart>
-                            </ResponsiveContainer>
-                        </Painel>
-                        <Painel titulo="Por curso">
-                            {(stats?.por_curso ?? []).length === 0 ? (
-                                <p className="py-10 text-center text-sm text-muted-foreground">Sem respostas no filtro atual.</p>
-                            ) : (
-                                <ResponsiveContainer width="100%" height={Math.max(180, (stats?.por_curso ?? []).length * 30)}>
-                                    <BarChart data={stats.por_curso} layout="vertical" margin={{ top: 4, right: 24, left: 4, bottom: 0 }}>
-                                        <XAxis type="number" allowDecimals={false} tick={TICK} />
-                                        <YAxis type="category" dataKey="curso" width={220} tick={TICK} />
-                                        <Tooltip {...TT} />
-                                        <Bar dataKey="n" name="Respostas" fill={COR_SERIE} radius={[0, 4, 4, 0]} />
-                                    </BarChart>
-                                </ResponsiveContainer>
-                            )}
-                        </Painel>
-                    </section>
-
-                    <Painel titulo="Por disciplina (professor titular pelo Moodle)">
-                        {(stats?.por_disciplina ?? []).length === 0 ? (
-                            <p className="py-6 text-center text-sm text-muted-foreground">Nenhuma avaliação de disciplina no filtro atual.</p>
-                        ) : (
-                            <div className="overflow-x-auto">
-                                <table className="w-full min-w-[560px] text-sm">
-                                    <thead className="text-left text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
-                                        <tr><th className="py-2 pr-3">Disciplina</th><th className="py-2 pr-3">Período</th><th className="py-2 pr-3">Professor</th><th className="py-2 pr-3 text-right">Respostas</th><th className="py-2 text-right">Média</th></tr>
-                                    </thead>
-                                    <tbody>
-                                        {stats.por_disciplina.map((d: any) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
-                                            <tr key={d.contexto}>
-                                                <td className="py-2 pr-3">{d.disciplina.replace(/-/g, " ")}</td>
-                                                <td className="py-2 pr-3 text-xs text-muted-foreground">{d.periodo}</td>
-                                                <td className="py-2 pr-3">{d.docente ?? <span className="text-[var(--text-muted)]">não identificado</span>}</td>
-                                                <td className="py-2 pr-3 text-right tabular-nums">{d.n}</td>
-                                                <td className="py-2 text-right tabular-nums">{d.media ?? "–"}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        )}
-                    </Painel>
+                    <Resultados titulo="Avaliação geral" stats={statsGeral} />
+                    {disc && <Resultados titulo="Avaliação de disciplinas" stats={statsDisc} porDisciplina />}
 
                     <ProfessoresPorDisciplina admin={admin} />
 
                     <ProfessoresFotos />
+                    </>
+                    )}
+                </>
+            )}
+        </div>
+    )
+}
 
-                    <Painel titulo="Tabela por pergunta (alternativa textual aos gráficos)">
+// Resultados de uma parte da avaliação (geral ou disciplinas): gráficos, tabela por pergunta e comentários.
+function Resultados({ titulo, stats, porDisciplina }: { titulo: string; stats: any; porDisciplina?: boolean }) { // eslint-disable-line @typescript-eslint/no-explicit-any
+    const [busca, setBusca] = useState("")
+    const t = stats?.totais
+    const escala = (stats?.perguntas ?? []).filter((p: any) => p.tipo === "escala") // eslint-disable-line @typescript-eslint/no-explicit-any
+    const comentarios = useMemo(() => {
+        const q = busca.trim().toLowerCase()
+        const todos = stats?.comentarios ?? []
+        return q ? todos.filter((c: any) => c.texto.toLowerCase().includes(q)) : todos // eslint-disable-line @typescript-eslint/no-explicit-any
+    }, [stats, busca])
+    return (
+        <section className="space-y-4">
+            <div className="flex flex-wrap items-baseline justify-between gap-2 pt-2">
+                <h3 className="text-xl font-bold tracking-tight text-[var(--text-main)]">{titulo}</h3>
+                <p className="text-xs text-[var(--text-muted)]">
+                    {t ? `${t.respondentes} respostas · média ${t.media_geral ?? "–"} · ${t.pct_notas_altas ?? "–"}% notas altas · ${t.pct_notas_baixas ?? "–"}% notas baixas` : "carregando"}
+                </p>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+                <Painel titulo="Respostas por dia">
+                    <ResponsiveContainer width="100%" height={220}>
+                        <LineChart data={stats?.por_dia ?? []} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                            <CartesianGrid stroke="rgba(139,148,158,0.18)" vertical={false} />
+                            <XAxis dataKey="dia" tick={TICK} />
+                            <YAxis allowDecimals={false} tick={TICK} />
+                            <Tooltip {...TT} />
+                            <Line type="monotone" dataKey="n" name="Respostas" stroke={COR_SERIE} strokeWidth={2} dot={{ r: 3 }} />
+                        </LineChart>
+                    </ResponsiveContainer>
+                </Painel>
+                <Painel titulo="Média por bloco">
+                    <ResponsiveContainer width="100%" height={220}>
+                        <BarChart data={stats?.blocos ?? []} layout="vertical" margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
+                            <CartesianGrid stroke="rgba(139,148,158,0.18)" horizontal={false} />
+                            <XAxis type="number" domain={[0, 10]} tick={TICK} />
+                            <YAxis type="category" dataKey="titulo" width={150} tick={TICK} />
+                            <Tooltip {...TT} />
+                            <Bar dataKey="media" name="Média" fill={COR_SERIE} radius={[0, 4, 4, 0]} />
+                        </BarChart>
+                    </ResponsiveContainer>
+                </Painel>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+                <Painel titulo="Média por pergunta de escala">
+                    <ResponsiveContainer width="100%" height={Math.max(220, escala.length * 22)}>
+                        <BarChart data={escala} layout="vertical" margin={{ top: 4, right: 16, left: 4, bottom: 0 }}>
+                            <XAxis type="number" domain={[0, 10]} tick={TICK} />
+                            <YAxis type="category" dataKey="ordem" width={36} tick={TICK} tickFormatter={(v) => `P${v}`} />
+                            <Tooltip {...TT} formatter={(v: number) => [v, "Média"]} labelFormatter={(v) => `P${v}`} />
+                            <Bar dataKey="media" name="Média" fill={COR_SERIE} radius={[0, 4, 4, 0]} />
+                        </BarChart>
+                    </ResponsiveContainer>
+                </Painel>
+                <Painel titulo="Por curso">
+                    {(stats?.por_curso ?? []).length === 0 ? (
+                        <p className="py-10 text-center text-sm text-[var(--text-muted)]">Sem respostas no filtro atual.</p>
+                    ) : (
+                        <ResponsiveContainer width="100%" height={Math.max(180, (stats?.por_curso ?? []).length * 30)}>
+                            <BarChart data={stats.por_curso} layout="vertical" margin={{ top: 4, right: 24, left: 4, bottom: 0 }}>
+                                <XAxis type="number" allowDecimals={false} tick={TICK} />
+                                <YAxis type="category" dataKey="curso" width={220} tick={TICK} />
+                                <Tooltip {...TT} />
+                                <Bar dataKey="n" name="Respostas" fill={COR_SERIE} radius={[0, 4, 4, 0]} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    )}
+                </Painel>
+            </div>
+
+            {porDisciplina && (
+                <Painel titulo="Por disciplina e professor">
+                    {(stats?.por_disciplina ?? []).length === 0 ? (
+                        <p className="py-6 text-center text-sm text-[var(--text-muted)]">Nenhuma avaliação de disciplina no filtro atual.</p>
+                    ) : (
                         <div className="overflow-x-auto">
-                            <table className="w-full min-w-[640px] text-sm">
+                            <table className="w-full min-w-[560px] text-sm">
                                 <thead className="text-left text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
-                                    <tr><th className="py-2 pr-3">#</th><th className="py-2 pr-3">Pergunta</th><th className="py-2 pr-3 text-right">n</th><th className="py-2 pr-3 text-right">Média</th><th className="py-2">Distribuição</th></tr>
+                                    <tr><th className="py-2 pr-3">Disciplina</th><th className="py-2 pr-3">Período</th><th className="py-2 pr-3">Professor</th><th className="py-2 pr-3 text-right">Respostas</th><th className="py-2 text-right">Média</th></tr>
                                 </thead>
                                 <tbody>
-                                    {(stats?.perguntas ?? []).map((p: any) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
-                                        <tr key={p.id} className="align-top">
-                                            <td className="py-2 pr-3 text-xs text-muted-foreground">{p.ordem}</td>
-                                            <td className="py-2 pr-3">{p.texto}</td>
-                                            <td className="py-2 pr-3 text-right tabular-nums">{p.n}</td>
-                                            <td className="py-2 pr-3 text-right tabular-nums">{p.tipo === "escala" ? p.media ?? "–" : ""}</td>
-                                            <td className="py-2 text-xs">
-                                                {p.tipo === "escala" && p.distribuicao.map((d: any) => `${d.valor}:${d.n}`).join("  ")} {/* eslint-disable-line @typescript-eslint/no-explicit-any */}
-                                                {p.tipo === "escolha" && p.opcoes.map((o: any) => `${o.valor}: ${o.n}`).join(" · ")} {/* eslint-disable-line @typescript-eslint/no-explicit-any */}
-                                            </td>
+                                    {stats.por_disciplina.map((d: any) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
+                                        <tr key={d.contexto}>
+                                            <td className="py-2 pr-3">{d.disciplina.replace(/-/g, " ")}</td>
+                                            <td className="py-2 pr-3 text-xs text-[var(--text-muted)]">{d.periodo}</td>
+                                            <td className="py-2 pr-3">{d.docente ?? <span className="text-[var(--text-muted)]">não identificado</span>}</td>
+                                            <td className="py-2 pr-3 text-right tabular-nums">{d.n}</td>
+                                            <td className="py-2 text-right tabular-nums">{d.media ?? "–"}</td>
                                         </tr>
                                     ))}
                                 </tbody>
                             </table>
                         </div>
-                    </Painel>
-
-                    <Painel titulo={`Comentários (${comentariosFiltrados.length})`}>
-                        <Inp placeholder="Buscar nos comentários" value={busca} onChange={(e) => setBusca(e.target.value)} className="mb-3" />
-                        <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
-                            {comentariosFiltrados.map((c: any) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
-                                <div key={`${c.seq}-${c.respondido_em}-${c.texto.slice(0, 12)}`} className="rounded-xl bg-[var(--bg-card-hover)] p-4 text-sm">
-                                    <p className="mb-1 text-xs text-muted-foreground">
-                                        {c.teste ? "teste" : `protocolo ${c.seq}`} · {new Date(c.respondido_em).toLocaleString("pt-BR")}{c.curso ? ` · ${c.curso}` : ""}
-                                    </p>
-                                    <p className="whitespace-pre-wrap">{c.texto}</p>
-                                </div>
-                            ))}
-                            {comentariosFiltrados.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">Nenhum comentário.</p>}
-                        </div>
-                    </Painel>
-                    </>
                     )}
-                </>
+                </Painel>
+            )}
+
+            <Painel titulo="Tabela por pergunta (alternativa textual aos gráficos)">
+                <div className="overflow-x-auto">
+                    <table className="w-full min-w-[640px] text-sm">
+                        <thead className="text-left text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
+                            <tr><th className="py-2 pr-3">#</th><th className="py-2 pr-3">Pergunta</th><th className="py-2 pr-3 text-right">n</th><th className="py-2 pr-3 text-right">Média</th><th className="py-2">Distribuição</th></tr>
+                        </thead>
+                        <tbody>
+                            {(stats?.perguntas ?? []).map((p: any) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
+                                <tr key={p.id} className="align-top">
+                                    <td className="py-2 pr-3 text-xs text-[var(--text-muted)]">{p.ordem}</td>
+                                    <td className="py-2 pr-3">{p.texto}</td>
+                                    <td className="py-2 pr-3 text-right tabular-nums">{p.n}</td>
+                                    <td className="py-2 pr-3 text-right tabular-nums">{p.tipo === "escala" ? p.media ?? "–" : ""}</td>
+                                    <td className="py-2 text-xs">
+                                        {p.tipo === "escala" && p.distribuicao.map((d: any) => `${d.valor}:${d.n}`).join("  ")} {/* eslint-disable-line @typescript-eslint/no-explicit-any */}
+                                        {p.tipo === "escolha" && p.opcoes.map((o: any) => `${o.valor}: ${o.n}`).join(" · ")} {/* eslint-disable-line @typescript-eslint/no-explicit-any */}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </Painel>
+
+            <Painel titulo={`Comentários (${comentarios.length})`}>
+                <Inp placeholder="Buscar nos comentários" value={busca} onChange={(e) => setBusca(e.target.value)} className="mb-3" />
+                <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
+                    {comentarios.map((c: any) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
+                        <div key={`${c.seq}-${c.respondido_em}-${c.texto.slice(0, 12)}`} className="rounded-xl bg-[var(--bg-card-hover)] p-4 text-sm">
+                            <p className="mb-1 text-xs text-[var(--text-muted)]">
+                                {c.teste ? "teste" : `protocolo ${c.seq}`} · {new Date(c.respondido_em).toLocaleString("pt-BR")}{c.curso ? ` · ${c.curso}` : ""}
+                            </p>
+                            <p className="whitespace-pre-wrap">{c.texto}</p>
+                        </div>
+                    ))}
+                    {comentarios.length === 0 && <p className="py-6 text-center text-sm text-[var(--text-muted)]">Nenhum comentário.</p>}
+                </div>
+            </Painel>
+        </section>
+    )
+}
+
+// Alunos de teste: em status Teste, só eles veem a avaliação (pelo Início do Portal ou pelo link), mesmo com o Portal desligado.
+function AlunosTeste({ geral, salvando, onSalvar }: { geral: FormResumo; salvando: boolean; onSalvar: (cpfs: string[]) => void }) {
+    const [txt, setTxt] = useState("")
+    const { data } = useQuery({
+        queryKey: ["cpa-testadores", geral.id, (geral.alunos_teste ?? []).join(",")],
+        queryFn: () => chamar<{ alunos: { sponte_aluno_id: number; nome: string; ra: string | null }[] }>("testadores", { formulario_id: geral.id }),
+    })
+    const alunos = data?.alunos ?? []
+    return (
+        <div className="space-y-2">
+            <label className="block space-y-1">
+                <span className="text-xs text-[var(--text-muted)]">Alunos de teste (CPF, um por linha; a lista salva substitui a atual)</span>
+                <textarea value={txt} onChange={(e) => setTxt(e.target.value)} rows={3} placeholder="000.000.000-00"
+                    className="w-full rounded-lg bg-[var(--bg-card-hover)] p-3 text-sm text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-primary/40" />
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+                <Btn size="sm" variant="outline" disabled={salvando || !txt.trim()} onClick={() => { onSalvar(txt.split(/[\s,;]+/).filter(Boolean)); setTxt("") }}>Salvar lista</Btn>
+                {alunos.length > 0 && <Btn size="sm" variant="ghost" disabled={salvando} onClick={() => onSalvar([])}>Limpar lista</Btn>}
+            </div>
+            {alunos.length > 0 && (
+                <p className="text-xs text-[var(--text-muted)]">Na lista: {alunos.map((a) => `${a.nome}${a.ra ? ` (RA ${a.ra})` : ""}`).join(" · ")}</p>
             )}
         </div>
     )

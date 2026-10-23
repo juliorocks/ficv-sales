@@ -93,11 +93,12 @@ async function situacaoDoAluno(db: any, A: number, email: string | null, semestr
 }
 
 // formulários com o Portal ligado, do ano mais recente
-async function formsAbertos(db: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+// Portal ligado (portal_ativo) ou, em status teste, aluno que a CPA cadastrou como aluno de teste.
+async function formsAbertos(db: any, A: number) { // eslint-disable-line @typescript-eslint/no-explicit-any
     const { data } = await db.from("cpa_formularios")
-        .select("id, nivel, tipo, titulo, ano, status, intro, semestre")
-        .eq("portal_ativo", true).in("status", ["teste", "aberto"]).order("ano", { ascending: false });
-    return data ?? [];
+        .select("id, nivel, tipo, titulo, ano, status, intro, semestre, portal_ativo, alunos_teste")
+        .in("status", ["teste", "aberto"]).order("ano", { ascending: false });
+    return (data ?? []).filter((f: any) => f.portal_ativo || (f.status === "teste" && (f.alunos_teste ?? []).includes(A))); // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
 Deno.serve(async (req) => {
@@ -114,7 +115,7 @@ Deno.serve(async (req) => {
 
         const body = await req.json().catch(() => ({}));
         const acao = String(body.action ?? "pendencias");
-        const forms = await formsAbertos(db);
+        const forms = await formsAbertos(db, A);
         if (!forms.length) return j({ geral: null, disciplinas: [] }); // Portal desligado: nem chama Sponte nem Moodle
 
         // semestre das disciplinas: o que a CPA definiu no formulário de disciplina, senão o atual
