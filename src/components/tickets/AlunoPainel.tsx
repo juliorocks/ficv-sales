@@ -458,7 +458,7 @@ export function AlunoNotas({ foco }: { foco?: NotasFoco | null }) {
       ) : (
         <>
           {secoes.map(({ t, disciplinas }) => (
-            <details key={t.turma_id} id={`periodo-${t.turma_id}`} open className={`glass-card group scroll-mt-20 ${foco?.turma_id === t.turma_id ? 'ring-2 ring-[var(--primary)]/40' : ''}`}>
+            <details key={t.turma_id} id={`periodo-${t.turma_id}`} open={VIGENTE.test(t.situacao ?? '') || t.turma_id === foco?.turma_id} className={`glass-card group scroll-mt-20 ${foco?.turma_id === t.turma_id ? 'ring-2 ring-[var(--primary)]/40' : ''}`}>
               <summary className="list-none cursor-pointer px-4 py-3 flex items-center gap-2 [&::-webkit-details-marker]:hidden">
                 <p className="text-sm font-semibold text-[var(--text-main)] flex-1 min-w-0 truncate">{periodoLabel(t.turma)}</p>
                 {t.situacao && (
