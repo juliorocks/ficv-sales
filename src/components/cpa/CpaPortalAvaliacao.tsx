@@ -71,24 +71,37 @@ export function CpaPortalCard() {
     const geralPendente = pendentes.some((i) => i.contexto === "")
 
     return (
-        <section className="glass-card space-y-4 p-6">
-            <h2 className="flex items-center gap-2 text-sm font-semibold">
-                <ClipboardCheck className="h-4 w-4 text-primary" /> Avaliação da CPA
-            </h2>
-            {pendentes.length > 0 ? (
-                <>
-                    <p className="text-sm text-[var(--text-muted)]">
-                        {textoAvaliacao(geralPendente, disciplinasPendentes)} Sua opinião ajuda a FICV a melhorar, e as respostas são anônimas.
-                    </p>
-                    <Btn size="lg" className="h-12 w-full text-sm" style={{ background: TINTA }} onClick={() => setFila(pendentes)}>
-                        Responder Avaliação da CPA
-                    </Btn>
-                </>
-            ) : (
-                <p className="flex items-center gap-2 text-sm text-emerald-700">
-                    <Check className="h-4 w-4" /> Você já respondeu a Avaliação da CPA. Obrigado!
-                </p>
-            )}
+        <>
+            <section className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#13161D] via-[#1B1F29] to-[#3A2F14] p-6 text-white shadow-lg shadow-black/20">
+                <div className="pointer-events-none absolute -right-8 -top-8 h-40 w-40 rounded-full bg-[#C9A84C]/25 blur-3xl" />
+                <div className="relative flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+                    <div className="flex items-start gap-4">
+                        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#C9A84C]/20 text-[#E2C878]">
+                            <ClipboardCheck className="h-6 w-6" />
+                        </span>
+                        <div className="space-y-1">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-[#E2C878]">Avaliação da CPA</p>
+                            {pendentes.length > 0 ? (
+                                <>
+                                    <h2 className="text-lg font-bold leading-snug">Sua opinião melhora a FICV</h2>
+                                    <p className="text-sm text-white/70">{textoAvaliacao(geralPendente, disciplinasPendentes)} As respostas são anônimas.</p>
+                                </>
+                            ) : (
+                                <>
+                                    <h2 className="text-lg font-bold leading-snug">Avaliação concluída</h2>
+                                    <p className="flex items-center gap-2 text-sm text-white/70"><Check className="h-4 w-4 text-[#E2C878]" /> Você já respondeu a Avaliação da CPA. Obrigado!</p>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                    {pendentes.length > 0 && (
+                        <button type="button" onClick={() => setFila(pendentes)}
+                            className="h-12 w-full shrink-0 rounded-full bg-[#C9A84C] px-7 text-sm font-bold text-[#13161D] transition-all hover:bg-[#E2C878] active:scale-95 md:w-auto">
+                            Responder Avaliação da CPA
+                        </button>
+                    )}
+                </div>
+            </section>
             {fila && (
                 <div className="fixed inset-x-0 top-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 overflow-y-auto bg-background sm:bottom-0">
                     <button type="button" aria-label="Fechar" onClick={fechar}
@@ -98,7 +111,7 @@ export function CpaPortalCard() {
                     <CpaFila itens={fila} onFechar={fechar} />
                 </div>
             )}
-        </section>
+        </>
     )
 }
 

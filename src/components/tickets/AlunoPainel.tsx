@@ -13,7 +13,7 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { AlertCircle, BookOpen, CalendarDays, CheckCircle2, ChevronRight, ChevronsUpDown, Copy, CreditCard, ExternalLink, FileText, GraduationCap, Loader2, Printer, RefreshCw, Wallet } from 'lucide-react'
 import { showError, showSuccess } from '../../utils/toast'
-import { CpaPortalCard } from '../cpa/CpaPortalAvaliacao'
+import { PortalDestaques } from '../portal/PortalDestaques'
 
 interface AlunoPainelCtx { targetAlunoId?: string; readOnly?: boolean }
 const Ctx = createContext<AlunoPainelCtx>({})
@@ -204,6 +204,9 @@ export function AlunoInicio({ onGo, onDeclaracao }: { onGo: (tab: 'financeiro' |
         </div>
       </div>
 
+      {/* Destaques no topo: Avaliação da CPA (só com o Portal ligado) e os banners do admin. Fora na visão de staff. */}
+      {!readOnly && <PortalDestaques />}
+
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Box>
           <p className="text-xs text-[var(--text-muted)] flex items-center gap-1.5"><Wallet className="w-3.5 h-3.5" /> Próxima parcela</p>
@@ -289,9 +292,6 @@ export function AlunoInicio({ onGo, onDeclaracao }: { onGo: (tab: 'financeiro' |
         <p className="text-sm text-[var(--text-main)]">Precisa de ajuda com algo?</p>
         <button onClick={() => onGo('chamados')} className="btn-primary text-sm px-4 py-2 rounded-lg">Abrir chamado</button>
       </Box>
-
-      {/* Avaliação CPA: só aparece com o Portal ligado no painel da CPA; na visão de staff, a função recusa e o cartão some */}
-      {!readOnly && <CpaPortalCard />}
     </div>
   )
 }
