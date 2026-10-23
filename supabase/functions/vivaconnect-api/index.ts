@@ -214,8 +214,16 @@ Deno.serve(async (req) => {
             // entrega (131026/janela) só depois, sem avisar na hora do envio. Template (hsmName)
             // nunca precisa de janela aberta — é feito pra isso.
             if (!hsmName && !media && ch.kind === "waba") {
+                // A tela junta as conversas de leads com o mesmo telefone; a trava precisa olhar os mesmos.
+                const { data: me } = await db.from("leads").select("telefone").eq("id", leadId).maybeSingle();
+                const suffix = String(me?.telefone ?? "").replace(/\D/g, "").slice(-8);
+                let leadIds: unknown[] = [leadId];
+                if (suffix.length === 8) {
+                    const { data: same } = await db.from("leads").select("id").ilike("telefone", `%${suffix}%`).limit(20);
+                    if (same?.length) leadIds = [...new Set([leadId, ...same.map((l: { id: unknown }) => l.id)])];
+                }
                 const { data: lastInbound } = await db.from("widechat_messages").select("created_at")
-                    .eq("lead_id", leadId).eq("origin", "channel").neq("provider", "email")
+                    .in("lead_id", leadIds).eq("origin", "channel").neq("provider", "email")
                     .order("created_at", { ascending: false }).limit(1).maybeSingle();
                 const windowOpen = !!lastInbound && (Date.now() - new Date(lastInbound.created_at).getTime()) < 24 * 3600 * 1000;
                 if (!windowOpen) return jsonRes({ error: "Passaram 24h da última mensagem do cliente — só dá pra enviar um template aprovado." }, 400);

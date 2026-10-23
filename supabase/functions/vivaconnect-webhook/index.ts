@@ -203,6 +203,13 @@ Deno.serve(async (req) => {
             }).select("id, nome_completo, perfil, assigned_to_id, vivaconnect_channel_id, curso_interesse, stage_id").single();
             if (error) throw new Error(`criar lead: ${error.message}`);
             lead = created;
+            // Duas mensagens quase juntas do mesmo número criavam dois leads (ids consecutivos).
+            // O de menor id fica; o outro se desfaz antes de receber qualquer coisa.
+            const older = await findLeadByPhone(db, m.number, { beforeId: created.id });
+            if (older) {
+                await db.from("leads").delete().eq("id", created.id);
+                lead = older;
+            }
         }
 
         // precisa estar FORA do if(lead) — usada lá embaixo, já fora do escopo do bloco, na

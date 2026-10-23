@@ -211,6 +211,8 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 - **Janela de 24h do WhatsApp**: qualquer lugar que calcula se texto livre é permitido precisa ignorar `provider='email'`
   (resposta por e-mail tem `origin='channel'` e não pode abrir a janela do WhatsApp). Já existe em WideChatHistory e vivaconnect-api.
 
+- **Leads duplicados por telefone (2026-10-23)**: o webhook criava 2 leads quando 2 mensagens do mesmo número chegavam juntas (ids consecutivos); o `findLeadByPhone` pega o de maior id, então a conversa se dividia. Agora o lead recém-criado se desfaz se existir outro com o mesmo final de telefone e id menor. A trava de 24h no `send` do `vivaconnect-api` olha todos os leads com o mesmo final de telefone (a tela já juntava). Existem ~70 grupos de duplicados antigos ainda não unificados.
+
 - **Token em refresh**: `UPDATE` que filtra 0 linhas sem erro. Padrão: `getSession()` antes, `withTimeout`, `.select()`
   pra checar se alterou algo. Já reapareceu em TicketDetail (05/10).
 - **Coluna de segredo**: nunca `SELECT` de senha, token ou api_key, nem com alias, nem pra "checar existência". Usar
