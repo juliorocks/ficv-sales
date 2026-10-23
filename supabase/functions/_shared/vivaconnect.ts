@@ -93,6 +93,9 @@ export const TICKET_TEMPLATE_NAME = "ficv_retomar_atendimento";
 export function toZproNumber(raw: unknown): string | null {
     let d = onlyDigits(raw);
     if (d.length < 10 || /^0+$/.test(d)) return null;
+    // "00" é o prefixo de discagem internacional (ex.: 00245955367959 = Guiné-Bissau); o WhatsApp
+    // não aceita os zeros (Meta 131009 "Parameter value is not valid").
+    if (d.startsWith("00") && d.length >= 12) d = d.replace(/^0+/, "");
     // DDD(2) + local(8), sem o 55 ainda: celular de antes da expansão pro 9º dígito
     // (2012-2016) guardado assim mesmo (comum em cadastro puxado do Sponte/formulário
     // antigo) — se o local já começa em 6-9 (faixa histórica de celular), só falta
