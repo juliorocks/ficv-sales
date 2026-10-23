@@ -217,6 +217,7 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 
 - **Leads duplicados por telefone (2026-10-23)**: o webhook criava 2 leads quando 2 mensagens do mesmo número chegavam juntas (ids consecutivos); o `findLeadByPhone` pega o de maior id, então a conversa se dividia. Agora o lead recém-criado se desfaz se existir outro com o mesmo final de telefone e id menor. A trava de 24h no `send` do `vivaconnect-api` olha todos os leads com o mesmo final de telefone (a tela já juntava). Existem ~70 grupos de duplicados antigos ainda não unificados.
 
+- **Lead puxado pra Em Contato voltava pra Aluno (2026-10-23)**: dois caminhos moviam de novo — (1) `vivaconnect-webhook` (bloco `isStudent`/`aluno_atual`) a cada mensagem do cliente com telefone de aluno; (2) cron `sync_leads_matriculado_from_sponte` depois de 24h parado. Agora lead em Em Contato é ignorado nos dois (o cron ainda converte pra Matriculado). Qualquer automação nova que mande pra Aluno precisa respeitar Em Contato.
 - **Token em refresh**: `UPDATE` que filtra 0 linhas sem erro. Padrão: `getSession()` antes, `withTimeout`, `.select()`
   pra checar se alterou algo. Já reapareceu em TicketDetail (05/10).
 - **Coluna de segredo**: nunca `SELECT` de senha, token ou api_key, nem com alias, nem pra "checar existência". Usar

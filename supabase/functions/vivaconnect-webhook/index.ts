@@ -347,6 +347,9 @@ Deno.serve(async (req) => {
         if (isStudent) {
             if (lead && lead.stage_id) {
                 const { data: st } = await db.from("stages").select("name").eq("id", lead.stage_id).maybeSingle();
+                // Em Contato = agente humano assumiu (inclusive puxando de Aluno na mão): não volta
+                // pra Aluno nem manda o link do Portal por cima da conversa dele.
+                if (/em contato/i.test(st?.name ?? "")) return await done("stored:aluno (em atendimento humano)", lead.id);
                 if (!/matricul|^aluno$/i.test(st?.name ?? "")) {
                     const { data: alunoStage } = await db.from("stages").select("id").eq("name", "Aluno").maybeSingle();
                     if (alunoStage) {
@@ -558,6 +561,7 @@ async function aiReply(db: any, settings: any, leadId: number, channelId: number
         const { data: leadRow } = await db.from("leads").select("nome_completo, stage_id").eq("id", leadId).maybeSingle();
         if (leadRow?.stage_id) {
             const { data: st } = await db.from("stages").select("name").eq("id", leadRow.stage_id).maybeSingle();
+            if (/em contato/i.test(st?.name ?? "")) return `ia:aluno_atual ignorado (lead em atendimento humano)`;
             if (!/matricul|^aluno$/i.test(st?.name ?? "")) {
                 const { data: alunoStage } = await db.from("stages").select("id").eq("name", "Aluno").maybeSingle();
                 if (alunoStage) {
