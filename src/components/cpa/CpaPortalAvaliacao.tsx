@@ -19,6 +19,13 @@ type Item = { formulario_id: number; contexto: string; titulo: string; detalhe: 
 
 const TINTA = "#13161D"
 
+function textoAvaliacao(geral: boolean, disciplinas: number): string {
+    const disc = `${disciplinas} ${disciplinas === 1 ? "disciplina" : "disciplinas"} deste semestre`
+    if (geral && disciplinas) return `Você vai avaliar a instituição e ${disc}, tudo em sequência.`
+    if (disciplinas) return `Você vai avaliar ${disc}, em sequência.`
+    return "Você vai avaliar a instituição."
+}
+
 async function portal<T>(body: Record<string, unknown>): Promise<T> {
     const { data, error } = await supabase.functions.invoke("cpa-portal", { body })
     if (error) throw new Error(await extractFnErrorMessage(error, "Não foi possível carregar a avaliação."))
@@ -60,35 +67,28 @@ export function CpaPortalCard() {
         qc.invalidateQueries({ queryKey: ["cpa-portal-pendencias"] })
     }
 
+    const disciplinasPendentes = pendentes.filter((i) => i.contexto !== "").length
+    const geralPendente = pendentes.some((i) => i.contexto === "")
+
     return (
         <section className="glass-card space-y-4 p-6">
-            <div className="flex items-center justify-between">
-                <h2 className="flex items-center gap-2 text-sm font-semibold">
-                    <ClipboardCheck className="h-4 w-4 text-primary" /> Avaliações
-                </h2>
-                <span className="text-xs text-[var(--text-muted)]">{pendentes.length ? `${pendentes.length} pendente(s)` : "Tudo respondido"}</span>
-            </div>
-            {pendentes.length > 0 && (
-                <Btn size="lg" className="h-12 w-full text-sm" style={{ background: TINTA }} onClick={() => setFila(pendentes)}>
-                    Responder {pendentes.length > 1 ? `todas (${pendentes.length})` : "agora"}
-                </Btn>
+            <h2 className="flex items-center gap-2 text-sm font-semibold">
+                <ClipboardCheck className="h-4 w-4 text-primary" /> Avaliação da CPA
+            </h2>
+            {pendentes.length > 0 ? (
+                <>
+                    <p className="text-sm text-[var(--text-muted)]">
+                        {textoAvaliacao(geralPendente, disciplinasPendentes)} Sua opinião ajuda a FICV a melhorar, e as respostas são anônimas.
+                    </p>
+                    <Btn size="lg" className="h-12 w-full text-sm" style={{ background: TINTA }} onClick={() => setFila(pendentes)}>
+                        Responder Avaliação da CPA
+                    </Btn>
+                </>
+            ) : (
+                <p className="flex items-center gap-2 text-sm text-emerald-700">
+                    <Check className="h-4 w-4" /> Você já respondeu a Avaliação da CPA. Obrigado!
+                </p>
             )}
-            <ul className="space-y-2">
-                {itens.map((i) => (
-                    <li key={`${i.formulario_id}|${i.contexto}`}>
-                        <div className="flex w-full items-center justify-between gap-3 rounded-xl bg-[var(--bg-card-hover)] px-4 py-3 text-sm">
-                            {i.foto !== undefined && <AvatarDocente src={i.foto} nome={i.detalhe} tamanho={36} />}
-                            <span className="min-w-0 flex-1">
-                                <span className="block truncate font-medium">{i.titulo}</span>
-                                <span className="block truncate text-xs text-[var(--text-muted)]">{i.detalhe}</span>
-                            </span>
-                            {i.respondida
-                                ? <span className="flex shrink-0 items-center gap-1 text-xs text-emerald-700"><Check className="h-3.5 w-3.5" /> Respondida</span>
-                                : <button type="button" onClick={() => setFila([i])} className="shrink-0 text-xs font-semibold text-primary">Responder</button>}
-                        </div>
-                    </li>
-                ))}
-            </ul>
             {fila && (
                 <div className="fixed inset-x-0 top-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 overflow-y-auto bg-background sm:bottom-0">
                     <button type="button" aria-label="Fechar" onClick={fechar}
