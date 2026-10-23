@@ -2,6 +2,7 @@
 // Cada banner tem arte para celular e/ou desktop, link opcional, janela de exibição e ordem.
 // Escrita só do admin (RLS); o aluno lê os ativos dentro da janela. As artes ficam no bucket público portal-banners.
 import { useState } from "react"
+import { createPortal } from "react-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowDown, ArrowUp, Images, Loader2, Pencil, Plus, Trash2, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
@@ -239,7 +240,8 @@ function FormBanner({ valor, salvando, onSalvar, onFechar }: { valor: Rascunho; 
     }
     const previa = (nova: File | null, atual: string | null) => (nova ? URL.createObjectURL(nova) : atual ? publica(atual) : null)
 
-    return (
+    // no body: dentro do bloco com animação (transform) o "fixed" ficava preso ao tamanho do bloco e o janelão saía cortado
+    return createPortal(
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4" onClick={onFechar}>
             <form className="glass-card mt-8 w-full max-w-2xl space-y-5 p-6 shadow-xl" onClick={(e) => e.stopPropagation()}
                 onSubmit={(e) => { e.preventDefault(); onSalvar(r) }}>
@@ -283,7 +285,8 @@ function FormBanner({ valor, salvando, onSalvar, onFechar }: { valor: Rascunho; 
                     <Btn type="submit" disabled={salvando}>{salvando && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Salvar banner</Btn>
                 </div>
             </form>
-        </div>
+        </div>,
+        document.body,
     )
 }
 

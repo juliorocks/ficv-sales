@@ -2,6 +2,7 @@
 // Reordenar é com as setas (↑ ↓) dentro do bloco, e dos blocos entre si. Perguntas que já têm
 // resposta não mudam tipo, escala, opções nem somem: o servidor recusa, e a tela também trava.
 import { useState } from "react"
+import { createPortal } from "react-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowDown, ArrowUp, Loader2, Pencil, Plus, Trash2, X } from "lucide-react"
 import { Btn } from "./cpaUi"
@@ -247,7 +248,7 @@ function FormPergunta({ valor, blocos, travada, salvando, onSalvar }: {
 }
 
 function Dialogo({ titulo, onFechar, children }: { titulo: string; onFechar: () => void; children: React.ReactNode }) {
-    return (
+    return createPortal(
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4" onClick={onFechar}>
             <div className="mt-10 w-full max-w-lg glass-card p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
                 <div className="mb-4 flex items-center justify-between">
@@ -256,7 +257,8 @@ function Dialogo({ titulo, onFechar, children }: { titulo: string; onFechar: () 
                 </div>
                 {children}
             </div>
-        </div>
+        </div>,
+        document.body,
     )
 }
 

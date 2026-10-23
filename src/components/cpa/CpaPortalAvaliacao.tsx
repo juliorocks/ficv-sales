@@ -4,6 +4,7 @@
 // O aluno responde tudo de uma vez: a avaliação geral e cada disciplina pendente, em sequência, cada
 // uma separada por uma tela de título. Cada parte é gravada à parte (uma resposta por formulário/disciplina).
 import { useEffect, useState } from "react"
+import { createPortal } from "react-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ClipboardCheck, Check, Loader2, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
@@ -102,14 +103,15 @@ export function CpaPortalCard() {
                     )}
                 </div>
             </section>
-            {fila && (
+            {fila && createPortal(
                 <div className="fixed inset-x-0 top-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 overflow-y-auto bg-background sm:bottom-0">
                     <button type="button" aria-label="Fechar" onClick={fechar}
                         className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-muted">
                         <X className="h-4 w-4" />
                     </button>
                     <CpaFila itens={fila} onFechar={fechar} />
-                </div>
+                </div>,
+                document.body,
             )}
         </>
     )
