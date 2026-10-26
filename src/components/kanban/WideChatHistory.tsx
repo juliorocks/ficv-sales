@@ -169,7 +169,7 @@ interface WideChatMessage {
     media_url?: string | null
     provider?: string
     interno?: boolean
-    raw_data?: { kind?: string; followup_id?: number } | null
+    raw_data?: { kind?: string; followup_id?: number; msg?: { contacts?: { name?: { formatted_name?: string }; phones?: { phone?: string; wa_id?: string }[] }[] } } | null
     // tracinhos de confirmação (✓/✓✓/✓✓ azul), atualizados pelo cron vivaconnect-api
     // (action=sync_delivery_status, 13/10) — só mensagem NOSSA (origin agent/auto) tem isso
     delivery_status?: 'sent' | 'delivered' | 'read' | 'failed' | null
@@ -1316,6 +1316,20 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                                                 )
                                             }
                                             if (isTpl) return <p className="text-xs opacity-80">📄 Template enviado</p>
+                                            if (msg.type === 'contact') {
+                                                const cards = msg.raw_data?.msg?.contacts ?? []
+                                                if (cards.length) return (
+                                                    <div className="space-y-1.5">
+                                                        {cards.map((c, i) => (
+                                                            <div key={i} className="text-sm">
+                                                                <p className="text-[10px] font-semibold uppercase tracking-wide opacity-70">Contato compartilhado</p>
+                                                                <p className="font-medium">{c.name?.formatted_name || 'Sem nome'}</p>
+                                                                {(c.phones ?? []).map((ph, j) => <p key={j} className="select-all">{ph.phone || ph.wa_id}</p>)}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )
+                                            }
                                             return <p className="italic text-xs opacity-70">Arquivo de mídia ({msg.type})</p>
                                         })()}
                                     </div>
