@@ -25,7 +25,18 @@ async function nomeDivergeDoHistorico(db: any, alunoId: number, nome: string): P
     const { data } = await db.from("sponte_matriculas").select("aluno").eq("aluno_id", alunoId).limit(50);
     const historicos = [...new Set((data || []).map((r: any) => normNome(r.aluno)))].filter(Boolean);
     if (historicos.length === 0) return false;
-    return !historicos.includes(normNome(nome));
+    return !historicos.some((h) => mesmoNome(h, nome));
+}
+
+// "Bruna Martins" (matrícula) e "Bruna Aparecida Martins Silva" (cadastro) são a mesma pessoa: aceita
+// quando as palavras de um nome estão todas no outro. Nome de outra pessoa continua divergindo.
+const LIGACAO = new Set(["de", "da", "do", "das", "dos", "e"]);
+function mesmoNome(a: string, b: string): boolean {
+    const ta = normNome(a).split(" ").filter((t) => t && !LIGACAO.has(t));
+    const tb = normNome(b).split(" ").filter((t) => t && !LIGACAO.has(t));
+    if (!ta.length || !tb.length) return false;
+    const [menor, maior] = ta.length <= tb.length ? [ta, tb] : [tb, ta];
+    return menor.every((t) => maior.includes(t));
 }
 
 /** Garante a conta do aluno. Devolve { aluno } ou { error }. Não mexe em conta existente. */
