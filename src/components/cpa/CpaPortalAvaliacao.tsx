@@ -85,7 +85,7 @@ export function CpaPortalCard() {
                             {pendentes.length > 0 ? (
                                 <>
                                     <h2 className="text-lg font-bold leading-snug">Sua opinião melhora a FICV</h2>
-                                    <p className="text-sm text-white/70">{textoAvaliacao(geralPendente, disciplinasPendentes)} As respostas são anônimas.</p>
+                                    <p className="text-sm text-white/70">{textoAvaliacao(geralPendente, disciplinasPendentes)}</p>
                                 </>
                             ) : (
                                 <>
@@ -156,7 +156,7 @@ function Conclusao({ comprovantes, onFechar }: { comprovantes: Resultado[]; onFe
     return (
         <div className="mx-auto flex h-full max-w-md flex-col items-center justify-center space-y-5 overflow-y-auto px-6 py-8 text-center">
             <h2 className="text-2xl font-bold">Obrigado por participar!</h2>
-            <p className="text-sm text-[var(--text-muted)]">Suas respostas foram registradas de forma anônima.</p>
+            <p className="text-sm text-[var(--text-muted)]">Suas respostas foram registradas.</p>
             <div className="w-full space-y-2 text-left">
                 {comprovantes.map((r, k) => (
                     <div key={k} className="glass-card p-4">
