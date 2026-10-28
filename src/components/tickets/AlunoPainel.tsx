@@ -123,6 +123,9 @@ function agruparCursos(ms: Matricula[]): CursoAgrupado[] {
         .filter((t) => !/direito/i.test(c.nome) || periodoKey(t.turma) >= DIREITO_NOTAS_DESDE)
         .sort((x, y) => rankSituacao(x.situacao) - rankSituacao(y.situacao) || periodoKey(y.turma) - periodoKey(x.turma) || String(y.data_matricula).localeCompare(String(x.data_matricula))),
     }))
+    // curso que ficou sem nenhum período (Direito só com períodos antigos) some da lista;
+    // deixar o grupo vazio derrubava a tela inteira (turmas[0] indefinido)
+    .filter((c) => c.turmas.length > 0)
     .sort((x, y) => Number(y.vigente) - Number(x.vigente) || y.ultima.localeCompare(x.ultima))
 }
 
