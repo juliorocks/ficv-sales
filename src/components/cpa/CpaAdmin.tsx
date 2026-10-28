@@ -254,6 +254,24 @@ export function CpaAdmin() {
                             <span className="text-xs text-[var(--text-muted)]">Traz o professor titular de cada disciplina do Moodle. O que foi preenchido à mão não é sobrescrito.</span>
                         </section>
                     )}
+                    <section className="flex flex-wrap items-center gap-3 glass-card p-6">
+                        <Btn onClick={() => exportar.mutate()} disabled={exportar.isPending}>
+                            {exportar.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                            Exportar CSV + verificação
+                        </Btn>
+                        <Btn variant="outline" onClick={() => verificar.mutate()} disabled={verificar.isPending}>
+                            <ShieldCheck className="mr-2 h-4 w-4" /> Verificar integridade
+                        </Btn>
+                        {veredito && (
+                            <span className={`flex items-center gap-2 text-sm ${falha ? "text-red-700" : "text-emerald-700"}`}>
+                                {falha ? <ShieldAlert className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
+                                {falha
+                                    ? `ADULTERADA no protocolo ${falha.primeiro_erro?.seq}: ${falha.primeiro_erro?.motivo}.`
+                                    : `Íntegra: ${veredito.reduce((n, c) => n + c.total, 0)} respostas oficiais (geral e disciplinas), sem alteração.`}
+                            </span>
+                        )}
+                    </section>
+
                     {admin && (
                         <section className="flex flex-wrap items-center gap-3 glass-card p-6">
                             <Btn variant="outline" onClick={() => vincular.mutate()} disabled={vincular.isPending}>
@@ -303,24 +321,6 @@ export function CpaAdmin() {
                                 <RefreshCw className={`mr-2 h-4 w-4 ${atualizando ? "animate-spin" : ""}`} /> Atualizar
                             </Btn>
                         </div>
-                    </section>
-
-                    <section className="flex flex-wrap items-center gap-3 glass-card p-6">
-                        <Btn onClick={() => exportar.mutate()} disabled={exportar.isPending}>
-                            {exportar.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-                            Exportar CSV + verificação
-                        </Btn>
-                        <Btn variant="outline" onClick={() => verificar.mutate()} disabled={verificar.isPending}>
-                            <ShieldCheck className="mr-2 h-4 w-4" /> Verificar integridade
-                        </Btn>
-                        {veredito && (
-                            <span className={`flex items-center gap-2 text-sm ${falha ? "text-red-700" : "text-emerald-700"}`}>
-                                {falha ? <ShieldAlert className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
-                                {falha
-                                    ? `ADULTERADA no protocolo ${falha.primeiro_erro?.seq}: ${falha.primeiro_erro?.motivo}.`
-                                    : `Íntegra: ${veredito.reduce((n, c) => n + c.total, 0)} respostas oficiais (geral e disciplinas), sem alteração.`}
-                            </span>
-                        )}
                     </section>
 
                     {filtros.docente && statsDisc && statsDiscBase && (
