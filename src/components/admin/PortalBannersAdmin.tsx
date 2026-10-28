@@ -82,7 +82,7 @@ export function PortalBannersAdmin() {
             let desktop = r.imagem_desktop
             if (r.novoMobile) { if (mobile) antigos.push(mobile); mobile = await enviar(r.novoMobile, "mobile") }
             if (r.novoDesktop) { if (desktop) antigos.push(desktop); desktop = await enviar(r.novoDesktop, "desktop") }
-            if (!mobile && !desktop) throw new Error("Envie pelo menos uma arte (celular ou desktop).")
+            if (!mobile && !desktop) throw new Error("Envie a arte do banner.")
             const reg = {
                 titulo: r.titulo.trim(), link_url: r.link_url.trim() || null, ativo: r.ativo,
                 inicio_em: paraIso(r.inicio), fim_em: paraIso(r.fim), imagem_mobile: mobile, imagem_desktop: desktop,
@@ -150,7 +150,7 @@ export function PortalBannersAdmin() {
                     </div>
                     <h2 className="mb-2 text-3xl font-bold tracking-tight text-[var(--text-main)]">Banners de destaque</h2>
                     <p className="max-w-2xl text-sm text-[var(--text-muted)]">
-                        Aparecem no topo do Início do Portal, logo abaixo da saudação. Suba uma arte para o celular e outra para o desktop.
+                        Aparecem no topo do Início do Portal, logo abaixo da saudação. Suba uma arte só, na proporção 4:1 (1600 × 400 px): ela vale para celular e computador.
                         Com mais de um banner no ar, eles se alternam sozinhos. A Avaliação da CPA aparece sempre antes, quando estiver ativa.
                     </p>
                 </div>
@@ -171,8 +171,7 @@ export function PortalBannersAdmin() {
                     return (
                         <div key={b.id} className="glass-card flex flex-col gap-4 p-4 lg:flex-row lg:items-center">
                             <div className="flex shrink-0 items-end gap-3">
-                                <Miniatura rotulo="Celular" path={b.imagem_mobile} largura={96} proporcao="2/1" />
-                                <Miniatura rotulo="Desktop" path={b.imagem_desktop} largura={200} proporcao="4/1" />
+                                <Miniatura rotulo="Banner" path={b.imagem_desktop ?? b.imagem_mobile} largura={200} proporcao="4/1" />
                             </div>
                             <div className="min-w-0 flex-1 space-y-1">
                                 <div className="flex flex-wrap items-center gap-2">
@@ -259,11 +258,8 @@ function FormBanner({ valor, salvando, onSalvar, onFechar }: { valor: Rascunho; 
                     <Inp value={r.link_url} onChange={(e) => set("link_url", e.target.value)} placeholder="https://" />
                 </label>
 
-                <div className="grid gap-4 sm:grid-cols-2">
-                    <CampoArte rotulo="Arte do celular" dica="Recomendado 1080 × 540 px (2:1)" proporcao="2/1" url={previa(r.novoMobile, r.imagem_mobile)} onEscolher={(f) => escolher("mobile", f)} />
-                    <CampoArte rotulo="Arte do desktop" dica="Recomendado 1600 × 400 px (4:1)" proporcao="4/1" url={previa(r.novoDesktop, r.imagem_desktop)} onEscolher={(f) => escolher("desktop", f)} />
-                </div>
-                <p className="text-xs text-[var(--text-muted)]">PNG, JPG ou WebP até 3 MB. Se subir só uma arte, ela vale para os dois tamanhos. Deixe o texto importante longe das bordas: a imagem é cortada para caber.</p>
+                <CampoArte rotulo="Arte do banner" dica="Recomendado 1600 × 400 px (4:1). Vale para celular e computador." proporcao="4/1" url={previa(r.novoDesktop, r.imagem_desktop ?? r.imagem_mobile)} onEscolher={(f) => escolher("desktop", f)} />
+                <p className="text-xs text-[var(--text-muted)]">PNG, JPG ou WebP até 3 MB. A mesma imagem aparece no celular e no computador, sempre na proporção 4:1. Deixe o texto importante longe das bordas: a imagem é cortada para caber.</p>
                 {aviso && <p role="alert" className="text-sm text-destructive">{aviso}</p>}
 
                 <div className="grid gap-4 sm:grid-cols-2">

@@ -45,19 +45,12 @@ function BannersCarrossel() {
 
     if (!n) return null
     const b = data![Math.min(i, n - 1)]
-    const mobile = b.imagem_mobile ?? b.imagem_desktop!
-    const desktop = b.imagem_desktop ?? b.imagem_mobile!
-    const arte = (
-        <picture>
-            <source media="(min-width: 768px)" srcSet={urlArteBanner(desktop)} />
-            <img src={urlArteBanner(mobile)} alt={b.titulo} className="h-full w-full object-cover" loading="lazy" />
-        </picture>
-    )
+    const arte = <img src={urlArteBanner((b.imagem_desktop ?? b.imagem_mobile)!)} alt={b.titulo} className="h-full w-full object-cover" loading="lazy" />
     const externo = !!b.link_url && b.link_url.startsWith("https://")
 
     return (
         <section aria-label="Destaques" className="relative overflow-hidden rounded-2xl shadow-lg shadow-black/10">
-            <div className="aspect-[2/1] w-full md:aspect-[4/1]">
+            <div className="aspect-[4/1] w-full">
                 {b.link_url
                     ? <a href={b.link_url} {...(externo ? { target: "_blank", rel: "noopener noreferrer" } : {})} className="block h-full w-full">{arte}</a>
                     : arte}
