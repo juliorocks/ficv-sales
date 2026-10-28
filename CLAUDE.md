@@ -172,7 +172,7 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 - **Dois canais de WhatsApp**: WideChat (legado, `widechat-*`) e VivaConnect (Z-PRO, `vivaconnect-*`). Os dois
   gravam em `widechat_messages`, diferenciados pela coluna `provider`. A aba Conversas do lead mostra os dois.
 - **E-mail como alternativa ao WhatsApp (2026-10-19)**: `provider='email'`. Envio manual pelo botão "Enviar por e-mail"
-  (aparece quando o WhatsApp recusou a última mensagem ou a janela de 24h fechou; só com `leads.email`) →
+  (sempre disponível ao lado de "Nota interna" quando o lead tem `leads.email`, 2026-10-28; o aviso amarelo continua aparecendo quando o WhatsApp recusou ou a janela de 24h fechou) →
   `vivaconnect-api` action `send_email` (Resend, `sendEmail`). Resposta do cliente chega em `email-inbound`
   pelo endereço assinado `lead-<id>-<sig>@<RESEND_INBOUND_DOMAIN>` (`leadReplyAddress`) e vira mensagem `origin='channel'`.
 - **Etapas do Kanban**: Entrada → IA Atendendo (Vivi atendendo) → Em Contato (SÓ com resposta humana real enviada).

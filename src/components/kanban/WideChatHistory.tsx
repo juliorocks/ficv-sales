@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabase"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
-import { AlertCircle, MessageSquare, Send, Loader2, FileText, Smile, Paperclip, Mic, Square, X, Image as ImageIcon, FileAudio, BookOpen, Lock, Reply, Check, CheckCheck } from "lucide-react"
+import { AlertCircle, MessageSquare, Send, Loader2, FileText, Smile, Paperclip, Mic, Square, X, Image as ImageIcon, FileAudio, BookOpen, Lock, Reply, Check, CheckCheck, Mail } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -1361,8 +1361,15 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                         className={`flex items-center gap-1 text-xs px-2 py-1 rounded transition-all ${interno ? 'bg-amber-500 text-white' : 'text-slate-500 hover:text-slate-800'}`}>
                         <Lock className="w-3 h-3" /> Nota interna
                     </button>
+                    {leadEmail && (
+                        <button type="button" title={`Enviar por e-mail para ${leadEmail}`}
+                            onClick={() => { setEmailBody(newMessage); setEmailOpen(true) }}
+                            className="flex items-center gap-1 text-xs px-2 py-1 rounded text-slate-500 hover:text-slate-800 transition-all ml-auto">
+                            <Mail className="w-3 h-3" /> Enviar por e-mail
+                        </button>
+                    )}
                 </div>
-                {!interno && isViva && leadEmail && (lastWaFailed || !canSendText) && (
+                {!interno && leadEmail && (lastWaFailed || !canSendText) && (
                     <div className="flex items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                         <span>
                             {lastWaFailed ? 'O WhatsApp não entregou essa conversa. ' : 'A janela do WhatsApp fechou. '}
