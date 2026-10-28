@@ -49,7 +49,7 @@ function BannersCarrossel() {
     const externo = !!b.link_url && b.link_url.startsWith("https://")
 
     return (
-        <section aria-label="Destaques" className="relative overflow-hidden rounded-2xl shadow-lg shadow-black/10">
+        <section aria-label="Destaques" className="relative -mx-4 overflow-hidden sm:-mx-6">
             <div className="aspect-[4/1] w-full">
                 {b.link_url
                     ? <a href={b.link_url} {...(externo ? { target: "_blank", rel: "noopener noreferrer" } : {})} className="block h-full w-full">{arte}</a>
