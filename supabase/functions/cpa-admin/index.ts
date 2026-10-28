@@ -245,9 +245,10 @@ async function sincronizarDocentes(db: Db, offset: number, semestre: string) {
     };
 }
 
-// Perguntas que já têm resposta gravada (oficial ou teste). Depois de respondida, a estrutura não muda.
+// Perguntas que já têm resposta OFICIAL gravada. Depois de respondida, a estrutura não muda.
 async function perguntasRespondidas(db: Db, formId: number): Promise<Set<string>> {
-    const linhas = await todas(() => db.from("cpa_respostas").select("id, respostas").eq("formulario_id", formId));
+    // só resposta OFICIAL trava a pergunta; resposta de teste não: a equipe testa e depois enxuga o formulário
+    const linhas = await todas(() => db.from("cpa_respostas").select("id, respostas").eq("formulario_id", formId).eq("teste", false));
     const s = new Set<string>();
     for (const l of linhas) for (const [k, v] of Object.entries(l.respostas ?? {})) if (v !== null && v !== "") s.add(k);
     return s;

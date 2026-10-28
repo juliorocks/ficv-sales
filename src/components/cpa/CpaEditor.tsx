@@ -91,7 +91,7 @@ export function CpaEditor({ formId, admin }: { formId: number; admin: boolean })
 
             {respondidas.size > 0 && (
                 <p className="rounded-md bg-amber-100 px-3 py-2 text-xs text-amber-900">
-                    {respondidas.size} pergunta(s) já têm resposta. Essas podem ter o texto e os rótulos ajustados, mas não mudam de tipo, escala ou opções e não podem ser excluídas.
+                    {respondidas.size} pergunta(s) já têm resposta oficial. Essas podem ter o texto e os rótulos ajustados, mas não mudam de tipo, escala ou opções e não podem ser excluídas.
                 </p>
             )}
 
@@ -241,7 +241,7 @@ function FormPergunta({ valor, blocos, travada, salvando, onSalvar }: {
                     <input type="checkbox" checked={f.obrigatoria} onChange={(e) => set("obrigatoria", e.target.checked)} /> Obrigatória
                 </label>
             </div>
-            {travada && <p className="text-xs text-amber-800">Esta pergunta já tem respostas: tipo, escala, opções e papel ficam travados.</p>}
+            {travada && <p className="text-xs text-amber-800">Esta pergunta já tem respostas oficiais: tipo, escala, opções e papel ficam travados.</p>}
             <Rodape salvando={salvando} />
         </form>
     )
