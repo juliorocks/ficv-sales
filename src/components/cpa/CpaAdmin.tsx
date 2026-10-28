@@ -76,7 +76,7 @@ export function CpaAdmin() {
 
     const apagarTestes = useMutation({
         mutationFn: async () => (await Promise.all(partes.map((f) => chamar<{ apagadas: number }>("delete_tests", { formulario_id: f.id })))).reduce((n, r) => n + r.apagadas, 0),
-        onSuccess: (n) => { qc.invalidateQueries({ queryKey: ["cpa-forms"] }); qc.invalidateQueries({ queryKey: ["cpa-stats"] }); showSuccess(`${n} respostas de teste apagadas`) },
+        onSuccess: (n) => { qc.invalidateQueries({ queryKey: ["cpa-forms"] }); qc.invalidateQueries({ queryKey: ["cpa-stats"] }); showSuccess(`${n} respostas de teste apagadas; alunos de teste reiniciados`) },
         onError: (e: Error) => showError(e.message),
     })
 
@@ -227,9 +227,10 @@ export function CpaAdmin() {
                                 <SemestreCampo valor={disc?.semestre ?? null} salvando={alterar.isPending} onSalvar={(v) => alterar.mutate({ semestre: v })} />
                                 <AlunosTeste geral={geral} salvando={alterar.isPending} onSalvar={(cpfs) => alterar.mutate({ alunos_teste_cpf: cpfs })} />
                                 <Btn size="sm" variant="ghost" className="text-destructive" disabled={apagarTestes.isPending || testes === 0}
-                                    onClick={() => { if (confirm(`Apagar ${testes} respostas de teste (geral e disciplinas)? As oficiais não são afetadas.`)) apagarTestes.mutate() }}>
-                                    Apagar respostas de teste ({testes})
+                                    onClick={() => { if (confirm(`Apagar ${testes} respostas de teste (geral e disciplinas) e reiniciar os alunos de teste? Eles voltam a ver as avaliações como pendentes no Portal. As oficiais não são afetadas.`)) apagarTestes.mutate() }}>
+                                    Reiniciar testes: apagar respostas ({testes})
                                 </Btn>
+                                <p className="text-xs text-[var(--text-muted)]">Os alunos de teste voltam a ver as avaliações como pendentes (recarregar o Portal).</p>
                             </div>
                         )}
                     </section>
