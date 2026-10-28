@@ -57,11 +57,16 @@ async function resolverDocentes(db: any, ativas: ReturnType<typeof disciplinasAt
     return mapa;
 }
 
-async function situacaoDoAluno(db: any, A: number, email: string | null, semestre: string) { // eslint-disable-line @typescript-eslint/no-explicit-any
+async function situacaoDoAluno(db: any, A: number, email: string | null, semestre: string, nivelTeste: string | null) { // eslint-disable-line @typescript-eslint/no-explicit-any
     const { data: ms } = await db.from("sponte_matriculas")
         .select("turma_id, nome_turma, nome_curso, data_inicio")
         .eq("aluno_id", A).eq("situacao_id", 1).not("turma_id", "is", null);
     const matriculas: Matricula[] = ms ?? [];
+    // aluno de teste que não está no espelho do Sponte (equipe): vale o nível do cadastro, pra a CPA conseguir testar
+    if (!matriculas.length && nivelTeste) {
+        const nome = nivelTeste === "pos" ? "Pós Graduação em Teste" : "Bacharelado em Teste";
+        matriculas.push({ turma_id: 0, nome_turma: "Teste", nome_curso: nome, data_inicio: null });
+    }
     if (!matriculas.length) return { principal: null as null | { nivel: string; curso: string }, itens: [] as Omit<Item, "formulario_id">[] };
 
     // principal: graduação se houver, senão pós; dentro do nível, a matrícula mais recente
@@ -108,7 +113,7 @@ Deno.serve(async (req) => {
         const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
         const { data: { user } } = await db.auth.getUser(jwt);
         if (!user?.email?.endsWith("@aluno.ficv.br")) return j({ error: "Sessão inválida." }, 401);
-        const { data: aluno } = await db.from("alunos").select("sponte_aluno_id, nome, ra, email").eq("id", user.id).maybeSingle();
+        const { data: aluno } = await db.from("alunos").select("sponte_aluno_id, nome, ra, email, nivel").eq("id", user.id).maybeSingle();
         if (!aluno?.sponte_aluno_id) return j({ error: "Conta não ligada ao Sponte." }, 404);
         const A = Number(aluno.sponte_aluno_id);
         const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -120,7 +125,8 @@ Deno.serve(async (req) => {
 
         // semestre das disciplinas: o que a CPA definiu no formulário de disciplina, senão o atual
         const semestre: string = forms.find((f: any) => f.tipo === "disciplina" && f.semestre)?.semestre ?? semestreAtual(); // eslint-disable-line @typescript-eslint/no-explicit-any
-        const { principal, itens } = await situacaoDoAluno(db, A, aluno.email ?? null, semestre);
+        const { principal, itens } = await situacaoDoAluno(db, A, aluno.email ?? null, semestre,
+            forms.some((f: any) => f.status === "teste" && (f.alunos_teste ?? []).includes(A)) ? (aluno.nivel ?? null) : null); // eslint-disable-line @typescript-eslint/no-explicit-any
         const geralForm = principal ? forms.find((f: any) => f.tipo === "geral" && f.nivel === principal.nivel) : null; // eslint-disable-line @typescript-eslint/no-explicit-any
         const itensElegiveis: Item[] = itens
             .map((i) => ({ ...i, formulario_id: forms.find((f: any) => f.tipo === "disciplina" && f.nivel === i.nivel)?.id ?? 0 })) // eslint-disable-line @typescript-eslint/no-explicit-any
