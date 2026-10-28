@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react"
 import { createPortal } from "react-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ClipboardCheck, Check, Loader2, X } from "lucide-react"
+import { ClipboardCheck, Check, ChevronDown, Loader2, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { extractFnErrorMessage } from "@/utils/functionsError"
 import { AvatarDocente, Btn } from "./cpaUi"
@@ -41,6 +41,7 @@ async function portal<T>(body: Record<string, unknown>): Promise<T> {
 export function CpaPortalCard() {
     const qc = useQueryClient()
     const [fila, setFila] = useState<Item[] | null>(null)
+    const [minhas, setMinhas] = useState(false)
     const { data } = useQuery({
         queryKey: ["cpa-portal-pendencias"],
         queryFn: () => portal<Pendencias>({ action: "pendencias" }),
@@ -75,9 +76,24 @@ export function CpaPortalCard() {
         qc.invalidateQueries({ queryKey: ["cpa-portal-pendencias"] })
     }
 
+    const jaRespondeu = itens.some((i) => i.respondida)
+    const minhasBotao = jaRespondeu && (
+        <button type="button" onClick={() => setMinhas(true)}
+            className="glass-card flex w-full items-center gap-3 p-4 text-left text-sm font-semibold">
+            <ClipboardCheck className="h-5 w-5 text-primary" /> Minhas avaliações da CPA
+            <span className="ml-auto text-xs font-normal text-[var(--text-muted)]">ver o que respondi</span>
+        </button>
+    )
+
     // respondeu tudo: nem banner nem popup (a fila aberta se mantém até o aluno ver os comprovantes)
     if (!pendentes.length && !fila) {
-        return veioDoLink ? <section className="glass-card p-6 text-center text-sm text-[var(--text-muted)]">Você já respondeu todas as avaliações. Obrigado!</section> : null
+        return (
+            <>
+                {veioDoLink && <section className="glass-card p-6 text-center text-sm text-[var(--text-muted)]">Você já respondeu todas as avaliações. Obrigado!</section>}
+                {minhasBotao}
+                {minhas && <MinhasAvaliacoes onFechar={() => setMinhas(false)} />}
+            </>
+        )
     }
 
     const disciplinasPendentes = pendentes.filter((i) => i.contexto !== "").length
@@ -85,6 +101,8 @@ export function CpaPortalCard() {
 
     return (
         <>
+            {minhasBotao}
+            {minhas && <MinhasAvaliacoes onFechar={() => setMinhas(false)} />}
             {fila && createPortal(
                 <div className="fixed inset-x-0 top-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 overflow-hidden bg-background sm:bottom-0">
                     <button type="button" aria-label="Fechar" onClick={fechar}
@@ -176,5 +194,63 @@ function CpaPortalAvaliacao({ formulario_id, contexto, aoConcluir }: { formulari
                 return d as RespostaEnvio
             }}
         />
+    )
+}
+
+type MinhaAvaliacao = {
+    formulario_id: number; titulo: string; tipo: string; teste: boolean; protocolo: number | null; comprovante: string; respondido_em: string
+    disciplina: string | null; turma: string | null; docente: string | null
+    respostas: { pergunta: string; tipo: string; valor: string | number; escala_max: number | null }[]
+}
+
+// O aluno revê o que respondeu (a participação guarda aluno e resposta).
+function MinhasAvaliacoes({ onFechar }: { onFechar: () => void }) {
+    const { data, isLoading, error } = useQuery({
+        queryKey: ["cpa-portal-minhas"],
+        queryFn: () => portal<{ avaliacoes: MinhaAvaliacao[] }>({ action: "minhas" }),
+        retry: false,
+    })
+    const [aberta, setAberta] = useState<number | null>(null)
+    const lista = data?.avaliacoes ?? []
+    return createPortal(
+        <div className="fixed inset-x-0 top-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 overflow-y-auto bg-background sm:bottom-0">
+            <button type="button" aria-label="Fechar" onClick={onFechar} className="fixed right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-muted">
+                <X className="h-4 w-4" />
+            </button>
+            <div className="mx-auto max-w-2xl space-y-3 px-5 py-8">
+                <h2 className="text-2xl font-bold">Minhas avaliações</h2>
+                <p className="text-sm text-[var(--text-muted)]">O que você respondeu na avaliação da CPA.</p>
+                {isLoading && <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>}
+                {error && <p className="text-sm text-[var(--text-muted)]">{(error as Error).message}</p>}
+                {!isLoading && !error && !lista.length && <p className="glass-card p-5 text-sm text-[var(--text-muted)]">Nenhuma avaliação sua encontrada ainda.</p>}
+                {lista.map((a, k) => (
+                    <div key={k} className="glass-card overflow-hidden">
+                        <button type="button" className="flex w-full items-center gap-3 p-4 text-left" onClick={() => setAberta(aberta === k ? null : k)}>
+                            <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm font-semibold">{a.disciplina ?? "Avaliação institucional"}{a.teste ? " (teste)" : ""}</p>
+                                <p className="truncate text-xs text-[var(--text-muted)]">
+                                    {[a.turma, a.docente ? `Prof. ${a.docente}` : null, new Date(a.respondido_em).toLocaleDateString("pt-BR")].filter(Boolean).join(" · ")}
+                                </p>
+                            </div>
+                            <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${aberta === k ? "rotate-180" : ""}`} />
+                        </button>
+                        {aberta === k && (
+                            <div className="space-y-3 border-t border-[var(--border)] p-4">
+                                {a.respostas.map((r, i) => (
+                                    <div key={i} className="text-sm">
+                                        <p className="text-[var(--text-muted)]">{r.pergunta}</p>
+                                        <p className="font-semibold">{r.tipo === "escala" ? `${r.valor}${r.escala_max !== null ? ` de ${r.escala_max}` : ""}` : String(r.valor)}</p>
+                                    </div>
+                                ))}
+                                <p className="break-all border-t border-[var(--border)] pt-3 font-mono text-[10px] text-[var(--text-muted)]">
+                                    {a.protocolo ? `Protocolo ${a.protocolo} · ` : ""}Comprovante {a.comprovante}
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                ))}
+            </div>
+        </div>,
+        document.body,
     )
 }

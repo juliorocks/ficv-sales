@@ -1,7 +1,7 @@
 // cpa-form — endpoint PÚBLICO da Avaliação CPA (página /avaliacao/:token). Sem verify_jwt.
 //   get    { token }             -> formulário, blocos e perguntas (só se status teste/aberto)
 //   submit { token, respostas }  -> valida tudo no servidor e grava pela cpa_registrar_resposta
-// Respostas são anônimas: nada que identifique o respondente é gravado.
+// Link público: respostas sem identificação. No Portal (cpa-portal) a participação guarda aluno e resposta.
 import { pg } from "../_shared/db.ts";
 import { validarRespostas } from "../_shared/cpa.ts";
 

@@ -84,6 +84,12 @@ export function CpaAdmin() {
         onError: (e: Error) => showError(e.message),
     })
 
+    const vincular = useMutation({
+        mutationFn: () => chamar<{ participacoes: number; alunos: number; respostas: number; sem_aluno: number; sem_resposta: number }>("vincular_participacoes", { formulario_id: geral!.id }),
+        onSuccess: (r) => showSuccess(r.participacoes ? `${r.participacoes} participações: ${r.alunos} alunos e ${r.respostas} respostas ligados; sem aluno: ${r.sem_aluno}, sem resposta: ${r.sem_resposta}` : "Nada a recuperar: tudo já está ligado"),
+        onError: (e: Error) => showError(e.message),
+    })
+
     const sincronizarDocentes = useMutation({
         mutationFn: async () => {
             let offset = 0
@@ -245,6 +251,15 @@ export function CpaAdmin() {
                                 Atualizar professores (Moodle)
                             </Btn>
                             <span className="text-xs text-[var(--text-muted)]">Traz o professor titular de cada disciplina do Moodle. O que foi preenchido à mão não é sobrescrito.</span>
+                        </section>
+                    )}
+                    {admin && (
+                        <section className="flex flex-wrap items-center gap-3 glass-card p-6">
+                            <Btn variant="outline" onClick={() => vincular.mutate()} disabled={vincular.isPending}>
+                                {vincular.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                                Recuperar vínculo das avaliações já enviadas
+                            </Btn>
+                            <span className="text-xs text-[var(--text-muted)]">Liga cada avaliação já respondida ao aluno, para ele ver em "Minhas avaliações" no Portal. Pode rodar mais de uma vez.</span>
                         </section>
                     )}
 

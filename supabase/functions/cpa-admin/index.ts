@@ -27,10 +27,10 @@ const sha256Hex = async (s: string) => {
 
 // PostgREST devolve no máximo 1000 linhas por chamada: pagina até acabar.
 // deno-lint-ignore no-explicit-any
-async function todas(montar: () => any): Promise<any[]> {
+async function todas(montar: () => any, ordem = "id"): Promise<any[]> {
     const out: unknown[] = [];
     for (let from = 0; ; from += 1000) {
-        const { data, error } = await montar().order("id").range(from, from + 999);
+        const { data, error } = await montar().order(ordem).range(from, from + 999);
         if (error) throw error;
         out.push(...(data ?? []));
         if ((data ?? []).length < 1000) break;
@@ -424,7 +424,7 @@ Deno.serve(async (req) => {
                 if (filtros.contexto && /^[a-z0-9~-]+$/.test(filtros.contexto)) q = q.eq("contexto", filtros.contexto);
                 if (filtros.de) q = q.gte("respondido_em", `${filtros.de}T00:00:00-03:00`);
                 if (filtros.ate) q = q.lte("respondido_em", `${filtros.ate}T23:59:59-03:00`);
-                const part = await todas(() => q.order("respondente_hash"));
+                const part = await todas(() => q, "respondente_hash");
                 alunos = new Set(part.map((r: Db) => r.respondente_hash)).size;
             }
             return j(estatisticas(form, perguntas, blocos, linhas, todasLinhas, docentes, pop[form.nivel as "graduacao" | "pos"] ?? null, nomes, alunos));
@@ -476,6 +476,38 @@ Deno.serve(async (req) => {
             if (error) throw error;
             await db.from("cpa_participacoes").delete().eq("formulario_id", formId).eq("teste", true);
             return j({ apagadas: (data ?? []).length });
+        }
+
+        if (acao === "vincular_participacoes") {
+            // recupera o vínculo das avaliações enviadas antes de a participação guardar aluno e resposta:
+            // o aluno sai do HMAC (recalculado pra cada aluno do Portal) e a resposta é a do mesmo formulário/contexto
+            // gravada logo depois da participação (a participação é inserida milissegundos antes da resposta)
+            if (!ehAdmin) return j({ error: "Só admin recupera os vínculos." }, 403);
+            const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+            const pendentes = await todas(() => db.from("cpa_participacoes").select("formulario_id, contexto, respondente_hash, respondido_em, aluno_id, resposta_id").or("aluno_id.is.null,resposta_id.is.null"), "respondido_em");
+            if (!pendentes.length) return j({ participacoes: 0, alunos: 0, respostas: 0, sem_aluno: 0, sem_resposta: 0 });
+            const alunos = (await todas(() => db.from("alunos").select("sponte_aluno_id").not("sponte_aluno_id", "is", null), "sponte_aluno_id")).map((a: Db) => Number(a.sponte_aluno_id));
+            const resps = await todas(() => db.from("cpa_respostas").select("id, formulario_id, contexto, respondido_em"));
+            const usadas = new Set((await todas(() => db.from("cpa_participacoes").select("resposta_id").not("resposta_id", "is", null), "resposta_id")).map((r: Db) => r.resposta_id));
+            let comAluno = 0, comResposta = 0, semAluno = 0, semResposta = 0;
+            for (const pt of pendentes) {
+                const patch: Db = {};
+                if (!pt.aluno_id) {
+                    let achou: number | null = null;
+                    for (const A of alunos) if (await participacaoHash(key, A, pt.formulario_id, pt.contexto) === pt.respondente_hash) { achou = A; break; }
+                    if (achou) { patch.aluno_id = achou; comAluno++; } else semAluno++;
+                }
+                if (!pt.resposta_id) {
+                    const t = Date.parse(pt.respondido_em);
+                    const r = resps.find((x: Db) => x.formulario_id === pt.formulario_id && x.contexto === pt.contexto && !usadas.has(x.id)
+                        && Date.parse(x.respondido_em) >= t - 1000 && Date.parse(x.respondido_em) - t <= 15000);
+                    if (r) { patch.resposta_id = r.id; usadas.add(r.id); comResposta++; } else semResposta++;
+                }
+                if (Object.keys(patch).length) {
+                    await db.from("cpa_participacoes").update(patch).eq("formulario_id", pt.formulario_id).eq("contexto", pt.contexto).eq("respondente_hash", pt.respondente_hash);
+                }
+            }
+            return j({ participacoes: pendentes.length, alunos: comAluno, respostas: comResposta, sem_aluno: semAluno, sem_resposta: semResposta });
         }
 
         if (acao === "reset_aluno_teste") {

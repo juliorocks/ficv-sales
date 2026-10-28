@@ -1,7 +1,8 @@
 // cpa-portal — Avaliação CPA dentro do Portal do Aluno. Só enxerga o aluno LOGADO (JWT).
 //   pendencias                              -> avaliações abertas pro aluno (geral + disciplinas)
 //   form      { formulario_id, contexto }   -> formulário, se o aluno pode responder
-//   submit    { formulario_id, contexto, respostas } -> grava (anônimo) e marca participação
+//   submit    { formulario_id, contexto, respostas } -> grava e marca participação (com aluno_id e resposta_id)
+//   minhas                                  -> o aluno revê as próprias respostas (participação → resposta)
 // Nada aparece se o formulário não estiver com portal_ativo = true (desligado por padrão).
 //   geral: nível principal do aluno (graduação > pós), pela matrícula Vigente do Sponte.
 //   disciplinas: cursos do Moodle em que o aluno está inscrito e que estão ativos no semestre
@@ -120,6 +121,36 @@ Deno.serve(async (req) => {
 
         const body = await req.json().catch(() => ({}));
         const acao = String(body.action ?? "pendencias");
+
+        if (acao === "minhas") {
+            const { data: parts } = await db.from("cpa_participacoes").select("formulario_id, contexto, resposta_id, respondido_em")
+                .eq("aluno_id", A).not("resposta_id", "is", null).order("respondido_em", { ascending: false });
+            const ids = (parts ?? []).map((p: any) => p.resposta_id); // eslint-disable-line @typescript-eslint/no-explicit-any
+            if (!ids.length) return j({ avaliacoes: [] });
+            const fids = [...new Set((parts ?? []).map((p: any) => p.formulario_id))]; // eslint-disable-line @typescript-eslint/no-explicit-any
+            const [{ data: resp }, { data: perg }, { data: frm }, { data: docs }] = await Promise.all([
+                db.from("cpa_respostas").select("id, seq, teste, respostas, hash, respondido_em").in("id", ids),
+                db.from("cpa_perguntas").select("id, formulario_id, ordem, texto, tipo, escala_max, chave").in("formulario_id", fids).order("ordem"),
+                db.from("cpa_formularios").select("id, titulo, tipo, nivel").in("id", fids),
+                db.from("cpa_docentes").select("periodo, disciplina, docente, periodo_nome, disciplina_nome"),
+            ]);
+            const nomes = new Map((docs ?? []).map((d: any) => [`${d.periodo}~${d.disciplina}`, d])); // eslint-disable-line @typescript-eslint/no-explicit-any
+            const avaliacoes = (parts ?? []).map((p: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
+                const r: any = (resp ?? []).find((x: any) => x.id === p.resposta_id); // eslint-disable-line @typescript-eslint/no-explicit-any
+                const f: any = (frm ?? []).find((x: any) => x.id === p.formulario_id); // eslint-disable-line @typescript-eslint/no-explicit-any
+                if (!r || !f) return null;
+                const d: any = nomes.get(p.contexto); // eslint-disable-line @typescript-eslint/no-explicit-any
+                return {
+                    formulario_id: f.id, titulo: f.titulo, tipo: f.tipo, teste: r.teste, protocolo: r.seq, comprovante: r.hash, respondido_em: r.respondido_em,
+                    disciplina: f.tipo === "disciplina" ? (d?.disciplina_nome ?? p.contexto.split("~")[1] ?? null) : null,
+                    turma: f.tipo === "disciplina" ? (d?.periodo_nome ?? null) : null,
+                    docente: f.tipo === "disciplina" ? (d?.docente ?? null) : null,
+                    respostas: (perg ?? []).filter((q: any) => q.formulario_id === f.id && q.chave !== "curso" && r.respostas?.[q.id] !== undefined && r.respostas[q.id] !== "") // eslint-disable-line @typescript-eslint/no-explicit-any
+                        .map((q: any) => ({ pergunta: q.texto, tipo: q.tipo, valor: r.respostas[q.id], escala_max: q.escala_max })), // eslint-disable-line @typescript-eslint/no-explicit-any
+                };
+            }).filter(Boolean);
+            return j({ avaliacoes });
+        }
         const forms = await formsAbertos(db, A);
         if (!forms.length) return j({ geral: null, disciplinas: [] }); // Portal desligado: nem chama Sponte nem Moodle
 
@@ -198,7 +229,7 @@ Deno.serve(async (req) => {
 
             const hash = hashes.get(`${fid}|${alvo}`)!;
             const { error: errPart } = await db.from("cpa_participacoes").insert({
-                formulario_id: fid, contexto: alvo, respondente_hash: hash, teste: eleg.formulario.status === "teste",
+                formulario_id: fid, contexto: alvo, respondente_hash: hash, teste: eleg.formulario.status === "teste", aluno_id: A,
             });
             if (errPart) {
                 if (errPart.code === "23505") return j({ error: "Você já respondeu esta avaliação." }, 409);
@@ -213,6 +244,7 @@ Deno.serve(async (req) => {
                 throw error;
             }
             const linha = Array.isArray(data) ? data[0] : data;
+            await db.from("cpa_participacoes").update({ resposta_id: linha.out_id }).eq("formulario_id", fid).eq("contexto", alvo).eq("respondente_hash", hash);
             const { data: gravada } = await db.from("cpa_respostas").select("respondido_em").eq("id", linha.out_id).maybeSingle();
             return j({
                 ok: true, teste: linha.out_teste, protocolo: linha.out_seq, comprovante: linha.out_hash,
