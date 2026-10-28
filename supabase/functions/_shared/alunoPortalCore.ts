@@ -28,14 +28,28 @@ async function completarTurmasComMoodle(turmas: TurmaBoletim[], uid: number, cur
                 if (!d.media && m.media) (d as any).media = m.media;
             }
         }
-        // O Sponte só lista disciplina com nota consolidada; no EAD o resto já tem nota no Moodle
+        // O Sponte só lista disciplina com nota consolidada; no EAD o resto já tem nota (ou ao menos o curso) no Moodle
         // (achado 23/10: aluno de pós com 5 disciplinas de 10,0 no Moodle e 2 no Portal).
         if (t.turma && EAD_RE.test(t.turma)) {
             const chave = (s: string) => norm(s).replace(/^\d+\s+/, "");
-            const tem = new Set(t.disciplinas.map((d) => chave(d.disciplina)));
-            const doMoodle = await moodleDisciplinasDoPeriodo(uid, cursos, t.turma);
+            const tem = (nome: string) => t.disciplinas.some((d) => { const a = chave(d.disciplina), b = chave(nome); return a === b || a.includes(b) || b.includes(a); });
+            // turma Modular: o Moodle nomeia os cursos pelo módulo ("... - 2026.2 - P4 - <disciplina>")
+            let prefixo = t.turma;
+            if (/modular\s*$/i.test(t.turma)) {
+                const mods = t.disciplinas.map((d) => (d as any).modulo).filter(Boolean);
+                const modulo = mods.sort((a, b) => mods.filter((x) => x === b).length - mods.filter((x) => x === a).length)[0];
+                if (!modulo) continue;
+                prefixo = t.turma.replace(/modular\s*$/i, `P${modulo}`);
+            }
+            // período em andamento = o semestre mais novo entre os cursos do aluno no Moodle: lá a disciplina
+            // aparece mesmo sem nota; nos períodos antigos só entra a que tem nota
+            const semestres = cursos.map((c) => c.fullname.match(/\b(20\d\d\.\d)\b/)?.[1]).filter(Boolean) as string[];
+            const atual = semestres.sort().pop();
+            const emAndamento = !!atual && prefixo.includes(atual);
+            const doMoodle = await moodleDisciplinasDoPeriodo(uid, cursos, prefixo);
             for (const s of doMoodle) {
-                if (tem.has(chave(s.disciplina)) || (!s.avaliacoes?.length && !s.media)) continue;
+                if (tem(s.disciplina) || /^0+\s/.test(s.disciplina)) continue;
+                if (!emAndamento && !s.avaliacoes?.length && !s.media) continue;
                 (t as any).disciplinas.push({ ...s, disciplina: s.disciplina.replace(/^\d+\s+/, "") });
             }
         }
