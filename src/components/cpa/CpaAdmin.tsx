@@ -10,7 +10,7 @@ import { showError, showSuccess } from "@/utils/toast"
 import { chamar } from "./cpaApi"
 import { CpaEditor } from "./CpaEditor"
 import { abrirRelatorioProfessor } from "./cpaRelatorio"
-import { Resultados, StatsCpa } from "./CpaResultados"
+import { Chip, Resultados, StatsCpa } from "./CpaResultados"
 
 
 type Filtros = { origem: "oficial" | "teste" | "todas"; curso: string; contexto: string; docente: string; de: string; ate: string }
@@ -323,6 +323,21 @@ export function CpaAdmin() {
                         </div>
                     </section>
 
+                    {(filtros.curso || filtros.docente || filtros.contexto || filtros.de || filtros.ate || filtros.origem !== "oficial") && (
+                        <div className="sticky top-2 z-20 flex flex-wrap items-center gap-2 rounded-2xl bg-[var(--bg-card)] p-3 shadow-[0_8px_30px_rgba(15,23,42,0.12)] ring-1 ring-primary/20">
+                            <span className="text-xs font-semibold text-[var(--text-muted)]">Filtros ativos:</span>
+                            {filtros.origem !== "oficial" && <Chip rotulo="Origem" valor={filtros.origem === "teste" ? "Teste" : "Todas"} onRemover={() => setFiltros((f) => ({ ...f, origem: "oficial" }))} />}
+                            {filtros.curso && <Chip rotulo="Curso" valor={filtros.curso} onRemover={() => setFiltros((f) => ({ ...f, curso: "" }))} />}
+                            {filtros.docente && <Chip rotulo="Professor" valor={filtros.docente} onRemover={() => setFiltros((f) => ({ ...f, docente: "", contexto: "" }))} />}
+                            {filtros.contexto && <Chip rotulo="Disciplina" valor={rotuloContexto ?? filtros.contexto} onRemover={() => { setFiltros((f) => ({ ...f, contexto: "" })); setRotuloContexto(null) }} />}
+                            {filtros.de && <Chip rotulo="De" valor={filtros.de.split("-").reverse().join("/")} onRemover={() => setFiltros((f) => ({ ...f, de: "" }))} />}
+                            {filtros.ate && <Chip rotulo="Até" valor={filtros.ate.split("-").reverse().join("/")} onRemover={() => setFiltros((f) => ({ ...f, ate: "" }))} />}
+                            <Btn size="sm" variant="outline" className="ml-auto" onClick={() => { setFiltros((f) => ({ ...f, origem: "oficial", curso: "", docente: "", contexto: "", de: "", ate: "" })); setRotuloContexto(null) }}>
+                                Limpar filtros · ver todos
+                            </Btn>
+                        </div>
+                    )}
+
                     {filtros.docente && statsDisc && statsDiscBase && (
                         <section className="flex flex-wrap items-center gap-3 glass-card p-4">
                             <span className="text-sm">Resultados do professor <b>{filtros.docente}</b>. A avaliação geral não é por professor e fica oculta.</span>
@@ -334,13 +349,13 @@ export function CpaAdmin() {
                     )}
                     {!filtros.docente && (
                         <Resultados titulo="Avaliação geral" tipo="geral" stats={statsGeral} atualizando={carregandoG}
-                            onFiltrarCurso={(curso) => setFiltros((f) => ({ ...f, curso }))}
+                            onFiltrarCurso={(curso) => setFiltros((f) => ({ ...f, curso: f.curso === curso ? "" : curso }))}
                             onFiltrarContexto={() => {}} onLimparContexto={() => {}} />
                     )}
                     {disc && (
                         <Resultados titulo="Avaliação de disciplinas" tipo="disciplina" stats={statsDisc} rankingBase={statsDiscBase} atualizando={carregandoD || carregandoDF}
                             contextoAtivo={filtros.contexto ? { contexto: filtros.contexto, rotulo: rotuloContexto ?? filtros.contexto } : null}
-                            onFiltrarCurso={(curso) => setFiltros((f) => ({ ...f, curso }))}
+                            onFiltrarCurso={(curso) => setFiltros((f) => ({ ...f, curso: f.curso === curso ? "" : curso }))}
                             onFiltrarContexto={(contexto, rotulo) => { setFiltros((f) => ({ ...f, contexto })); setRotuloContexto(rotulo) }}
                             onLimparContexto={() => { setFiltros((f) => ({ ...f, contexto: "" })); setRotuloContexto(null) }} />
                     )}
