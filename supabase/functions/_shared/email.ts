@@ -3,14 +3,18 @@
 // verificado na Resend).
 import { getSecret } from "./secrets.ts";
 
-export async function sendEmail(to: string, subject: string, html: string, replyTo?: string | null): Promise<{ ok: boolean; id?: string; error?: string }> {
+export async function sendEmail(to: string, subject: string, html: string, replyTo?: string | null,
+    thread?: { messageId: string; references: string[] }): Promise<{ ok: boolean; id?: string; error?: string }> {
     const key = await getSecret("RESEND_API_KEY");
     const from = await getSecret("RESEND_FROM");
     if (!key || !from) return { ok: false, error: "Resend não configurada (Gestão > Integrações)." };
     const r = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-        body: JSON.stringify({ from, to: [to], subject, html, ...(replyTo ? { reply_to: replyTo } : {}) }),
+        body: JSON.stringify({ from, to: [to], subject, html, ...(replyTo ? { reply_to: replyTo } : {}),
+            // Message-ID próprio + In-Reply-To/References: é o que faz o Gmail/Outlook agrupar na mesma conversa
+            ...(thread ? { headers: { "Message-ID": thread.messageId,
+                ...(thread.references.length ? { "In-Reply-To": thread.references[thread.references.length - 1], References: thread.references.join(" ") } : {}) } } : {}) }),
         signal: AbortSignal.timeout(20000),
     });
     const d = await r.json().catch(() => null);

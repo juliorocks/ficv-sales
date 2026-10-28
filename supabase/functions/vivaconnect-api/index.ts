@@ -167,12 +167,17 @@ Deno.serve(async (req) => {
                 ? ((await db.from("profiles").select("full_name").eq("id", createdBy).maybeSingle()).data?.full_name ?? null)
                 : null;
             const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#222">${escHtml(text).replace(/\n/g, "<br>")}</div>`;
-            const r = await sendEmail(to, "Faculdade Internacional Cidade Viva", html, replyTo);
+            // e-mails anteriores da conversa: o novo entra na mesma conversa do Gmail/Outlook
+            const { data: prev } = await db.from("widechat_messages").select("raw_data")
+                .eq("lead_id", leadId).eq("provider", "email").eq("origin", "agent").order("created_at", { ascending: true }).limit(50);
+            const references = (prev ?? []).map((m: { raw_data: { message_id_header?: string } | null }) => m.raw_data?.message_id_header).filter(Boolean) as string[];
+            const messageId = `<lead-${leadId}-${crypto.randomUUID()}@email.ficv.edu.br>`;
+            const r = await sendEmail(to, "Faculdade Internacional Cidade Viva", html, replyTo, { messageId, references });
             if (!r.ok) return jsonRes({ error: r.error }, 502);
             await db.from("widechat_messages").insert({
                 lead_id: leadId, provider: "email", channel_id: null, origin: "agent", type: "text",
                 message: text, message_id: `email-out-${r.id}`, sender_name: senderName,
-                raw_data: { channel: "email", to, resend_id: r.id, reply_to: replyTo }, created_at: new Date().toISOString(),
+                raw_data: { channel: "email", to, resend_id: r.id, reply_to: replyTo, message_id_header: messageId }, created_at: new Date().toISOString(),
             });
             if (createdBy) await markHumanReplied(db, leadId, "Agente respondeu por e-mail", createdBy);
             return jsonRes({ ok: true, to });
