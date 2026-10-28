@@ -1,7 +1,7 @@
 // Peças de visualização da Avaliação CPA (HTML/SVG, sem biblioteca extra além do Recharts já usado nas séries).
 // Formas, por tipo de dado: escala de satisfação = barra divergente empilhada centrada no neutro; grade
 // curso × bloco = mapa de calor de um tom; número de manchete = cartão de indicador. Cor por função:
-// divergente (azul ↔ vermelho, neutro cinza: seguro para daltonismo) só para favorável/crítico; um tom só
+// divergente (verde ↔ vermelho, neutro cinza: seguro para daltonismo) só para favorável/crítico; um tom só
 // (o roxo da marca) para magnitude. Toda cor que carrega sentido vem com rótulo e valor em texto.
 import { useMemo, useState } from "react"
 import { createPortal } from "react-dom"
@@ -11,8 +11,8 @@ export type Bandas = { c: number; n: number; f: number }
 export function usePaleta() {
     const escuro = typeof document !== "undefined" && document.documentElement.classList.contains("dark")
     return useMemo(() => escuro
-        ? { escuro, fav: "#3987e5", crit: "#e66767", neu: "#55544e", neuTxt: "#f0efec", serie: "#8B88FF", grade: "rgba(139,148,158,0.18)", tick: "#8B949E", superficie: "#12161C", seq: "#8B88FF" }
-        : { escuro, fav: "#2a78d6", crit: "#e34948", neu: "#cfcdc4", neuTxt: "#3a3935", serie: "#5551FF", grade: "rgba(100,116,139,0.18)", tick: "#64748B", superficie: "#ffffff", seq: "#5551FF" }, [escuro])
+        ? { escuro, fav: "#2b9f62", crit: "#e66767", neu: "#55544e", neuTxt: "#f0efec", serie: "#8B88FF", grade: "rgba(139,148,158,0.18)", tick: "#8B949E", superficie: "#12161C", seq: "#8B88FF" }
+        : { escuro, fav: "#1a8a4c", crit: "#e34948", neu: "#cfcdc4", neuTxt: "#3a3935", serie: "#5551FF", grade: "rgba(100,116,139,0.18)", tick: "#64748B", superficie: "#ffffff", seq: "#5551FF" }, [escuro])
 }
 export type Paleta = ReturnType<typeof usePaleta>
 
