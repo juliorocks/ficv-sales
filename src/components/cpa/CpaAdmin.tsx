@@ -2,18 +2,17 @@
 // exportação com SHA-256 e verificação da cadeia de integridade (base da comprovação ao MEC).
 // Gráficos: uma série por gráfico, cor única, eixo único; a tabela ao lado é a alternativa textual.
 import { useMemo, useState } from "react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabase"
-import { AvatarDocente, Btn, Cartao, Inp, Rotulo, TICK, TT, COR_GRAFICO } from "./cpaUi"
+import { AvatarDocente, Btn, Inp, Rotulo } from "./cpaUi"
 import { ClipboardCheck, Download, Loader2, RefreshCw, ShieldCheck, ShieldAlert } from "lucide-react"
 import { showError, showSuccess } from "@/utils/toast"
 import { chamar } from "./cpaApi"
 import { CpaEditor } from "./CpaEditor"
+import { Resultados, StatsCpa } from "./CpaResultados"
 
-const COR_SERIE = COR_GRAFICO
 
-type Filtros = { origem: "oficial" | "teste" | "todas"; curso: string; de: string; ate: string }
+type Filtros = { origem: "oficial" | "teste" | "todas"; curso: string; contexto: string; de: string; ate: string }
 type FormResumo = {
     id: number; nivel: string; tipo: string; titulo: string; ano: number; status: "teste" | "aberto" | "encerrado"
     token: string; portal_ativo: boolean; semestre: string | null; alunos_teste?: number[]; populacao_ativa: number | null; oficiais: number; testes: number
@@ -22,18 +21,19 @@ type Pergunta = { id: number; bloco_id: number; ordem: number; texto: string; ti
 type Cadeia = { integra: boolean; total: number; primeiro_erro: { seq: number; motivo: string } | null; cabeca: string | null }
 
 // uma avaliação por nível reúne a geral e a de disciplinas: mesmo link, mesmo status, mesmos resultados
-function useStats(form: FormResumo | null, filtros: Filtros) {
+function useStats(form: FormResumo | null, filtros: Filtros, habilitado = true) {
     return useQuery({
         queryKey: ["cpa-stats", form?.id, filtros],
-        enabled: !!form,
-        queryFn: () => chamar<any>("stats", { formulario_id: form!.id, filtros: limparFiltros(filtros) }), // eslint-disable-line @typescript-eslint/no-explicit-any
+        enabled: !!form && habilitado,
+        placeholderData: keepPreviousData, // refaz a consulta sem piscar: o quadro anterior fica visível, esmaecido
+        queryFn: () => chamar<StatsCpa>("stats", { formulario_id: form!.id, filtros: limparFiltros(filtros, form!.tipo) }),
     })
 }
 
 export function CpaAdmin() {
     const qc = useQueryClient()
     const [nivel, setNivel] = useState<"graduacao" | "pos">("graduacao")
-    const [filtros, setFiltros] = useState<Filtros>({ origem: "oficial", curso: "", de: "", ate: "" })
+    const [filtros, setFiltros] = useState<Filtros>({ origem: "oficial", curso: "", contexto: "", de: "", ate: "" })
     const [verificacao, setVerificacao] = useState<null | { geral: Cadeia | null; disc: Cadeia | null }>(null)
     const [aba, setAba] = useState<"painel" | "perguntas">("painel")
 
@@ -53,8 +53,12 @@ export function CpaAdmin() {
         enabled: !!geral,
         queryFn: () => chamar<{ perguntas: Pergunta[] }>("form", { formulario_id: geral!.id }),
     })
+    const [rotuloContexto, setRotuloContexto] = useState<string | null>(null)
     const { data: statsGeral, isFetching: carregandoG, refetch: refazerG } = useStats(geral, filtros)
-    const { data: statsDisc, isFetching: carregandoD, refetch: refazerD } = useStats(disc, filtros)
+    // ranking de disciplinas e professores sempre sem o filtro de disciplina, senão encolhe para uma linha no drilldown
+    const { data: statsDiscBase, isFetching: carregandoD, refetch: refazerD } = useStats(disc, { ...filtros, contexto: "" })
+    const { data: statsDiscFiltrada, isFetching: carregandoDF, refetch: refazerDF } = useStats(disc, filtros, !!filtros.contexto)
+    const statsDisc = filtros.contexto ? statsDiscFiltrada : statsDiscBase
 
     const opcoesCurso = useMemo(() => {
         const doForm = (detalhe?.perguntas ?? []).find((p) => p.tipo === "escolha")?.opcoes ?? []
@@ -112,7 +116,7 @@ export function CpaAdmin() {
     })
 
     const exportar = useMutation({
-        mutationFn: async () => Promise.all(partes.map(async (f) => ({ f, r: await chamar<any>("export", { formulario_id: f.id, filtros: limparFiltros(filtros) }) }))), // eslint-disable-line @typescript-eslint/no-explicit-any
+        mutationFn: async () => Promise.all(partes.map(async (f) => ({ f, r: await chamar<any>("export", { formulario_id: f.id, filtros: limparFiltros(filtros, f.tipo) }) }))), // eslint-disable-line @typescript-eslint/no-explicit-any
         onSuccess: (rs) => {
             const base = `cpa_${nivel}_${geral?.ano ?? ""}`
             const sec = (f: FormResumo, r: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -145,10 +149,8 @@ export function CpaAdmin() {
     if (erroForms) return <p className="p-6 text-sm text-destructive">{(erroForms as Error).message}</p>
 
     const link = `${window.location.origin}/avaliacao`
-    const tg = statsGeral?.totais
-    const td = statsDisc?.totais
     const testes = partes.reduce((n, f) => n + f.testes, 0)
-    const atualizando = carregandoG || carregandoD
+    const atualizando = carregandoG || carregandoD || carregandoDF
     const veredito = verificacao && [verificacao.geral, verificacao.disc].filter((c): c is Cadeia => !!c)
     const falha = veredito?.find((c) => !c.integra)
 
@@ -235,13 +237,6 @@ export function CpaAdmin() {
                         )}
                     </section>
 
-                    <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                        <Kpi rotulo="Respondentes (avaliação geral)" valor={tg?.respondentes ?? "–"} sub={tg?.percentual != null ? `${tg.percentual}% de ${tg.populacao_ativa} alunos ativos` : "Sem base de alunos ativos"} />
-                        <Kpi rotulo="Disciplinas avaliadas" valor={td?.respondentes ?? "–"} sub="uma resposta por aluno e disciplina" />
-                        <Kpi rotulo="Média da avaliação geral" valor={tg?.media_geral ?? "–"} sub={tg?.pct_notas_altas != null ? `${tg.pct_notas_altas}% de notas altas` : "sem respostas"} />
-                        <Kpi rotulo="Média das disciplinas" valor={td?.media_geral ?? "–"} sub={td?.pct_notas_altas != null ? `${td.pct_notas_altas}% de notas altas` : "sem respostas"} />
-                    </section>
-
                     <section className="grid gap-3 glass-card p-6 md:grid-cols-5">
                         <Campo rotulo="Origem">
                             <select className="h-9 w-full rounded-lg bg-[var(--bg-card-hover)] px-3 text-sm text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-primary/40" value={filtros.origem}
@@ -261,7 +256,7 @@ export function CpaAdmin() {
                         <Campo rotulo="De"><Inp type="date" value={filtros.de} onChange={(e) => setFiltros({ ...filtros, de: e.target.value })} /></Campo>
                         <Campo rotulo="Até"><Inp type="date" value={filtros.ate} onChange={(e) => setFiltros({ ...filtros, ate: e.target.value })} /></Campo>
                         <div className="flex items-end gap-2">
-                            <Btn size="sm" variant="outline" onClick={() => { refazerG(); refazerD() }} disabled={atualizando}>
+                            <Btn size="sm" variant="outline" onClick={() => { refazerG(); refazerD(); if (filtros.contexto) refazerDF() }} disabled={atualizando}>
                                 <RefreshCw className={`mr-2 h-4 w-4 ${atualizando ? "animate-spin" : ""}`} /> Atualizar
                             </Btn>
                         </div>
@@ -291,8 +286,16 @@ export function CpaAdmin() {
                         )}
                     </section>
 
-                    <Resultados titulo="Avaliação geral" stats={statsGeral} />
-                    {disc && <Resultados titulo="Avaliação de disciplinas" stats={statsDisc} porDisciplina />}
+                    <Resultados titulo="Avaliação geral" tipo="geral" stats={statsGeral} atualizando={carregandoG}
+                        onFiltrarCurso={(curso) => setFiltros((f) => ({ ...f, curso }))}
+                        onFiltrarContexto={() => {}} onLimparContexto={() => {}} />
+                    {disc && (
+                        <Resultados titulo="Avaliação de disciplinas" tipo="disciplina" stats={statsDisc} rankingBase={statsDiscBase} atualizando={carregandoD || carregandoDF}
+                            contextoAtivo={filtros.contexto ? { contexto: filtros.contexto, rotulo: rotuloContexto ?? filtros.contexto } : null}
+                            onFiltrarCurso={(curso) => setFiltros((f) => ({ ...f, curso }))}
+                            onFiltrarContexto={(contexto, rotulo) => { setFiltros((f) => ({ ...f, contexto })); setRotuloContexto(rotulo) }}
+                            onLimparContexto={() => { setFiltros((f) => ({ ...f, contexto: "" })); setRotuloContexto(null) }} />
+                    )}
 
                     <ProfessoresPorDisciplina admin={admin} />
 
@@ -302,146 +305,6 @@ export function CpaAdmin() {
                 </>
             )}
         </div>
-    )
-}
-
-// Resultados de uma parte da avaliação (geral ou disciplinas): gráficos, tabela por pergunta e comentários.
-function Resultados({ titulo, stats, porDisciplina }: { titulo: string; stats: any; porDisciplina?: boolean }) { // eslint-disable-line @typescript-eslint/no-explicit-any
-    const [busca, setBusca] = useState("")
-    const t = stats?.totais
-    const escala = (stats?.perguntas ?? []).filter((p: any) => p.tipo === "escala") // eslint-disable-line @typescript-eslint/no-explicit-any
-    const comentarios = useMemo(() => {
-        const q = busca.trim().toLowerCase()
-        const todos = stats?.comentarios ?? []
-        return q ? todos.filter((c: any) => c.texto.toLowerCase().includes(q)) : todos // eslint-disable-line @typescript-eslint/no-explicit-any
-    }, [stats, busca])
-    return (
-        <section className="space-y-4">
-            <div className="flex flex-wrap items-baseline justify-between gap-2 pt-2">
-                <h3 className="text-xl font-bold tracking-tight text-[var(--text-main)]">{titulo}</h3>
-                <p className="text-xs text-[var(--text-muted)]">
-                    {t ? `${t.respondentes} respostas · média ${t.media_geral ?? "–"} · ${t.pct_notas_altas ?? "–"}% notas altas · ${t.pct_notas_baixas ?? "–"}% notas baixas` : "carregando"}
-                </p>
-            </div>
-
-            <div className="grid gap-4 lg:grid-cols-2">
-                <Painel titulo="Respostas por dia">
-                    <ResponsiveContainer width="100%" height={220}>
-                        <LineChart data={stats?.por_dia ?? []} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                            <CartesianGrid stroke="rgba(139,148,158,0.18)" vertical={false} />
-                            <XAxis dataKey="dia" tick={TICK} />
-                            <YAxis allowDecimals={false} tick={TICK} />
-                            <Tooltip {...TT} />
-                            <Line type="monotone" dataKey="n" name="Respostas" stroke={COR_SERIE} strokeWidth={2} dot={{ r: 3 }} />
-                        </LineChart>
-                    </ResponsiveContainer>
-                </Painel>
-                <Painel titulo="Média por bloco">
-                    <ResponsiveContainer width="100%" height={220}>
-                        <BarChart data={stats?.blocos ?? []} layout="vertical" margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
-                            <CartesianGrid stroke="rgba(139,148,158,0.18)" horizontal={false} />
-                            <XAxis type="number" domain={[0, 10]} tick={TICK} />
-                            <YAxis type="category" dataKey="titulo" width={150} tick={TICK} />
-                            <Tooltip {...TT} />
-                            <Bar dataKey="media" name="Média" fill={COR_SERIE} radius={[0, 4, 4, 0]} />
-                        </BarChart>
-                    </ResponsiveContainer>
-                </Painel>
-            </div>
-
-            <div className="grid gap-4 lg:grid-cols-2">
-                <Painel titulo="Média por pergunta de escala">
-                    <ResponsiveContainer width="100%" height={Math.max(220, escala.length * 22)}>
-                        <BarChart data={escala} layout="vertical" margin={{ top: 4, right: 16, left: 4, bottom: 0 }}>
-                            <XAxis type="number" domain={[0, 10]} tick={TICK} />
-                            <YAxis type="category" dataKey="ordem" width={36} tick={TICK} tickFormatter={(v) => `P${v}`} />
-                            <Tooltip {...TT} formatter={(v: number) => [v, "Média"]} labelFormatter={(v) => `P${v}`} />
-                            <Bar dataKey="media" name="Média" fill={COR_SERIE} radius={[0, 4, 4, 0]} />
-                        </BarChart>
-                    </ResponsiveContainer>
-                </Painel>
-                <Painel titulo="Por curso">
-                    {(stats?.por_curso ?? []).length === 0 ? (
-                        <p className="py-10 text-center text-sm text-[var(--text-muted)]">Sem respostas no filtro atual.</p>
-                    ) : (
-                        <ResponsiveContainer width="100%" height={Math.max(180, (stats?.por_curso ?? []).length * 30)}>
-                            <BarChart data={stats.por_curso} layout="vertical" margin={{ top: 4, right: 24, left: 4, bottom: 0 }}>
-                                <XAxis type="number" allowDecimals={false} tick={TICK} />
-                                <YAxis type="category" dataKey="curso" width={220} tick={TICK} />
-                                <Tooltip {...TT} />
-                                <Bar dataKey="n" name="Respostas" fill={COR_SERIE} radius={[0, 4, 4, 0]} />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    )}
-                </Painel>
-            </div>
-
-            {porDisciplina && (
-                <Painel titulo="Por disciplina e professor">
-                    {(stats?.por_disciplina ?? []).length === 0 ? (
-                        <p className="py-6 text-center text-sm text-[var(--text-muted)]">Nenhuma avaliação de disciplina no filtro atual.</p>
-                    ) : (
-                        <div className="overflow-x-auto">
-                            <table className="w-full min-w-[560px] text-sm">
-                                <thead className="text-left text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
-                                    <tr><th className="py-2 pr-3">Disciplina</th><th className="py-2 pr-3">Período</th><th className="py-2 pr-3">Professor</th><th className="py-2 pr-3 text-right">Respostas</th><th className="py-2 text-right">Média</th></tr>
-                                </thead>
-                                <tbody>
-                                    {stats.por_disciplina.map((d: any) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
-                                        <tr key={d.contexto}>
-                                            <td className="py-2 pr-3">{d.disciplina.replace(/-/g, " ")}</td>
-                                            <td className="py-2 pr-3 text-xs text-[var(--text-muted)]">{d.periodo}</td>
-                                            <td className="py-2 pr-3">{d.docente ?? <span className="text-[var(--text-muted)]">não identificado</span>}</td>
-                                            <td className="py-2 pr-3 text-right tabular-nums">{d.n}</td>
-                                            <td className="py-2 text-right tabular-nums">{d.media ?? "–"}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    )}
-                </Painel>
-            )}
-
-            <Painel titulo="Tabela por pergunta (alternativa textual aos gráficos)">
-                <div className="overflow-x-auto">
-                    <table className="w-full min-w-[640px] text-sm">
-                        <thead className="text-left text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
-                            <tr><th className="py-2 pr-3">#</th><th className="py-2 pr-3">Pergunta</th><th className="py-2 pr-3 text-right">n</th><th className="py-2 pr-3 text-right">Média</th><th className="py-2">Distribuição</th></tr>
-                        </thead>
-                        <tbody>
-                            {(stats?.perguntas ?? []).map((p: any) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
-                                <tr key={p.id} className="align-top">
-                                    <td className="py-2 pr-3 text-xs text-[var(--text-muted)]">{p.ordem}</td>
-                                    <td className="py-2 pr-3">{p.texto}</td>
-                                    <td className="py-2 pr-3 text-right tabular-nums">{p.n}</td>
-                                    <td className="py-2 pr-3 text-right tabular-nums">{p.tipo === "escala" ? p.media ?? "–" : ""}</td>
-                                    <td className="py-2 text-xs">
-                                        {p.tipo === "escala" && p.distribuicao.map((d: any) => `${d.valor}:${d.n}`).join("  ")} {/* eslint-disable-line @typescript-eslint/no-explicit-any */}
-                                        {p.tipo === "escolha" && p.opcoes.map((o: any) => `${o.valor}: ${o.n}`).join(" · ")} {/* eslint-disable-line @typescript-eslint/no-explicit-any */}
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            </Painel>
-
-            <Painel titulo={`Comentários (${comentarios.length})`}>
-                <Inp placeholder="Buscar nos comentários" value={busca} onChange={(e) => setBusca(e.target.value)} className="mb-3" />
-                <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
-                    {comentarios.map((c: any) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
-                        <div key={`${c.seq}-${c.respondido_em}-${c.texto.slice(0, 12)}`} className="rounded-xl bg-[var(--bg-card-hover)] p-4 text-sm">
-                            <p className="mb-1 text-xs text-[var(--text-muted)]">
-                                {c.teste ? "teste" : `protocolo ${c.seq}`} · {new Date(c.respondido_em).toLocaleString("pt-BR")}{c.curso ? ` · ${c.curso}` : ""}
-                            </p>
-                            <p className="whitespace-pre-wrap">{c.texto}</p>
-                        </div>
-                    ))}
-                    {comentarios.length === 0 && <p className="py-6 text-center text-sm text-[var(--text-muted)]">Nenhum comentário.</p>}
-                </div>
-            </Painel>
-        </section>
     )
 }
 
@@ -488,8 +351,11 @@ function AlunosTeste({ geral, salvando, onSalvar }: { geral: FormResumo; salvand
     )
 }
 
-function limparFiltros(f: Filtros) {
-    return { origem: f.origem, ...(f.curso ? { curso: f.curso } : {}), ...(f.de ? { de: f.de } : {}), ...(f.ate ? { ate: f.ate } : {}) }
+function limparFiltros(f: Filtros, tipo: string) {
+    return {
+        origem: f.origem, ...(f.curso ? { curso: f.curso } : {}), ...(f.contexto && tipo === "disciplina" ? { contexto: f.contexto } : {}),
+        ...(f.de ? { de: f.de } : {}), ...(f.ate ? { ate: f.ate } : {}),
+    }
 }
 
 function rotuloStatus(s: string) {
@@ -503,16 +369,6 @@ function baixar(nome: string, conteudo: string, tipo: string) {
     a.download = nome
     a.click()
     URL.revokeObjectURL(url)
-}
-
-function Kpi({ rotulo, valor, sub }: { rotulo: string; valor: string | number; sub: string }) {
-    return (
-        <Cartao>
-            <p className="mb-6 text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)]">{rotulo}</p>
-            <h3 className="mb-1 text-2xl font-bold tabular-nums text-[var(--text-main)]">{valor}</h3>
-            <p className="text-[10px] text-[var(--text-muted)]">{sub}</p>
-        </Cartao>
-    )
 }
 
 function Painel({ titulo, children }: { titulo: string; children: React.ReactNode }) {

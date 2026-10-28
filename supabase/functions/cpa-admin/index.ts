@@ -40,13 +40,14 @@ async function todas(montar: () => any): Promise<any[]> {
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
-type Filtros = { origem?: string; curso?: string; de?: string; ate?: string };
+type Filtros = { origem?: string; curso?: string; contexto?: string; de?: string; ate?: string };
 
 function aplicarFiltros(q: Db, formId: number, f: Filtros) {
     q = q.eq("formulario_id", formId);
     if (f.origem === "oficial" || !f.origem) q = q.eq("teste", false);
     if (f.origem === "teste") q = q.eq("teste", true);
     if (f.curso) q = q.eq("curso", f.curso);
+    if (f.contexto && /^[a-z0-9~-]+$/.test(f.contexto)) q = q.eq("contexto", f.contexto);
     if (f.de) q = q.gte("respondido_em", `${f.de}T00:00:00-03:00`);
     if (f.ate) q = q.lte("respondido_em", `${f.ate}T23:59:59-03:00`);
     return q;
@@ -116,59 +117,115 @@ const ordenarChaves = (v: unknown): unknown => (v && typeof v === "object" && !A
 
 const media = (xs: number[]) => (xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 100) / 100 : null);
 
-// "Nota alta" = top 10% da escala (9 em 0–10 ou em 1–10); "nota baixa" = metade inferior.
-function estatisticas(form: Db, perguntas: Db[], blocos: Db[], linhas: Db[], todasRespostas: { teste: boolean }[], docentes: Map<string, string>, populacao: number | null) {
+// Faixas de leitura de qualquer nota: favorável = top 10% da escala (9 e 10 de 10; 5 de 5), neutra = de 70% a
+// 90% (7 e 8 de 10), crítica = abaixo disso. É a leitura de NPS/Likert, igual para 0–10, 1–10 e 0–5.
+type Aval = { v: number; max: number };
+const faixaDe = (v: number, max: number): "c" | "n" | "f" => (v >= max * 0.9 ? "f" : v >= max * 0.7 ? "n" : "c");
+const nota10 = (a: Aval) => (a.v * 10) / a.max;
+function resumir(lista: Aval[]) {
+    const bandas = { c: 0, n: 0, f: 0 };
+    for (const a of lista) bandas[faixaDe(a.v, a.max)]++;
+    return { n: lista.length, media: media(lista.map(nota10)), bandas };
+}
+
+// Pergunta de nível ("Muito baixo" … "Muito alto") vira nota como no relatório da Prime: 2, 4, 6, 8 e 10.
+// (conferido: 12 Muito alto + 1 Alto + 1 Médio = 9,57, o mesmo do relatório)
+const ehOrdinal = (p: Db) => p.tipo === "escolha" && Array.isArray(p.opcoes) && p.opcoes.length === 5 && p.opcoes.includes("Muito alto");
+// Dificuldade não é "quanto melhor, mais alto": mostra a distribuição, mas fica fora das médias e faixas
+const ehNeutra = (p: Db) => /dificuldade/i.test(String(p.texto));
+function avalDe(p: Db, l: Db): Aval | null {
+    const v = l.respostas?.[String(p.id)];
+    if (v === undefined || v === null || v === "") return null;
+    if (p.tipo === "escala") return { v: Number(v), max: p.escala_max };
+    if (ehOrdinal(p)) {
+        const i = (p.opcoes as string[]).indexOf(String(v));
+        return i >= 0 ? { v: (i + 1) * 2, max: 10 } : null;
+    }
+    return null;
+}
+const juntar = <K>(m: Map<K, Aval[]>, k: K, a: Aval) => { const l = m.get(k); if (l) l.push(a); else m.set(k, [a]); };
+
+function estatisticas(form: Db, perguntas: Db[], blocos: Db[], linhas: Db[], todasRespostas: { teste: boolean }[], docentes: Map<string, string>, populacao: number | null, nomes: Map<string, { disciplina_nome: string | null; periodo_nome: string | null }> = new Map()) {
     const porDia = new Map<string, number>();
-    const porCurso = new Map<string, number>();
     const comentarios: Db[] = [];
-    const notas: number[] = [];
-    let altas = 0;
-    let baixas = 0;
+    const semCurso = "(sem curso)";
+    const avaliativas = perguntas.filter((p) => (p.tipo === "escala" || ehOrdinal(p)) && !ehNeutra(p));
+
+    // um passo pelas respostas alimenta todos os recortes (geral, bloco, curso, curso×bloco, disciplina, professor)
+    const total: Aval[] = [];
+    const porBlocoAv = new Map<number, Aval[]>();
+    const porCursoAv = new Map<string, Aval[]>();
+    const porCursoBlocoAv = new Map<string, Aval[]>();
+    const porDiscAv = new Map<string, Aval[]>();
+    const porDocAv = new Map<string, Aval[]>();
+    const linhasPorCurso = new Map<string, number>();
+    const linhasPorDisc = new Map<string, number>();
+    const linhasPorDoc = new Map<string, number>();
+    const discsDoDoc = new Map<string, Set<string>>();
+    for (const l of linhas) {
+        const dia = String(l.respondido_em).slice(0, 10);
+        porDia.set(dia, (porDia.get(dia) ?? 0) + 1);
+        const curso = l.curso ?? semCurso;
+        linhasPorCurso.set(curso, (linhasPorCurso.get(curso) ?? 0) + 1);
+        const docente = l.contexto ? docentes.get(l.contexto) ?? null : null;
+        if (l.contexto) {
+            linhasPorDisc.set(l.contexto, (linhasPorDisc.get(l.contexto) ?? 0) + 1);
+            if (docente) {
+                linhasPorDoc.set(docente, (linhasPorDoc.get(docente) ?? 0) + 1);
+                (discsDoDoc.get(docente) ?? discsDoDoc.set(docente, new Set()).get(docente)!).add(l.contexto);
+            }
+        }
+        for (const p of avaliativas) {
+            const a = avalDe(p, l);
+            if (!a) continue;
+            total.push(a);
+            juntar(porBlocoAv, p.bloco_id, a);
+            juntar(porCursoAv, curso, a);
+            juntar(porCursoBlocoAv, `${curso}|${p.bloco_id}`, a);
+            if (l.contexto) juntar(porDiscAv, l.contexto, a);
+            if (docente) juntar(porDocAv, docente, a);
+        }
+    }
 
     const itens = perguntas.map((p) => {
+        const base = { id: p.id, bloco_id: p.bloco_id, ordem: p.ordem, texto: p.texto, tipo: p.tipo };
         const valores = linhas.map((l) => l.respostas[String(p.id)]).filter((v) => v !== undefined && v !== null && v !== "");
-        if (p.tipo === "escala") {
-            const nums = valores.map(Number);
-            const dist = [];
-            for (let v = p.escala_min; v <= p.escala_max; v++) dist.push({ valor: v, n: nums.filter((x) => x === v).length });
-            notas.push(...nums);
-            altas += nums.filter((v) => v >= p.escala_max * 0.9).length;
-            baixas += nums.filter((v) => v <= p.escala_max * 0.5).length;
-            return { id: p.id, bloco_id: p.bloco_id, ordem: p.ordem, texto: p.texto, tipo: p.tipo, n: nums.length, media: media(nums), distribuicao: dist, min: p.escala_min, max: p.escala_max };
+        if (p.tipo === "escala" || ehOrdinal(p)) {
+            const avs = linhas.map((l) => ({ l, a: avalDe(p, l) })).filter((x): x is { l: Db; a: Aval } => !!x.a);
+            const porCursoQ = new Map<string, number[]>();
+            for (const { l, a } of avs) { const c = l.curso ?? semCurso; (porCursoQ.get(c) ?? porCursoQ.set(c, []).get(c)!).push(a.v); }
+            const comum = {
+                ...base, n: avs.length, media: media(avs.map((x) => x.a.v)), neutra: ehNeutra(p),
+                bandas: resumir(avs.map((x) => x.a)).bandas,
+                por_curso: [...porCursoQ.entries()].map(([curso, vs]) => ({ curso, n: vs.length, media: media(vs) })).sort((x, y) => y.n - x.n),
+            };
+            if (p.tipo === "escala") {
+                const dist = [];
+                for (let v = p.escala_min; v <= p.escala_max; v++) dist.push({ valor: v, n: avs.filter((x) => x.a.v === v).length });
+                return { ...comum, distribuicao: dist, min: p.escala_min, max: p.escala_max };
+            }
+            return { ...comum, ordinal: true, opcoes: (p.opcoes as string[]).map((op) => ({ valor: op, n: valores.filter((v) => v === op).length })) };
         }
         if (p.tipo === "escolha") {
-            const opcoes = (p.opcoes as string[]).map((op) => ({ valor: op, n: valores.filter((v) => v === op).length }));
-            return { id: p.id, bloco_id: p.bloco_id, ordem: p.ordem, texto: p.texto, tipo: p.tipo, n: valores.length, opcoes };
+            return { ...base, n: valores.length, opcoes: (p.opcoes as string[]).map((op) => ({ valor: op, n: valores.filter((v) => v === op).length })) };
         }
         for (const l of linhas) {
             const t = String(l.respostas[String(p.id)] ?? "").trim();
             if (t) comentarios.push({ seq: l.seq, teste: l.teste, curso: l.curso, contexto: l.contexto, respondido_em: l.respondido_em, texto: t, pergunta: p.texto });
         }
-        return { id: p.id, bloco_id: p.bloco_id, ordem: p.ordem, texto: p.texto, tipo: p.tipo, n: valores.length };
-    });
-
-    // por disciplina (contexto "periodo~disciplina"): média das notas de escala de cada resposta
-    const porDisc = new Map<string, { n: number; notas: number[] }>();
-    const escalas = perguntas.filter((p) => p.tipo === "escala");
-    for (const l of linhas) {
-        const dia = String(l.respondido_em).slice(0, 10);
-        porDia.set(dia, (porDia.get(dia) ?? 0) + 1);
-        const c = l.curso ?? "(sem curso)";
-        porCurso.set(c, (porCurso.get(c) ?? 0) + 1);
-        if (l.contexto) {
-            const d = porDisc.get(l.contexto) ?? { n: 0, notas: [] };
-            d.n++;
-            for (const p of escalas) if (typeof l.respostas[String(p.id)] === "number") d.notas.push(l.respostas[String(p.id)]);
-            porDisc.set(l.contexto, d);
-        }
-    }
-
-    const porBloco = blocos.map((b) => {
-        const medias = itens.filter((i) => i.bloco_id === b.id && i.tipo === "escala").map((i) => i.media).filter((m): m is number => m !== null);
-        return { ordem: b.ordem, titulo: b.titulo, media: media(medias) };
+        return { ...base, n: valores.length };
     });
 
     const pct = (parte: number, todo: number) => (todo ? Math.round((parte / todo) * 1000) / 10 : null);
+    const geral = resumir(total);
+    const perguntaIndicacao = avaliativas.find((p) => /indicaria/i.test(String(p.texto)));
+    const indicacao = perguntaIndicacao
+        ? (() => {
+            const r = resumir(linhas.map((l) => avalDe(perguntaIndicacao, l)).filter((x): x is Aval => !!x));
+            return r.n ? { pergunta_id: perguntaIndicacao.id, n: r.n, bandas: r.bandas, nps: Math.round(((r.bandas.f - r.bandas.c) / r.n) * 100) } : null;
+        })()
+        : null;
+
     return {
         formulario: { id: form.id, titulo: form.titulo, nivel: form.nivel, tipo: form.tipo, status: form.status, portal_ativo: form.portal_ativo },
         totais: {
@@ -176,17 +233,28 @@ function estatisticas(form: Db, perguntas: Db[], blocos: Db[], linhas: Db[], tod
             populacao_ativa: populacao,
             percentual: populacao ? pct(linhas.length, populacao) : null,
             testes: todasRespostas.filter((r) => r.teste).length,
-            media_geral: media(notas),
-            pct_notas_altas: pct(altas, notas.length),
-            pct_notas_baixas: pct(baixas, notas.length),
+            media_geral: geral.media,
+            bandas: geral.bandas,
+            pct_favoraveis: pct(geral.bandas.f, geral.n),
+            pct_neutros: pct(geral.bandas.n, geral.n),
+            pct_criticos: pct(geral.bandas.c, geral.n),
         },
+        indicacao,
         por_dia: [...porDia.entries()].sort().map(([dia, n]) => ({ dia, n })),
-        por_curso: [...porCurso.entries()].sort((a, b) => b[1] - a[1]).map(([curso, n]) => ({ curso, n })),
-        por_disciplina: [...porDisc.entries()].map(([contexto, d]) => {
+        por_curso: [...linhasPorCurso.entries()].map(([curso, n]) => ({
+            curso, n, ...resumir(porCursoAv.get(curso) ?? []),
+            por_bloco: Object.fromEntries(blocos.map((b) => [b.id, resumir(porCursoBlocoAv.get(`${curso}|${b.id}`) ?? []).media])),
+        })).sort((a, b) => b.n - a.n),
+        por_disciplina: [...linhasPorDisc.entries()].map(([contexto, n]) => {
             const [periodo, disc] = contexto.split("~");
-            return { contexto, periodo, disciplina: disc, docente: docentes.get(`${periodo}~${disc}`) ?? null, n: d.n, media: media(d.notas) };
+            const r = resumir(porDiscAv.get(contexto) ?? []);
+            return { contexto, periodo, disciplina: disc, disciplina_nome: nomes.get(contexto)?.disciplina_nome ?? null, periodo_nome: nomes.get(contexto)?.periodo_nome ?? null, docente: docentes.get(contexto) ?? null, n, media: r.media, bandas: r.bandas };
         }).sort((a, b) => b.n - a.n),
-        blocos: porBloco,
+        por_docente: [...linhasPorDoc.entries()].map(([docente, n]) => {
+            const r = resumir(porDocAv.get(docente) ?? []);
+            return { docente, n, disciplinas: discsDoDoc.get(docente)?.size ?? 0, media: r.media, bandas: r.bandas };
+        }).sort((a, b) => b.n - a.n),
+        blocos: blocos.map((b) => ({ id: b.id, ordem: b.ordem, titulo: b.titulo, ...resumir(porBlocoAv.get(b.id) ?? []) })),
         perguntas: itens,
         comentarios: comentarios.sort((a, b) => String(b.respondido_em).localeCompare(String(a.respondido_em))),
     };
@@ -345,9 +413,10 @@ Deno.serve(async (req) => {
             const linhas = await carregarRespostas(db, formId, filtros);
             const todasLinhas = await todas(() => db.from("cpa_respostas").select("id, teste").eq("formulario_id", formId));
             const pop = await populacaoAtiva(db);
-            const { data: docs } = await db.from("cpa_docentes").select("periodo, disciplina, docente");
+            const { data: docs } = await db.from("cpa_docentes").select("periodo, disciplina, docente, periodo_nome, disciplina_nome");
             const docentes = new Map<string, string>((docs ?? []).map((d: Db) => [`${d.periodo}~${d.disciplina}`, d.docente]));
-            return j(estatisticas(form, perguntas, blocos, linhas, todasLinhas, docentes, pop[form.nivel as "graduacao" | "pos"] ?? null));
+            const nomes = new Map<string, { disciplina_nome: string | null; periodo_nome: string | null }>((docs ?? []).map((d: Db) => [`${d.periodo}~${d.disciplina}`, { disciplina_nome: d.disciplina_nome ?? null, periodo_nome: d.periodo_nome ?? null }]));
+            return j(estatisticas(form, perguntas, blocos, linhas, todasLinhas, docentes, pop[form.nivel as "graduacao" | "pos"] ?? null, nomes));
         }
 
         if (acao === "export") {
