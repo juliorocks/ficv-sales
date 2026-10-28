@@ -23,7 +23,7 @@ type DiscR = { contexto: string; periodo: string; disciplina: string; disciplina
 type DocR = { docente: string; n: number; disciplinas: number; media: number | null; bandas: Bandas }
 export type StatsCpa = {
     formulario: { id: number; titulo: string; nivel: string; tipo: string }
-    totais: { respondentes: number; populacao_ativa: number | null; percentual: number | null; testes: number; media_geral: number | null; bandas: Bandas }
+    totais: { respondentes: number; alunos: number | null; populacao_ativa: number | null; percentual: number | null; testes: number; media_geral: number | null; bandas: Bandas }
     indicacao: { n: number; nps: number; bandas: Bandas } | null
     por_dia: { dia: string; n: number }[]
     por_curso: CursoR[]
@@ -83,7 +83,7 @@ export function Resultados({ titulo, tipo, stats, atualizando, rankingBase, cont
         <section className="space-y-5">
             <div className="flex flex-wrap items-baseline justify-between gap-2 pt-2">
                 <h3 className="text-xl font-bold tracking-tight text-[var(--text-main)]">{titulo}</h3>
-                {t && !vazio && <p className="text-xs text-[var(--text-muted)]">{fmtInt(t.respondentes)} {tipo === "geral" ? "respondentes" : "avaliações"}{t.testes ? ` · ${t.testes} de teste` : ""}</p>}
+                {t && !vazio && <p className="text-xs text-[var(--text-muted)]">{tipo === "geral" ? `${fmtInt(t.respondentes)} respondentes` : t.alunos !== null ? `${fmtInt(t.alunos)} ${t.alunos === 1 ? "aluno" : "alunos"}` : `${fmtInt(t.respondentes)} avaliações`}{t.testes ? ` · ${t.testes} de teste` : ""}</p>}
             </div>
 
             {contextoAtivo && (
@@ -249,15 +249,15 @@ function Indicadores({ stats, tipo, p, dica }: { stats: StatsCpa; tipo: "geral" 
                 <p className="mt-2 text-xs text-[var(--text-muted)]">{pctDe(t.bandas.n, total)}% neutras · {pctDe(t.bandas.c, total)}% críticas</p>
             </div>
             <div className="glass-card p-5">
-                <Rotulo>{tipo === "geral" ? "Participação" : "Avaliações de disciplina"}</Rotulo>
-                <p className="text-3xl font-bold tabular-nums text-[var(--text-main)]">{fmtInt(t.respondentes)}</p>
+                <Rotulo>{tipo === "geral" ? "Participação" : t.alunos !== null ? "Alunos que avaliaram" : "Avaliações de disciplina"}</Rotulo>
+                <p className="text-3xl font-bold tabular-nums text-[var(--text-main)]">{fmtInt(tipo === "geral" ? t.respondentes : t.alunos ?? t.respondentes)}</p>
                 {tipo === "geral" ? (
                     <>
                         <div className="my-3"><Medidor valor={t.respondentes} de={t.populacao_ativa ?? 0} p={p} /></div>
                         <p className="text-xs text-[var(--text-muted)]">{t.percentual !== null ? `${fmt1(t.percentual)}% de ${fmtInt(t.populacao_ativa)} alunos ativos` : "sem base de alunos ativos"}</p>
                     </>
                 ) : (
-                    <p className="mt-3 text-xs text-[var(--text-muted)]">{stats.por_disciplina.length} disciplinas · {stats.por_docente.length} professores</p>
+                    <p className="mt-3 text-xs text-[var(--text-muted)]">{t.alunos !== null ? `${fmtInt(t.respondentes)} avaliações · ` : ""}{stats.por_disciplina.length} disciplinas · {stats.por_docente.length} professores</p>
                 )}
             </div>
             {nps ? (

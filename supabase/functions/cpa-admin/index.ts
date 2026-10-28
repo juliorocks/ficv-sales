@@ -145,7 +145,7 @@ function avalDe(p: Db, l: Db): Aval | null {
 }
 const juntar = <K>(m: Map<K, Aval[]>, k: K, a: Aval) => { const l = m.get(k); if (l) l.push(a); else m.set(k, [a]); };
 
-function estatisticas(form: Db, perguntas: Db[], blocos: Db[], linhas: Db[], todasRespostas: { teste: boolean }[], docentes: Map<string, string>, populacao: number | null, nomes: Map<string, { disciplina_nome: string | null; periodo_nome: string | null }> = new Map()) {
+function estatisticas(form: Db, perguntas: Db[], blocos: Db[], linhas: Db[], todasRespostas: { teste: boolean }[], docentes: Map<string, string>, populacao: number | null, nomes: Map<string, { disciplina_nome: string | null; periodo_nome: string | null }> = new Map(), alunos: number | null = null) {
     const porDia = new Map<string, number>();
     const comentarios: Db[] = [];
     const semCurso = "(sem curso)";
@@ -230,6 +230,7 @@ function estatisticas(form: Db, perguntas: Db[], blocos: Db[], linhas: Db[], tod
         formulario: { id: form.id, titulo: form.titulo, nivel: form.nivel, tipo: form.tipo, status: form.status, portal_ativo: form.portal_ativo },
         totais: {
             respondentes: linhas.length,
+            alunos,
             populacao_ativa: populacao,
             percentual: populacao ? pct(linhas.length, populacao) : null,
             testes: todasRespostas.filter((r) => r.teste).length,
@@ -416,7 +417,17 @@ Deno.serve(async (req) => {
             const { data: docs } = await db.from("cpa_docentes").select("periodo, disciplina, docente, periodo_nome, disciplina_nome");
             const docentes = new Map<string, string>((docs ?? []).map((d: Db) => [`${d.periodo}~${d.disciplina}`, d.docente]));
             const nomes = new Map<string, { disciplina_nome: string | null; periodo_nome: string | null }>((docs ?? []).map((d: Db) => [`${d.periodo}~${d.disciplina}`, { disciplina_nome: d.disciplina_nome ?? null, periodo_nome: d.periodo_nome ?? null }]));
-            return j(estatisticas(form, perguntas, blocos, linhas, todasLinhas, docentes, pop[form.nivel as "graduacao" | "pos"] ?? null, nomes));
+            // na disciplina cada resposta é um aluno × disciplina: alunos = participantes distintos (a participação não guarda curso)
+            let alunos: number | null = null;
+            if (form.tipo === "disciplina" && !filtros.curso) {
+                let q = db.from("cpa_participacoes").select("respondente_hash").eq("formulario_id", formId).eq("teste", filtros.origem === "teste");
+                if (filtros.contexto && /^[a-z0-9~-]+$/.test(filtros.contexto)) q = q.eq("contexto", filtros.contexto);
+                if (filtros.de) q = q.gte("respondido_em", `${filtros.de}T00:00:00-03:00`);
+                if (filtros.ate) q = q.lte("respondido_em", `${filtros.ate}T23:59:59-03:00`);
+                const part = await todas(() => q.order("respondente_hash"));
+                alunos = new Set(part.map((r: Db) => r.respondente_hash)).size;
+            }
+            return j(estatisticas(form, perguntas, blocos, linhas, todasLinhas, docentes, pop[form.nivel as "graduacao" | "pos"] ?? null, nomes, alunos));
         }
 
         if (acao === "export") {
