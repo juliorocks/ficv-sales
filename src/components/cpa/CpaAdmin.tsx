@@ -5,14 +5,15 @@ import { useMemo, useState } from "react"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { supabase } from "@/lib/supabase"
 import { AvatarDocente, Btn, Inp, Rotulo } from "./cpaUi"
-import { ClipboardCheck, Download, Loader2, RefreshCw, ShieldCheck, ShieldAlert } from "lucide-react"
+import { ClipboardCheck, Download, FileText, Loader2, RefreshCw, ShieldCheck, ShieldAlert } from "lucide-react"
 import { showError, showSuccess } from "@/utils/toast"
 import { chamar } from "./cpaApi"
 import { CpaEditor } from "./CpaEditor"
+import { abrirRelatorioProfessor } from "./cpaRelatorio"
 import { Resultados, StatsCpa } from "./CpaResultados"
 
 
-type Filtros = { origem: "oficial" | "teste" | "todas"; curso: string; contexto: string; de: string; ate: string }
+type Filtros = { origem: "oficial" | "teste" | "todas"; curso: string; contexto: string; docente: string; de: string; ate: string }
 type FormResumo = {
     id: number; nivel: string; tipo: string; titulo: string; ano: number; status: "teste" | "aberto" | "encerrado"
     token: string; portal_ativo: boolean; semestre: string | null; alunos_teste?: number[]; populacao_ativa: number | null; oficiais: number; testes: number
@@ -33,7 +34,7 @@ function useStats(form: FormResumo | null, filtros: Filtros, habilitado = true) 
 export function CpaAdmin() {
     const qc = useQueryClient()
     const [nivel, setNivel] = useState<"graduacao" | "pos">("graduacao")
-    const [filtros, setFiltros] = useState<Filtros>({ origem: "oficial", curso: "", contexto: "", de: "", ate: "" })
+    const [filtros, setFiltros] = useState<Filtros>({ origem: "oficial", curso: "", contexto: "", docente: "", de: "", ate: "" })
     const [verificacao, setVerificacao] = useState<null | { geral: Cadeia | null; disc: Cadeia | null }>(null)
     const [aba, setAba] = useState<"painel" | "perguntas" | "config">("painel")
 
@@ -56,9 +57,9 @@ export function CpaAdmin() {
     const [rotuloContexto, setRotuloContexto] = useState<string | null>(null)
     const { data: statsGeral, isFetching: carregandoG, refetch: refazerG } = useStats(geral, filtros)
     // ranking de disciplinas e professores sempre sem o filtro de disciplina, senão encolhe para uma linha no drilldown
-    const { data: statsDiscBase, isFetching: carregandoD, refetch: refazerD } = useStats(disc, { ...filtros, contexto: "" })
-    const { data: statsDiscFiltrada, isFetching: carregandoDF, refetch: refazerDF } = useStats(disc, filtros, !!filtros.contexto)
-    const statsDisc = filtros.contexto ? statsDiscFiltrada : statsDiscBase
+    const { data: statsDiscBase, isFetching: carregandoD, refetch: refazerD } = useStats(disc, { ...filtros, contexto: "", docente: "" })
+    const { data: statsDiscFiltrada, isFetching: carregandoDF, refetch: refazerDF } = useStats(disc, filtros, !!(filtros.contexto || filtros.docente))
+    const statsDisc = filtros.contexto || filtros.docente ? statsDiscFiltrada : statsDiscBase
 
     const opcoesCurso = useMemo(() => {
         const doForm = (detalhe?.perguntas ?? []).find((p) => p.tipo === "escolha")?.opcoes ?? []
@@ -174,7 +175,7 @@ export function CpaAdmin() {
                 </div>
                 <div className="flex gap-2">
                     {(["graduacao", "pos"] as const).map((n) => (
-                        <Btn key={n} size="sm" variant={nivel === n ? "default" : "outline"} onClick={() => setNivel(n)}>
+                        <Btn key={n} size="sm" variant={nivel === n ? "default" : "outline"} onClick={() => { setNivel(n); setFiltros((f) => ({ ...f, docente: "", contexto: "", curso: "" })); setRotuloContexto(null) }}>
                             {n === "graduacao" ? "Graduação" : "Pós"} {forms.find((f) => f.nivel === n)?.ano}
                         </Btn>
                     ))}
@@ -272,7 +273,7 @@ export function CpaAdmin() {
                     {aba === "painel" && (
                     <>
                     <p className="text-sm text-[var(--text-muted)]">Status: <b className="text-[var(--text-main)]">{rotuloStatus(geral.status)}</b> · Portal {geral.portal_ativo ? "ligado" : "desligado"} · <button type="button" className="underline" onClick={() => setAba("config")}>Configurações</button></p>
-                    <section className="grid gap-3 glass-card p-6 md:grid-cols-5">
+                    <section className="grid gap-3 glass-card p-6 md:grid-cols-6">
                         <Campo rotulo="Origem">
                             <select className="h-9 w-full rounded-lg bg-[var(--bg-card-hover)] px-3 text-sm text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-primary/40" value={filtros.origem}
                                 onChange={(e) => setFiltros({ ...filtros, origem: e.target.value as Filtros["origem"] })}>
@@ -288,10 +289,17 @@ export function CpaAdmin() {
                                 {opcoesCurso.map((c) => <option key={c} value={c}>{c}</option>)}
                             </select>
                         </Campo>
+                        <Campo rotulo="Professor">
+                            <select className="h-9 w-full rounded-lg bg-[var(--bg-card-hover)] px-3 text-sm text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-primary/40" value={filtros.docente}
+                                onChange={(e) => { setFiltros({ ...filtros, docente: e.target.value, contexto: "" }); setRotuloContexto(null) }}>
+                                <option value="">Todos</option>
+                                {[...(statsDiscBase?.por_docente ?? [])].sort((a, b) => a.docente.localeCompare(b.docente, "pt-BR")).map((d) => <option key={d.docente} value={d.docente}>{d.docente}</option>)}
+                            </select>
+                        </Campo>
                         <Campo rotulo="De"><Inp type="date" value={filtros.de} onChange={(e) => setFiltros({ ...filtros, de: e.target.value })} /></Campo>
                         <Campo rotulo="Até"><Inp type="date" value={filtros.ate} onChange={(e) => setFiltros({ ...filtros, ate: e.target.value })} /></Campo>
                         <div className="flex items-end gap-2">
-                            <Btn size="sm" variant="outline" onClick={() => { refazerG(); refazerD(); if (filtros.contexto) refazerDF() }} disabled={atualizando}>
+                            <Btn size="sm" variant="outline" onClick={() => { refazerG(); refazerD(); if (filtros.contexto || filtros.docente) refazerDF() }} disabled={atualizando}>
                                 <RefreshCw className={`mr-2 h-4 w-4 ${atualizando ? "animate-spin" : ""}`} /> Atualizar
                             </Btn>
                         </div>
@@ -315,9 +323,20 @@ export function CpaAdmin() {
                         )}
                     </section>
 
-                    <Resultados titulo="Avaliação geral" tipo="geral" stats={statsGeral} atualizando={carregandoG}
-                        onFiltrarCurso={(curso) => setFiltros((f) => ({ ...f, curso }))}
-                        onFiltrarContexto={() => {}} onLimparContexto={() => {}} />
+                    {filtros.docente && statsDisc && statsDiscBase && (
+                        <section className="flex flex-wrap items-center gap-3 glass-card p-4">
+                            <span className="text-sm">Resultados do professor <b>{filtros.docente}</b>. A avaliação geral não é por professor e fica oculta.</span>
+                            <Btn size="sm" onClick={() => {
+                                try { abrirRelatorioProfessor({ docente: filtros.docente, nivel, stats: statsDisc, base: statsDiscBase, origem: filtros.origem, de: filtros.de, ate: filtros.ate }) } catch (e) { showError((e as Error).message) }
+                            }}><FileText className="mr-2 h-4 w-4" /> Relatório do professor (1 página)</Btn>
+                            <Btn size="sm" variant="ghost" onClick={() => setFiltros((f) => ({ ...f, docente: "", contexto: "" }))}>Ver todos</Btn>
+                        </section>
+                    )}
+                    {!filtros.docente && (
+                        <Resultados titulo="Avaliação geral" tipo="geral" stats={statsGeral} atualizando={carregandoG}
+                            onFiltrarCurso={(curso) => setFiltros((f) => ({ ...f, curso }))}
+                            onFiltrarContexto={() => {}} onLimparContexto={() => {}} />
+                    )}
                     {disc && (
                         <Resultados titulo="Avaliação de disciplinas" tipo="disciplina" stats={statsDisc} rankingBase={statsDiscBase} atualizando={carregandoD || carregandoDF}
                             contextoAtivo={filtros.contexto ? { contexto: filtros.contexto, rotulo: rotuloContexto ?? filtros.contexto } : null}
@@ -379,7 +398,7 @@ function AlunosTeste({ geral, salvando, onSalvar }: { geral: FormResumo; salvand
 
 function limparFiltros(f: Filtros, tipo: string) {
     return {
-        origem: f.origem, ...(f.curso ? { curso: f.curso } : {}), ...(f.contexto && tipo === "disciplina" ? { contexto: f.contexto } : {}),
+        origem: f.origem, ...(f.curso ? { curso: f.curso } : {}), ...(f.contexto && tipo === "disciplina" ? { contexto: f.contexto } : {}), ...(f.docente && tipo === "disciplina" ? { docente: f.docente } : {}),
         ...(f.de ? { de: f.de } : {}), ...(f.ate ? { ate: f.ate } : {}),
     }
 }

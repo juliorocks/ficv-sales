@@ -40,7 +40,7 @@ async function todas(montar: () => any, ordem = "id"): Promise<any[]> {
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
-type Filtros = { origem?: string; curso?: string; contexto?: string; de?: string; ate?: string };
+type Filtros = { origem?: string; curso?: string; contexto?: string; docente?: string; de?: string; ate?: string };
 
 function aplicarFiltros(q: Db, formId: number, f: Filtros) {
     q = q.eq("formulario_id", formId);
@@ -411,17 +411,21 @@ Deno.serve(async (req) => {
 
         if (acao === "stats") {
             const { blocos, perguntas } = await carregarPerguntas(db, formId);
-            const linhas = await carregarRespostas(db, formId, filtros);
+            let linhas = await carregarRespostas(db, formId, filtros);
             const todasLinhas = await todas(() => db.from("cpa_respostas").select("id, teste").eq("formulario_id", formId));
             const pop = await populacaoAtiva(db);
             const { data: docs } = await db.from("cpa_docentes").select("periodo, disciplina, docente, periodo_nome, disciplina_nome");
             const docentes = new Map<string, string>((docs ?? []).map((d: Db) => [`${d.periodo}~${d.disciplina}`, d.docente]));
             const nomes = new Map<string, { disciplina_nome: string | null; periodo_nome: string | null }>((docs ?? []).map((d: Db) => [`${d.periodo}~${d.disciplina}`, { disciplina_nome: d.disciplina_nome ?? null, periodo_nome: d.periodo_nome ?? null }]));
+            // filtro por professor: só as respostas das disciplinas dele (o professor vem de cpa_docentes pelo contexto)
+            const contextosDoDocente = filtros.docente ? new Set([...docentes.entries()].filter(([, d]) => d === filtros.docente).map(([c]) => c)) : null;
+            if (contextosDoDocente) linhas = linhas.filter((l: Db) => contextosDoDocente.has(l.contexto));
             // na disciplina cada resposta é um aluno × disciplina: alunos = participantes distintos (a participação não guarda curso)
             let alunos: number | null = null;
             if (form.tipo === "disciplina" && !filtros.curso) {
                 let q = db.from("cpa_participacoes").select("respondente_hash").eq("formulario_id", formId).eq("teste", filtros.origem === "teste");
                 if (filtros.contexto && /^[a-z0-9~-]+$/.test(filtros.contexto)) q = q.eq("contexto", filtros.contexto);
+                if (contextosDoDocente) q = q.in("contexto", [...contextosDoDocente]);
                 if (filtros.de) q = q.gte("respondido_em", `${filtros.de}T00:00:00-03:00`);
                 if (filtros.ate) q = q.lte("respondido_em", `${filtros.ate}T23:59:59-03:00`);
                 const part = await todas(() => q, "respondente_hash");
