@@ -13,12 +13,17 @@ import { AvatarDocente, Btn } from "./cpaUi"
 import { CpaFormFlow, Bloco, Formulario, Pergunta, Resultado, RespostaEnvio } from "./CpaFormPage"
 
 type Pendencias = {
+    oficial?: boolean
     geral: { formulario_id: number; titulo: string; nivel: string; respondida: boolean } | null
     disciplinas: { formulario_id: number; contexto: string; disciplina: string; turma: string; docente: string | null; docente_foto: string | null; respondida: boolean }[]
 }
 type Item = { formulario_id: number; contexto: string; titulo: string; detalhe: string; foto?: string | null; respondida: boolean }
 
 const TINTA = "#13161D"
+
+// o popup abre sozinho uma vez a cada carregamento da página (atualizou, abre de novo), enquanto houver
+// avaliação oficial pendente; sem opção de "não mostrar mais"
+let abriuNestaPagina = false
 
 function textoAvaliacao(geral: boolean, disciplinas: number): string {
     const disc = `${disciplinas} ${disciplinas === 1 ? "disciplina" : "disciplinas"} deste semestre`
@@ -53,7 +58,9 @@ export function CpaPortalCard() {
     const veioDoLink = window.location.pathname.replace(/\/+$/, "") === "/avaliacao"
     const [abriuSozinho, setAbriuSozinho] = useState(false)
     useEffect(() => {
-        if (veioDoLink && !abriuSozinho && data && pendentes.length) { setFila(pendentes); setAbriuSozinho(true) }
+        if (!data || !pendentes.length || abriuSozinho) return
+        if (veioDoLink) { setFila(pendentes); setAbriuSozinho(true) }
+        else if (data.oficial && !abriuNestaPagina) { abriuNestaPagina = true; setFila(pendentes); setAbriuSozinho(true) }
     }, [veioDoLink, abriuSozinho, data, pendentes.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
     if (!itens.length) {
@@ -66,6 +73,11 @@ export function CpaPortalCard() {
     function fechar() {
         setFila(null)
         qc.invalidateQueries({ queryKey: ["cpa-portal-pendencias"] })
+    }
+
+    // respondeu tudo: nem banner nem popup (a fila aberta se mantém até o aluno ver os comprovantes)
+    if (!pendentes.length && !fila) {
+        return veioDoLink ? <section className="glass-card p-6 text-center text-sm text-[var(--text-muted)]">Você já respondeu todas as avaliações. Obrigado!</section> : null
     }
 
     const disciplinasPendentes = pendentes.filter((i) => i.contexto !== "").length

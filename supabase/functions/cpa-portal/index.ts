@@ -147,6 +147,7 @@ Deno.serve(async (req) => {
 
         if (acao === "pendencias") {
             return j({
+                oficial: forms.some((f: any) => f.status === "aberto"), // eslint-disable-line @typescript-eslint/no-explicit-any
                 geral: geralForm ? { formulario_id: geralForm.id, titulo: geralForm.titulo, nivel: geralForm.nivel, respondida: respondido(geralForm.id, "") } : null,
                 disciplinas: itensElegiveis.map((i) => ({
                     formulario_id: i.formulario_id, contexto: i.contexto, disciplina: i.disciplina, turma: i.turma,
