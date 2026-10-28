@@ -35,7 +35,7 @@ export function CpaAdmin() {
     const [nivel, setNivel] = useState<"graduacao" | "pos">("graduacao")
     const [filtros, setFiltros] = useState<Filtros>({ origem: "oficial", curso: "", contexto: "", de: "", ate: "" })
     const [verificacao, setVerificacao] = useState<null | { geral: Cadeia | null; disc: Cadeia | null }>(null)
-    const [aba, setAba] = useState<"painel" | "perguntas">("painel")
+    const [aba, setAba] = useState<"painel" | "perguntas" | "config">("painel")
 
     const { data: lista, isLoading: carregandoForms, error: erroForms } = useQuery({
         queryKey: ["cpa-forms"],
@@ -180,6 +180,7 @@ export function CpaAdmin() {
                     <div className="flex gap-2 pb-2">
                         <Btn size="sm" variant={aba === "painel" ? "default" : "ghost"} onClick={() => setAba("painel")}>Painel e respostas</Btn>
                         <Btn size="sm" variant={aba === "perguntas" ? "default" : "ghost"} onClick={() => setAba("perguntas")}>Perguntas</Btn>
+                        <Btn size="sm" variant={aba === "config" ? "default" : "ghost"} onClick={() => setAba("config")}>Configurações</Btn>
                     </div>
 
                     {aba === "perguntas" && (
@@ -197,7 +198,7 @@ export function CpaAdmin() {
                         </div>
                     )}
 
-                    {aba === "painel" && (
+                    {aba === "config" && (
                     <>
                     <section className="grid gap-4 glass-card p-6 md:grid-cols-2">
                         <div className="space-y-2 text-sm">
@@ -237,6 +238,25 @@ export function CpaAdmin() {
                         )}
                     </section>
 
+                    {admin && (
+                        <section className="flex flex-wrap items-center gap-3 glass-card p-6">
+                            <Btn variant="outline" onClick={() => sincronizarDocentes.mutate()} disabled={sincronizarDocentes.isPending}>
+                                {sincronizarDocentes.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                                Atualizar professores (Moodle)
+                            </Btn>
+                            <span className="text-xs text-[var(--text-muted)]">Traz o professor titular de cada disciplina do Moodle. O que foi preenchido à mão não é sobrescrito.</span>
+                        </section>
+                    )}
+
+                    <ProfessoresPorDisciplina admin={admin} />
+
+                    <ProfessoresFotos />
+                    </>
+                    )}
+
+                    {aba === "painel" && (
+                    <>
+                    <p className="text-sm text-[var(--text-muted)]">Status: <b className="text-[var(--text-main)]">{rotuloStatus(geral.status)}</b> · Portal {geral.portal_ativo ? "ligado" : "desligado"} · <button type="button" className="underline" onClick={() => setAba("config")}>Configurações</button></p>
                     <section className="grid gap-3 glass-card p-6 md:grid-cols-5">
                         <Campo rotulo="Origem">
                             <select className="h-9 w-full rounded-lg bg-[var(--bg-card-hover)] px-3 text-sm text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-primary/40" value={filtros.origem}
@@ -267,12 +287,6 @@ export function CpaAdmin() {
                             {exportar.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
                             Exportar CSV + verificação
                         </Btn>
-                        {admin && (
-                            <Btn variant="outline" onClick={() => sincronizarDocentes.mutate()} disabled={sincronizarDocentes.isPending}>
-                                {sincronizarDocentes.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                                Atualizar professores (Moodle)
-                            </Btn>
-                        )}
                         <Btn variant="outline" onClick={() => verificar.mutate()} disabled={verificar.isPending}>
                             <ShieldCheck className="mr-2 h-4 w-4" /> Verificar integridade
                         </Btn>
@@ -297,9 +311,6 @@ export function CpaAdmin() {
                             onLimparContexto={() => { setFiltros((f) => ({ ...f, contexto: "" })); setRotuloContexto(null) }} />
                     )}
 
-                    <ProfessoresPorDisciplina admin={admin} />
-
-                    <ProfessoresFotos />
                     </>
                     )}
                 </>
