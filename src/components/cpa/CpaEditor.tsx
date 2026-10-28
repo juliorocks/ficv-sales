@@ -99,7 +99,7 @@ export function CpaEditor({ formId, admin }: { formId: number; admin: boolean })
             </div>
 
             {respondidas.size > 0 && (
-                <p className="rounded-xl bg-amber-100 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/15 dark:text-amber-200">
+                <p className="rounded-xl bg-amber-100 px-3 py-2 text-xs text-amber-900">
                     {respondidas.size} pergunta(s) já têm resposta oficial. Essas podem ter o texto e os rótulos ajustados, mas não mudam de tipo, escala ou opções e não podem ser excluídas.
                 </p>
             )}
@@ -301,7 +301,7 @@ function Pilula({ onClick, destaque, children }: { onClick: () => void; destaque
 }
 
 function Tag({ children, cor }: { children: React.ReactNode; cor?: "amber" }) {
-    return <span className={`rounded-full px-2 py-0.5 ${cor === "amber" ? "bg-amber-100 text-amber-900 dark:bg-amber-500/15 dark:text-amber-200" : "bg-[var(--bg-card-hover)] text-[var(--text-muted)]"}`}>{children}</span>
+    return <span className={`rounded-full px-2 py-0.5 ${cor === "amber" ? "bg-amber-100 text-amber-900" : "bg-[var(--bg-card-hover)] text-[var(--text-muted)]"}`}>{children}</span>
 }
 
 function IconBtn({ label, onClick, disabled, children }: { label: string; onClick: () => void; disabled?: boolean; children: React.ReactNode }) {
