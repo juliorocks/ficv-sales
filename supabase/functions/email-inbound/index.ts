@@ -12,7 +12,9 @@ const j = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, 
 
 /** Tira a parte citada ("Em … escreveu:", "> …", assinatura "-- ") — fica só a resposta nova. */
 function onlyNewText(t: string): string {
-    const lines = t.replace(/\r\n/g, "\n").split("\n");
+    // o Gmail quebra "Em qua., 28 de out. ... FICV <x@y>\nescreveu:" em duas linhas
+    t = t.replace(/\r\n/g, "\n").replace(/^\s*(Em|On)\s[^\n]{3,200}\n?[^\n]{0,120}(escreveu|wrote):[\s\S]*$/m, "");
+    const lines = t.split("\n");
     const out: string[] = [];
     for (const l of lines) {
         if (/^\s*(Em .{3,120} escreveu:|On .{3,120} wrote:|-{2,}\s*Mensagem original|-{2,}\s*Original Message|De:\s|From:\s|Enviado do meu|Sent from my)/i.test(l)) break;
