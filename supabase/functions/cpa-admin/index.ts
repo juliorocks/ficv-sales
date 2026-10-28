@@ -145,6 +145,22 @@ function avalDe(p: Db, l: Db): Aval | null {
 }
 const juntar = <K>(m: Map<K, Aval[]>, k: K, a: Aval) => { const l = m.get(k); if (l) l.push(a); else m.set(k, [a]); };
 
+// O Moodle junta todos os professores do curso em "A / B / C" (e escreve "Prof. X" e "X" para a mesma pessoa).
+// Cada pessoa conta individualmente. Curso com mais de 4 nomes é banca/orientação (TCC), não o professor da disciplina.
+const MAX_PROFESSORES = 4;
+function nomesDoDocente(bruto: string | null | undefined): string[] {
+    const nomes = String(bruto ?? "").split(" / ").map((n) => n.replace(/^prof(?:essor|essora)?\.?\s+/i, "").replace(/\s+/g, " ").trim()).filter(Boolean);
+    const unicos = new Map<string, string>();
+    for (const n of nomes) {
+        const chave = n.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+        const bonito = n === n.toUpperCase() ? n.toLowerCase().replace(/(^|\s)(\p{L})/gu, (_m, a, b) => a + (b as string).toUpperCase()).replace(/\s(De|Da|Do|Das|Dos|E)\s/g, (m) => m.toLowerCase()) : n;
+        if (!unicos.has(chave)) unicos.set(chave, bonito);
+    }
+    const lista = [...unicos.values()];
+    return lista.length > MAX_PROFESSORES ? [] : lista;
+}
+const ehEquipe = (bruto: string | null | undefined) => String(bruto ?? "").split(" / ").filter(Boolean).length > MAX_PROFESSORES;
+
 function estatisticas(form: Db, perguntas: Db[], blocos: Db[], linhas: Db[], todasRespostas: { teste: boolean }[], docentes: Map<string, string>, populacao: number | null, nomes: Map<string, { disciplina_nome: string | null; periodo_nome: string | null }> = new Map(), alunos: number | null = null) {
     const porDia = new Map<string, number>();
     const comentarios: Db[] = [];
@@ -167,10 +183,10 @@ function estatisticas(form: Db, perguntas: Db[], blocos: Db[], linhas: Db[], tod
         porDia.set(dia, (porDia.get(dia) ?? 0) + 1);
         const curso = l.curso ?? semCurso;
         linhasPorCurso.set(curso, (linhasPorCurso.get(curso) ?? 0) + 1);
-        const docente = l.contexto ? docentes.get(l.contexto) ?? null : null;
+        const nomesDoc = l.contexto ? nomesDoDocente(docentes.get(l.contexto)) : [];
         if (l.contexto) {
             linhasPorDisc.set(l.contexto, (linhasPorDisc.get(l.contexto) ?? 0) + 1);
-            if (docente) {
+            for (const docente of nomesDoc) {
                 linhasPorDoc.set(docente, (linhasPorDoc.get(docente) ?? 0) + 1);
                 (discsDoDoc.get(docente) ?? discsDoDoc.set(docente, new Set()).get(docente)!).add(l.contexto);
             }
@@ -183,7 +199,7 @@ function estatisticas(form: Db, perguntas: Db[], blocos: Db[], linhas: Db[], tod
             juntar(porCursoAv, curso, a);
             juntar(porCursoBlocoAv, `${curso}|${p.bloco_id}`, a);
             if (l.contexto) juntar(porDiscAv, l.contexto, a);
-            if (docente) juntar(porDocAv, docente, a);
+            for (const docente of nomesDoc) juntar(porDocAv, docente, a);
         }
     }
 
@@ -249,7 +265,7 @@ function estatisticas(form: Db, perguntas: Db[], blocos: Db[], linhas: Db[], tod
         por_disciplina: [...linhasPorDisc.entries()].map(([contexto, n]) => {
             const [periodo, disc] = contexto.split("~");
             const r = resumir(porDiscAv.get(contexto) ?? []);
-            return { contexto, periodo, disciplina: disc, disciplina_nome: nomes.get(contexto)?.disciplina_nome ?? null, periodo_nome: nomes.get(contexto)?.periodo_nome ?? null, docente: docentes.get(contexto) ?? null, n, media: r.media, bandas: r.bandas };
+            return { contexto, periodo, disciplina: disc, disciplina_nome: nomes.get(contexto)?.disciplina_nome ?? null, periodo_nome: nomes.get(contexto)?.periodo_nome ?? null, docente: ehEquipe(docentes.get(contexto)) ? "Equipe de orientação (TCC)" : nomesDoDocente(docentes.get(contexto)).join(" / ") || null, docentes: nomesDoDocente(docentes.get(contexto)), n, media: r.media, bandas: r.bandas };
         }).sort((a, b) => b.n - a.n),
         por_docente: [...linhasPorDoc.entries()].map(([docente, n]) => {
             const r = resumir(porDocAv.get(docente) ?? []);
@@ -418,7 +434,7 @@ Deno.serve(async (req) => {
             const docentes = new Map<string, string>((docs ?? []).map((d: Db) => [`${d.periodo}~${d.disciplina}`, d.docente]));
             const nomes = new Map<string, { disciplina_nome: string | null; periodo_nome: string | null }>((docs ?? []).map((d: Db) => [`${d.periodo}~${d.disciplina}`, { disciplina_nome: d.disciplina_nome ?? null, periodo_nome: d.periodo_nome ?? null }]));
             // filtro por professor: só as respostas das disciplinas dele (o professor vem de cpa_docentes pelo contexto)
-            const contextosDoDocente = filtros.docente ? new Set([...docentes.entries()].filter(([, d]) => d === filtros.docente).map(([c]) => c)) : null;
+            const contextosDoDocente = filtros.docente ? new Set([...docentes.entries()].filter(([, d]) => nomesDoDocente(d).includes(String(filtros.docente))).map(([c]) => c)) : null;
             if (contextosDoDocente) linhas = linhas.filter((l: Db) => contextosDoDocente.has(l.contexto));
             // na disciplina cada resposta é um aluno × disciplina: alunos = participantes distintos (a participação não guarda curso)
             let alunos: number | null = null;

@@ -19,7 +19,7 @@ export type Item = {
 }
 type BlocoR = { id: number; ordem: number; titulo: string; n: number; media: number | null; bandas: Bandas }
 type CursoR = { curso: string; n: number; media: number | null; bandas: Bandas; por_bloco: Record<string, number | null> }
-type DiscR = { contexto: string; periodo: string; disciplina: string; disciplina_nome?: string; periodo_nome?: string; docente: string | null; n: number; media: number | null; bandas: Bandas }
+type DiscR = { contexto: string; periodo: string; disciplina: string; disciplina_nome?: string; periodo_nome?: string; docente: string | null; docentes?: string[]; n: number; media: number | null; bandas: Bandas }
 type DocR = { docente: string; n: number; disciplinas: number; media: number | null; bandas: Bandas }
 export type StatsCpa = {
     formulario: { id: number; titulo: string; nivel: string; tipo: string }
@@ -416,7 +416,7 @@ function RankingDisciplinas({ base, ativo, p, dica, rotulos, onFiltrarContexto }
                 {modo === "professores" && (lista as DocR[]).map((d) => (
                     <div key={d.docente}>
                         {linha(d.docente, d.docente, `${d.disciplinas} ${d.disciplinas === 1 ? "disciplina" : "disciplinas"}`, d.bandas, d.media, d.n, () => setAberto(aberto === d.docente ? null : d.docente))}
-                        {aberto === d.docente && discs.filter((x) => x.docente === d.docente).map((x) =>
+                        {aberto === d.docente && discs.filter((x) => (x.docentes ?? [x.docente]).includes(d.docente)).map((x) =>
                             linha(`${d.docente}|${x.contexto}`, nomeDisc(x), nomePeriodo(x), x.bandas, x.media, x.n,
                                 () => onFiltrarContexto(x.contexto, `${nomeDisc(x)} · Prof. ${d.docente}`), ativo === x.contexto, true))}
                     </div>
