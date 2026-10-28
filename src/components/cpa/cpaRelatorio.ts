@@ -3,7 +3,8 @@
 import type { StatsCpa } from "./CpaResultados"
 import { rotulosFaixas } from "./cpaViz"
 
-const COR = { fav: "#1a8a4c", crit: "#e34948", neu: "#cfcdc4", marca: "#5551FF", tinta: "#13161D", suave: "#64748B", linha: "#E2E8F0" }
+const LOGO_FICV = "https://siteficv.vercel.app/images/test-logo.png"
+const COR = { fav: "#1a8a4c", crit: "#e34948", neu: "#cfcdc4", marca: "#5551FF", tinta: "#13161D", ouro: "#A07E2A", suave: "#64748B", linha: "#E2E8F0" }
 
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!))
 const n1 = (n: number | null | undefined) => (n === null || n === undefined ? "–" : n.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }))
@@ -62,9 +63,12 @@ body { margin: 0; font: 11px/1.4 -apple-system, "Segoe UI", Roboto, Helvetica, A
 .barra-topo { display: flex; justify-content: flex-end; padding: 10px; }
 .barra-topo button { font: inherit; padding: 8px 16px; border-radius: 999px; border: 0; background: ${COR.marca}; color: #fff; font-weight: 600; cursor: pointer; }
 @media print { body { background: #fff; } .pag { margin: 0; padding: 0; width: auto; min-height: 0; } .barra-topo { display: none; } }
-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid ${COR.tinta}; padding-bottom: 8px; }
-header .inst { font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: ${COR.suave}; font-weight: 700; }
-h1 { margin: 2px 0 0; font-size: 20px; } h2 { margin: 14px 0 6px; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: ${COR.suave}; }
+header { background: ${COR.tinta}; color: #fff; border-radius: 10px; border-bottom: 3px solid ${COR.ouro}; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+header img { height: 38px; width: auto; display: block; }
+header .meta { text-align: right; font-size: 9.5px; line-height: 1.5; color: #cbd0da; }
+header .meta b { display: block; color: ${COR.ouro}; font-size: 9px; letter-spacing: .14em; text-transform: uppercase; }
+.titulo { margin-top: 14px; } .titulo .tipo { font-size: 9px; letter-spacing: .14em; text-transform: uppercase; color: ${COR.ouro}; font-weight: 700; }
+h1 { margin: 2px 0 0; font-size: 22px; } h2 { margin: 14px 0 6px; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: ${COR.suave}; }
 .sub { color: ${COR.suave}; font-size: 10px; margin-top: 2px; }
 .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; }
 .kpi { border: 1px solid ${COR.linha}; border-radius: 8px; padding: 8px 10px; }
@@ -81,9 +85,10 @@ footer { margin-top: 12px; padding-top: 6px; border-top: 1px solid ${COR.linha};
 </style></head><body>
 <div class="barra-topo"><button onclick="window.print()">Imprimir / salvar em PDF</button></div>
 <div class="pag">
-<header><div><div class="inst">Faculdade Internacional Cidade Viva · CPA</div><h1>${esc(docente)}</h1>
-<div class="sub">Avaliação de disciplinas · ${o.nivel === "pos" ? "Pós-graduação" : "Graduação"}${periodos ? ` · ${esc(periodos)}` : ""}</div></div>
-<div class="sub" style="text-align:right">Gerado em ${new Date().toLocaleDateString("pt-BR")}<br>${esc(filtroTxt)}</div></header>
+<header><img src="${LOGO_FICV}" alt="Faculdade Internacional Cidade Viva">
+<div class="meta"><b>Comissão Própria de Avaliação</b>Relatório individual de avaliação docente<br>Gerado em ${new Date().toLocaleDateString("pt-BR")} · ${esc(filtroTxt)}</div></header>
+<div class="titulo"><div class="tipo">Avaliação de disciplinas · ${o.nivel === "pos" ? "Pós-graduação" : "Graduação"}</div><h1>${esc(docente)}</h1>
+<div class="sub">${esc(periodos)}</div></div>
 
 <div class="kpis">
 <div class="kpi"><div class="r">Nota média</div><div class="v">${n1(t.media_geral)} <small>/ 10</small></div>${delta(t.media_geral, ref)}</div>
@@ -100,7 +105,7 @@ footer { margin-top: 12px; padding-top: 6px; border-top: 1px solid ${COR.linha};
 <table><tr><th>Pergunta</th><th>Distribuição</th><th class="num">Média</th><th class="num">Inst.</th></tr>${linhasPerguntas}</table>
 
 ${comentarios ? `<h2>Comentários dos alunos</h2><ul>${comentarios}</ul>` : ""}
-<footer>Baseado em ${t.respondentes} avaliações (${t.alunos ?? t.respondentes} alunos). “Inst.” é a média de todas as disciplinas deste nível no mesmo recorte. Comentários sem identificação do aluno. Documento para feedback interno.</footer>
+<footer>Baseado em ${t.respondentes} avaliações (${t.alunos ?? t.respondentes} alunos). “Inst.” é a média de todas as disciplinas deste nível no mesmo recorte. Comentários sem identificação do aluno. Documento para feedback interno · Faculdade Internacional Cidade Viva.</footer>
 </div></body></html>`
 
     return html
