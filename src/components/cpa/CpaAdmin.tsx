@@ -453,6 +453,12 @@ function AlunosTeste({ geral, salvando, onSalvar }: { geral: FormResumo; salvand
         queryFn: () => chamar<{ alunos: { sponte_aluno_id: number; nome: string; ra: string | null }[] }>("testadores", { formulario_id: geral.id }),
     })
     const alunos = data?.alunos ?? []
+    const qc = useQueryClient()
+    const reiniciar = useMutation({
+        mutationFn: (a: { sponte_aluno_id: number; nome: string }) => chamar<{ apagadas: number }>("reset_aluno_teste", { formulario_id: geral.id, aluno_id: a.sponte_aluno_id }),
+        onSuccess: (r, a) => { qc.invalidateQueries({ queryKey: ["cpa-stats"] }); showSuccess(`${a.nome}: ${r.apagadas} avaliação(ões) liberada(s) pra responder de novo`) },
+        onError: (e: Error) => showError(e.message),
+    })
     return (
         <div className="space-y-2">
             <label className="block space-y-1">
@@ -465,7 +471,18 @@ function AlunosTeste({ geral, salvando, onSalvar }: { geral: FormResumo; salvand
                 {alunos.length > 0 && <Btn size="sm" variant="ghost" disabled={salvando} onClick={() => onSalvar([])}>Limpar lista</Btn>}
             </div>
             {alunos.length > 0 && (
-                <p className="text-xs text-[var(--text-muted)]">Na lista: {alunos.map((a) => `${a.nome}${a.ra ? ` (RA ${a.ra})` : ""}`).join(" · ")}</p>
+                <div className="space-y-1">
+                    <p className="text-xs text-[var(--text-muted)]">Na lista:</p>
+                    {alunos.map((a) => (
+                        <div key={a.sponte_aluno_id} className="flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
+                            <span>{a.nome}{a.ra ? ` (RA ${a.ra})` : ""}</span>
+                            <Btn size="sm" variant="outline" disabled={reiniciar.isPending}
+                                onClick={() => { if (confirm(`Liberar ${a.nome} pra responder as avaliações de teste de novo?`)) reiniciar.mutate(a) }}>
+                                Reiniciar este aluno
+                            </Btn>
+                        </div>
+                    ))}
+                </div>
             )}
         </div>
     )

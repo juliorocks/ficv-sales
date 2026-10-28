@@ -6,11 +6,12 @@
 //   verify      { formulario_id }                 -> recalcula a cadeia de hash das oficiais
 //   update_form { formulario_id, status?, portal_ativo?, titulo? }   (admin)
 //   delete_tests{ formulario_id }                 (admin) apaga só respostas de teste
+//   reset_aluno_teste { aluno_id }                (admin) libera o aluno de teste (participações de teste) pra responder de novo
 //   sync_docentes { offset? }                     (admin) professores titulares pelo Moodle, em lotes
 // filtros: { origem: 'oficial'|'teste'|'todas', curso?: string, de?: 'AAAA-MM-DD', ate?: 'AAAA-MM-DD' }
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { partirCurso, professoresDoCurso, semestreAtual, todosOsCursos } from "../_shared/cpaMoodle.ts";
-import { nivelDoCurso, slug } from "../_shared/cpa.ts";
+import { nivelDoCurso, participacaoHash, slug } from "../_shared/cpa.ts";
 
 const cors = {
     "Access-Control-Allow-Origin": "*",
@@ -394,6 +395,22 @@ Deno.serve(async (req) => {
             if (error) throw error;
             await db.from("cpa_participacoes").delete().eq("formulario_id", formId).eq("teste", true);
             return j({ apagadas: (data ?? []).length });
+        }
+
+        if (acao === "reset_aluno_teste") {
+            if (!ehAdmin) return j({ error: "Só admin reinicia aluno de teste." }, 403);
+            const A = Number(body.aluno_id);
+            if (!A) return j({ error: "aluno_id obrigatório." }, 400);
+            const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+            const { data: parts, error } = await db.from("cpa_participacoes").select("formulario_id, contexto, respondente_hash").eq("teste", true);
+            if (error) throw error;
+            let apagadas = 0;
+            for (const p of parts ?? []) {
+                if (p.respondente_hash !== await participacaoHash(key, A, p.formulario_id, p.contexto)) continue;
+                await db.from("cpa_participacoes").delete().eq("formulario_id", p.formulario_id).eq("contexto", p.contexto).eq("respondente_hash", p.respondente_hash);
+                apagadas++;
+            }
+            return j({ apagadas });
         }
 
         if (acao === "estrutura") {
