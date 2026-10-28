@@ -46,17 +46,28 @@ function aplicarFiltros(q: Db, formId: number, f: Filtros) {
     q = q.eq("formulario_id", formId);
     if (f.origem === "oficial" || !f.origem) q = q.eq("teste", false);
     if (f.origem === "teste") q = q.eq("teste", true);
-    if (f.curso) q = q.eq("curso", f.curso);
     if (f.contexto && /^[a-z0-9~-]+$/.test(f.contexto)) q = q.eq("contexto", f.contexto);
     if (f.de) q = q.gte("respondido_em", `${f.de}T00:00:00-03:00`);
     if (f.ate) q = q.lte("respondido_em", `${f.ate}T23:59:59-03:00`);
     return q;
 }
 
+// O mesmo curso chega com grafias diferentes ("Pós-Graduação em X" da lista do formulário, "Pós Graduação Em X" do Sponte).
+// Respostas oficiais são imutáveis, então a unificação é na leitura: compara por chave sem acento, caixa e hífen.
+const cursoKey = (c: string | null | undefined) => String(c ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[-–]/g, " ").replace(/\s+/g, " ").trim();
+
+async function cursosOficiais(db: Db): Promise<Map<string, string>> {
+    const { data } = await db.from("cpa_perguntas").select("opcoes").eq("chave", "curso");
+    const m = new Map<string, string>();
+    for (const r of data ?? []) for (const o of (r.opcoes ?? []) as string[]) if (!m.has(cursoKey(o))) m.set(cursoKey(o), o);
+    return m;
+}
+
 async function carregarRespostas(db: Db, formId: number, f: Filtros) {
-    return await todas(() => aplicarFiltros(
+    const linhas = await todas(() => aplicarFiltros(
         db.from("cpa_respostas").select("id, seq, teste, respondido_em, respostas, curso, contexto, hash, hash_anterior, canonico"),
         formId, f));
+    return f.curso ? linhas.filter((l: Db) => cursoKey(l.curso) === cursoKey(f.curso)) : linhas;
 }
 
 async function carregarPerguntas(db: Db, formId: number) {
@@ -427,7 +438,8 @@ Deno.serve(async (req) => {
 
         if (acao === "stats") {
             const { blocos, perguntas } = await carregarPerguntas(db, formId);
-            let linhas = await carregarRespostas(db, formId, filtros);
+            const oficiais = await cursosOficiais(db);
+            let linhas = (await carregarRespostas(db, formId, filtros)).map((l: Db) => l.curso ? { ...l, curso: oficiais.get(cursoKey(l.curso)) ?? l.curso } : l);
             const todasLinhas = await todas(() => db.from("cpa_respostas").select("id, teste").eq("formulario_id", formId));
             const pop = await populacaoAtiva(db);
             const { data: docs } = await db.from("cpa_docentes").select("periodo, disciplina, docente, periodo_nome, disciplina_nome");

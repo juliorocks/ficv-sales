@@ -204,9 +204,10 @@ Deno.serve(async (req) => {
         // o curso no Portal vem da matrícula: a pergunta de curso não é mostrada ao aluno, e o valor gravado
         // é a opção oficial do formulário (o nome do Sponte vem com outra grafia: "Pós Graduação Em ...")
         const perguntaCurso = (perguntas ?? []).find((p: any) => p.chave === "curso"); // eslint-disable-line @typescript-eslint/no-explicit-any
-        const cursoOficial: string = perguntaCurso
-            ? ((perguntaCurso.opcoes as string[] | null)?.find((o) => slug(o) === slug(eleg.curso)) ?? eleg.curso)
-            : eleg.curso;
+        // sem pergunta de curso neste formulário (disciplina), vale a lista de cursos dos outros formulários: mesma grafia em tudo
+        const opcoesCurso: string[] = (perguntaCurso?.opcoes as string[] | null)
+            ?? ((await db.from("cpa_perguntas").select("opcoes").eq("chave", "curso")).data ?? []).flatMap((r: any) => r.opcoes ?? []); // eslint-disable-line @typescript-eslint/no-explicit-any
+        const cursoOficial: string = opcoesCurso.find((o) => slug(o) === slug(eleg.curso)) ?? eleg.curso;
 
         if (acao === "form") {
             return j({
