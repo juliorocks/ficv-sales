@@ -40,7 +40,7 @@ jobs:
           # Valores vêm por variável de ambiente, nunca interpolados no script (injeção de shell)
           if [[ -n "$INPUT_START" && ! "$INPUT_START" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then echo "start_date inválida"; exit 1; fi
           if [[ -n "$INPUT_END" && ! "$INPUT_END" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then echo "end_date inválida"; exit 1; fi
-          case "${INPUT_MODE:-full}" in full|matriculas|parcelas) ;; *) echo "mode inválido"; exit 1;; esac
+          case "${INPUT_MODE:-full}" in full|matriculas|parcelas|abertas) ;; *) echo "mode inválido"; exit 1;; esac
           START_DATE="${INPUT_START:-$(date -d '3 days ago' +%Y-%m-%d)}"
           END_DATE="${INPUT_END:-$(date +%Y-%m-%d)}"
           echo "Sincronizando $START_DATE → $END_DATE"
@@ -48,3 +48,9 @@ jobs:
             "${INPUT_MODE:-full}" \
             "$START_DATE" \
             "$END_DATE"
+      - name: Sync parcelas em aberto (inadimplência)
+        if: ${{ github.event.inputs.mode == '' || github.event.inputs.mode == 'abertas' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/sync-sponte.mjs abertas

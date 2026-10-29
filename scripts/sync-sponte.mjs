@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Sync Sponte CRM → Supabase (Postgres via PostgREST)
-// Uso: node scripts/sync-sponte.mjs [full|matriculas|parcelas] [start_date] [end_date]
+// Uso: node scripts/sync-sponte.mjs [full|matriculas|parcelas|abertas] [start_date] [end_date]
 
 import { pgUpsert, pgEnabled } from './lib/pg-mirror.mjs';
 
@@ -120,6 +120,28 @@ async function syncMatriculas() {
     return synced;
 }
 
+function parseParcelas(xml) {
+    return extractAll(xml, 'wsParcela')
+        .filter(r => extractFirst(r, 'ContaReceberID') !== '0')
+        .map(r => ({
+            conta_receber_id: parseInt(extractFirst(r, 'ContaReceberID')) || 0,
+            numero_parcela:   extractFirst(r, 'NumeroParcela') || '0',
+            aluno_id:         parseInt(extractFirst(r, 'AlunoID')) || null,
+            situacao_parcela: extractFirst(r, 'SituacaoParcela') || null,
+            data_pagamento:   parseBrDate(extractFirst(r, 'DataPagamento')),
+            vencimento:       parseBrDate(extractFirst(r, 'Vencimento')),
+            valor_parcela:    parseBrNumber(extractFirst(r, 'ValorParcela')),
+            valor_pago:       parseBrNumber(extractFirst(r, 'ValorPago')),
+            forma_cobranca:   extractFirst(r, 'FormaCobranca') || null,
+            categoria:        extractFirst(r, 'Categoria') || null,
+            categoria_id:     parseInt(extractFirst(r, 'CategoriaID')) || null,
+            sacado:           extractFirst(r, 'Sacado') || null,
+            conta_creditar:   extractFirst(r, 'ContaCreditar') || null,
+            synced_at:        new Date().toISOString(),
+        }))
+        .filter(r => r.conta_receber_id > 0);
+}
+
 // ─── Sync parcelas ────────────────────────────────────────────────────────────
 
 async function syncParcelas() {
@@ -145,25 +167,7 @@ async function syncParcelas() {
         ).catch(e => { console.error(`  chunk ${chunk.start}→${chunk.end}: ${e.message}`); return ''; });
         if (!xml) continue;
 
-        const rows = extractAll(xml, 'wsParcela')
-            .filter(r => extractFirst(r, 'ContaReceberID') !== '0')
-            .map(r => ({
-                conta_receber_id: parseInt(extractFirst(r, 'ContaReceberID')) || 0,
-                numero_parcela:   extractFirst(r, 'NumeroParcela') || '0',
-                aluno_id:         parseInt(extractFirst(r, 'AlunoID')) || null,
-                situacao_parcela: extractFirst(r, 'SituacaoParcela') || null,
-                data_pagamento:   parseBrDate(extractFirst(r, 'DataPagamento')),
-                vencimento:       parseBrDate(extractFirst(r, 'Vencimento')),
-                valor_parcela:    parseBrNumber(extractFirst(r, 'ValorParcela')),
-                valor_pago:       parseBrNumber(extractFirst(r, 'ValorPago')),
-                forma_cobranca:   extractFirst(r, 'FormaCobranca') || null,
-                categoria:        extractFirst(r, 'Categoria') || null,
-                categoria_id:     parseInt(extractFirst(r, 'CategoriaID')) || null,
-                sacado:           extractFirst(r, 'Sacado') || null,
-                conta_creditar:   extractFirst(r, 'ContaCreditar') || null,
-                synced_at:        new Date().toISOString(),
-            }))
-            .filter(r => r.conta_receber_id > 0);
+        const rows = parseParcelas(xml);
 
         await pgUpsert('sponte_parcelas', rows, 'conta_receber_id,numero_parcela');
         totalSynced += rows.length;
@@ -177,6 +181,34 @@ async function syncParcelas() {
     return totalSynced;
 }
 
+
+// Inadimplência: o sync acima busca por data de pagamento (só traz parcela paga). Aqui a busca é por
+// vencimento, que traz também Pendente e Cancelada; do início do ano até 45 dias à frente.
+async function syncAbertas() {
+    const fim = new Date(now.getTime() + 45 * 86400000).toISOString().split('T')[0];
+    const ini = process.env.ABERTAS_DESDE || `${year}-01-01`;
+    console.log(`  Buscando parcelas por vencimento ${ini} → ${fim}...`);
+    const cursor = new Date(ini + 'T12:00:00');
+    const last   = new Date(fim + 'T12:00:00');
+    let total = 0;
+    while (cursor <= last) {
+        const cs = cursor.toISOString().split('T')[0];
+        cursor.setMonth(cursor.getMonth() + 1);
+        cursor.setDate(0);
+        const ce = cursor < last ? cursor.toISOString().split('T')[0] : fim;
+        const xml = await soapCall('GetParcelas',
+            `<sParametrosBusca>DataVencimento=${cs.replace(/-/g,'/')} e ${ce.replace(/-/g,'/')}</sParametrosBusca>`
+        ).catch(e => { console.error(`  vencimento ${cs}→${ce}: ${e.message}`); return ''; });
+        cursor.setDate(cursor.getDate() + 1);
+        if (!xml) continue;
+        const rows = parseParcelas(xml);
+        await pgUpsert('sponte_parcelas', rows, 'conta_receber_id,numero_parcela');
+        total += rows.length;
+        process.stdout.write(`\r  ${total} parcelas por vencimento...`);
+    }
+    console.log(`\n  ✓ ${total} parcelas por vencimento sincronizadas`);
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 if (!pgEnabled) throw new Error('SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY não definidos');
@@ -184,5 +216,6 @@ console.log(`\n🔄 Sync Sponte → Supabase | modo=${mode} | ${startDate} → $
 
 if (mode === 'matriculas' || mode === 'full') await syncMatriculas();
 if (mode === 'parcelas'   || mode === 'full') await syncParcelas();
+if (mode === 'abertas'    || mode === 'full') await syncAbertas();
 
 console.log('\n✅ Sync concluído!');

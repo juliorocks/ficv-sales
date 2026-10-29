@@ -1,0 +1,229 @@
+import { Fragment, useMemo, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
+import { AlertCircle, ChevronDown, ChevronRight, Download, Loader2, MessageCircle, RefreshCw, Search } from "lucide-react"
+import { supabase } from "@/lib/supabase"
+import { withTimeout } from "@/utils/withTimeout"
+
+type Detalhe = { vencimento: string; valor: number; categoria: string | null; atraso: number }
+type AlunoInad = {
+    aluno_id: number; nome: string | null; turma: string | null; curso: string | null; situacao: string | null; vigente: boolean | null
+    celular: string | null; parcelas: number; valor: number; atraso_max: number
+    f30: number | null; f60: number | null; f90: number | null; f90p: number | null; detalhe: Detalhe[]
+}
+type Relatorio = { alunos: AlunoInad[]; turmas: { turma: string | null; alunos: number }[]; sincronizado_em: string | null }
+
+const SEM_TURMA = "Sem turma"
+const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })
+const dataBr = (s: string) => new Date(s + "T12:00:00").toLocaleDateString("pt-BR")
+const FAIXAS = [["f30", "1 a 30 dias"], ["f60", "31 a 60 dias"], ["f90", "61 a 90 dias"], ["f90p", "Mais de 90 dias"]] as const
+const MARCA = "#5551FF"
+
+function whatsapp(cel: string | null) {
+    const d = (cel ?? "").replace(/\D/g, "")
+    if (d.length < 10) return null
+    return `https://wa.me/${d.startsWith("55") ? d : "55" + d}`
+}
+
+export function InadimplenciaDashboard() {
+    const [todos, setTodos] = useState(false)
+    const [turma, setTurma] = useState("")
+    const [busca, setBusca] = useState("")
+    const [aberto, setAberto] = useState<number | null>(null)
+    const [ordemTurma, setOrdemTurma] = useState<"valor" | "pct" | "alunos">("valor")
+
+    const { data, isLoading, isFetching, error, refetch } = useQuery({
+        queryKey: ["inadimplencia"],
+        staleTime: 5 * 60_000,
+        queryFn: async () => {
+            const { data, error } = await withTimeout(supabase.rpc("inadimplencia_report"), 30000, "A consulta de inadimplência")
+            if (error) throw new Error(error.message)
+            return data as Relatorio
+        },
+    })
+
+    const base = useMemo(() => (data?.alunos ?? []).filter((a) => todos || a.vigente), [data, todos])
+    const vigentesPorTurma = useMemo(() => new Map((data?.turmas ?? []).map((t) => [t.turma ?? SEM_TURMA, t.alunos])), [data])
+    const totalVigentes = useMemo(() => [...vigentesPorTurma.values()].reduce((s, n) => s + n, 0), [vigentesPorTurma])
+
+    const porTurma = useMemo(() => {
+        const m = new Map<string, { turma: string; inad: number; valor: number; atraso: number }>()
+        for (const a of base) {
+            const k = a.turma ?? SEM_TURMA
+            const x = m.get(k) ?? { turma: k, inad: 0, valor: 0, atraso: 0 }
+            x.inad++; x.valor += a.valor; x.atraso = Math.max(x.atraso, a.atraso_max)
+            m.set(k, x)
+        }
+        const l = [...m.values()].map((x) => {
+            const alunos = vigentesPorTurma.get(x.turma) ?? 0
+            return { ...x, alunos, pct: alunos ? Math.min(100, (x.inad / alunos) * 100) : null }
+        })
+        return l.sort((a, b) => ordemTurma === "pct" ? (b.pct ?? -1) - (a.pct ?? -1) : ordemTurma === "alunos" ? b.inad - a.inad : b.valor - a.valor)
+    }, [base, vigentesPorTurma, ordemTurma])
+
+    const lista = useMemo(() => {
+        const q = busca.trim().toLowerCase()
+        return base
+            .filter((a) => !turma || (a.turma ?? SEM_TURMA) === turma)
+            .filter((a) => !q || (a.nome ?? "").toLowerCase().includes(q) || String(a.aluno_id) === q)
+            .sort((a, b) => b.valor - a.valor)
+    }, [base, turma, busca])
+
+    const totalValor = base.reduce((s, a) => s + a.valor, 0)
+    const faixas = FAIXAS.map(([k, nome]) => ({ nome, valor: base.reduce((s, a) => s + (a[k] ?? 0), 0) }))
+    const maiorFaixa = Math.max(...faixas.map((f) => f.valor), 1)
+    const vigInad = base.filter((a) => a.vigente).length
+    const pctGeral = totalVigentes ? (vigInad / totalVigentes) * 100 : 0
+    const noRecorte = lista.reduce((s, a) => s + a.valor, 0)
+
+    function exportar() {
+        const cab = ["Aluno", "AlunoID", "Turma", "Curso", "Situação", "Celular", "Parcelas em atraso", "Valor", "Maior atraso (dias)", "Venc. mais antigo"]
+        const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`
+        const linhas = lista.map((a) => [a.nome, a.aluno_id, a.turma, a.curso, a.situacao, a.celular, a.parcelas, a.valor.toFixed(2).replace(".", ","), a.atraso_max, a.detalhe[0] ? dataBr(a.detalhe[0].vencimento) : ""].map(esc).join(";"))
+        const blob = new Blob(["﻿" + [cab.map(esc).join(";"), ...linhas].join("\n")], { type: "text/csv;charset=utf-8" })
+        const url = URL.createObjectURL(blob)
+        const l = document.createElement("a"); l.href = url; l.download = `inadimplencia-${new Date().toISOString().slice(0, 10)}.csv`; l.click()
+        URL.revokeObjectURL(url)
+    }
+
+    if (isLoading) return <div className="flex items-center gap-2 p-8 text-sm text-[var(--text-muted)]"><Loader2 className="h-4 w-4 animate-spin" /> Consultando parcelas em aberto…</div>
+    if (error) return <div className="glass-card flex items-center gap-2 p-6 text-sm"><AlertCircle className="h-4 w-4 text-red-500" /> {(error as Error).message}</div>
+
+    return (
+        <div className="space-y-6">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                    <h1 className="text-2xl font-bold text-[var(--text-main)]">Inadimplência</h1>
+                    <p className="text-xs text-[var(--text-muted)]">
+                        Parcelas pendentes já vencidas (Sponte){data?.sincronizado_em ? ` · atualizado em ${new Date(data.sincronizado_em).toLocaleString("pt-BR")}` : ""}
+                    </p>
+                </div>
+                <div className="flex items-center gap-2">
+                    <label className="flex cursor-pointer items-center gap-2 text-sm text-[var(--text-main)]">
+                        <input type="checkbox" checked={todos} onChange={(e) => setTodos(e.target.checked)} /> Incluir alunos sem matrícula Vigente
+                    </label>
+                    <button type="button" onClick={() => refetch()} className="rounded-full border border-[var(--border)] p-2 text-[var(--text-muted)] hover:bg-[var(--bg-card-hover)]" aria-label="Atualizar">
+                        <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+                    </button>
+                </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+                <div className="glass-card p-5">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Valor em atraso</p>
+                    <p className="mt-2 text-4xl font-bold text-[var(--text-main)]">{brl(totalValor)}</p>
+                    <p className="mt-1 text-xs text-[var(--text-muted)]">{base.reduce((s, a) => s + a.parcelas, 0).toLocaleString("pt-BR")} parcelas</p>
+                </div>
+                <div className="glass-card p-5">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Alunos inadimplentes</p>
+                    <p className="mt-2 text-4xl font-bold text-[var(--text-main)]">{base.length.toLocaleString("pt-BR")}</p>
+                    <p className="mt-1 text-xs text-[var(--text-muted)]">{pctGeral.toFixed(1).replace(".", ",")}% dos {totalVigentes.toLocaleString("pt-BR")} alunos Vigentes ({vigInad} Vigentes inadimplentes)</p>
+                </div>
+                <div className="glass-card p-5">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Há mais de 90 dias</p>
+                    <p className="mt-2 text-4xl font-bold text-[var(--text-main)]">{brl(faixas[3].valor)}</p>
+                    <p className="mt-1 text-xs text-[var(--text-muted)]">{totalValor ? Math.round((faixas[3].valor / totalValor) * 100) : 0}% do valor em atraso</p>
+                </div>
+            </div>
+
+            <div className="glass-card space-y-3 p-5">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Por tempo de atraso</p>
+                {faixas.map((f) => (
+                    <div key={f.nome} className="grid grid-cols-[120px_1fr_120px] items-center gap-3 text-sm">
+                        <span className="text-[var(--text-main)]">{f.nome}</span>
+                        <div className="h-5 rounded bg-[var(--bg-card-hover)]"><div className="h-full rounded" style={{ width: `${(f.valor / maiorFaixa) * 100}%`, background: MARCA }} /></div>
+                        <span className="text-right font-semibold tabular-nums text-[var(--text-main)]">{brl(f.valor)}</span>
+                    </div>
+                ))}
+            </div>
+
+            <div className="glass-card p-5">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Por turma (clique para ver os alunos)</p>
+                    <div className="flex gap-1.5 text-xs">
+                        {([["valor", "Maior valor"], ["pct", "Maior %"], ["alunos", "Mais alunos"]] as const).map(([k, n]) => (
+                            <button key={k} type="button" onClick={() => setOrdemTurma(k)} className={`rounded-full px-3 py-1 ${ordemTurma === k ? "bg-primary text-white" : "bg-[var(--bg-card-hover)] text-[var(--text-main)]"}`}>{n}</button>
+                        ))}
+                    </div>
+                </div>
+                <div className="max-h-[420px] overflow-auto">
+                    <table className="w-full text-sm">
+                        <thead className="sticky top-0 bg-[var(--bg-card)] text-left text-[11px] uppercase tracking-wider text-[var(--text-muted)]">
+                            <tr><th className="py-2">Turma</th><th className="text-right">Alunos Vigentes</th><th className="text-right">Inadimplentes</th><th className="w-40 pl-4">% da turma</th><th className="text-right">Valor</th><th className="text-right">Maior atraso</th></tr>
+                        </thead>
+                        <tbody>
+                            {porTurma.map((t) => (
+                                <tr key={t.turma} onClick={() => setTurma(turma === t.turma ? "" : t.turma)} className={`cursor-pointer border-t border-[var(--border)] hover:bg-[var(--bg-card-hover)] ${turma === t.turma ? "bg-primary/10" : ""}`}>
+                                    <td className="py-2 pr-2 text-[var(--text-main)]">{t.turma}</td>
+                                    <td className="text-right tabular-nums">{t.alunos || "–"}</td>
+                                    <td className="text-right font-semibold tabular-nums">{t.inad}</td>
+                                    <td className="pl-4">
+                                        {t.pct === null ? "–" : (
+                                            <div className="flex items-center gap-2">
+                                                <div className="h-2 flex-1 rounded bg-[var(--bg-card-hover)]"><div className="h-full rounded" style={{ width: `${t.pct}%`, background: MARCA }} /></div>
+                                                <span className="w-10 text-right text-xs tabular-nums">{Math.round(t.pct)}%</span>
+                                            </div>
+                                        )}
+                                    </td>
+                                    <td className="text-right font-semibold tabular-nums">{brl(t.valor)}</td>
+                                    <td className="text-right tabular-nums text-[var(--text-muted)]">{t.atraso} d</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div className="glass-card p-5">
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                        Alunos{turma ? ` · ${turma}` : ""} · {lista.length} · {brl(noRecorte)}
+                    </p>
+                    {turma && <button type="button" onClick={() => setTurma("")} className="rounded-full bg-[var(--bg-card-hover)] px-3 py-1 text-xs">Limpar turma ✕</button>}
+                    <div className="ml-auto flex items-center gap-2">
+                        <div className="relative"><Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-[var(--text-muted)]" />
+                            <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar aluno" className="rounded-full border border-[var(--border)] bg-transparent py-2 pl-8 pr-3 text-sm outline-none" /></div>
+                        <button type="button" onClick={exportar} className="flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-2 text-sm hover:bg-[var(--bg-card-hover)]"><Download className="h-4 w-4" /> CSV</button>
+                    </div>
+                </div>
+                <div className="max-h-[560px] overflow-auto">
+                    <table className="w-full text-sm">
+                        <thead className="sticky top-0 bg-[var(--bg-card)] text-left text-[11px] uppercase tracking-wider text-[var(--text-muted)]">
+                            <tr><th className="w-6" /><th className="py-2">Aluno</th><th>Turma</th><th className="text-right">Parcelas</th><th className="text-right">Valor</th><th className="text-right">Atraso</th><th className="w-10" /></tr>
+                        </thead>
+                        <tbody>
+                            {lista.slice(0, 400).map((a) => {
+                                const wa = whatsapp(a.celular)
+                                const abre = aberto === a.aluno_id
+                                return (
+                                    <Fragment key={a.aluno_id}>
+                                        <tr onClick={() => setAberto(abre ? null : a.aluno_id)} className="cursor-pointer border-t border-[var(--border)] hover:bg-[var(--bg-card-hover)]">
+                                            <td>{abre ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</td>
+                                            <td className="py-2 pr-2"><span className="text-[var(--text-main)]">{a.nome ?? `Aluno ${a.aluno_id}`}</span>{!a.vigente && <span className="ml-2 text-[11px] text-[var(--text-muted)]">{a.situacao ?? "sem matrícula"}</span>}</td>
+                                            <td className="max-w-[260px] truncate text-[var(--text-muted)]">{a.turma ?? SEM_TURMA}</td>
+                                            <td className="text-right tabular-nums">{a.parcelas}</td>
+                                            <td className="text-right font-semibold tabular-nums">{brl(a.valor)}</td>
+                                            <td className="text-right tabular-nums text-[var(--text-muted)]">{a.atraso_max} d</td>
+                                            <td className="text-right">{wa && <a href={wa} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} aria-label="Chamar no WhatsApp" className="inline-block p-1.5 text-[var(--text-muted)] hover:text-[var(--text-main)]"><MessageCircle className="h-4 w-4" /></a>}</td>
+                                        </tr>
+                                        {abre && (
+                                            <tr className="bg-[var(--bg-card-hover)]"><td /><td colSpan={6} className="py-2">
+                                                <p className="mb-1 text-xs text-[var(--text-muted)]">{a.curso ?? ""}{a.celular ? ` · ${a.celular}` : ""} · ID Sponte {a.aluno_id}</p>
+                                                <ul className="grid gap-x-6 gap-y-0.5 text-xs md:grid-cols-2">
+                                                    {a.detalhe.map((d, i) => (
+                                                        <li key={i} className="flex justify-between gap-3"><span>{dataBr(d.vencimento)} · {d.categoria ?? "Parcela"}</span><span className="tabular-nums">{brl(d.valor)} · {d.atraso} d</span></li>
+                                                    ))}
+                                                </ul>
+                                            </td></tr>
+                                        )}
+                                    </Fragment>
+                                )
+                            })}
+                        </tbody>
+                    </table>
+                    {lista.length > 400 && <p className="py-2 text-center text-xs text-[var(--text-muted)]">Mostrando os 400 maiores valores. Use a busca, a turma ou o CSV para ver o resto.</p>}
+                    {lista.length === 0 && <p className="py-6 text-center text-sm text-[var(--text-muted)]">Nenhum aluno inadimplente neste recorte.</p>}
+                </div>
+            </div>
+        </div>
+    )
+}

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
+    DollarSign,
     LayoutDashboard,
     Users,
     Settings,
@@ -85,6 +86,7 @@ import { TicketQueuesSettings } from './components/admin/TicketQueuesSettings';
 import { TutorVirtualSettings } from './components/admin/TutorVirtualSettings';
 import { TicketDashboard } from './components/tickets/TicketDashboard';
 import { SponteDashboard } from './components/SponteDashboard';
+import { InadimplenciaDashboard } from './components/InadimplenciaDashboard';
 import { CampaignsDashboard } from './components/CampaignsDashboard';
 import { NotificationBell } from './components/notifications/NotificationBell';
 import { FollowupsPage } from './components/followups/FollowupsPage';
@@ -208,9 +210,10 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     }, [activeTab]);
     // Secretaria/Tutor/Coordenador trabalham só com Chamados (Portal do Aluno)
     const isTicketRole = ['secretaria', 'tutor', 'coordenador', 'atendente', 'biblioteca'].includes(String(profile?.role ?? ''));
+    const podeInadimplencia = ['admin', 'agent', 'secretaria', 'coordenador'].includes(String(profile?.role ?? ''));
     useEffect(() => {
-        if (isTicketRole && activeTab !== 'tickets') setActiveTab('tickets');
-    }, [isTicketRole, activeTab]);
+        if (isTicketRole && activeTab !== 'tickets' && !(activeTab === 'inadimplencia' && podeInadimplencia)) setActiveTab('tickets');
+    }, [isTicketRole, activeTab, podeInadimplencia]);
 
     // Load team selection — always validate against DB to flush corrupted localStorage values
     useEffect(() => {
@@ -969,6 +972,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                         {!sidebarCollapsed && <p className="text-[10px] text-[var(--text-muted)] font-bold tracking-widest uppercase mb-4 px-2">Atendimento ao Aluno</p>}
                         <nav className="space-y-1">
                             <NavItem collapsed={sidebarCollapsed} icon={TicketIcon} label="Chamados" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
+                            {podeInadimplencia && <NavItem collapsed={sidebarCollapsed} icon={DollarSign} label="Inadimplência" active={activeTab === 'inadimplencia'} onClick={() => setActiveTab('inadimplencia')} />}
                         </nav>
                         </>) : (<>
                         {!sidebarCollapsed && <p className="text-[10px] text-[var(--text-muted)] font-bold tracking-widest uppercase mb-4 px-2">Menu Principal</p>}
@@ -1049,6 +1053,9 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                             )}
                             {(profile?.role === 'admin' || profile?.role === 'agent') && (
                                 <NavItem collapsed={sidebarCollapsed} icon={GraduationCap} label="Matrículas" active={activeTab === 'matriculas'} onClick={() => setActiveTab('matriculas')} />
+                            )}
+                            {(profile?.role === 'admin' || profile?.role === 'agent') && (
+                                <NavItem collapsed={sidebarCollapsed} icon={DollarSign} label="Inadimplência" active={activeTab === 'inadimplencia'} onClick={() => setActiveTab('inadimplencia')} />
                             )}
                             {(profile?.role === 'admin') && (
                                 <div className="space-y-1">
@@ -2074,6 +2081,12 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {activeTab === 'matriculas' && (profile?.role === 'admin' || profile?.role === 'agent') && (
                     <div className="animate-fade-in">
                         <SponteDashboard isAdmin={profile?.role === 'admin'} />
+                    </div>
+                )}
+
+                {activeTab === 'inadimplencia' && podeInadimplencia && (
+                    <div className="animate-fade-in">
+                        <InadimplenciaDashboard />
                     </div>
                 )}
 
