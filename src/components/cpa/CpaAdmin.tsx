@@ -60,6 +60,9 @@ export function CpaAdmin() {
     const { data: statsDiscBase, isFetching: carregandoD, refetch: refazerD } = useStats(disc, { ...filtros, contexto: "", docente: "" })
     const { data: statsDiscFiltrada, isFetching: carregandoDF, refetch: refazerDF } = useStats(disc, filtros, !!(filtros.contexto || filtros.docente))
     const statsDisc = filtros.contexto || filtros.docente ? statsDiscFiltrada : statsDiscBase
+    // com professor escolhido o ranking lista as disciplinas dele (sem o filtro de disciplina, senão encolhe no drilldown)
+    const { data: statsDiscDocente } = useStats(disc, { ...filtros, contexto: "" }, !!filtros.docente)
+    const rankingBase = filtros.docente ? statsDiscDocente : statsDiscBase
 
     const opcoesCurso = useMemo(() => {
         const doForm = (detalhe?.perguntas ?? []).find((p) => p.tipo === "escolha")?.opcoes ?? []
@@ -342,7 +345,7 @@ export function CpaAdmin() {
                         <section className="flex flex-wrap items-center gap-3 glass-card p-4">
                             <span className="text-sm">Resultados do professor <b>{filtros.docente}</b>. A avaliação geral não é por professor e fica oculta.</span>
                             <Btn size="sm" onClick={() => {
-                                try { abrirRelatorioProfessor({ docente: filtros.docente, nivel, stats: statsDisc, base: statsDiscBase, origem: filtros.origem, de: filtros.de, ate: filtros.ate }) } catch (e) { showError((e as Error).message) }
+                                try { abrirRelatorioProfessor({ docente: filtros.docente, nivel, stats: statsDiscDocente ?? statsDisc, base: statsDiscBase, origem: filtros.origem, de: filtros.de, ate: filtros.ate }) } catch (e) { showError((e as Error).message) }
                             }}><FileText className="mr-2 h-4 w-4" /> Relatório do professor (1 página)</Btn>
                             <Btn size="sm" variant="ghost" onClick={() => setFiltros((f) => ({ ...f, docente: "", contexto: "" }))}>Ver todos</Btn>
                         </section>
@@ -353,7 +356,7 @@ export function CpaAdmin() {
                             onFiltrarContexto={() => {}} onLimparContexto={() => {}} />
                     )}
                     {disc && (
-                        <Resultados titulo="Avaliação de disciplinas" tipo="disciplina" stats={statsDisc} rankingBase={statsDiscBase} atualizando={carregandoD || carregandoDF}
+                        <Resultados titulo="Avaliação de disciplinas" tipo="disciplina" stats={statsDisc} rankingBase={rankingBase} atualizando={carregandoD || carregandoDF}
                             contextoAtivo={filtros.contexto ? { contexto: filtros.contexto, rotulo: rotuloContexto ?? filtros.contexto } : null}
                             onFiltrarCurso={(curso) => setFiltros((f) => ({ ...f, curso: f.curso === curso ? "" : curso }))}
                             onFiltrarContexto={(contexto, rotulo) => { setFiltros((f) => ({ ...f, contexto })); setRotuloContexto(rotulo) }}
