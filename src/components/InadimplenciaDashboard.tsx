@@ -1,6 +1,7 @@
 import { Fragment, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { AlertCircle, ChevronDown, ChevronRight, Download, Loader2, MessageCircle, RefreshCw, Search } from "lucide-react"
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { supabase } from "@/lib/supabase"
 import { withTimeout } from "@/utils/withTimeout"
 
@@ -10,6 +11,7 @@ type AlunoInad = {
     celular: string | null; parcelas: number; valor: number; atraso_max: number
     f30: number | null; f60: number | null; f90: number | null; f90p: number | null; detalhe: Detalhe[]
 }
+type LinhaMes = { mes: string; curso: string; vigente: boolean; parcelas: number; valor: number; parcelas_abertas: number; valor_aberto: number; alunos: number; alunos_abertos: number }
 type Relatorio = { alunos: AlunoInad[]; turmas: { turma: string | null; alunos: number }[]; sincronizado_em: string | null }
 
 const SEM_TURMA = "Sem turma"
@@ -17,6 +19,9 @@ const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", curren
 const dataBr = (s: string) => new Date(s + "T12:00:00").toLocaleDateString("pt-BR")
 const FAIXAS = [["f30", "1 a 30 dias"], ["f60", "31 a 60 dias"], ["f90", "61 a 90 dias"], ["f90p", "Mais de 90 dias"]] as const
 const MARCA = "#5551FF"
+const MESES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
+const rotuloMes = (m: string) => `${MESES[Number(m.slice(5)) - 1]}/${m.slice(2, 4)}`
+const pct1 = (v: number) => `${v.toFixed(1).replace(".", ",")}%`
 
 function whatsapp(cel: string | null) {
     const d = (cel ?? "").replace(/\D/g, "")
@@ -40,6 +45,29 @@ export function InadimplenciaDashboard() {
             return data as Relatorio
         },
     })
+
+    const { data: mensal } = useQuery({
+        queryKey: ["inadimplencia-mensal"],
+        staleTime: 5 * 60_000,
+        queryFn: async () => {
+            const { data, error } = await withTimeout(supabase.rpc("inadimplencia_mensal"), 30000, "A série mensal")
+            if (error) throw new Error(error.message)
+            return data as LinhaMes[]
+        },
+    })
+    const [cursoSerie, setCursoSerie] = useState("")
+    const cursosSerie = useMemo(() => [...new Set((mensal ?? []).filter((l) => todos || l.vigente).map((l) => l.curso))].sort(), [mensal, todos])
+    const serie = useMemo(() => {
+        const m = new Map<string, { mes: string; nome: string; valor: number; aberto: number; alunos: number; alunosAb: number }>()
+        for (const l of mensal ?? []) {
+            if (!todos && !l.vigente) continue
+            if (cursoSerie && l.curso !== cursoSerie) continue
+            const x = m.get(l.mes) ?? { mes: l.mes, nome: rotuloMes(l.mes), valor: 0, aberto: 0, alunos: 0, alunosAb: 0 }
+            x.valor += l.valor; x.aberto += l.valor_aberto; x.alunos += l.alunos; x.alunosAb += l.alunos_abertos
+            m.set(l.mes, x)
+        }
+        return [...m.values()].sort((a, b) => a.mes.localeCompare(b.mes)).map((x) => ({ ...x, indice: x.valor ? (x.aberto / x.valor) * 100 : 0, indiceAlunos: x.alunos ? (x.alunosAb / x.alunos) * 100 : 0 }))
+    }, [mensal, todos, cursoSerie])
 
     const base = useMemo(() => (data?.alunos ?? []).filter((a) => todos || a.vigente), [data, todos])
     const vigentesPorTurma = useMemo(() => new Map((data?.turmas ?? []).map((t) => [t.turma ?? SEM_TURMA, t.alunos])), [data])
@@ -123,6 +151,74 @@ export function InadimplenciaDashboard() {
                     <p className="mt-2 text-4xl font-bold text-[var(--text-main)]">{brl(faixas[3].valor)}</p>
                     <p className="mt-1 text-xs text-[var(--text-muted)]">{totalValor ? Math.round((faixas[3].valor / totalValor) * 100) : 0}% do valor em atraso</p>
                 </div>
+            </div>
+
+            <div className="glass-card space-y-4 p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Evolução mês a mês</p>
+                        <p className="mt-1 max-w-xl text-xs text-[var(--text-muted)]">
+                            Índice = valor ainda pendente ÷ valor das parcelas que venceram no mês (canceladas fora). Mostra a situação de hoje de cada mês, não a de quando venceu. O mês atual conta só até hoje. Dados a partir de jan/2026.
+                        </p>
+                    </div>
+                    <select value={cursoSerie} onChange={(e) => setCursoSerie(e.target.value)} className="max-w-[280px] rounded-full border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text-main)]" aria-label="Curso">
+                        <option value="">Todos os cursos</option>
+                        {cursosSerie.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                </div>
+                {serie.length === 0 ? <p className="py-6 text-center text-sm text-[var(--text-muted)]">Sem parcelas neste recorte.</p> : (
+                    <div className="grid gap-6 lg:grid-cols-2">
+                        <div>
+                            <p className="mb-2 text-sm font-medium text-[var(--text-main)]">Índice de inadimplência (% do valor)</p>
+                            <div className="h-64">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <LineChart data={serie} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                                        <CartesianGrid stroke="rgba(100,116,139,0.18)" vertical={false} />
+                                        <XAxis dataKey="nome" tick={{ fill: "#64748B", fontSize: 12 }} tickLine={false} axisLine={false} />
+                                        <YAxis tickFormatter={(v) => `${v}%`} tick={{ fill: "#64748B", fontSize: 12 }} tickLine={false} axisLine={false} width={44} />
+                                        <Tooltip content={({ active, payload }) => {
+                                            const x = active && payload?.[0]?.payload
+                                            if (!x) return null
+                                            return (
+                                                <div className="rounded-xl bg-[var(--bg-card)] px-3 py-2 text-xs shadow-lg ring-1 ring-black/5">
+                                                    <p className="mb-1 font-medium text-[var(--text-muted)]">{x.nome}</p>
+                                                    <p className="text-sm font-semibold text-[var(--text-main)]">{pct1(x.indice)} do valor</p>
+                                                    <p className="text-[var(--text-muted)]">{brl(x.aberto)} de {brl(x.valor)}</p>
+                                                    <p className="text-[var(--text-muted)]">{pct1(x.indiceAlunos)} dos alunos ({x.alunosAb} de {x.alunos})</p>
+                                                </div>
+                                            )
+                                        }} />
+                                        <Line type="monotone" dataKey="indice" stroke={MARCA} strokeWidth={2} dot={{ r: 4, fill: MARCA, stroke: "var(--bg-card)", strokeWidth: 2 }} isAnimationActive={false} />
+                                    </LineChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+                        <div>
+                            <p className="mb-2 text-sm font-medium text-[var(--text-main)]">Valor ainda em aberto (R$)</p>
+                            <div className="h-64">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={serie} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                                        <CartesianGrid stroke="rgba(100,116,139,0.18)" vertical={false} />
+                                        <XAxis dataKey="nome" tick={{ fill: "#64748B", fontSize: 12 }} tickLine={false} axisLine={false} />
+                                        <YAxis tickFormatter={(v) => (v >= 1000 ? `${Math.round(v / 1000)} mil` : String(v))} tick={{ fill: "#64748B", fontSize: 12 }} tickLine={false} axisLine={false} width={52} />
+                                        <Tooltip cursor={{ fill: "rgba(100,116,139,0.10)" }} content={({ active, payload }) => {
+                                            const x = active && payload?.[0]?.payload
+                                            if (!x) return null
+                                            return (
+                                                <div className="rounded-xl bg-[var(--bg-card)] px-3 py-2 text-xs shadow-lg ring-1 ring-black/5">
+                                                    <p className="mb-1 font-medium text-[var(--text-muted)]">{x.nome}</p>
+                                                    <p className="text-sm font-semibold text-[var(--text-main)]">{brl(x.aberto)} em aberto</p>
+                                                    <p className="text-[var(--text-muted)]">{x.alunosAb} alunos · {pct1(x.indice)} de {brl(x.valor)}</p>
+                                                </div>
+                                            )
+                                        }} />
+                                        <Bar dataKey="aberto" fill={MARCA} radius={[4, 4, 0, 0]} isAnimationActive={false} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
 
             <div className="glass-card space-y-3 p-5">
