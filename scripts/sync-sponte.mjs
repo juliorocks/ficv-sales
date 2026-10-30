@@ -136,6 +136,7 @@ function parseParcelas(xml) {
             categoria:        extractFirst(r, 'Categoria') || null,
             categoria_id:     parseInt(extractFirst(r, 'CategoriaID')) || null,
             sacado:           extractFirst(r, 'Sacado') || null,
+            bolsa_associada:  extractFirst(r, 'BolsaAssociada') || null,
             conta_creditar:   extractFirst(r, 'ContaCreditar') || null,
             synced_at:        new Date().toISOString(),
         }))

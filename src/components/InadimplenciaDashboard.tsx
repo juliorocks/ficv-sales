@@ -5,10 +5,10 @@ import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Too
 import { supabase } from "@/lib/supabase"
 import { withTimeout } from "@/utils/withTimeout"
 
-type Detalhe = { vencimento: string; valor: number; categoria: string | null; atraso: number; atual?: number }
+type Detalhe = { vencimento: string; valor: number; categoria: string | null; atraso: number; desconto_pct?: number; liquido?: number; atual?: number }
 type AlunoInad = {
     aluno_id: number; nome: string | null; turma: string | null; curso: string | null; situacao: string | null; vigente: boolean | null
-    celular: string | null; parcelas: number; valor: number; atualizado?: number; atraso_max: number
+    celular: string | null; parcelas: number; valor: number; liquido?: number; atualizado?: number; atraso_max: number
     f30: number | null; f60: number | null; f90: number | null; f90p: number | null; detalhe: Detalhe[]
 }
 type LinhaMes = { dia: string; curso: string; vigente: boolean; parcelas: number; valor: number; parcelas_abertas: number; valor_aberto: number; alunos: number; alunos_abertos: number }
@@ -105,8 +105,8 @@ export function InadimplenciaDashboard() {
         const bruto = a.detalhe.filter((d) => dentro(d.vencimento))
         if (!bruto.length) return []
         const inpc = data?.inpc ?? []
-        const det = bruto.map((d) => ({ ...d, atual: valorAtualizado(d.valor, d.vencimento, d.atraso, data?.inpc ?? []) }))
-        return [{ ...a, detalhe: det, parcelas: det.length, valor: det.reduce((t, d) => t + d.valor, 0), atualizado: det.reduce((t, d) => t + (d.atual ?? d.valor), 0),
+        const det = bruto.map((d) => { const liquido = d.valor * (1 - (d.desconto_pct ?? 0) / 100); return { ...d, liquido, atual: valorAtualizado(liquido, d.vencimento, d.atraso, data?.inpc ?? []) } })
+        return [{ ...a, detalhe: det, parcelas: det.length, valor: det.reduce((t, d) => t + d.valor, 0), liquido: det.reduce((t, d) => t + (d.liquido ?? d.valor), 0), atualizado: det.reduce((t, d) => t + (d.atual ?? d.valor), 0),
             atraso_max: Math.max(...bruto.map((d) => d.atraso)), f30: 0, f60: 0, f90: 0, f90p: 0 }]
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }), [data, todos, de, ate])
@@ -115,11 +115,11 @@ export function InadimplenciaDashboard() {
     const totalVigentes = useMemo(() => [...vigentesPorTurma.values()].reduce((s, n) => s + n, 0), [vigentesPorTurma])
 
     const porTurma = useMemo(() => {
-        const m = new Map<string, { turma: string; inad: number; valor: number; atualizado: number; atraso: number }>()
+        const m = new Map<string, { turma: string; inad: number; valor: number; liquido: number; atualizado: number; atraso: number }>()
         for (const a of base) {
             const k = a.turma ?? SEM_TURMA
-            const x = m.get(k) ?? { turma: k, inad: 0, valor: 0, atualizado: 0, atraso: 0 }
-            x.inad++; x.valor += a.valor; x.atualizado += a.atualizado ?? a.valor; x.atraso = Math.max(x.atraso, a.atraso_max)
+            const x = m.get(k) ?? { turma: k, inad: 0, valor: 0, liquido: 0, atualizado: 0, atraso: 0 }
+            x.inad++; x.valor += a.valor; x.liquido += a.liquido ?? a.valor; x.atualizado += a.atualizado ?? a.valor; x.atraso = Math.max(x.atraso, a.atraso_max)
             m.set(k, x)
         }
         const l = [...m.values()].map((x) => {
@@ -138,6 +138,7 @@ export function InadimplenciaDashboard() {
     }, [base, turma, busca])
 
     const totalValor = base.reduce((s, a) => s + a.valor, 0)
+    const totalLiquido = base.reduce((s, a) => s + (a.liquido ?? a.valor), 0)
     const totalAtualizado = base.reduce((s, a) => s + (a.atualizado ?? a.valor), 0)
     const faixas = FAIXAS.map(([k, nome]) => {
         const ds = base.flatMap((a) => a.detalhe).filter((d) => (k === "f30" ? d.atraso <= 30 : k === "f60" ? d.atraso > 30 && d.atraso <= 60 : k === "f90" ? d.atraso > 60 && d.atraso <= 90 : d.atraso > 90))
@@ -149,12 +150,13 @@ export function InadimplenciaDashboard() {
     const vigInad = base.filter((a) => a.vigente).length
     const pctGeral = totalVigentes ? (vigInad / totalVigentes) * 100 : 0
     const noRecorte = lista.reduce((s, a) => s + a.valor, 0)
+    const noRecorteLiquido = lista.reduce((s, a) => s + (a.liquido ?? a.valor), 0)
     const noRecorteAtual = lista.reduce((s, a) => s + (a.atualizado ?? a.valor), 0)
 
     function exportar() {
-        const cab = ["Aluno", "AlunoID", "Turma", "Curso", "Situação", "Celular", "Parcelas em atraso", "Valor", "Valor atualizado", "Maior atraso (dias)", "Venc. mais antigo"]
+        const cab = ["Aluno", "AlunoID", "Turma", "Curso", "Situação", "Celular", "Parcelas em atraso", "Valor", "Valor com desconto", "Valor atualizado", "Maior atraso (dias)", "Venc. mais antigo"]
         const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`
-        const linhas = lista.map((a) => [a.nome, a.aluno_id, a.turma, a.curso, a.situacao, a.celular, a.parcelas, a.valor.toFixed(2).replace(".", ","), (a.atualizado ?? a.valor).toFixed(2).replace(".", ","), a.atraso_max, a.detalhe[0] ? dataBr(a.detalhe[0].vencimento) : ""].map(esc).join(";"))
+        const linhas = lista.map((a) => [a.nome, a.aluno_id, a.turma, a.curso, a.situacao, a.celular, a.parcelas, a.valor.toFixed(2).replace(".", ","), (a.liquido ?? a.valor).toFixed(2).replace(".", ","), (a.atualizado ?? a.valor).toFixed(2).replace(".", ","), a.atraso_max, a.detalhe[0] ? dataBr(a.detalhe[0].vencimento) : ""].map(esc).join(";"))
         const blob = new Blob(["﻿" + [cab.map(esc).join(";"), ...linhas].join("\n")], { type: "text/csv;charset=utf-8" })
         const url = URL.createObjectURL(blob)
         const l = document.createElement("a"); l.href = url; l.download = `inadimplencia-${new Date().toISOString().slice(0, 10)}.csv`; l.click()
@@ -204,7 +206,7 @@ export function InadimplenciaDashboard() {
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Valor em atraso</p>
                     <p className="mt-2 text-4xl font-bold text-[var(--text-main)]">{brl(totalValor)}</p>
                     <p className="mt-1 text-xs text-[var(--text-muted)]">
-                        <b className="text-[var(--text-main)]">{brl(totalAtualizado)}</b> atualizado (INPC + multa + juros) ·
+                        com desconto <b className="text-[var(--text-main)]">{brl(totalLiquido)}</b> · atualizado <b className="text-[var(--text-main)]">{brl(totalAtualizado)}</b> ·
                         {pctValor !== null && <><b className="text-[var(--text-main)]">{pct1(pctValor)}</b> de {brl(vencido)} vencidos no período · </>}
                         {base.reduce((s, a) => s + a.parcelas, 0).toLocaleString("pt-BR")} parcelas
                     </p>
@@ -312,7 +314,7 @@ export function InadimplenciaDashboard() {
                 <div className="max-h-[420px] overflow-auto">
                     <table className="w-full text-sm">
                         <thead className="sticky top-0 bg-[var(--bg-card)] text-left text-[11px] uppercase tracking-wider text-[var(--text-muted)]">
-                            <tr><th className="py-2">Turma</th><th className="text-right">Alunos</th><th className="text-right">Inadimplentes</th><th className="w-40 pl-4">% da turma</th><th className="text-right">Valor</th><th className="text-right">Atualizado</th><th className="text-right">Maior atraso</th></tr>
+                            <tr><th className="py-2">Turma</th><th className="text-right">Alunos</th><th className="text-right">Inadimplentes</th><th className="w-40 pl-4">% da turma</th><th className="text-right">Valor</th><th className="text-right">Com desconto</th><th className="text-right">Atualizado</th><th className="text-right">Maior atraso</th></tr>
                         </thead>
                         <tbody>
                             {porTurma.map((t) => (
@@ -329,6 +331,7 @@ export function InadimplenciaDashboard() {
                                         )}
                                     </td>
                                     <td className="text-right font-semibold tabular-nums">{brl(t.valor)}</td>
+                                    <td className="text-right tabular-nums">{brl(t.liquido)}</td>
                                     <td className="text-right tabular-nums text-[var(--text-muted)]">{brl(t.atualizado)}</td>
                                     <td className="text-right tabular-nums text-[var(--text-muted)]">{t.atraso} d</td>
                                 </tr>
@@ -341,7 +344,7 @@ export function InadimplenciaDashboard() {
             <div className="glass-card p-5">
                 <div className="mb-3 flex flex-wrap items-center gap-2">
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                        Alunos{turma ? ` · ${turma}` : ""} · {lista.length} · {brl(noRecorte)} · {brl(noRecorteAtual)} atualizado
+                        Alunos{turma ? ` · ${turma}` : ""} · {lista.length} · {brl(noRecorte)} · {brl(noRecorteLiquido)} com desconto · {brl(noRecorteAtual)} atualizado
                     </p>
                     {turma && <button type="button" onClick={() => setTurma("")} className="rounded-full bg-[var(--bg-card-hover)] px-3 py-1 text-xs">Limpar turma ✕</button>}
                     <div className="ml-auto flex items-center gap-2">
@@ -353,7 +356,7 @@ export function InadimplenciaDashboard() {
                 <div className="max-h-[560px] overflow-auto">
                     <table className="w-full text-sm">
                         <thead className="sticky top-0 bg-[var(--bg-card)] text-left text-[11px] uppercase tracking-wider text-[var(--text-muted)]">
-                            <tr><th className="w-6" /><th className="py-2">Aluno</th><th>Turma</th><th className="text-right">Parcelas</th><th className="text-right">Valor</th><th className="text-right">Atualizado</th><th className="text-right">Atraso</th><th className="w-10" /></tr>
+                            <tr><th className="w-6" /><th className="py-2">Aluno</th><th>Turma</th><th className="text-right">Parcelas</th><th className="text-right">Valor</th><th className="text-right">Com desconto</th><th className="text-right">Atualizado</th><th className="text-right">Atraso</th><th className="w-10" /></tr>
                         </thead>
                         <tbody>
                             {lista.slice(0, 400).map((a) => {
@@ -367,16 +370,17 @@ export function InadimplenciaDashboard() {
                                             <td className="max-w-[260px] truncate text-[var(--text-muted)]">{a.turma ?? SEM_TURMA}</td>
                                             <td className="text-right tabular-nums">{a.parcelas}</td>
                                             <td className="text-right font-semibold tabular-nums">{brl(a.valor)}</td>
+                                            <td className="text-right tabular-nums">{brl(a.liquido ?? a.valor)}</td>
                                             <td className="text-right tabular-nums text-[var(--text-muted)]">{brl(a.atualizado ?? a.valor)}</td>
                                             <td className="text-right tabular-nums text-[var(--text-muted)]">{a.atraso_max} d</td>
                                             <td className="text-right">{wa && <a href={wa} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} aria-label="Chamar no WhatsApp" className="inline-block p-1.5 text-[var(--text-muted)] hover:text-[var(--text-main)]"><MessageCircle className="h-4 w-4" /></a>}</td>
                                         </tr>
                                         {abre && (
-                                            <tr className="bg-[var(--bg-card-hover)]"><td /><td colSpan={7} className="py-2">
+                                            <tr className="bg-[var(--bg-card-hover)]"><td /><td colSpan={8} className="py-2">
                                                 <p className="mb-1 text-xs text-[var(--text-muted)]">{a.curso ?? ""}{a.celular ? ` · ${a.celular}` : ""} · ID Sponte {a.aluno_id}</p>
                                                 <ul className="grid gap-x-6 gap-y-0.5 text-xs md:grid-cols-2">
                                                     {a.detalhe.map((d, i) => (
-                                                        <li key={i} className="flex justify-between gap-3"><span>{dataBr(d.vencimento)} · {d.categoria ?? "Parcela"}</span><span className="tabular-nums">{brl(d.valor)}{d.atual !== undefined && d.atual !== d.valor ? ` → ${brl(d.atual)}` : ""} · {d.atraso} d</span></li>
+                                                        <li key={i} className="flex justify-between gap-3"><span>{dataBr(d.vencimento)} · {d.categoria ?? "Parcela"}</span><span className="tabular-nums">{brl(d.valor)}{d.liquido !== undefined && d.liquido !== d.valor ? ` → ${brl(d.liquido)} (−${d.desconto_pct}%)` : ""}{d.atual !== undefined && d.atual !== d.liquido ? ` → ${brl(d.atual)}` : ""} · {d.atraso} d</span></li>
                                                     ))}
                                                 </ul>
                                             </td></tr>
