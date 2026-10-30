@@ -5,19 +5,28 @@ import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Too
 import { supabase } from "@/lib/supabase"
 import { withTimeout } from "@/utils/withTimeout"
 
-type Detalhe = { vencimento: string; valor: number; categoria: string | null; atraso: number }
+type Detalhe = { vencimento: string; valor: number; categoria: string | null; atraso: number; atual?: number }
 type AlunoInad = {
     aluno_id: number; nome: string | null; turma: string | null; curso: string | null; situacao: string | null; vigente: boolean | null
-    celular: string | null; parcelas: number; valor: number; atraso_max: number
+    celular: string | null; parcelas: number; valor: number; principal?: number; atraso_max: number
     f30: number | null; f60: number | null; f90: number | null; f90p: number | null; detalhe: Detalhe[]
 }
 type LinhaMes = { dia: string; curso: string; vigente: boolean; parcelas: number; valor: number; parcelas_abertas: number; valor_aberto: number; alunos: number; alunos_abertos: number }
-type Relatorio = { alunos: AlunoInad[]; turmas: { turma: string | null; alunos: number; pre: number }[]; sincronizado_em: string | null }
+type Relatorio = { alunos: AlunoInad[]; turmas: { turma: string | null; alunos: number; pre: number }[]; sincronizado_em: string | null; inpc?: { mes: string; v: number }[] }
 
 const SEM_TURMA = "Sem turma"
 const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })
 const dataBr = (s: string) => new Date(s + "T12:00:00").toLocaleDateString("pt-BR")
 const FAIXAS = [["f30", "1 a 30 dias"], ["f60", "31 a 60 dias"], ["f90", "61 a 90 dias"], ["f90p", "Mais de 90 dias"]] as const
+// Cláusula 9ª do contrato: principal corrigido pelo INPC desde o mês seguinte ao vencimento, multa de 2% e juros de 0,033% ao dia
+const MULTA = 0.02
+const JUROS_DIA = 0.00033
+function valorAtualizado(valor: number, vencimento: string, atraso: number, inpc: { mes: string; v: number }[]) {
+    const mesVenc = vencimento.slice(0, 7)
+    const fator = inpc.filter((i) => i.mes > mesVenc).reduce((f, i) => f * (1 + i.v / 100), 1)
+    const corrigido = valor * fator
+    return corrigido * (1 + MULTA + JUROS_DIA * atraso)
+}
 const MARCA = "#5551FF"
 const MESES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
 const rotuloMes = (m: string) => `${MESES[Number(m.slice(5)) - 1]}/${m.slice(2, 4)}`
@@ -49,6 +58,7 @@ export function InadimplenciaDashboard() {
     const [turma, setTurma] = useState("")
     const [busca, setBusca] = useState("")
     const [aberto, setAberto] = useState<number | null>(null)
+    const [atualizados, setAtualizados] = useState(true)
     const [preset, setPreset] = useState<Preset>("ano")
     const [custom, setCustom] = useState({ de: "", ate: "" })
     const { de, ate } = preset === "custom" ? custom : faixaDoPreset(preset)
@@ -93,13 +103,15 @@ export function InadimplenciaDashboard() {
     }, [mensal, todos, cursoSerie, de, ate, porDia])
 
     const base = useMemo(() => (data?.alunos ?? []).filter((a) => todos || a.vigente).flatMap((a) => {
-        const det = a.detalhe.filter((d) => dentro(d.vencimento))
-        if (!det.length) return []
-        const soma = (f: (d: Detalhe) => boolean) => det.filter(f).reduce((t, d) => t + d.valor, 0)
-        return [{ ...a, detalhe: det, parcelas: det.length, valor: soma(() => true), atraso_max: Math.max(...det.map((d) => d.atraso)),
+        const bruto = a.detalhe.filter((d) => dentro(d.vencimento))
+        if (!bruto.length) return []
+        const inpc = data?.inpc ?? []
+        const det = bruto.map((d) => ({ ...d, atual: atualizados ? valorAtualizado(d.valor, d.vencimento, d.atraso, inpc) : d.valor }))
+        const soma = (f: (d: Detalhe) => boolean) => det.filter(f).reduce((t, d) => t + (d.atual ?? d.valor), 0)
+        return [{ ...a, detalhe: det, parcelas: det.length, valor: soma(() => true), principal: det.reduce((t, d) => t + d.valor, 0), atraso_max: Math.max(...bruto.map((d) => d.atraso)),
             f30: soma((d) => d.atraso <= 30), f60: soma((d) => d.atraso > 30 && d.atraso <= 60), f90: soma((d) => d.atraso > 60 && d.atraso <= 90), f90p: soma((d) => d.atraso > 90) }]
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }), [data, todos, de, ate])
+    }), [data, todos, de, ate, atualizados])
     const vigentesPorTurma = useMemo(() => new Map((data?.turmas ?? []).map((t) => [t.turma ?? SEM_TURMA, t.alunos])), [data])
     const preDaTurma = useMemo(() => new Map((data?.turmas ?? []).map((t) => [t.turma ?? SEM_TURMA, t.pre])), [data])
     const totalVigentes = useMemo(() => [...vigentesPorTurma.values()].reduce((s, n) => s + n, 0), [vigentesPorTurma])
@@ -128,18 +140,19 @@ export function InadimplenciaDashboard() {
     }, [base, turma, busca])
 
     const totalValor = base.reduce((s, a) => s + a.valor, 0)
+    const totalPrincipal = base.reduce((s, a) => s + (a.principal ?? a.valor), 0)
     const faixas = FAIXAS.map(([k, nome]) => ({ nome, valor: base.reduce((s, a) => s + (a[k] ?? 0), 0) }))
     const maiorFaixa = Math.max(...faixas.map((f) => f.valor), 1)
     const vencido = (mensal ?? []).filter((l) => (todos || l.vigente) && dentro(l.dia)).reduce((t, l) => t + l.valor, 0)
-    const pctValor = vencido ? (totalValor / vencido) * 100 : null
+    const pctValor = vencido ? (totalPrincipal / vencido) * 100 : null
     const vigInad = base.filter((a) => a.vigente).length
     const pctGeral = totalVigentes ? (vigInad / totalVigentes) * 100 : 0
     const noRecorte = lista.reduce((s, a) => s + a.valor, 0)
 
     function exportar() {
-        const cab = ["Aluno", "AlunoID", "Turma", "Curso", "Situação", "Celular", "Parcelas em atraso", "Valor", "Maior atraso (dias)", "Venc. mais antigo"]
+        const cab = ["Aluno", "AlunoID", "Turma", "Curso", "Situação", "Celular", "Parcelas em atraso", "Principal", atualizados ? "Valor atualizado" : "Valor", "Maior atraso (dias)", "Venc. mais antigo"]
         const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`
-        const linhas = lista.map((a) => [a.nome, a.aluno_id, a.turma, a.curso, a.situacao, a.celular, a.parcelas, a.valor.toFixed(2).replace(".", ","), a.atraso_max, a.detalhe[0] ? dataBr(a.detalhe[0].vencimento) : ""].map(esc).join(";"))
+        const linhas = lista.map((a) => [a.nome, a.aluno_id, a.turma, a.curso, a.situacao, a.celular, a.parcelas, (a.principal ?? a.valor).toFixed(2).replace(".", ","), a.valor.toFixed(2).replace(".", ","), a.atraso_max, a.detalhe[0] ? dataBr(a.detalhe[0].vencimento) : ""].map(esc).join(";"))
         const blob = new Blob(["﻿" + [cab.map(esc).join(";"), ...linhas].join("\n")], { type: "text/csv;charset=utf-8" })
         const url = URL.createObjectURL(blob)
         const l = document.createElement("a"); l.href = url; l.download = `inadimplencia-${new Date().toISOString().slice(0, 10)}.csv`; l.click()
@@ -159,6 +172,9 @@ export function InadimplenciaDashboard() {
                     </p>
                 </div>
                 <div className="flex items-center gap-2">
+                    <label className="flex cursor-pointer items-center gap-2 text-sm text-[var(--text-main)]" title="Principal corrigido pelo INPC + multa de 2% + juros de 0,033% ao dia (cláusula 9ª)">
+                        <input type="checkbox" checked={atualizados} onChange={(e) => setAtualizados(e.target.checked)} /> Valores atualizados (INPC + multa + juros)
+                    </label>
                     <label className="flex cursor-pointer items-center gap-2 text-sm text-[var(--text-main)]">
                         <input type="checkbox" checked={todos} onChange={(e) => setTodos(e.target.checked)} /> Incluir alunos sem matrícula Vigente
                     </label>
@@ -189,6 +205,7 @@ export function InadimplenciaDashboard() {
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Valor em atraso</p>
                     <p className="mt-2 text-4xl font-bold text-[var(--text-main)]">{brl(totalValor)}</p>
                     <p className="mt-1 text-xs text-[var(--text-muted)]">
+                        {atualizados && <>principal {brl(totalPrincipal)} + encargos {brl(totalValor - totalPrincipal)} · </>}
                         {pctValor !== null && <><b className="text-[var(--text-main)]">{pct1(pctValor)}</b> de {brl(vencido)} vencidos no período · </>}
                         {base.reduce((s, a) => s + a.parcelas, 0).toLocaleString("pt-BR")} parcelas
                     </p>
@@ -210,7 +227,7 @@ export function InadimplenciaDashboard() {
                     <div>
                         <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Evolução mês a mês</p>
                         <p className="mt-1 max-w-xl text-xs text-[var(--text-muted)]">
-                            Índice = valor ainda pendente ÷ valor das parcelas que venceram no mês (canceladas fora). Mostra a situação de hoje de cada mês, não a de quando venceu. O mês atual conta só até hoje. Dados a partir de jan/2026. Segue o período escolhido no topo.
+                            Índice (sobre o principal, sem multa e juros) = valor ainda pendente ÷ valor das parcelas que venceram no mês (canceladas fora). Mostra a situação de hoje de cada mês, não a de quando venceu. O mês atual conta só até hoje. Dados a partir de jan/2026. Segue o período escolhido no topo.
                         </p>
                     </div>
                     <select value={cursoSerie} onChange={(e) => setCursoSerie(e.target.value)} className="max-w-[280px] rounded-full border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text-main)]" aria-label="Curso">
@@ -358,7 +375,7 @@ export function InadimplenciaDashboard() {
                                                 <p className="mb-1 text-xs text-[var(--text-muted)]">{a.curso ?? ""}{a.celular ? ` · ${a.celular}` : ""} · ID Sponte {a.aluno_id}</p>
                                                 <ul className="grid gap-x-6 gap-y-0.5 text-xs md:grid-cols-2">
                                                     {a.detalhe.map((d, i) => (
-                                                        <li key={i} className="flex justify-between gap-3"><span>{dataBr(d.vencimento)} · {d.categoria ?? "Parcela"}</span><span className="tabular-nums">{brl(d.valor)} · {d.atraso} d</span></li>
+                                                        <li key={i} className="flex justify-between gap-3"><span>{dataBr(d.vencimento)} · {d.categoria ?? "Parcela"}</span><span className="tabular-nums">{brl(d.valor)}{atualizados && d.atual !== undefined && d.atual !== d.valor ? ` → ${brl(d.atual)}` : ""} · {d.atraso} d</span></li>
                                                     ))}
                                                 </ul>
                                             </td></tr>

@@ -209,6 +209,15 @@ async function syncAbertas() {
     console.log(`\n  ✓ ${total} parcelas por vencimento sincronizadas`);
 }
 
+// INPC (série 188 do Banco Central) para atualizar parcelas em atraso no dashboard de inadimplência
+async function syncInpc() {
+    const r = await fetch(`https://api.bcb.gov.br/dados/serie/bcdata.sgs.188/dados?formato=json&dataInicial=01/01/${year - 1}`);
+    if (!r.ok) { console.error(`  INPC: HTTP ${r.status}`); return; }
+    const rows = (await r.json()).map(x => ({ mes: x.data.split('/').reverse().join('-'), variacao: parseFloat(x.valor) })).filter(x => !Number.isNaN(x.variacao));
+    await pgUpsert('indice_inpc', rows, 'mes');
+    console.log(`  ✓ ${rows.length} meses de INPC`);
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 if (!pgEnabled) throw new Error('SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY não definidos');
@@ -216,6 +225,6 @@ console.log(`\n🔄 Sync Sponte → Supabase | modo=${mode} | ${startDate} → $
 
 if (mode === 'matriculas' || mode === 'full') await syncMatriculas();
 if (mode === 'parcelas'   || mode === 'full') await syncParcelas();
-if (mode === 'abertas'    || mode === 'full') await syncAbertas();
+if (mode === 'abertas'    || mode === 'full') { await syncAbertas(); await syncInpc(); }
 
 console.log('\n✅ Sync concluído!');
