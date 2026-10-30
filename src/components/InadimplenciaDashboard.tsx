@@ -105,7 +105,7 @@ export function InadimplenciaDashboard() {
         const bruto = a.detalhe.filter((d) => dentro(d.vencimento))
         if (!bruto.length) return []
         const inpc = data?.inpc ?? []
-        const det = bruto.map((d) => { const liquido = d.valor * (1 - (d.desconto_pct ?? 0) / 100); return { ...d, liquido, atual: valorAtualizado(liquido, d.vencimento, d.atraso, data?.inpc ?? []) } })
+        const det = bruto.map((d) => { const liquido = d.valor * (1 - (d.desconto_pct ?? 0) / 100); return { ...d, liquido, atual: valorAtualizado(d.valor, d.vencimento, d.atraso, data?.inpc ?? []) } })
         return [{ ...a, detalhe: det, parcelas: det.length, valor: det.reduce((t, d) => t + d.valor, 0), liquido: det.reduce((t, d) => t + (d.liquido ?? d.valor), 0), atualizado: det.reduce((t, d) => t + (d.atual ?? d.valor), 0),
             atraso_max: Math.max(...bruto.map((d) => d.atraso)), f30: 0, f60: 0, f90: 0, f90p: 0 }]
     // eslint-disable-next-line react-hooks/exhaustive-deps
