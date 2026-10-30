@@ -156,7 +156,7 @@ export function InadimplenciaDashboard() {
     const noRecorteAtual = lista.reduce((s, a) => s + (a.atualizado ?? a.valor), 0)
 
     function abrirChamado(a: AlunoInad) {
-        const datas = a.detalhe.map((d) => dataBr(d.vencimento).slice(0, 5)).join(", ")
+        const datas = [...new Set(a.detalhe.map((d) => d.vencimento).sort())].map((v) => dataBr(v).slice(0, 5)).join(", ")
         setChamado({
             aluno: { aluno_id: a.aluno_id, nome: a.nome ?? `Aluno ${a.aluno_id}`, situacao: a.situacao, turma_atual: a.turma },
             categoria: "financeiro",
