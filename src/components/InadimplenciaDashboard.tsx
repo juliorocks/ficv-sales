@@ -11,7 +11,7 @@ type AlunoInad = {
     celular: string | null; parcelas: number; valor: number; atraso_max: number
     f30: number | null; f60: number | null; f90: number | null; f90p: number | null; detalhe: Detalhe[]
 }
-type LinhaMes = { mes: string; curso: string; vigente: boolean; parcelas: number; valor: number; parcelas_abertas: number; valor_aberto: number; alunos: number; alunos_abertos: number }
+type LinhaMes = { dia: string; curso: string; vigente: boolean; parcelas: number; valor: number; parcelas_abertas: number; valor_aberto: number; alunos: number; alunos_abertos: number }
 type Relatorio = { alunos: AlunoInad[]; turmas: { turma: string | null; alunos: number; pre: number }[]; sincronizado_em: string | null }
 
 const SEM_TURMA = "Sem turma"
@@ -21,6 +21,21 @@ const FAIXAS = [["f30", "1 a 30 dias"], ["f60", "31 a 60 dias"], ["f90", "61 a 9
 const MARCA = "#5551FF"
 const MESES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
 const rotuloMes = (m: string) => `${MESES[Number(m.slice(5)) - 1]}/${m.slice(2, 4)}`
+const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+type Preset = "mes" | "mes_passado" | "semestre" | "ano" | "90d" | "tudo" | "custom"
+const PRESETS: [Preset, string][] = [["mes", "Este mês"], ["mes_passado", "Mês passado"], ["semestre", "Este semestre"], ["ano", "Este ano"], ["90d", "Últimos 90 dias"], ["tudo", "Todo o período"], ["custom", "Personalizado"]]
+function faixaDoPreset(p: Preset): { de: string; ate: string } {
+    const h = new Date()
+    const ano = h.getFullYear(), mes = h.getMonth()
+    switch (p) {
+        case "mes": return { de: iso(new Date(ano, mes, 1)), ate: iso(h) }
+        case "mes_passado": return { de: iso(new Date(ano, mes - 1, 1)), ate: iso(new Date(ano, mes, 0)) }
+        case "semestre": return { de: iso(new Date(ano, mes < 6 ? 0 : 6, 1)), ate: iso(h) }
+        case "ano": return { de: iso(new Date(ano, 0, 1)), ate: iso(h) }
+        case "90d": return { de: iso(new Date(h.getTime() - 90 * 86400000)), ate: iso(h) }
+        default: return { de: "", ate: "" }
+    }
+}
 const pct1 = (v: number) => `${v.toFixed(1).replace(".", ",")}%`
 
 function whatsapp(cel: string | null) {
@@ -34,6 +49,10 @@ export function InadimplenciaDashboard() {
     const [turma, setTurma] = useState("")
     const [busca, setBusca] = useState("")
     const [aberto, setAberto] = useState<number | null>(null)
+    const [preset, setPreset] = useState<Preset>("ano")
+    const [custom, setCustom] = useState({ de: "", ate: "" })
+    const { de, ate } = preset === "custom" ? custom : faixaDoPreset(preset)
+    const dentro = (dia: string) => (!de || dia >= de) && (!ate || dia <= ate)
     const [ordemTurma, setOrdemTurma] = useState<"valor" | "pct" | "alunos">("valor")
 
     const { data, isLoading, isFetching, error, refetch } = useQuery({
@@ -57,19 +76,30 @@ export function InadimplenciaDashboard() {
     })
     const [cursoSerie, setCursoSerie] = useState("")
     const cursosSerie = useMemo(() => [...new Set((mensal ?? []).filter((l) => todos || l.vigente).map((l) => l.curso))].sort(), [mensal, todos])
+    const porDia = !!de && !!ate && (new Date(ate).getTime() - new Date(de).getTime()) / 86400000 <= 62
     const serie = useMemo(() => {
-        const m = new Map<string, { mes: string; nome: string; valor: number; aberto: number; alunos: number; alunosAb: number }>()
+        const m = new Map<string, { chave: string; nome: string; valor: number; aberto: number; alunos: number; alunosAb: number }>()
         for (const l of mensal ?? []) {
             if (!todos && !l.vigente) continue
             if (cursoSerie && l.curso !== cursoSerie) continue
-            const x = m.get(l.mes) ?? { mes: l.mes, nome: rotuloMes(l.mes), valor: 0, aberto: 0, alunos: 0, alunosAb: 0 }
+            if (!dentro(l.dia)) continue
+            const chave = porDia ? l.dia : l.dia.slice(0, 7)
+            const x = m.get(chave) ?? { chave, nome: porDia ? l.dia.slice(8) + "/" + l.dia.slice(5, 7) : rotuloMes(chave), valor: 0, aberto: 0, alunos: 0, alunosAb: 0 }
             x.valor += l.valor; x.aberto += l.valor_aberto; x.alunos += l.alunos; x.alunosAb += l.alunos_abertos
-            m.set(l.mes, x)
+            m.set(chave, x)
         }
-        return [...m.values()].sort((a, b) => a.mes.localeCompare(b.mes)).map((x) => ({ ...x, indice: x.valor ? (x.aberto / x.valor) * 100 : 0, indiceAlunos: x.alunos ? (x.alunosAb / x.alunos) * 100 : 0 }))
-    }, [mensal, todos, cursoSerie])
+        return [...m.values()].sort((a, b) => a.chave.localeCompare(b.chave)).map((x) => ({ ...x, indice: x.valor ? (x.aberto / x.valor) * 100 : 0, indiceAlunos: x.alunos ? (x.alunosAb / x.alunos) * 100 : 0 }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [mensal, todos, cursoSerie, de, ate, porDia])
 
-    const base = useMemo(() => (data?.alunos ?? []).filter((a) => todos || a.vigente), [data, todos])
+    const base = useMemo(() => (data?.alunos ?? []).filter((a) => todos || a.vigente).flatMap((a) => {
+        const det = a.detalhe.filter((d) => dentro(d.vencimento))
+        if (!det.length) return []
+        const soma = (f: (d: Detalhe) => boolean) => det.filter(f).reduce((t, d) => t + d.valor, 0)
+        return [{ ...a, detalhe: det, parcelas: det.length, valor: soma(() => true), atraso_max: Math.max(...det.map((d) => d.atraso)),
+            f30: soma((d) => d.atraso <= 30), f60: soma((d) => d.atraso > 30 && d.atraso <= 60), f90: soma((d) => d.atraso > 60 && d.atraso <= 90), f90p: soma((d) => d.atraso > 90) }]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }), [data, todos, de, ate])
     const vigentesPorTurma = useMemo(() => new Map((data?.turmas ?? []).map((t) => [t.turma ?? SEM_TURMA, t.alunos])), [data])
     const preDaTurma = useMemo(() => new Map((data?.turmas ?? []).map((t) => [t.turma ?? SEM_TURMA, t.pre])), [data])
     const totalVigentes = useMemo(() => [...vigentesPorTurma.values()].reduce((s, n) => s + n, 0), [vigentesPorTurma])
@@ -100,7 +130,7 @@ export function InadimplenciaDashboard() {
     const totalValor = base.reduce((s, a) => s + a.valor, 0)
     const faixas = FAIXAS.map(([k, nome]) => ({ nome, valor: base.reduce((s, a) => s + (a[k] ?? 0), 0) }))
     const maiorFaixa = Math.max(...faixas.map((f) => f.valor), 1)
-    const vencido = (mensal ?? []).filter((l) => todos || l.vigente).reduce((t, l) => t + l.valor, 0)
+    const vencido = (mensal ?? []).filter((l) => (todos || l.vigente) && dentro(l.dia)).reduce((t, l) => t + l.valor, 0)
     const pctValor = vencido ? (totalValor / vencido) * 100 : null
     const vigInad = base.filter((a) => a.vigente).length
     const pctGeral = totalVigentes ? (vigInad / totalVigentes) * 100 : 0
@@ -138,12 +168,28 @@ export function InadimplenciaDashboard() {
                 </div>
             </div>
 
+            <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-[var(--text-muted)]">Vencimento:</span>
+                {PRESETS.map(([k, nome]) => (
+                    <button key={k} type="button" onClick={() => { if (k === "custom" && !custom.de && !custom.ate) setCustom(faixaDoPreset("ano")); setPreset(k) }}
+                        className={`rounded-full px-3 py-1.5 text-sm ${preset === k ? "bg-primary text-white" : "bg-[var(--bg-card)] text-[var(--text-main)] ring-1 ring-[var(--border)] hover:bg-[var(--bg-card-hover)]"}`}>{nome}</button>
+                ))}
+                {preset === "custom" && (
+                    <span className="flex items-center gap-1.5 text-sm text-[var(--text-main)]">
+                        <input type="date" value={custom.de} max={custom.ate || undefined} onChange={(e) => setCustom((c) => ({ ...c, de: e.target.value }))} className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] px-2 py-1" aria-label="De" />
+                        até
+                        <input type="date" value={custom.ate} min={custom.de || undefined} onChange={(e) => setCustom((c) => ({ ...c, ate: e.target.value }))} className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] px-2 py-1" aria-label="Até" />
+                    </span>
+                )}
+                {(de || ate) && <span className="text-xs text-[var(--text-muted)]">{de ? dataBr(de) : "início"} → {ate ? dataBr(ate) : "hoje"}</span>}
+            </div>
+
             <div className="grid gap-4 md:grid-cols-3">
                 <div className="glass-card p-5">
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Valor em atraso</p>
                     <p className="mt-2 text-4xl font-bold text-[var(--text-main)]">{brl(totalValor)}</p>
                     <p className="mt-1 text-xs text-[var(--text-muted)]">
-                        {pctValor !== null && <><b className="text-[var(--text-main)]">{pct1(pctValor)}</b> de {brl(vencido)} vencidos em 2026 · </>}
+                        {pctValor !== null && <><b className="text-[var(--text-main)]">{pct1(pctValor)}</b> de {brl(vencido)} vencidos no período · </>}
                         {base.reduce((s, a) => s + a.parcelas, 0).toLocaleString("pt-BR")} parcelas
                     </p>
                 </div>
@@ -164,7 +210,7 @@ export function InadimplenciaDashboard() {
                     <div>
                         <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Evolução mês a mês</p>
                         <p className="mt-1 max-w-xl text-xs text-[var(--text-muted)]">
-                            Índice = valor ainda pendente ÷ valor das parcelas que venceram no mês (canceladas fora). Mostra a situação de hoje de cada mês, não a de quando venceu. O mês atual conta só até hoje. Dados a partir de jan/2026.
+                            Índice = valor ainda pendente ÷ valor das parcelas que venceram no mês (canceladas fora). Mostra a situação de hoje de cada mês, não a de quando venceu. O mês atual conta só até hoje. Dados a partir de jan/2026. Segue o período escolhido no topo.
                         </p>
                     </div>
                     <select value={cursoSerie} onChange={(e) => setCursoSerie(e.target.value)} className="max-w-[280px] rounded-full border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text-main)]" aria-label="Curso">
