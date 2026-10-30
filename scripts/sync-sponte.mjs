@@ -82,10 +82,10 @@ function parseBrNumber(s) {
 
 // ─── Sync matrículas ──────────────────────────────────────────────────────────
 
-async function syncMatriculas() {
-    console.log(`  Buscando matrículas ${startDate} → ${endDate}...`);
+async function syncMatriculas(ini = startDate, fim = endDate) {
+    console.log(`  Buscando matrículas ${ini} → ${fim}...`);
     const xml = await soapCall('GetMatriculas',
-        `<sParametrosBusca>DataMatricula=${startDate.replace(/-/g,'/')} e ${endDate.replace(/-/g,'/')}</sParametrosBusca>`);
+        `<sParametrosBusca>DataMatricula=${ini.replace(/-/g,'/')} e ${fim.replace(/-/g,'/')}</sParametrosBusca>`);
 
     const rows = extractAll(xml, 'wsMatricula')
         .filter(r => extractFirst(r, 'ContratoID') !== '0')
@@ -226,6 +226,10 @@ console.log(`\n🔄 Sync Sponte → Supabase | modo=${mode} | ${startDate} → $
 
 if (mode === 'matriculas' || mode === 'full') await syncMatriculas();
 if (mode === 'parcelas'   || mode === 'full') await syncParcelas();
-if (mode === 'abertas'    || mode === 'full') { await syncAbertas(); await syncInpc(); }
+if (mode === 'abertas'    || mode === 'full') {
+    // situação do contrato muda depois da data da matrícula (cancelou, encerrou): relê todas, senão o Integrantes da turma fica velho
+    await syncMatriculas('2015-01-01', `${year}-12-31`);
+    await syncAbertas(); await syncInpc();
+}
 
 console.log('\n✅ Sync concluído!');

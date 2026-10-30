@@ -13,7 +13,7 @@ type AlunoInad = {
     f30: number | null; f60: number | null; f90: number | null; f90p: number | null; detalhe: Detalhe[]
 }
 type LinhaMes = { dia: string; curso: string; vigente: boolean; parcelas: number; valor: number; parcelas_abertas: number; valor_aberto: number; alunos: number; alunos_abertos: number }
-type Relatorio = { alunos: AlunoInad[]; turmas: { turma: string | null; alunos: number; pre: number }[]; sincronizado_em: string | null; inpc?: { mes: string; v: number }[] }
+type Relatorio = { alunos: AlunoInad[]; turmas: { turma: string | null; alunos: number; pre: number; vig: number }[]; sincronizado_em: string | null; inpc?: { mes: string; v: number }[] }
 
 const SEM_TURMA = "Sem turma"
 const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })
@@ -114,7 +114,7 @@ export function InadimplenciaDashboard() {
     }), [data, todos, de, ate])
     const vigentesPorTurma = useMemo(() => new Map((data?.turmas ?? []).map((t) => [t.turma ?? SEM_TURMA, t.alunos])), [data])
     const preDaTurma = useMemo(() => new Map((data?.turmas ?? []).map((t) => [t.turma ?? SEM_TURMA, t.pre])), [data])
-    const totalVigentes = useMemo(() => [...vigentesPorTurma.values()].reduce((s, n) => s + n, 0), [vigentesPorTurma])
+    const totalVigentes = useMemo(() => (data?.turmas ?? []).reduce((s, t) => s + t.vig, 0), [data])
 
     const porTurma = useMemo(() => {
         const m = new Map<string, { turma: string; inad: number; valor: number; liquido: number; atualizado: number; atraso: number }>()
