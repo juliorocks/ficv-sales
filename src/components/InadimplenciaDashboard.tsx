@@ -100,6 +100,8 @@ export function InadimplenciaDashboard() {
     const totalValor = base.reduce((s, a) => s + a.valor, 0)
     const faixas = FAIXAS.map(([k, nome]) => ({ nome, valor: base.reduce((s, a) => s + (a[k] ?? 0), 0) }))
     const maiorFaixa = Math.max(...faixas.map((f) => f.valor), 1)
+    const vencido = (mensal ?? []).filter((l) => todos || l.vigente).reduce((t, l) => t + l.valor, 0)
+    const pctValor = vencido ? (totalValor / vencido) * 100 : null
     const vigInad = base.filter((a) => a.vigente).length
     const pctGeral = totalVigentes ? (vigInad / totalVigentes) * 100 : 0
     const noRecorte = lista.reduce((s, a) => s + a.valor, 0)
@@ -140,7 +142,10 @@ export function InadimplenciaDashboard() {
                 <div className="glass-card p-5">
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Valor em atraso</p>
                     <p className="mt-2 text-4xl font-bold text-[var(--text-main)]">{brl(totalValor)}</p>
-                    <p className="mt-1 text-xs text-[var(--text-muted)]">{base.reduce((s, a) => s + a.parcelas, 0).toLocaleString("pt-BR")} parcelas</p>
+                    <p className="mt-1 text-xs text-[var(--text-muted)]">
+                        {pctValor !== null && <><b className="text-[var(--text-main)]">{pct1(pctValor)}</b> de {brl(vencido)} vencidos em 2026 · </>}
+                        {base.reduce((s, a) => s + a.parcelas, 0).toLocaleString("pt-BR")} parcelas
+                    </p>
                 </div>
                 <div className="glass-card p-5">
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Alunos inadimplentes</p>
