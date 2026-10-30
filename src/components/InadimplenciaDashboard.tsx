@@ -83,11 +83,11 @@ export function InadimplenciaDashboard() {
             m.set(k, x)
         }
         const l = [...m.values()].map((x) => {
-            const alunos = vigentesPorTurma.get(x.turma) ?? 0
+            const alunos = (vigentesPorTurma.get(x.turma) ?? 0) + (preDaTurma.get(x.turma) ?? 0)
             return { ...x, alunos, pct: alunos ? Math.min(100, (x.inad / alunos) * 100) : null }
         })
         return l.sort((a, b) => ordemTurma === "pct" ? (b.pct ?? -1) - (a.pct ?? -1) : ordemTurma === "alunos" ? b.inad - a.inad : b.valor - a.valor)
-    }, [base, vigentesPorTurma, ordemTurma])
+    }, [base, vigentesPorTurma, preDaTurma, ordemTurma])
 
     const lista = useMemo(() => {
         const q = busca.trim().toLowerCase()
@@ -250,13 +250,13 @@ export function InadimplenciaDashboard() {
                 <div className="max-h-[420px] overflow-auto">
                     <table className="w-full text-sm">
                         <thead className="sticky top-0 bg-[var(--bg-card)] text-left text-[11px] uppercase tracking-wider text-[var(--text-muted)]">
-                            <tr><th className="py-2">Turma</th><th className="text-right">Alunos Vigentes</th><th className="text-right">Inadimplentes</th><th className="w-40 pl-4">% da turma</th><th className="text-right">Valor</th><th className="text-right">Maior atraso</th></tr>
+                            <tr><th className="py-2">Turma</th><th className="text-right">Alunos</th><th className="text-right">Inadimplentes</th><th className="w-40 pl-4">% da turma</th><th className="text-right">Valor</th><th className="text-right">Maior atraso</th></tr>
                         </thead>
                         <tbody>
                             {porTurma.map((t) => (
                                 <tr key={t.turma} onClick={() => setTurma(turma === t.turma ? "" : t.turma)} className={`cursor-pointer border-t border-[var(--border)] hover:bg-[var(--bg-card-hover)] ${turma === t.turma ? "bg-primary/10" : ""}`}>
                                     <td className="py-2 pr-2 text-[var(--text-main)]">{t.turma}</td>
-                                    <td className="text-right tabular-nums">{t.alunos || "–"}{(preDaTurma.get(t.turma) ?? 0) > 0 && <span className="ml-1 text-xs text-[var(--text-muted)]" title="Pré-Matrícula (o Integrantes do Sponte soma os dois)">+ {preDaTurma.get(t.turma)} pré</span>}</td>
+                                    <td className="text-right tabular-nums">{t.alunos || "–"}</td>
                                     <td className="text-right font-semibold tabular-nums">{t.inad}</td>
                                     <td className="pl-4">
                                         {t.pct === null ? "–" : (
