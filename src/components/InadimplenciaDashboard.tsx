@@ -12,7 +12,7 @@ type AlunoInad = {
     f30: number | null; f60: number | null; f90: number | null; f90p: number | null; detalhe: Detalhe[]
 }
 type LinhaMes = { mes: string; curso: string; vigente: boolean; parcelas: number; valor: number; parcelas_abertas: number; valor_aberto: number; alunos: number; alunos_abertos: number }
-type Relatorio = { alunos: AlunoInad[]; turmas: { turma: string | null; alunos: number }[]; sincronizado_em: string | null }
+type Relatorio = { alunos: AlunoInad[]; turmas: { turma: string | null; alunos: number; pre: number }[]; sincronizado_em: string | null }
 
 const SEM_TURMA = "Sem turma"
 const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })
@@ -71,6 +71,7 @@ export function InadimplenciaDashboard() {
 
     const base = useMemo(() => (data?.alunos ?? []).filter((a) => todos || a.vigente), [data, todos])
     const vigentesPorTurma = useMemo(() => new Map((data?.turmas ?? []).map((t) => [t.turma ?? SEM_TURMA, t.alunos])), [data])
+    const preDaTurma = useMemo(() => new Map((data?.turmas ?? []).map((t) => [t.turma ?? SEM_TURMA, t.pre])), [data])
     const totalVigentes = useMemo(() => [...vigentesPorTurma.values()].reduce((s, n) => s + n, 0), [vigentesPorTurma])
 
     const porTurma = useMemo(() => {
@@ -250,7 +251,7 @@ export function InadimplenciaDashboard() {
                             {porTurma.map((t) => (
                                 <tr key={t.turma} onClick={() => setTurma(turma === t.turma ? "" : t.turma)} className={`cursor-pointer border-t border-[var(--border)] hover:bg-[var(--bg-card-hover)] ${turma === t.turma ? "bg-primary/10" : ""}`}>
                                     <td className="py-2 pr-2 text-[var(--text-main)]">{t.turma}</td>
-                                    <td className="text-right tabular-nums">{t.alunos || "–"}</td>
+                                    <td className="text-right tabular-nums">{t.alunos || "–"}{(preDaTurma.get(t.turma) ?? 0) > 0 && <span className="ml-1 text-xs text-[var(--text-muted)]" title="Pré-Matrícula (o Integrantes do Sponte soma os dois)">+ {preDaTurma.get(t.turma)} pré</span>}</td>
                                     <td className="text-right font-semibold tabular-nums">{t.inad}</td>
                                     <td className="pl-4">
                                         {t.pct === null ? "–" : (
