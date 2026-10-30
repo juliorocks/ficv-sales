@@ -25,7 +25,7 @@ const CATEGORIAS = [
   { value: 'outros', label: '💬 Outros' },
 ]
 
-type AlunoResult = { aluno_id: number; nome: string; situacao: string | null; turma_atual: string | null }
+export type AlunoResult = { aluno_id: number; nome: string; situacao: string | null; turma_atual: string | null }
 type TurmaResult = { turma_id: number; nome: string; curso_id: number | null; curso: string | null; vagas_ocupadas: number }
 type RosterItem = { aluno_id: number; nome: string; situacao: string | null }
 type CreateResult = { aluno_id: number; nome: string; ok: boolean; ticket_id?: number; protocolo?: string; created_account?: boolean; error?: string }
@@ -40,19 +40,21 @@ async function callStaffTickets(body: Record<string, unknown>) {
   return data
 }
 
-export function NewTicketDialog({ onClose, onCreated }: { onClose: () => void; onCreated?: () => void }) {
+// `aluno` abre já com o aluno escolhido (ex.: vindo do dashboard de Inadimplência); os campos *Inicial vêm preenchidos e editáveis
+export type NewTicketPrefill = { aluno?: AlunoResult; categoria?: string; titulo?: string; descricao?: string }
+export function NewTicketDialog({ onClose, onCreated, prefill }: { onClose: () => void; onCreated?: () => void; prefill?: NewTicketPrefill }) {
   const [tipo, setTipo] = useState<'aluno' | 'turma'>('aluno')
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
   const [alunoResults, setAlunoResults] = useState<AlunoResult[]>([])
   const [turmaResults, setTurmaResults] = useState<TurmaResult[]>([])
-  const [alunoSel, setAlunoSel] = useState<AlunoResult | null>(null)
+  const [alunoSel, setAlunoSel] = useState<AlunoResult | null>(prefill?.aluno ?? null)
   const [turmaSel, setTurmaSel] = useState<TurmaResult | null>(null)
   const [roster, setRoster] = useState<RosterItem[] | null>(null)
   const [loadingRoster, setLoadingRoster] = useState(false)
-  const [categoria, setCategoria] = useState('')
-  const [titulo, setTitulo] = useState('')
-  const [descricao, setDescricao] = useState('')
+  const [categoria, setCategoria] = useState(prefill?.categoria ?? '')
+  const [titulo, setTitulo] = useState(prefill?.titulo ?? '')
+  const [descricao, setDescricao] = useState(prefill?.descricao ?? '')
   const [saving, setSaving] = useState(false)
   const [results, setResults] = useState<CreateResult[] | null>(null)
 

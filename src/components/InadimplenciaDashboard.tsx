@@ -1,7 +1,8 @@
 import { Fragment, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { AlertCircle, ChevronDown, ChevronRight, Download, Loader2, MessageCircle, RefreshCw, Search } from "lucide-react"
+import { AlertCircle, ChevronDown, ChevronRight, Download, Loader2, MessageCircle, RefreshCw, Search, Ticket } from "lucide-react"
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
+import { NewTicketDialog, type NewTicketPrefill } from "./tickets/NewTicketDialog"
 import { supabase } from "@/lib/supabase"
 import { withTimeout } from "@/utils/withTimeout"
 
@@ -58,6 +59,7 @@ export function InadimplenciaDashboard() {
     const [turma, setTurma] = useState("")
     const [busca, setBusca] = useState("")
     const [aberto, setAberto] = useState<number | null>(null)
+    const [chamado, setChamado] = useState<NewTicketPrefill | null>(null)
     const [preset, setPreset] = useState<Preset>("ano")
     const [custom, setCustom] = useState({ de: "", ate: "" })
     const { de, ate } = preset === "custom" ? custom : faixaDoPreset(preset)
@@ -152,6 +154,16 @@ export function InadimplenciaDashboard() {
     const noRecorte = lista.reduce((s, a) => s + a.valor, 0)
     const noRecorteLiquido = lista.reduce((s, a) => s + (a.liquido ?? a.valor), 0)
     const noRecorteAtual = lista.reduce((s, a) => s + (a.atualizado ?? a.valor), 0)
+
+    function abrirChamado(a: AlunoInad) {
+        const datas = a.detalhe.map((d) => dataBr(d.vencimento).slice(0, 5)).join(", ")
+        setChamado({
+            aluno: { aluno_id: a.aluno_id, nome: a.nome ?? `Aluno ${a.aluno_id}`, situacao: a.situacao, turma_atual: a.turma },
+            categoria: "financeiro",
+            titulo: "Parcelas em atraso",
+            descricao: `Olá, ${(a.nome ?? "").split(" ")[0]}! Identificamos ${a.parcelas === 1 ? "1 parcela em aberto" : `${a.parcelas} parcelas em aberto`} (vencimento em ${datas}). Podemos ajudar a regularizar? Se você já pagou, envie o comprovante por aqui.`,
+        })
+    }
 
     function exportar() {
         const cab = ["Aluno", "AlunoID", "Turma", "Curso", "Situação", "Celular", "Parcelas em atraso", "Valor", "Valor com desconto", "Valor atualizado", "Maior atraso (dias)", "Venc. mais antigo"]
@@ -356,7 +368,7 @@ export function InadimplenciaDashboard() {
                 <div className="max-h-[560px] overflow-auto">
                     <table className="w-full text-sm">
                         <thead className="sticky top-0 bg-[var(--bg-card)] text-left text-[11px] uppercase tracking-wider text-[var(--text-muted)]">
-                            <tr><th className="w-6" /><th className="py-2">Aluno</th><th>Turma</th><th className="text-right">Parcelas</th><th className="text-right">Valor</th><th className="text-right">Com desconto</th><th className="text-right">Atualizado</th><th className="text-right">Atraso</th><th className="w-10" /></tr>
+                            <tr><th className="w-6" /><th className="py-2">Aluno</th><th>Turma</th><th className="text-right">Parcelas</th><th className="text-right">Valor</th><th className="text-right">Com desconto</th><th className="text-right">Atualizado</th><th className="text-right">Atraso</th><th className="w-20" /></tr>
                         </thead>
                         <tbody>
                             {lista.slice(0, 400).map((a) => {
@@ -373,7 +385,9 @@ export function InadimplenciaDashboard() {
                                             <td className="text-right tabular-nums">{brl(a.liquido ?? a.valor)}</td>
                                             <td className="text-right tabular-nums text-[var(--text-muted)]">{brl(a.atualizado ?? a.valor)}</td>
                                             <td className="text-right tabular-nums text-[var(--text-muted)]">{a.atraso_max} d</td>
-                                            <td className="text-right">{wa && <a href={wa} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} aria-label="Chamar no WhatsApp" className="inline-block p-1.5 text-[var(--text-muted)] hover:text-[var(--text-main)]"><MessageCircle className="h-4 w-4" /></a>}</td>
+                                            <td className="whitespace-nowrap text-right">
+                                                <button type="button" onClick={(e) => { e.stopPropagation(); abrirChamado(a) }} aria-label="Abrir chamado para o aluno" title="Abrir chamado" className="inline-block p-1.5 text-[var(--text-muted)] hover:text-[var(--text-main)]"><Ticket className="h-4 w-4" /></button>
+                                                {wa && <a href={wa} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} aria-label="Chamar no WhatsApp" className="inline-block p-1.5 text-[var(--text-muted)] hover:text-[var(--text-main)]"><MessageCircle className="h-4 w-4" /></a>}</td>
                                         </tr>
                                         {abre && (
                                             <tr className="bg-[var(--bg-card-hover)]"><td /><td colSpan={8} className="py-2">
@@ -394,6 +408,7 @@ export function InadimplenciaDashboard() {
                     {lista.length === 0 && <p className="py-6 text-center text-sm text-[var(--text-muted)]">Nenhum aluno inadimplente neste recorte.</p>}
                 </div>
             </div>
+            {chamado && <NewTicketDialog prefill={chamado} onClose={() => setChamado(null)} />}
         </div>
     )
 }
