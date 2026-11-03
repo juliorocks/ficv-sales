@@ -65,6 +65,7 @@ import {
     PieChart, Pie, Legend
 } from 'recharts';
 import confetti from 'canvas-confetti';
+import { IaStatusAlert } from './components/admin/IaStatusAlert';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 import { MatriculaConfetti } from './components/MatriculaConfetti';
@@ -1159,6 +1160,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
 
             {/* Main Content */}
             <main className={`flex-1 min-w-0 min-h-screen bg-[var(--bg-main)] p-8 transition-all overflow-x-clip ${isTvMode ? 'ml-0' : sidebarCollapsed ? 'ml-[76px]' : 'ml-[240px]'}`}>
+                {profile?.role === 'admin' && !isTvMode && <IaStatusAlert />}
                 {(activeTab === 'dashboard' || activeTab === 'agents' || activeTab === 'history' || activeTab.startsWith('kanban')) && (
                     <header className={`flex justify-between items-start relative ${activeTab === 'kanban' ? 'mb-6 items-center' : 'mb-10'}`}>
                         {activeTab === 'kanban' ? (
