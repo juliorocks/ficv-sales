@@ -24,7 +24,7 @@ export type HubDest = {
 export const temNumero = (d: HubDest) => onlyDigits(d.numero).length >= 10;
 export const temFila = (d: HubDest) => d.zpro_queue_id != null;
 export type HubMsg = { de: "contato" | "hub"; texto: string; em: string };
-export type Classificacao = { destino: HubDest | null; confianca: number; motivo: string; metodo: "ia"; resposta: string | null };
+export type Classificacao = { destino: HubDest | null; confianca: number; motivo: string; metodo: "ia" | "palavras"; resposta: string | null };
 
 /**
  * Empresas na triagem = todas as ATIVAS, com ou sem número novo (28/09: a IA sempre
@@ -80,7 +80,7 @@ function perguntaReserva(dests: HubDest[], nome: string | null | undefined): str
  * IA classifica o destino pela conversa inteira (contato + as próprias perguntas do hub) e,
  * se ainda não der pra saber, já escreve a próxima pergunta natural — sem menu numerado.
  */
-export async function classify(db: SupabaseClient, dests: HubDest[], historico: HubMsg[], nome: string | null, settings: any): Promise<Classificacao> {
+export async function classify(db: SupabaseClient, dests: HubDest[], historico: HubMsg[], nome: string | null, settings: any, opts: { porPalavras?: boolean } = {}): Promise<Classificacao> {
     const { data: s } = await db.from("ai_agent_settings").select("chat_model").eq("id", 1).maybeSingle();
     const lista = dests.map((d) => `- id ${d.id}: ${d.nome}${d.is_self ? " (este número — é a Faculdade)" : ""} — ${d.assuntos}`).join("\n");
     const system = [
@@ -112,9 +112,40 @@ export async function classify(db: SupabaseClient, dests: HubDest[], historico: 
             resposta: resposta || null,
         };
     } catch (e) {
+        // sem OpenAI / erro → palavras explícitas ("Escola viva", "Igreja", "Fundação"…); sem isso toda
+        // resposta do menu virava Faculdade (3/11: OpenAI sem crédito, 5 contatos de outras empresas no Kanban)
+        if (opts.porPalavras) {
+            const porPalavra = classificarPorPalavras(dests, historico);
+            if (porPalavra) return { destino: porPalavra, confianca: 0.9, motivo: "IA indisponível — empresa reconhecida pelas palavras da resposta", metodo: "palavras", resposta: null };
+        }
         // sem OpenAI / erro → pergunta de reserva (nunca trava o atendimento)
         return { destino: null, confianca: 0, motivo: `IA indisponível: ${(e as Error).message}`.slice(0, 300), metodo: "ia", resposta: null };
     }
+}
+
+const POR_EMPRESA: { achar: RegExp; palavras: RegExp }[] = [
+    { achar: /igreja/i, palavras: /\bigrejas?\b|\bmembros?\b|\bmembresias?\b|\bbatismos?\b|\bcultos?\b|\bc[eé]lulas?\b|\bpastor|\bora[çc][ãõ]/i },
+    { achar: /escola/i, palavras: /\bescolas?\b|\binfanti(l|s)\b|\bfundamental(is)?\b|ensino m[eé]dio/i },
+    { achar: /funda[çc][ãa]o/i, palavras: /funda[çc][ãa]o|doa[çc][ãõ]|projetos? socia(l|is)|a[çc][ãõ]es? socia(l|is)/i },
+];
+const PALAVRAS_FACULDADE = /faculdade|\bficv\b|gradua[çc][ãa]o|\bp[óo]s\b|p[óo]s-?gradua|vestibular|teologia|\bdireito\b|\bead\b/i;
+
+/** Só quando a OpenAI falha: reconhece a empresa pelo que o contato escreveu. Exige UMA única empresa
+ *  na mensagem (a mais recente; se não houver, o conjunto das falas); "Cidade viva" sozinho não decide. */
+export function classificarPorPalavras(dests: HubDest[], historico: HubMsg[]): HubDest | null {
+    const falas = historico.filter((m) => m.de === "contato").map((m) => m.texto);
+    const tentar = (texto: string): HubDest | null => {
+        const achadas = new Set<HubDest>();
+        for (const r of POR_EMPRESA) {
+            if (!r.palavras.test(texto)) continue;
+            const d = dests.find((x) => !x.is_self && r.achar.test(x.nome));
+            if (d) achadas.add(d);
+        }
+        const self = dests.find((x) => x.is_self);
+        if (self && PALAVRAS_FACULDADE.test(texto)) achadas.add(self);
+        return achadas.size === 1 ? [...achadas][0] : null;
+    };
+    return tentar(falas[falas.length - 1] ?? "") ?? tentar(falas.join(" / "));
 }
 
 export type HubPlano =
@@ -144,7 +175,7 @@ export async function planejar(
     const historico: HubMsg[] = [...(sessao?.messages ?? []), { de: "contato", texto, em: new Date().toISOString() }];
     const falasContato = historico.filter((m) => m.de === "contato").map((m) => m.texto);
 
-    const c = await classify(db, dests, historico, nome, settings);
+    const c = await classify(db, dests, historico, nome, settings, { porPalavras: true });
     if (c.destino) {
         // já encaminhado pra essa mesma empresa há pouco → não repete a mensagem
         if (sessao?.status === "encaminhado" && sessao.destination_id === c.destino.id && sessao.redirected_at
