@@ -36,7 +36,8 @@ import {
     KeyRound,
     Inbox,
     ClipboardCheck,
-    Images
+    Images,
+    GanttChart
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { reprocessAllAnalyses } from './services/reprocessor';
@@ -96,6 +97,7 @@ import { MarketingFormSubmissions } from './components/marketing/MarketingFormSu
 import { MarketingFormBuilder } from './components/marketing/MarketingFormBuilder';
 import { CpaAdmin } from './components/cpa/CpaAdmin';
 import { PortalBannersAdmin } from './components/admin/PortalBannersAdmin';
+import { ProjetoPainel } from './components/projeto/ProjetoPainel';
 
 const queryClient = new QueryClient({
     defaultOptions: {
@@ -1098,6 +1100,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                     <NavItem collapsed={sidebarCollapsed} icon={Inbox} label="Filas de Atendimento" active={activeTab === 'ticket-queues'} onClick={() => setActiveTab('ticket-queues')} />
                                     <NavItem collapsed={sidebarCollapsed} icon={GraduationCap} label="Tutor Virtual" active={activeTab === 'tutor-virtual'} onClick={() => setActiveTab('tutor-virtual')} />
                                     <NavItem collapsed={sidebarCollapsed} icon={Images} label="Banners do Portal" active={activeTab === 'portal-banners'} onClick={() => setActiveTab('portal-banners')} />
+                                    <NavItem collapsed={sidebarCollapsed} icon={GanttChart} label="Painel do Projeto" active={activeTab === 'projeto'} onClick={() => setActiveTab('projeto')} />
                                     <NavItem collapsed={sidebarCollapsed} icon={KeyRound} label="Integrações" active={activeTab === 'integrations'} onClick={() => setActiveTab('integrations')} />
                                     <NavItem collapsed={sidebarCollapsed} icon={Bot} label="IA de Atendimento" active={activeTab === 'ai-agent'} onClick={() => setActiveTab('ai-agent')} />
                                     <NavItem collapsed={sidebarCollapsed} icon={Plug} label="VivaConnect" active={activeTab === 'vivaconnect'} onClick={() => setActiveTab('vivaconnect')} />
@@ -1949,6 +1952,12 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {activeTab === 'portal-banners' && profile?.role === 'admin' && (
                     <div className="animate-fade-in">
                         <PortalBannersAdmin />
+                    </div>
+                )}
+
+                {activeTab === 'projeto' && profile?.role === 'admin' && (
+                    <div className="animate-fade-in">
+                        <ProjetoPainel />
                     </div>
                 )}
 
