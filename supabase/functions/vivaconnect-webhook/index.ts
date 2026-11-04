@@ -390,6 +390,37 @@ Deno.serve(async (req) => {
     }
 });
 
+// Aluno reconhecido pelo conteúdo da conversa: etapa "Aluno" + link do Portal, e a IA para.
+async function tratarAlunoAtual(db: any, settings: any, leadId: number, channelId: number, num: string): Promise<string> {
+    const { data: leadRow } = await db.from("leads").select("nome_completo, stage_id").eq("id", leadId).maybeSingle();
+    if (leadRow?.stage_id) {
+        const { data: st } = await db.from("stages").select("name").eq("id", leadRow.stage_id).maybeSingle();
+        if (/em contato/i.test(st?.name ?? "")) return `ia:aluno_atual ignorado (lead em atendimento humano)`;
+        if (!/matricul|^aluno$/i.test(st?.name ?? "")) {
+            const { data: alunoStage } = await db.from("stages").select("id").eq("name", "Aluno").maybeSingle();
+            if (alunoStage) {
+                await db.from("leads").update({
+                    stage_id: alunoStage.id, stage_entry_date: new Date().toISOString(),
+                    perfil: "aluno", updated_at: new Date().toISOString(),
+                }).eq("id", leadId);
+            }
+        }
+    }
+    if (settings.student_reply_enabled && String(settings.student_reply_template ?? "").trim()) {
+        await db.from("vivaconnect_outbox").insert({
+            lead_id: leadId, channel_id: channelId, kind: "student_reply", number: num,
+            body: fillTemplate(settings.student_reply_template, { primeiro_nome: firstName(leadRow?.nome_completo ?? "") || "tudo bem" }),
+        });
+        await kickOutbox();
+    }
+    await db.from("ai_lead_sessions").delete().eq("lead_id", leadId);
+    return "ia:aluno (pelo conteúdo) → link do portal, IA parou";
+}
+
+// Reserva quando a OpenAI falha: sem ela ninguém reconhece aluno pelo conteúdo (Nubia, 04/11).
+// Frases deliberadamente específicas, para não pegar quem só pergunta do curso antes de se matricular.
+const ALUNO_PELAS_PALAVRAS = /\b(j[áa]\s+)?sou\s+(ex[- ]?)?(aluno|aluna)\b|portal do aluno|\b(meu|minha|meus|minhas)\s+(curso|disciplinas?|notas?|boletos?|mensalidades?|matr[íi]cula|tutor|tutora|professor|professora)\b|n[ãa]o\s+(tem|aparece|consigo)\s+(a\s+)?disciplinas?|disciplinas?\s+(para|pra)\s+estudar|trancamento|rematr[íi]cula|segunda chamada|hist[óo]rico escolar|acesso ao (portal|ava|moodle)|\b(moodle|ava)\b/i;
+
 async function aiReply(db: any, settings: any, leadId: number, channelId: number, number: string, isReopen: boolean): Promise<string> {
     const { data: hist } = await db.from("widechat_messages").select("origin, message, created_at")
         .eq("lead_id", leadId).eq("provider", "vivaconnect").eq("interno", false).order("created_at", { ascending: false }).limit(20);
@@ -508,7 +539,14 @@ async function aiReply(db: any, settings: any, leadId: number, channelId: number
         signal: AbortSignal.timeout(90000),
     });
     const out = await r.json().catch(() => ({}));
-    if (!r.ok) return `ia:erro ${out?.error ?? r.status}`;
+    if (!r.ok) {
+        const falasDoLead = messages.filter((x: any) => x.role === "user").slice(-6).map((x: any) => x.content).join("\n");
+        if (ALUNO_PELAS_PALAVRAS.test(falasDoLead)) {
+            const num0 = toZproNumber(number) ?? number;
+            return `${await tratarAlunoAtual(db, settings, leadId, channelId, num0)} (IA indisponível, pelas palavras)`;
+        }
+        return `ia:erro ${out?.error ?? r.status}`;
+    }
     if (out.skipped) return `ia:pulou (${out.reason})`;
     // `replies` = a resposta quebrada em BLOCOS (ex.: grade numa mensagem, valores em
     // outra — pedido do usuário 29/09) — cada item vira uma linha própria na fila, todas
@@ -557,31 +595,7 @@ async function aiReply(db: any, settings: any, leadId: number, channelId: number
     // "aluno_atual" em ai-agent/index.ts) — mesmo tratamento do isStudent: mensagem fixa do
     // Portal (não o texto livre que a IA escreveu), etapa "Aluno", e para — nunca mais uma
     // comercial pra essa pessoa.
-    if (out.aluno_atual) {
-        const { data: leadRow } = await db.from("leads").select("nome_completo, stage_id").eq("id", leadId).maybeSingle();
-        if (leadRow?.stage_id) {
-            const { data: st } = await db.from("stages").select("name").eq("id", leadRow.stage_id).maybeSingle();
-            if (/em contato/i.test(st?.name ?? "")) return `ia:aluno_atual ignorado (lead em atendimento humano)`;
-            if (!/matricul|^aluno$/i.test(st?.name ?? "")) {
-                const { data: alunoStage } = await db.from("stages").select("id").eq("name", "Aluno").maybeSingle();
-                if (alunoStage) {
-                    await db.from("leads").update({
-                        stage_id: alunoStage.id, stage_entry_date: new Date().toISOString(),
-                        perfil: "aluno", updated_at: new Date().toISOString(),
-                    }).eq("id", leadId);
-                }
-            }
-        }
-        if (settings.student_reply_enabled && String(settings.student_reply_template ?? "").trim()) {
-            await db.from("vivaconnect_outbox").insert({
-                lead_id: leadId, channel_id: channelId, kind: "student_reply", number: num,
-                body: fillTemplate(settings.student_reply_template, { primeiro_nome: firstName(leadRow?.nome_completo ?? "") || "tudo bem" }),
-            });
-            await kickOutbox();
-        }
-        await db.from("ai_lead_sessions").delete().eq("lead_id", leadId);
-        return "ia:aluno (pelo conteúdo) → link do portal, IA parou";
-    }
+    if (out.aluno_atual) return await tratarAlunoAtual(db, settings, leadId, channelId, num);
 
     // Reabertura que era só cortesia (agradecimento/confirmação, sem assunto novo pra
     // tratar) — pedido do usuário 09/10: a IA responde curto e já devolve pro Finalizado
