@@ -213,10 +213,15 @@ async function searchOnce(
 // que não pode depender de sorte de embedding (catálogo completo, horário de
 // atendimento) a garantia tem que ser estrutural, não estatística — daí sempre incluir,
 // fora do teto de `count`. Uso esperado: poucos documentos curtos, não uma muleta geral.
+// Essencial entra INTEIRO em toda resposta: um PPC marcado por engano (251 trechos, ~56 mil tokens por mensagem)
+// esgotou US$ 10 da OpenAI em 2,5 dias (2026-11-04). Documento grande só entra pela busca.
+const MAX_CHUNKS_ESSENCIAL = 15;
+
 async function essentialChunks(db: SupabaseClient, publico: string): Promise<any[]> {
     const { data: docs } = await db.from("knowledge_base")
         .select("id, title, category")
         .eq("essencial", true).eq("ai_enabled", true)
+        .lte("chunk_count", MAX_CHUNKS_ESSENCIAL)
         .in("publico", [publico, "ambos"]);
     if (!docs?.length) return [];
     const byId = new Map(docs.map((d: any) => [d.id, d]));
