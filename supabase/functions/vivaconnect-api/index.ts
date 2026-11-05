@@ -409,8 +409,13 @@ Deno.serve(async (req) => {
                 ? `Template API: ${String(body.template_name).trim()}.`
                 : typeof body.body === "string" ? body.body.trim() : null;
             const since = new Date(Date.now() - 10 * 60_000).toISOString();
+            // Mídia sem legenda (áudio, arquivo) manda body vazio, e o Z-PRO guarda outro conteúdo pra
+            // ela: nesse caso confere só a janela de tempo (achado ao vivo 05/11: áudio entregue
+            // aparecia como "não apareceu no WhatsApp").
             const mine = list.filter((x: any) => x.fromMe && !String(x.body ?? "").startsWith("*System:*"))
-                .filter((x: any) => expected == null || (unsign(String(x.body ?? "")).trim() === expected && String(x.createdAt) >= since))
+                .filter((x: any) => expected == null
+                    || (expected === "" ? String(x.createdAt) >= since
+                        : unsign(String(x.body ?? "")).trim() === expected && String(x.createdAt) >= since))
                 .sort((a: any, b: any) => String(a.createdAt).localeCompare(String(b.createdAt)));
             const last = mine[mine.length - 1];
             if (!last) return jsonRes({ last: expected != null ? { status: "missing" } : null });
