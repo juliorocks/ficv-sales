@@ -5,6 +5,9 @@ import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Too
 import { NewTicketDialog, type NewTicketPrefill } from "./tickets/NewTicketDialog"
 import { LeadDialogById } from "./kanban/LeadDialogById"
 import { supabase } from "@/lib/supabase"
+import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import { useAuth } from "@/hooks/use-auth"
 import { temPapel } from "@/utils/papeis"
 import { showError, showSuccess } from "@/utils/toast"
@@ -22,6 +25,7 @@ type NoKanban = { aluno_id: number; lead_id: number; stage_id: number | null; st
 type CardAberto = { lead_id: number; criado: boolean; outro_dono: boolean; canal_id: number | null; stage: string | null; owner: string | null }
 // o template ficv_inadimplentes só existe no WABA deste canal (CIDADE VIVA - OFICIAL)
 const CANAL_TEMPLATE_INADIMPLENTES = 8
+const TEMPLATE_INADIMPLENTES = "ficv_inadimplentes"
 
 const SEM_TURMA = "Sem turma"
 const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })
@@ -68,8 +72,11 @@ export function InadimplenciaDashboard() {
     const [busca, setBusca] = useState("")
     const [aberto, setAberto] = useState<number | null>(null)
     const [chamado, setChamado] = useState<NewTicketPrefill | null>(null)
-    const [leadAberto, setLeadAberto] = useState<number | null>(null)
+    const [leadAberto, setLeadAberto] = useState<{ id: number; template?: string } | null>(null)
     const [abrindo, setAbrindo] = useState<number | null>(null)
+    // aluno sem telefone no Sponte nem no Portal: pede o número para abrir a conversa
+    const [pedirTelefone, setPedirTelefone] = useState<AlunoInad | null>(null)
+    const [telefoneDigitado, setTelefoneDigitado] = useState("")
     const { user } = useAuth()
     const qc = useQueryClient()
     // quem tem o Kanban (admin/agente, ou papel extra) abre o card do aluno por aqui; os demais seguem com o link do WhatsApp
@@ -113,12 +120,19 @@ export function InadimplenciaDashboard() {
     const kanbanPorAluno = useMemo(() => new Map((noKanban ?? []).map((k) => [k.aluno_id, k])), [noKanban])
 
     // cria (ou reaproveita) o card do aluno em Em Contato no Kanban de quem clicou e abre a conversa
-    const abrirNoKanban = async (a: AlunoInad) => {
+    const abrirNoKanban = async (a: AlunoInad, telefone?: string) => {
         setAbrindo(a.aluno_id)
         try {
             await supabase.auth.getSession() // token em refresh derruba a chamada sem erro claro
-            const { data, error } = await withTimeout(supabase.rpc("inadimplencia_abrir_lead", { p_aluno_id: a.aluno_id }), 20000, "A abertura do card")
-            if (error) throw new Error(error.message)
+            const { data, error } = await withTimeout(
+                supabase.rpc("inadimplencia_abrir_lead", telefone ? { p_aluno_id: a.aluno_id, p_telefone: telefone } : { p_aluno_id: a.aluno_id }),
+                20000, "A abertura do card")
+            if (error) {
+                // nem o Sponte nem o Portal têm o telefone: a pessoa informa o número
+                if (error.message === "SEM_CELULAR") { setTelefoneDigitado(""); setPedirTelefone(a); return }
+                throw new Error(error.message)
+            }
+            setPedirTelefone(null)
             const r = data as CardAberto
             qc.invalidateQueries({ queryKey: ["inadimplencia-kanban"] })
             qc.invalidateQueries({ queryKey: ["leads"] })
@@ -130,7 +144,8 @@ export function InadimplenciaDashboard() {
             if (r.canal_id && r.canal_id !== CANAL_TEMPLATE_INADIMPLENTES) {
                 showError("Esta conversa usa outro número. O template ficv_inadimplentes só existe no CIDADE VIVA - OFICIAL: troque o canal na conversa.")
             }
-            setLeadAberto(r.lead_id)
+            // abre a conversa já com o template ficv_inadimplentes preenchido (só falta confirmar o envio)
+            setLeadAberto({ id: r.lead_id, template: TEMPLATE_INADIMPLENTES })
         } catch (e) {
             showError(`Não consegui abrir o card: ${(e as Error).message}`)
         } finally {
@@ -431,9 +446,15 @@ export function InadimplenciaDashboard() {
                                     <Fragment key={a.aluno_id}>
                                         <tr onClick={() => setAberto(abre ? null : a.aluno_id)} className="cursor-pointer border-t border-[var(--border)] hover:bg-[var(--bg-card-hover)]">
                                             <td>{abre ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</td>
-                                            <td className="py-2 pr-2"><span className="text-[var(--text-main)]">{a.nome ?? `Aluno ${a.aluno_id}`}</span>{!a.vigente && <span className="ml-2 text-[11px] text-[var(--text-muted)]">{a.situacao ?? "sem matrícula"}</span>}
+                                            <td className="py-2 pr-2">
+                                                {temKanban ? (
+                                                    <button type="button" onClick={(e) => { e.stopPropagation(); abrirNoKanban(a) }} disabled={abrindo === a.aluno_id}
+                                                        title="Abrir a conversa no Kanban" className="text-left text-[var(--text-main)] hover:text-primary hover:underline disabled:opacity-60">{a.nome ?? `Aluno ${a.aluno_id}`}</button>
+                                                ) : (
+                                                    <span className="text-[var(--text-main)]">{a.nome ?? `Aluno ${a.aluno_id}`}</span>
+                                                )}{!a.vigente && <span className="ml-2 text-[11px] text-[var(--text-muted)]">{a.situacao ?? "sem matrícula"}</span>}
                                                 {k && (
-                                                    <button type="button" onClick={(e) => { e.stopPropagation(); setLeadAberto(k.lead_id) }}
+                                                    <button type="button" onClick={(e) => { e.stopPropagation(); setLeadAberto({ id: k.lead_id }) }}
                                                         title={`Já está no Kanban${k.owner ? ` de ${k.owner}` : " (sem atendente)"}${k.stage ? ` · ${k.stage}` : ""}. Clique para abrir a conversa.`}
                                                         className="ml-2 inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 align-middle text-[11px] font-medium text-primary hover:bg-primary/20">
                                                         <KanbanSquare className="h-3 w-3" />{k.stage ?? "No Kanban"}{k.owner ? ` · ${k.owner.split(" ")[0]}` : ""}
@@ -448,13 +469,11 @@ export function InadimplenciaDashboard() {
                                             <td className="whitespace-nowrap text-right">
                                                 <button type="button" onClick={(e) => { e.stopPropagation(); abrirChamado(a) }} aria-label="Abrir chamado para o aluno" title="Abrir chamado" className="inline-block p-1.5 text-[var(--text-muted)] hover:text-[var(--text-main)]"><Ticket className="h-4 w-4" /></button>
                                                 {temKanban ? (
-                                                    wa && (
-                                                        <button type="button" disabled={abrindo === a.aluno_id} onClick={(e) => { e.stopPropagation(); abrirNoKanban(a) }}
-                                                            aria-label="Abrir conversa no Kanban" title={k ? "Abrir a conversa no Kanban" : "Criar o card em Em Contato e abrir a conversa"}
-                                                            className={`inline-block p-1.5 hover:text-[var(--text-main)] disabled:opacity-60 ${k ? "text-primary" : "text-[var(--text-muted)]"}`}>
-                                                            {abrindo === a.aluno_id ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageCircle className="h-4 w-4" />}
-                                                        </button>
-                                                    )
+                                                    <button type="button" disabled={abrindo === a.aluno_id} onClick={(e) => { e.stopPropagation(); abrirNoKanban(a) }}
+                                                        aria-label="Abrir conversa no Kanban" title={k ? "Abrir a conversa no Kanban" : "Criar o card em Em Contato e abrir a conversa"}
+                                                        className={`inline-block p-1.5 hover:text-[var(--text-main)] disabled:opacity-60 ${k ? "text-primary" : "text-[var(--text-muted)]"}`}>
+                                                        {abrindo === a.aluno_id ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageCircle className="h-4 w-4" />}
+                                                    </button>
                                                 ) : (
                                                     wa && <a href={wa} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} aria-label="Chamar no WhatsApp" className="inline-block p-1.5 text-[var(--text-muted)] hover:text-[var(--text-main)]"><MessageCircle className="h-4 w-4" /></a>
                                                 )}</td>
@@ -480,8 +499,26 @@ export function InadimplenciaDashboard() {
             </div>
             {chamado && <NewTicketDialog prefill={chamado} onClose={() => setChamado(null)} />}
             {leadAberto && (
-                <LeadDialogById leadId={leadAberto} initialTab="chat" onClose={() => { setLeadAberto(null); qc.invalidateQueries({ queryKey: ["inadimplencia-kanban"] }) }} />
+                <LeadDialogById leadId={leadAberto.id} autoTemplate={leadAberto.template} initialTab="chat" onClose={() => { setLeadAberto(null); qc.invalidateQueries({ queryKey: ["inadimplencia-kanban"] }) }} />
             )}
+            <Dialog open={!!pedirTelefone} onOpenChange={(o) => { if (!o) setPedirTelefone(null) }}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader><DialogTitle>Telefone do aluno</DialogTitle></DialogHeader>
+                    <p className="text-sm text-[var(--text-muted)]">
+                        <strong className="text-[var(--text-main)]">{pedirTelefone?.nome}</strong> não tem celular no Sponte nem no Portal. Informe o WhatsApp com DDD para abrir a conversa.
+                    </p>
+                    <Input autoFocus inputMode="tel" placeholder="(83) 99999-9999" value={telefoneDigitado} onChange={(e) => setTelefoneDigitado(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter" && pedirTelefone && telefoneDigitado.replace(/\D/g, "").length >= 10) abrirNoKanban(pedirTelefone, telefoneDigitado) }} />
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setPedirTelefone(null)}>Cancelar</Button>
+                        <Button disabled={!pedirTelefone || abrindo === pedirTelefone.aluno_id || telefoneDigitado.replace(/\D/g, "").length < 10}
+                            onClick={() => pedirTelefone && abrirNoKanban(pedirTelefone, telefoneDigitado)}>
+                            {pedirTelefone && abrindo === pedirTelefone.aluno_id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Abrir conversa"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
         </div>
     )
 }

@@ -93,6 +93,9 @@ interface WideChatHistoryProps {
     telefone?: string | null // usado p/ achar conversas ligadas a outro registro do mesmo lead
     leadName?: string // p/ preencher {{NOME}} nos templates
     scrollClassName?: string // altura da área de mensagens (a visão Atendimentos usa a tela toda)
+    // nome do template a abrir já preenchido ao entrar na conversa (ex.: ficv_inadimplentes, vindo da lista de
+    // inadimplentes). Só abre quando o texto livre não é permitido (janela fechada) e o template está na lista do canal.
+    autoTemplate?: string
     // nota interna automática de follow-up agendado (01/10, raw_data.kind==='followup_auto')
     // tem um link "Ver follow-up" — quem renderiza decide pra onde isso leva (ex.: abrir/rolar
     // até o card do follow-up no painel ao lado, ver LeadFollowupPanel). Sem essa prop, o link
@@ -194,7 +197,7 @@ function DeliveryTick({ status, error }: { status?: WideChatMessage['delivery_st
 // emojis mais usados no atendimento — sem dependência de lib
 const EMOJIS = "😀 😅 😊 🙂 😉 😍 🥰 🤩 😎 🤔 🙌 👏 👍 🙏 💪 ✅ ❌ ⚠️ ℹ️ 📌 📎 📄 📅 ⏰ 💰 💸 🎓 📚 ✏️ 📝 📞 📲 💬 ✨ 🎉 🔥 ❤️ 🧡 💛 💚 💙 💜 🤝 👋 😢 😔 🥳".split(" ")
 
-export function WideChatHistory({ widechatContactId, leadId, telefone, leadName, scrollClassName, onOpenFollowup, onClose }: WideChatHistoryProps) {
+export function WideChatHistory({ widechatContactId, leadId, telefone, leadName, scrollClassName, autoTemplate, onOpenFollowup, onClose }: WideChatHistoryProps) {
     const queryClient = useQueryClient()
     const { user } = useAuth()
     const scrollRef = useRef<HTMLDivElement>(null)
@@ -1059,6 +1062,16 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
         sendMessageMutation.mutate({ hsm_template_name: t.name, hsm_placeholders: values, hsm_language: t.language, preview })
         setTplForm(null)
     }
+
+    // abre o template pedido (autoTemplate) uma única vez, assim que a lista do canal carrega
+    const autoTemplateFeito = useRef(false)
+    useEffect(() => {
+        if (!autoTemplate || autoTemplateFeito.current || canSendText || !hsm) return
+        const t = hsm.find((x: any) => x.name === autoTemplate)
+        if (!t) return
+        autoTemplateFeito.current = true
+        openTemplate(t)
+    }, [autoTemplate, canSendText, hsm]) // eslint-disable-line react-hooks/exhaustive-deps
 
     if (isLoading) {
         return (

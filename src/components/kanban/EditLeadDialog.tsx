@@ -58,9 +58,10 @@ interface EditLeadDialogProps {
     isOpen: boolean
     onOpenChange: (isOpen: boolean) => void
     initialTab?: "details" | "chat" | "history"
+    autoTemplate?: string // template a abrir já preenchido na aba de conversa (ver WideChatHistory)
 }
 
-export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, initialTab = "chat" }: EditLeadDialogProps) {
+export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, initialTab = "chat", autoTemplate }: EditLeadDialogProps) {
     const queryClient = useQueryClient()
     const { user, isLoading: isAuthLoading } = useAuth()
     const [isLossReasonOpen, setIsLossReasonOpen] = useState(false)
@@ -454,7 +455,7 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
                         </TabsContent>
                         <TabsContent value="chat">
                             <div className="py-2 max-h-[78vh] overflow-y-auto pr-2 space-y-4">
-                                <WideChatHistory widechatContactId={lead.widechat_contact_id || ""} leadId={lead.id} telefone={lead.telefone} leadName={lead.nome_completo} onOpenFollowup={setHighlightFollowupId} onClose={() => onOpenChange(false)} />
+                                <WideChatHistory widechatContactId={lead.widechat_contact_id || ""} leadId={lead.id} telefone={lead.telefone} leadName={lead.nome_completo} autoTemplate={autoTemplate} onOpenFollowup={setHighlightFollowupId} onClose={() => onOpenChange(false)} />
                                 <LeadFollowupPanel lead={lead} users={users || []} highlightFollowupId={highlightFollowupId} />
                             </div>
                         </TabsContent>

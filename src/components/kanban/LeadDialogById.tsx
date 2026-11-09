@@ -12,10 +12,12 @@ export function LeadDialogById({
     leadId,
     onClose,
     initialTab = "chat",
+    autoTemplate,
 }: {
     leadId: number
     onClose: () => void
     initialTab?: "details" | "chat" | "history"
+    autoTemplate?: string
 }) {
     const { data: lead } = useQuery<Lead | null>({
         queryKey: ["lead", leadId],
@@ -43,6 +45,7 @@ export function LeadDialogById({
             isOpen
             onOpenChange={(o) => { if (!o) onClose() }}
             initialTab={initialTab}
+            autoTemplate={autoTemplate}
         />
     )
 }
