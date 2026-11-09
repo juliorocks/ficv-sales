@@ -678,19 +678,23 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
   const transferTo = (v: string) => { if (v.startsWith('a:')) assignTo(v.slice(2)); else changeQueue(v.slice(2)) }
 
   const canEvaluate = !isStaff && (t.status === 'resolvido') && !t.avaliado
+  // resolvido/fechado: o aluno não escreve mais nesse chamado (2026-11-09, equipe); a equipe segue respondendo
+  const chamadoFechado = !isStaff && ['resolvido', 'fechado'].includes(t.status)
   // aluno encerra o próprio chamado: Tutor sai ANTES da mensagem (senão ele responderia a ela),
   // sem e-mail de "resolvido", e a avaliação já abre
   const canClose = !isStaff && !['resolvido', 'fechado'].includes(t.status)
   const encerrarChamado = async () => {
     if (!window.confirm('Encerrar este chamado? Use quando o seu problema já foi resolvido.')) return
+    // a mensagem vem ANTES do status: depois de resolvido o aluno não consegue mais escrever
+    const { error: mErr } = await supabase.from('ticket_messages').insert({
+      ticket_id: ticket.id, autor_id: currentUserId, autor_nome: currentUserName, autor_role: 'aluno', interno: false,
+      conteudo: '✅ Encerrei este chamado — meu problema foi resolvido.',
+    })
+    if (mErr) { showError('Não foi possível encerrar agora. Tente de novo.'); return }
     const { data, error } = await supabase.from('tickets').update({
       status: 'resolvido', resolved_at: new Date().toISOString(), ai_status: 'off', encerrado_pelo_aluno: true,
     }).eq('id', ticket.id).select('id')
     if (error || !data?.length) { showError('Não foi possível encerrar agora. Tente de novo.'); return }
-    await supabase.from('ticket_messages').insert({
-      ticket_id: ticket.id, autor_id: currentUserId, autor_nome: currentUserName, autor_role: 'aluno', interno: false,
-      conteudo: '✅ Encerrei este chamado — meu problema foi resolvido.',
-    })
     qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
     qc.invalidateQueries({ queryKey: ['ticket-messages', ticket.id] })
     qc.invalidateQueries({ queryKey: ['tickets'] })
@@ -1068,7 +1072,12 @@ export function TicketDetail({ ticket, onClose, alunoId, alunoNome }: Props) {
                 />
               </div>
             )}
-            {!recording && (
+            {chamadoFechado && (
+              <p className="text-sm text-[var(--text-muted)] text-center py-2">
+                Este chamado já foi resolvido e não aceita novas mensagens. Para continuar, abra um novo chamado pelo Portal.
+              </p>
+            )}
+            {!recording && !chamadoFechado && (
               <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
                 <div className="relative flex-1 min-w-0">
                 <QuickReplySlash value={msg} onChange={setMsg} textareaRef={msgTextareaRef}

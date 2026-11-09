@@ -6,7 +6,7 @@
 // (Reply-To dos nossos e-mails) e o remetente precisa ser o e-mail do aluno.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { getSecret } from "../_shared/secrets.ts";
-import { parseLeadReplyAddress, parseTicketReplyAddress } from "../_shared/email.ts";
+import { emailLayout, escHtml, parseLeadReplyAddress, parseTicketReplyAddress, portalUrl, sendEmail } from "../_shared/email.ts";
 
 const j = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { "Content-Type": "application/json" } });
 
@@ -91,6 +91,17 @@ Deno.serve(async (req) => {
     if (!allowed.includes(from)) {
         console.warn(`email-inbound: remetente ${from} não é o aluno do chamado ${t.protocolo}`);
         return j({ ignored: "remetente não confere" });
+    }
+
+    // chamado resolvido não recebe mais resposta (2026-11-09): avisa o aluno pra abrir um novo
+    if (t.status === "resolvido" || t.status === "fechado") {
+        await sendEmail(from, `Chamado ${t.protocolo} já foi resolvido`, emailLayout(
+            "Este chamado já foi resolvido",
+            `<p>Olá, ${escHtml(al?.nome ?? t.aluno_nome)}!</p>
+             <p>Recebemos sua resposta, mas o chamado <b>${escHtml(t.protocolo)}</b> já foi resolvido e não aceita novas mensagens.</p>
+             <p>Para continuar, abra um novo chamado pelo Portal do Aluno.</p>`,
+            { label: "Abrir novo chamado", url: await portalUrl() }));
+        return j({ ignored: "chamado resolvido — aviso enviado" });
     }
 
     const apiKey = await getSecret("RESEND_API_KEY");
