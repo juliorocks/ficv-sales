@@ -70,6 +70,8 @@ export function InadimplenciaDashboard() {
     const [todos, setTodos] = useState(false)
     const [turma, setTurma] = useState("")
     const [busca, setBusca] = useState("")
+    const [filtroWhats, setFiltroWhats] = useState<"todos" | "com" | "sem">("todos")
+    const [filtroKanban, setFiltroKanban] = useState<"todos" | "fora" | "dentro">("todos")
     const [aberto, setAberto] = useState<number | null>(null)
     const [chamado, setChamado] = useState<NewTicketPrefill | null>(null)
     const [leadAberto, setLeadAberto] = useState<{ id: number; template?: string } | null>(null)
@@ -118,6 +120,21 @@ export function InadimplenciaDashboard() {
         },
     })
     const kanbanPorAluno = useMemo(() => new Map((noKanban ?? []).map((k) => [k.aluno_id, k])), [noKanban])
+
+    // quem tem telefone para a conversa (matrículas, conta do Portal ou card já ligado); vazio sem acesso ao Kanban
+    const { data: comWhatsApp } = useQuery({
+        queryKey: ["inadimplencia-com-whatsapp"],
+        staleTime: 60_000,
+        retry: false,
+        queryFn: async () => {
+            const { data, error } = await withTimeout(supabase.rpc("inadimplencia_com_whatsapp"), 15000, "A consulta de telefones")
+            if (error) throw new Error(error.message)
+            return (data ?? []) as number[]
+        },
+    })
+    const idsComWhats = useMemo(() => new Set(comWhatsApp ?? []), [comWhatsApp])
+    // o celular que a própria lista traz também vale (cobre quem não tem acesso à consulta acima)
+    const temWhats = (a: AlunoInad) => !!whatsapp(a.celular) || idsComWhats.has(a.aluno_id)
 
     // cria (ou reaproveita) o card do aluno em Em Contato no Kanban de quem clicou e abre a conversa
     const abrirNoKanban = async (a: AlunoInad, telefone?: string) => {
@@ -203,8 +220,11 @@ export function InadimplenciaDashboard() {
         return base
             .filter((a) => !turma || (a.turma ?? SEM_TURMA) === turma)
             .filter((a) => !q || (a.nome ?? "").toLowerCase().includes(q) || String(a.aluno_id) === q)
+            .filter((a) => filtroWhats === "todos" || (filtroWhats === "com") === temWhats(a))
+            .filter((a) => filtroKanban === "todos" || (filtroKanban === "dentro") === kanbanPorAluno.has(a.aluno_id))
             .sort((a, b) => b.valor - a.valor)
-    }, [base, turma, busca])
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [base, turma, busca, filtroWhats, filtroKanban, idsComWhats, kanbanPorAluno])
 
     const totalValor = base.reduce((s, a) => s + a.valor, 0)
     const totalLiquido = base.reduce((s, a) => s + (a.liquido ?? a.valor), 0)
@@ -426,7 +446,21 @@ export function InadimplenciaDashboard() {
                         Alunos{turma ? ` · ${turma}` : ""} · {lista.length} · {brl(noRecorte)} · {brl(noRecorteLiquido)} com desconto · {brl(noRecorteAtual)} atualizado
                     </p>
                     {turma && <button type="button" onClick={() => setTurma("")} className="rounded-full bg-[var(--bg-card-hover)] px-3 py-1 text-xs">Limpar turma ✕</button>}
-                    <div className="ml-auto flex items-center gap-2">
+                    <div className="ml-auto flex flex-wrap items-center gap-2">
+                        <select value={filtroWhats} onChange={(e) => setFiltroWhats(e.target.value as typeof filtroWhats)} aria-label="Filtrar por WhatsApp"
+                            className="rounded-full border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text-main)]">
+                            <option value="todos">WhatsApp: todos</option>
+                            <option value="com">Com WhatsApp ({base.filter(temWhats).length})</option>
+                            <option value="sem">Sem WhatsApp ({base.filter((a) => !temWhats(a)).length})</option>
+                        </select>
+                        {temKanban && (
+                            <select value={filtroKanban} onChange={(e) => setFiltroKanban(e.target.value as typeof filtroKanban)} aria-label="Filtrar por Kanban"
+                                className="rounded-full border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text-main)]">
+                                <option value="todos">Kanban: todos</option>
+                                <option value="fora">Ainda não contatados</option>
+                                <option value="dentro">Já no Kanban</option>
+                            </select>
+                        )}
                         <div className="relative"><Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-[var(--text-muted)]" />
                             <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar aluno" className="rounded-full border border-[var(--border)] bg-transparent py-2 pl-8 pr-3 text-sm outline-none" /></div>
                         <button type="button" onClick={exportar} className="flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-2 text-sm hover:bg-[var(--bg-card-hover)]"><Download className="h-4 w-4" /> CSV</button>
