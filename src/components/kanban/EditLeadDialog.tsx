@@ -35,6 +35,7 @@ import { AddLeadNoteForm } from "./AddLeadNoteForm"
 import { LeadHistoryFeed } from "./LeadHistoryFeed"
 import { WideChatHistory } from "./WideChatHistory"
 import { LeadFollowupPanel } from "@/components/followups/LeadFollowupPanel"
+import { temPapel } from "@/utils/papeis"
 
 const formSchema = z.object({
     nome_completo: z.string().min(2, "O nome é obrigatório."),
@@ -387,7 +388,7 @@ export function EditLeadDialog({ lead, stages, children, isOpen, onOpenChange, i
                                                         disabled={isLoadingCourses}
                                                     >
                                                         <FormControl>
-                                                            <SelectTrigger disabled={!isAdmin && user?.role !== 'agent'}>
+                                                            <SelectTrigger disabled={!isAdmin && !temPapel(user, 'agent')}>
                                                                 <SelectValue placeholder="Selecione o curso..." />
                                                             </SelectTrigger>
                                                         </FormControl>

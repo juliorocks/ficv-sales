@@ -51,6 +51,7 @@ interface Profile {
     full_name: string;
     email?: string;
     role: Role;
+    papeis_extra?: string[] | null;
     created_at: string;
     must_change_password?: boolean;
 }
@@ -68,7 +69,7 @@ export const UserManagement: React.FC = () => {
         role: 'agent' as Role
     });
     const [editingUser, setEditingUser] = useState<Profile | null>(null);
-    const [editForm, setEditForm] = useState({ full_name: '', email: '', role: 'agent' as Role, newPassword: '' });
+    const [editForm, setEditForm] = useState({ full_name: '', email: '', role: 'agent' as Role, newPassword: '', comercial: false });
     const [editLoading, setEditLoading] = useState(false);
 
     useEffect(() => {
@@ -91,7 +92,7 @@ export const UserManagement: React.FC = () => {
 
     const openEditUser = (p: Profile) => {
         setEditingUser(p);
-        setEditForm({ full_name: p.full_name || '', email: p.email || '', role: p.role, newPassword: '' });
+        setEditForm({ full_name: p.full_name || '', email: p.email || '', role: p.role, newPassword: '', comercial: (p.papeis_extra ?? []).includes('agent') });
     };
 
     const handleUpdateUser = async (e: React.FormEvent) => {
@@ -103,9 +104,15 @@ export const UserManagement: React.FC = () => {
             if (editForm.newPassword && editForm.newPassword.length < 6) {
                 throw new Error('A nova senha deve ter no mínimo 6 caracteres.');
             }
+            const novoExtra = editForm.comercial && !['admin', 'agent'].includes(editForm.role) ? ['agent'] : [];
 
             const { data, error } = await supabase.functions.invoke('admin-manage-users', {
-                body: { action: 'update_profile', payload: { userId: editingUser.id, full_name: editForm.full_name, email: editForm.email, role: editForm.role } },
+                body: { action: 'update_profile', payload: {
+                    userId: editingUser.id, full_name: editForm.full_name, email: editForm.email, role: editForm.role,
+                    // o extra só faz sentido para quem trabalha com chamados (admin/agent já têm o Comercial);
+                    // só vai no pedido quando muda, pra editar nome/e-mail não depender do campo novo
+                    ...(novoExtra.join() !== (editingUser.papeis_extra ?? []).join() ? { papeis_extra: novoExtra } : {}),
+                } },
             });
             if (error) throw error;
             if ((data as any)?.error) throw new Error((data as any).error);
@@ -404,6 +411,19 @@ export const UserManagement: React.FC = () => {
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest ml-1">Nível de Acesso</label>
                                 <RolePicker value={editForm.role} onChange={(r) => setEditForm({ ...editForm, role: r })} />
+                                {!['admin', 'agent'].includes(editForm.role) && (
+                                    <label className="flex items-start gap-2.5 mt-3 p-3 rounded-xl border border-[var(--border)] cursor-pointer hover:border-primary/30 transition-all">
+                                        <input type="checkbox" checked={editForm.comercial}
+                                            onChange={e => setEditForm({ ...editForm, comercial: e.target.checked })}
+                                            className="mt-0.5 h-4 w-4 accent-[var(--primary)]" />
+                                        <span className="text-xs text-[var(--text-main)]">
+                                            Também atende o Comercial
+                                            <span className="block text-[11px] text-[var(--text-muted)]">
+                                                Libera o Kanban de leads, as conversas, Follow-ups e Matrículas, sem perder os chamados desta função.
+                                            </span>
+                                        </span>
+                                    </label>
+                                )}
                             </div>
 
                             <div className="space-y-2">

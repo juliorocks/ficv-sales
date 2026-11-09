@@ -44,6 +44,7 @@ import { reprocessAllAnalyses } from './services/reprocessor';
 import { CSVUploader } from './components/CSVUploader';
 import { TeamFilter } from './components/TeamFilter';
 import { AutoWidthSelect } from './utils/dashboardFilters';
+import { temPapel } from './utils/papeis';
 import { GoalDashboard } from './components/GoalDashboard';
 import { AgentProfile } from './components/AgentProfile';
 import { Login } from './components/Login';
@@ -214,9 +215,11 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     // Secretaria/Tutor/Coordenador trabalham só com Chamados (Portal do Aluno)
     const isTicketRole = ['secretaria', 'tutor', 'coordenador', 'atendente', 'biblioteca'].includes(String(profile?.role ?? ''));
     const podeInadimplencia = ['admin', 'agent', 'secretaria', 'coordenador'].includes(String(profile?.role ?? ''));
+    // admin/agent, ou papel principal de chamados com 'agent' como extra (ex.: secretaria que também atende o Comercial)
+    const ehComercial = temPapel(profile, 'admin', 'agent');
     useEffect(() => {
-        if (isTicketRole && activeTab !== 'tickets' && !(activeTab === 'inadimplencia' && podeInadimplencia)) setActiveTab('tickets');
-    }, [isTicketRole, activeTab, podeInadimplencia]);
+        if (isTicketRole && !ehComercial && activeTab !== 'tickets' && !(activeTab === 'inadimplencia' && podeInadimplencia)) setActiveTab('tickets');
+    }, [isTicketRole, ehComercial, activeTab, podeInadimplencia]);
 
     // Load team selection — always validate against DB to flush corrupted localStorage values
     useEffect(() => {
@@ -263,7 +266,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     useEffect(() => {
         if (kanbanAssigneeInit.current || !profile) return;
         kanbanAssigneeInit.current = true;
-        if (profile.role === 'agent') setKanbanAssignee(profile.id);
+        if (temPapel(profile, 'agent')) setKanbanAssignee(profile.id);
     }, [profile]);
 
     const fetchData = async (currentProfile?: any) => {
@@ -276,7 +279,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
 
         // Determine if we need to filter by agent profile name
         let targetAgentName: string | null = null;
-        if (activeProfile && activeProfile.role === 'agent') {
+        if (activeProfile && temPapel(activeProfile, 'agent')) {
             targetAgentName = activeProfile.full_name;
         }
 
@@ -971,7 +974,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
 
                     <div className={`py-2 flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar ${sidebarCollapsed ? 'px-2' : 'px-4'}`}>
                         {/* Secretaria/Tutor/Coordenador: só Chamados (sem CRM de vendas) */}
-                        {isTicketRole ? (<>
+                        {isTicketRole && !ehComercial ? (<>
                         {!sidebarCollapsed && <p className="text-[10px] text-[var(--text-muted)] font-bold tracking-widest uppercase mb-4 px-2">Atendimento ao Aluno</p>}
                         <nav className="space-y-1">
                             <NavItem collapsed={sidebarCollapsed} icon={TicketIcon} label="Chamados" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
@@ -1048,16 +1051,16 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                             {(profile?.role === 'admin') && <NavItem collapsed={sidebarCollapsed} icon={Target} label="Metas" active={activeTab === 'goals'} onClick={() => setActiveTab('goals')} />}
                             {(profile?.role === 'admin') && <NavItem collapsed={sidebarCollapsed} icon={FileUp} label="Uploads" active={activeTab === 'uploads'} onClick={() => setActiveTab('uploads')} />}
                             <NavItem collapsed={sidebarCollapsed} icon={BookOpen} label="Base de Conhecimento" active={activeTab === 'knowledge'} onClick={() => setActiveTab('knowledge')} />
-                            {(profile?.role === 'admin' || profile?.role === 'agent') && (
+                            {ehComercial && (
                                 <NavItem collapsed={sidebarCollapsed} icon={CalendarClock} label="Follow-ups" active={activeTab === 'followups'} onClick={() => setActiveTab('followups')} />
                             )}
-                            {profile?.role === 'admin' && (
+                            {(profile?.role === 'admin' || isTicketRole) && (
                                 <NavItem collapsed={sidebarCollapsed} icon={TicketIcon} label="Tickets" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
                             )}
-                            {(profile?.role === 'admin' || profile?.role === 'agent') && (
+                            {ehComercial && (
                                 <NavItem collapsed={sidebarCollapsed} icon={GraduationCap} label="Matrículas" active={activeTab === 'matriculas'} onClick={() => setActiveTab('matriculas')} />
                             )}
-                            {(profile?.role === 'admin' || profile?.role === 'agent') && (
+                            {(ehComercial || podeInadimplencia) && (
                                 <NavItem collapsed={sidebarCollapsed} icon={DollarSign} label="Inadimplência" active={activeTab === 'inadimplencia'} onClick={() => setActiveTab('inadimplencia')} />
                             )}
                             {(profile?.role === 'admin') && (
@@ -2089,7 +2092,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 )}
 
                 {/* Matrículas — integração Sponte CRM */}
-                {activeTab === 'matriculas' && (profile?.role === 'admin' || profile?.role === 'agent') && (
+                {activeTab === 'matriculas' && ehComercial && (
                     <div className="animate-fade-in">
                         <SponteDashboard isAdmin={profile?.role === 'admin'} />
                     </div>
@@ -2122,7 +2125,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 )}
 
                 {/* Follow-ups & Tarefas */}
-                {activeTab === 'followups' && (profile?.role === 'admin' || profile?.role === 'agent') && (
+                {activeTab === 'followups' && ehComercial && (
                     <div className="animate-fade-in">
                         <FollowupsPage profile={profile} />
                     </div>

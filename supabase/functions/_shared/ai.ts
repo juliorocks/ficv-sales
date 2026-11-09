@@ -14,7 +14,7 @@ export function jsonRes(body: unknown, status = 200) {
     });
 }
 
-export type Caller = { kind: "service" } | { kind: "user"; id: string; role: string };
+export type Caller = { kind: "service" } | { kind: "user"; id: string; role: string; papeis: string[] };
 
 function jwtRole(jwt: string): string | null {
     try {
@@ -44,13 +44,15 @@ export async function identify(req: Request, db: SupabaseClient): Promise<Caller
     }
     const { data: { user } } = await db.auth.getUser(jwt);
     if (!user) return null;
-    const { data: prof } = await db.from("profiles").select("role").eq("id", user.id).maybeSingle();
-    return { kind: "user", id: user.id, role: prof?.role ?? "" };
+    // "*" e não só role/papeis_extra: assim a função continua funcionando se for publicada antes da migration que cria a coluna
+    const { data: prof } = await db.from("profiles").select("*").eq("id", user.id).maybeSingle();
+    return { kind: "user", id: user.id, role: prof?.role ?? "", papeis: [prof?.role, ...(prof?.papeis_extra ?? [])].filter(Boolean) };
 }
 
 export const isAdmin = (c: Caller | null) => c?.kind === "service" || (c?.kind === "user" && c.role === "admin");
+// papel principal OU extra (ex.: secretaria que também atende o Comercial)
 export const isStaff = (c: Caller | null) =>
-    c?.kind === "service" || (c?.kind === "user" && ["admin", "agent"].includes(c.role));
+    c?.kind === "service" || (c?.kind === "user" && c.papeis.some((p) => p === "admin" || p === "agent"));
 
 // ── OpenAI ──────────────────────────────────────────────────────────────────
 async function openaiKey(): Promise<string> {

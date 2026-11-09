@@ -44,8 +44,10 @@ serve(async (req) => {
         const { data: { user } } = await supabase.auth.getUser(jwt);
         if (!user) return jsonRes({ error: 'Sessão não identificada. Faça login de novo.' }, 401);
         const who = { id: user.id, email: user.email ?? '' };
-        const { data: me } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
-        if (!me || !['admin', 'agent'].includes(me.role)) return jsonRes({ error: 'Não autorizado.' }, 403);
+        // "*": segue funcionando se a função for publicada antes da migration que cria papeis_extra
+        const { data: me } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
+        const papeis: string[] = me ? [me.role, ...(me.papeis_extra ?? [])] : [];
+        if (!papeis.some((p) => p === 'admin' || p === 'agent')) return jsonRes({ error: 'Não autorizado.' }, 403);
         // nome do agente que está de fato operando — pra atribuir a msg no NOSSO
         // histórico mesmo quando o envio sai pela conta de integração.
         const callerName = (await supabase.from('profiles').select('full_name').eq('id', who.id).maybeSingle())

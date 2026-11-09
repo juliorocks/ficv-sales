@@ -3,6 +3,7 @@ export interface User {
     email?: string
     full_name: string
     role: 'admin' | 'agent' | 'secretaria' | 'tutor' | 'coordenador' | 'atendente' | 'biblioteca'
+    papeis_extra?: string[] | null // hoje só 'agent' (ex.: secretaria que também atende o Comercial)
     avatar_url?: string | null
 }
 

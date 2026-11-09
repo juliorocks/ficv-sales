@@ -29,8 +29,9 @@ serve(async (req) => {
         const { action, payload } = await req.json();
 
         if (action === 'list') {
+            // "*": segue listando se a função for publicada antes da migration que cria papeis_extra
             const { data, error } = await admin.from('profiles')
-                .select('id, email, full_name, role, must_change_password').order('full_name', { ascending: true });
+                .select('*').order('full_name', { ascending: true });
             if (error) throw error;
             return json({ success: true, profiles: data });
         }
@@ -55,12 +56,17 @@ serve(async (req) => {
         }
 
         if (action === 'update_profile') {
-            const { userId, full_name, email, role } = payload ?? {};
+            const { userId, full_name, email, role, papeis_extra } = payload ?? {};
             if (!userId) throw new Error('userId é obrigatório.');
             const patch: Record<string, unknown> = {};
             if (full_name !== undefined) patch.full_name = full_name;
             if (email !== undefined) patch.email = email;
             if (role !== undefined) patch.role = role;
+            // papéis extras: hoje só 'agent' (secretaria que também atende o Comercial); o banco também restringe
+            if (papeis_extra !== undefined) {
+                if (!Array.isArray(papeis_extra) || papeis_extra.some((p: unknown) => p !== 'agent')) throw new Error("papeis_extra aceita só 'agent'.");
+                patch.papeis_extra = papeis_extra;
+            }
 
             const { error } = await admin.from('profiles').update(patch).eq('id', userId);
             if (error) throw error;
