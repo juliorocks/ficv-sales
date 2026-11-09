@@ -17,6 +17,7 @@ import { ensureAlunoAccountById } from "../_shared/aluno.ts";
 import { sponteBuscarAlunos, sponteBuscarTurmas, sponteRosterTurma } from "../_shared/sponte.ts";
 import { alunoPagamento } from "../_shared/alunoSponte.ts";
 import { boletimFor, overviewFor } from "../_shared/alunoPortalCore.ts";
+import { cursoDoAluno } from "../_shared/cursoChamado.ts";
 
 const TICKET_STAFF_ROLES = ["admin", "agent", "secretaria", "tutor", "coordenador", "atendente", "biblioteca"];
 // mesmo critério de 3 níveis que ticket_visible() já usa no Postgres (RLS) — repetido aqui
@@ -164,10 +165,11 @@ Deno.serve(async (req) => {
                     if (r.error || !r.aluno) { results.push({ aluno_id: sponteId, nome: nomeAlvo, ok: false, error: r.error ?? "sem conta" }); continue; }
                     const aluno = r.aluno;
                     const now = new Date().toISOString();
+                    const curso = await cursoDoAluno(db, sponteId, cursoNome);
                     const { data: ticketData, error: tErr } = await db.from("tickets").insert({
                         protocolo: "", titulo, categoria, prioridade: "media", status: "aguardando_aluno", origem: "agente",
                         aluno_id: aluno.id, aluno_nome: aluno.nome, aluno_email: aluno.email || null,
-                        curso_nome: cursoNome, nivel: nivel ?? aluno.nivel ?? null,
+                        curso_id: curso.curso_id, curso_nome: curso.curso_nome, nivel: nivel ?? curso.nivel ?? aluno.nivel ?? null,
                         atendente_id: caller.id, first_response_at: now,
                     }).select().single();
                     if (tErr || !ticketData) { results.push({ aluno_id: sponteId, nome: aluno.nome, ok: false, error: tErr?.message ?? "erro ao criar chamado" }); continue; }

@@ -15,6 +15,7 @@ import { corsHeaders, identify, isStaff, jsonRes } from "../_shared/ai.ts";
 import { ensureAlunoAccount } from "../_shared/aluno.ts";
 import { cpfDigits } from "../_shared/sponte.ts";
 import { portalUrl } from "../_shared/email.ts";
+import { cursoDoAluno, cursoDoCatalogoPorId } from "../_shared/cursoChamado.ts";
 
 const CATS = ["financeiro", "academico", "secretaria", "suporte_tecnico", "certificado", "cancelamento", "biblioteca", "outros"];
 const hora = (iso: string) => new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
@@ -33,7 +34,7 @@ Deno.serve(async (req) => {
         const resumo = String(body.resumo ?? "").trim();
         if (!leadId || !titulo) return jsonRes({ error: "lead_id e título são obrigatórios." }, 400);
 
-        const { data: lead } = await db.from("leads").select("id, nome_completo, email, telefone").eq("id", leadId).maybeSingle();
+        const { data: lead } = await db.from("leads").select("id, nome_completo, email, telefone, curso_interesse").eq("id", leadId).maybeSingle();
         if (!lead) return jsonRes({ error: "Lead não encontrado." }, 404);
 
         // já existe chamado aberto desse lead? não duplica
@@ -54,10 +55,14 @@ Deno.serve(async (req) => {
         const { data: me } = await db.from("profiles").select("full_name, role").eq("id", caller.id).maybeSingle();
         const agente = me?.full_name ?? "Equipe FICV";
 
+        // curso: da matrícula do aluno (Sponte); sem matrícula, o de interesse do lead
+        const curso = aluno?.sponte_aluno_id ? await cursoDoAluno(db, aluno.sponte_aluno_id) : { curso_id: null, curso_nome: null, nivel: null };
+        const cursoLead = curso.curso_id ? curso : await cursoDoCatalogoPorId(db, lead.curso_interesse ?? null);
         const { data: ticket, error: tErr } = await db.from("tickets").insert({
             titulo, categoria, prioridade: "media", status: "aberto",
             aluno_id: aluno?.id ?? null, aluno_nome: aluno?.nome ?? lead.nome_completo ?? "Aluno", aluno_email: email,
             lead_id: leadId, origem: "transferencia", transferido_por: caller.id,
+            curso_id: cursoLead.curso_id, curso_nome: cursoLead.curso_nome, nivel: cursoLead.nivel,
         }).select("id, protocolo, created_at").single();
         if (tErr) return jsonRes({ error: `Não foi possível criar o chamado: ${tErr.message}` }, 500);
 
