@@ -8,6 +8,7 @@ import {
 } from 'recharts';
 import { supabase } from '../lib/supabase';
 import { showSuccess, showError } from '@/utils/toast';
+import { extractFnErrorMessage } from '@/utils/functionsError';
 import { periodToDates, AutoWidthSelect, PERIOD_OPTIONS } from '@/utils/dashboardFilters';
 import { normalizeName, extractContactPhone, normalizeStudentPhone, daysDiff } from '@/utils/sponteMatch';
 import {
@@ -175,7 +176,8 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
             const { data, error } = await supabase.functions.invoke('sync-sponte', {
                 body: { mode: 'full', start_date: dateStart, end_date: dateEnd },
             });
-            if (error || data?.error) throw new Error(data?.error ?? error?.message ?? 'falha');
+            if (error) throw new Error(await extractFnErrorMessage(error, 'falha'));
+            if (data?.error) throw new Error(data.error);
             showSuccess('Sync iniciado! Os dados serão atualizados em ~2 minutos.');
         } catch (e: any) {
             showError('Erro ao iniciar sync: ' + e.message);
