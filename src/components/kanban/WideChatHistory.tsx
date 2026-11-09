@@ -1221,7 +1221,9 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                 </Alert>
             )}
             {/* área de conversa sempre em tema claro — legibilidade acima de tudo */}
-            <ScrollArea className={`${scrollClassName ?? "h-[400px] sm:h-[58vh]"} w-full p-4 bg-[#eef1f5]`}>
+            {/* o viewport do Radix embrulha a conversa em display:table, que cresce com a linha mais longa
+                e empurra os balões azuis (do agente) pra fora da área visível */}
+            <ScrollArea className={`${scrollClassName ?? "h-[400px] sm:h-[58vh]"} w-full p-4 bg-[#eef1f5] [&>[data-radix-scroll-area-viewport]>div]:!block`}>
                 {!messages || messages.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-slate-400">
                         <MessageSquare className="h-8 w-8 mb-2" />
