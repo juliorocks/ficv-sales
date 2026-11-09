@@ -1720,7 +1720,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
 
                             <div className="lg:col-span-2 glass-card p-8">
                                 <div className="flex justify-between items-center mb-8">
-                                    <h3 className="text-xs font-bold text-[#8B949E] uppercase tracking-widest">Últimas Análises Detalhadas</h3>
+                                    <h3 className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-widest">Últimas Análises Detalhadas</h3>
                                     <div className="flex items-center gap-3">
                                         <button
                                             onClick={() => setActiveTab('history')}
@@ -1741,22 +1741,22 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                                 const liveItem = analysisData.find(d => d.protocol === item.protocol);
                                                 setSelectedAnalysis(liveItem || item);
                                             }}
-                                            className="w-full flex justify-between items-center p-4 bg-[#161B22]/40 rounded-xl border border-[#30363D] hover:border-primary/50 hover:bg-[#161B22]/60 transition-all group"
+                                            className="w-full flex justify-between items-center p-4 bg-[var(--bg-card-hover)] rounded-xl border border-[var(--border)] hover:border-primary/50 hover:bg-[var(--bg-card)] transition-all group"
                                         >
                                             <div className="flex items-center gap-4">
                                                 <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-all">
                                                     <MessageSquare size={16} className="text-primary" />
                                                 </div>
                                                 <div className="text-left">
-                                                    <p className="font-bold text-sm text-white group-hover:text-primary transition-colors">{item.contact}</p>
-                                                    <p className="text-[10px] text-[#8B949E] font-medium">{item.agent} • {new Date(item.date).toLocaleDateString()}</p>
+                                                    <p className="font-bold text-sm text-[var(--text-main)] group-hover:text-primary transition-colors">{item.contact}</p>
+                                                    <p className="text-[10px] text-[var(--text-muted)] font-medium">{item.agent} • {new Date(item.date).toLocaleDateString()}</p>
                                                 </div>
                                             </div>
                                             <div className="text-right">
-                                                <span className={`text-sm font-black ${item.status === 'invalidated' ? 'text-[#30363D] line-through' : item.finalScore > 7 ? 'text-success-text' : 'text-warning'}`}>
+                                                <span className={`text-sm font-black ${item.status === 'invalidated' ? 'text-[var(--text-muted)] line-through' : item.finalScore > 7 ? 'text-success-text' : 'text-warning'}`}>
                                                     {item.status === 'invalidated' ? '---' : item.finalScore}
                                                 </span>
-                                                <p className="text-[9px] text-[#8B949E] uppercase font-bold tracking-widest">Score IA</p>
+                                                <p className="text-[9px] text-[var(--text-muted)] uppercase font-bold tracking-widest">Score IA</p>
                                             </div>
 
                                         </button>
