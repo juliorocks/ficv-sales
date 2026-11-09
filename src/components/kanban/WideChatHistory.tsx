@@ -1272,7 +1272,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                             }
                             return (
                                 <div key={msg.id} className={`group flex flex-col max-w-[85%] ${isUser ? "self-start" : "self-end items-end"}`}>
-                                    <div className={`px-4 py-2 text-sm shadow-sm ${isUser
+                                    <div className={`px-4 py-2 text-sm shadow-sm break-words ${isUser
                                         ? "bg-white text-slate-800 rounded-2xl rounded-tl-md"
                                         : isBot
                                             ? "bg-slate-200 text-slate-600 rounded-2xl rounded-tr-md"
