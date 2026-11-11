@@ -228,6 +228,8 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 - **Moodle (fotos)**: `core_user_get_users_by_field` devolve `profileimageurl`, mas para os professores testados (2026-10-22) é sempre a mesma imagem padrão de 1.128 bytes. Fotos vêm do painel da CPA, não do Moodle.
 - **Moodle**: `core_enrol_get_enrolled_users` traz o papel em `roles[].shortname`. Professor = `editingteacher`. `edteacher` é tutor.
 
+- **Número de fora deformado pelo Z-PRO (2026-11-11)**: no payload WABA, `ticket.contact.number` vem com 55 na frente para número estrangeiro (Peru `51976879975` → `555176879975`, EUA `19706496709` → `5519706496709`, São Tomé `2399914657` → `5523999914657`), então o lead nascia com número inexistente e a resposta ia para um DDD do Brasil. `parseWebhook` agora usa `msg.from` (número real da Meta) quando ele não começa com 55; `vivaconnect-webhook` redeployado em 2026-11-11. Não existe trava por país: em 6 dias passaram eventos de US, PT, PE, GW, AL, JO, MZ, ST. Lead da Irene Avelar (id 10505831) corrigido para 51976879975.
+
 - **Janela de 24h do WhatsApp**: qualquer lugar que calcula se texto livre é permitido precisa ignorar `provider='email'`
   (resposta por e-mail tem `origin='channel'` e não pode abrir a janela do WhatsApp). Já existe em WideChatHistory e vivaconnect-api.
 

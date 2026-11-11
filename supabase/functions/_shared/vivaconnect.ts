@@ -301,7 +301,12 @@ export function parseWebhook(p: any): ParsedMsg | null {
     if (!body && m?.type === "unsupported") body = "[mensagem não suportada pelo WhatsApp]";
     const ticket = findKey(p, ["ticket"]);
     const contact = findKey(p, ["contact", "contato"]);
-    const rawNum = (contact && (contact.number ?? contact.phone)) ?? findKey(p, ["number", "remoteJidAlt", "from", "phone"]);
+    let rawNum = (contact && (contact.number ?? contact.phone)) ?? findKey(p, ["number", "remoteJidAlt", "from", "phone"]);
+    // O Z-PRO "normaliza" número de fora como se fosse brasileiro (Peru 51976879975 vira 555176879975,
+    // EUA 19706496709 vira 5519706496709): o lead nascia com número que não existe e a resposta ia
+    // para um DDD do Brasil. O `from` da Meta é o número real; só vale quando não começa com 55.
+    const fromReal = onlyDigits(typeof m?.from === "string" ? m.from : "");
+    if (fromReal.length >= 8 && !fromReal.startsWith("55") && m?.fromMe !== true && onlyDigits(rawNum) !== fromReal) rawNum = fromReal;
     const numStr = String(rawNum ?? "");
     const isGroup = !!findKey(p, ["isGroup"]) || numStr.includes("@g.us") || /-\d+$/.test(numStr);
     const messageId = findKey(m, ["messageId", "id"]);
