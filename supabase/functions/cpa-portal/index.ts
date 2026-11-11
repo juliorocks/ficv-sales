@@ -9,6 +9,7 @@
 //   (_shared/cpaMoodle.ts). O professor vem do mesmo curso (cache em cpa_docentes; nas pós, a equipe preenche).
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { cursoRotulo, nivelDoCurso, participacaoHash, slug, validarRespostas } from "../_shared/cpa.ts";
+import { disciplinasDaTurma } from "../_shared/cpaTurma.ts";
 import { cursosDoUsuario, disciplinasAtivas, moodleUserIdPorEmail, professoresDoCurso, semestreAtual } from "../_shared/cpaMoodle.ts";
 
 const cors = {
@@ -82,7 +83,9 @@ async function situacaoDoAluno(db: any, A: number, email: string | null, semestr
         if (uid) {
             // só disciplinas dos níveis em que o aluno tem matrícula Vigente (aluno de pós com resquício de graduação no Moodle não entra)
             const niveis = new Set(matriculas.map((m) => nivelDoCurso(m.nome_curso)));
-            ativas = disciplinasAtivas(await cursosDoUsuario(uid), { semestre }).filter((a) => niveis.has(a.nivel));
+            const doMoodle = disciplinasAtivas(await cursosDoUsuario(uid), { semestre }).filter((a) => niveis.has(a.nivel));
+            // a inscrição no Moodle sobra (outro período, disciplina compartilhada de outro curso): vale a turma do Sponte
+            ativas = disciplinasDaTurma(matriculas, semestre, doMoodle);
         }
     } catch (e) {
         console.error("cpa-portal moodle:", e); // Moodle fora do ar: o aluno segue só com a avaliação geral
