@@ -1222,8 +1222,9 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                     onChange={setKanbanAssignee}
                                     placeholder="Todos os Atendentes"
                                     options={[
+                                        ...(profile?.id ? [{ value: profile.id, label: 'Apenas os Meus' }] : []),
                                         { value: 'unassigned', label: 'Sem atendente' },
-                                        ...kanbanAgentsInTeam.map(a => ({ value: a.id, label: a.full_name })),
+                                        ...kanbanAgentsInTeam.filter(a => a.id !== profile?.id).map(a => ({ value: a.id, label: a.full_name })),
                                     ]}
                                 />
                                 {/* Filtra o funil por período de entrada no funil (data_entrada) */}
