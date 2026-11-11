@@ -43,9 +43,11 @@ export async function alunoOverview(A: number) {
     // "Cancelada" (confirmado com dado real: AlunoID 6668, 2 matrículas Pós canceladas, TODAS
     // as parcelas delas vêm "Cancelada"). isPaid() do front só reconhece quit/pag/baix — uma
     // parcela Cancelada não batia em nenhum, então entrava como dívida real (inclusive "em
-    // atraso" se a data já tinha passado) pro aluno ver. Filtra aqui, na camada compartilhada
+    // atraso" se a data já tinha passado) pro aluno ver. Mesmo vale para "Renegociada" (2026-11-11,
+    // caso Claudia Mews Ebert): a dívida virou uma parcela de "Acordo Financeiro" e as originais ficam
+    // Renegociada, sem pagamento. Filtra aqui, na camada compartilhada
     // (Portal E Tutor Virtual), pra nunca mostrar cobrança de uma matrícula que não existe mais.
-    const parcelas = records(xp, "wsParcela").filter((r) => r.ContaReceberID && r.ContaReceberID !== "0" && !/cancelad/i.test(r.SituacaoParcela ?? "")).map((r) => ({
+    const parcelas = records(xp, "wsParcela").filter((r) => r.ContaReceberID && r.ContaReceberID !== "0" && !/cancelad|renegoci/i.test(r.SituacaoParcela ?? "")).map((r) => ({
         conta_receber_id: Number(r.ContaReceberID), numero_parcela: Number(r.NumeroParcela) || 0,
         vencimento: brDate(r.Vencimento), valor: brNum(r.ValorParcela), valor_pago: brNum(r.ValorPago) || null,
         data_pagamento: brDate(r.DataPagamento), situacao: n(r.SituacaoParcela), forma: n(r.FormaCobranca),
