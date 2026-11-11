@@ -38,7 +38,7 @@
 //     'vivaconnect'); o webhook ignora o eco.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { corsHeaders, identify, isAdmin, isStaff, jsonRes } from "../_shared/ai.ts";
-import { asList, fillTemplate, firstName, loadSettings, markHumanReplied, parseApiRef, toDiscovered, toZproNumber, TICKET_TEMPLATE_CHANNEL_ID, TICKET_TEMPLATE_NAME, zpro, zproErr } from "../_shared/vivaconnect.ts";
+import { asList, fillTemplate, firstName, loadSettings, markHumanReplied, parseApiRef, toDiscovered, toZproNumber, validarTelefone, TICKET_TEMPLATE_CHANNEL_ID, TICKET_TEMPLATE_NAME, zpro, zproErr } from "../_shared/vivaconnect.ts";
 import { type HubMsg, filaText, loadDestinations, planejar, redirectText } from "../_shared/hub.ts";
 import { getSecret } from "../_shared/secrets.ts";
 import { escHtml, leadReplyAddress, sendEmail } from "../_shared/email.ts";
@@ -200,8 +200,31 @@ Deno.serve(async (req) => {
             if (media && !["images", "sounds", "videos", "files"].includes(media.type)) return jsonRes({ error: "Tipo de mídia inválido." }, 400);
             const { data: lead } = await db.from("leads").select("id, telefone, vivaconnect_channel_id").eq("id", leadId).maybeSingle();
             if (!lead) return jsonRes({ error: "Lead não encontrado." }, 404);
-            const number = toZproNumber(lead.telefone);
-            if (!number) return jsonRes({ error: "Lead sem telefone válido." }, 400);
+            const tel = validarTelefone(lead.telefone);
+            if (!tel.ok) return jsonRes({ error: `Telefone do lead inválido: ${tel.motivo} Corrija o número no cadastro do lead.` }, 400);
+            const number = tel.number;
+            // Template de marketing repetido para quem não respondeu faz a Meta recusar (131049) e piora a cada
+            // tentativa; um template por contato a cada 24h, até o cliente responder.
+            if (hsmName) {
+                const suffix = String(lead.telefone ?? "").replace(/\D/g, "").slice(-8);
+                let ids: unknown[] = [leadId];
+                if (suffix.length === 8) {
+                    const { data: same } = await db.from("leads").select("id").ilike("telefone", `%${suffix}%`).limit(20);
+                    if (same?.length) ids = [...new Set([leadId, ...same.map((l: { id: unknown }) => l.id)])];
+                }
+                const desde = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+                const { data: ultimo } = await db.from("vivaconnect_outbox").select("created_at, hsm_template_name")
+                    .in("lead_id", ids).eq("kind", "manual").eq("status", "sent").not("hsm_template_name", "is", null)
+                    .gte("created_at", desde).order("created_at", { ascending: false }).limit(1).maybeSingle();
+                if (ultimo) {
+                    const { data: resp } = await db.from("widechat_messages").select("id").in("lead_id", ids)
+                        .eq("origin", "channel").neq("provider", "email").gt("created_at", ultimo.created_at).limit(1).maybeSingle();
+                    if (!resp) {
+                        const hora = new Date(ultimo.created_at).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
+                        return jsonRes({ error: `Já foi enviado o template "${ultimo.hsm_template_name}" a este contato às ${hora} e ele ainda não respondeu. Reenviar faz a Meta bloquear (limite de marketing). Aguarde a resposta ou tente depois de 24h.` }, 429);
+                    }
+                }
+            }
             // channel_id explícito (o agente trocou de canal na mão, ex.: janela de 24h fechou
             // no WABA fixo — pedido do usuário 13/10, troca sempre liberada) tem prioridade
             // sobre o canal fixo do lead — achado ao vivo 14/10: send ignorava a troca manual

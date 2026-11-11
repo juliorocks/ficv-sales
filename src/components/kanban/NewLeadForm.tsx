@@ -1,3 +1,4 @@
+import { telefoneInvalido } from "@/utils/telefone"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
@@ -23,7 +24,7 @@ const numOrNull = z.preprocess((v) => (v === '' || v === undefined || v === null
 const formSchema = z.object({
     nome_completo: z.string().min(2, "O nome é obrigatório."),
     email: z.string().email("E-mail inválido.").or(z.literal("")).optional(),
-    telefone: z.string().min(1, "O telefone é obrigatório."),
+    telefone: z.string().min(1, "O telefone é obrigatório.").superRefine((v, ctx) => { const m = telefoneInvalido(v); if (m) ctx.addIssue({ code: z.ZodIssueCode.custom, message: m }) }),
     valor_oportunidade: z.coerce.number().min(0, "O valor deve ser positivo.").default(0),
     observacoes: z.string().optional(),
     stage_id: z.coerce.number().min(1, "Selecione um estágio inicial."),
@@ -86,7 +87,7 @@ export function NewLeadForm({ onSuccess }: NewLeadFormProps) {
         mutationFn: async (values: NewLeadFormValues) => {
             // normaliza telefone BR: só dígitos, e prepende 55 se veio sem DDI
             let tel = (values.telefone || '').replace(/\D/g, '')
-            if ((tel.length === 10 || tel.length === 11) && !tel.startsWith('55')) tel = '55' + tel
+            if (!tel.startsWith('55') && (tel.length === 10 || (tel.length === 11 && tel[2] === '9'))) tel = '55' + tel
             // quem cria manualmente já fica dono do lead — pedido do usuário 06/10: "não faz
             // sentido" o agente ter que ir até a tela e se autovincular depois de criar
             const { data: leadData, error } = await supabase

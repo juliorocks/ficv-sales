@@ -230,6 +230,8 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 
 - **Número de fora deformado pelo Z-PRO (2026-11-11)**: no payload WABA, `ticket.contact.number` vem com 55 na frente para número estrangeiro (Peru `51976879975` → `555176879975`, EUA `19706496709` → `5519706496709`, São Tomé `2399914657` → `5523999914657`), então o lead nascia com número inexistente e a resposta ia para um DDD do Brasil. `parseWebhook` agora usa `msg.from` (número real da Meta) quando ele não começa com 55; `vivaconnect-webhook` redeployado em 2026-11-11. Não existe trava por país: em 6 dias passaram eventos de US, PT, PE, GW, AL, JO, MZ, ST. Lead da Irene Avelar (id 10505831) corrigido para 51976879975.
 
+- **Erros da Meta no envio de template (2026-11-11)**: `131049` = limite de template de MARKETING para quem não respondeu (a equipe reenviava o mesmo template 3x e piorava); `131026` = número que não existe no WhatsApp (caso `839997036940`: 12 dígitos sem 55, dígito a mais). O `send` do `vivaconnect-api` agora (a) recusa telefone inválido com `validarTelefone` (`_shared/vivaconnect.ts`; espelho no front em `utils/telefone.ts`, usado nos formulários Novo/Editar lead: mudou uma, muda a outra) e (b) recusa 2º template em 24h para contato (mesmo final de telefone) que não respondeu desde o último (HTTP 429, mensagem com a hora). Regra do 55: só prefixa com 10 dígitos, ou 11 quando o 3º é 9 (senão número dos EUA virava 55+). `131047` = passou de 24h (texto livre).
+
 - **Janela de 24h do WhatsApp**: qualquer lugar que calcula se texto livre é permitido precisa ignorar `provider='email'`
   (resposta por e-mail tem `origin='channel'` e não pode abrir a janela do WhatsApp). Já existe em WideChatHistory e vivaconnect-api.
 

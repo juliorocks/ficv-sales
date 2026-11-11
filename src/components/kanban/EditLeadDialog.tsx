@@ -1,3 +1,4 @@
+import { telefoneInvalido } from "@/utils/telefone"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
@@ -40,7 +41,7 @@ import { temPapel } from "@/utils/papeis"
 const formSchema = z.object({
     nome_completo: z.string().min(2, "O nome é obrigatório."),
     email: z.string().email("E-mail inválido.").or(z.literal("")).optional(),
-    telefone: z.string().min(1, "O telefone é obrigatório."),
+    telefone: z.string().min(1, "O telefone é obrigatório.").superRefine((v, ctx) => { const m = telefoneInvalido(v); if (m) ctx.addIssue({ code: z.ZodIssueCode.custom, message: m }) }),
     valor_oportunidade: z.preprocess((val) => Number(val), z.number().min(0, "O valor deve ser positivo.")),
     observacoes: z.string().nullable().optional(),
     temperatura: z.enum(['frio', 'morno', 'quente']).nullable().optional(),

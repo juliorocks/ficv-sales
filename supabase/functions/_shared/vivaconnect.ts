@@ -127,6 +127,25 @@ export function toZproNumber(raw: unknown): string | null {
     return d;
 }
 
+const DDD_BR = (ddd: string) => /^[1-9][1-9]$/.test(ddd);
+
+/** Número que a Meta nunca vai entregar (dígito a mais ou a menos, DDD inexistente). Mesma regra de src/utils/telefone.ts. */
+export function validarTelefone(raw: unknown): { ok: true; number: string } | { ok: false; motivo: string } {
+    const number = toZproNumber(raw);
+    if (!number) return { ok: false, motivo: "Telefone vazio ou curto demais." };
+    if (number.length > 15) return { ok: false, motivo: `O número tem ${number.length} dígitos (o máximo é 15).` };
+    if (number.startsWith("55")) {
+        if (number.length !== 12 && number.length !== 13) return { ok: false, motivo: `Número brasileiro com ${number.length} dígitos: o certo é 55 + DDD + 8 ou 9 dígitos.` };
+        if (!DDD_BR(number.slice(2, 4))) return { ok: false, motivo: `O DDD ${number.slice(2, 4)} não existe.` };
+        if (number.length === 13 && number[4] !== "9") return { ok: false, motivo: "Celular brasileiro de 9 dígitos precisa começar com 9." };
+        return { ok: true, number };
+    }
+    if ((number.length === 12 || number.length === 13) && DDD_BR(number.slice(0, 2)) && number[2] === "9") {
+        return { ok: false, motivo: `Parece um número brasileiro com dígito a mais (${number.length} dígitos, DDD ${number.slice(0, 2)}).` };
+    }
+    return { ok: true, number };
+}
+
 export async function loadSettings(db: SupabaseClient) {
     const { data, error } = await db.from("vivaconnect_settings").select("*").eq("id", 1).single();
     if (error || !data) throw new Error("vivaconnect_settings não encontrada");
