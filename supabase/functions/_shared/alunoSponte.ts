@@ -1,6 +1,7 @@
 // Dados do Sponte de UM aluno (AlunoID) — usados pelo Portal do Aluno (aluno-portal)
 // e pelo Tutor Virtual (tutor-virtual), pra que os dois mostrem exatamente o mesmo.
 import { brDate, brNum, records, retorno, sponteCall } from "./sponte.ts";
+import { pg } from "./db.ts";
 
 const n = (v?: string) => (v && v.trim() !== "" ? v.trim() : null);
 
@@ -41,6 +42,25 @@ export function parcelaDeContratoCancelado(p: { categoria: string | null; situac
     return doCodigo.some((m) => /cancel/i.test(m.situacao ?? "")) && !doCodigo.some((m) => !/cancel/i.test(m.situacao ?? ""));
 }
 
+// Baixa feita por sistema externo (Super Live → QuitarParcelas): o Sponte considera a parcela paga, mas GetParcelas
+// segue devolvendo "Pendente". A Super Live avisa a baixa em `sponte_baixas_externas` (função sponte-baixa) e aqui a
+// parcela passa a Quitada. O espelho do banco faz o mesmo por gatilho. Falha na consulta não derruba o Portal.
+async function aplicarBaixasExternas(parcelas: { conta_receber_id: number; numero_parcela: number; situacao: string | null; valor: number; valor_pago: number | null; data_pagamento: string | null }[]) {
+    const abertas = parcelas.filter((p) => /pendente/i.test(p.situacao ?? ""));
+    if (abertas.length === 0) return;
+    try {
+        const { data } = await pg().from("sponte_baixas_externas").select("conta_receber_id, numero_parcela, valor, pago_em")
+            .in("conta_receber_id", [...new Set(abertas.map((p) => p.conta_receber_id))]);
+        for (const b of data ?? []) {
+            const p = abertas.find((x) => x.conta_receber_id === Number(b.conta_receber_id) && String(x.numero_parcela) === String(b.numero_parcela));
+            if (!p) continue;
+            p.situacao = "Quitada";
+            p.valor_pago = Number(b.valor) || p.valor;
+            p.data_pagamento = p.data_pagamento ?? b.pago_em ?? null;
+        }
+    } catch (e) { console.error("aplicarBaixasExternas:", (e as Error).message); }
+}
+
 export async function alunoOverview(A: number) {
     const [xa, xm, xp] = await Promise.all([
         sponteCall("GetAlunos", { sParametrosBusca: `AlunoID=${A}` }),
@@ -67,7 +87,9 @@ export async function alunoOverview(A: number) {
         vencimento: brDate(r.Vencimento), valor: brNum(r.ValorParcela), valor_pago: brNum(r.ValorPago) || null,
         data_pagamento: brDate(r.DataPagamento), situacao: n(r.SituacaoParcela), forma: n(r.FormaCobranca),
         categoria: n(r.Categoria), bolsa: n(r.BolsaAssociada),
-    })).filter((p) => noPeriodo(p.vencimento)).filter((p) => !parcelaDeContratoCancelado(p, matriculas)).sort((x, y) => String(x.vencimento).localeCompare(String(y.vencimento)));
+    })).filter((p) => noPeriodo(p.vencimento)).sort((x, y) => String(x.vencimento).localeCompare(String(y.vencimento)));
+    await aplicarBaixasExternas(parcelas);
+    const parcelasVisiveis = parcelas.filter((p) => !parcelaDeContratoCancelado(p, matriculas));
     return {
         raw: a,
         aluno: {
@@ -77,7 +99,7 @@ export async function alunoOverview(A: number) {
             // portal usava até agora.
             data_nascimento: brDate(a.DataNascimento),
         },
-        matriculas, parcelas,
+        matriculas, parcelas: parcelasVisiveis,
     };
 }
 
