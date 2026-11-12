@@ -1,3 +1,4 @@
+SET statement_timeout = '120s';
 -- Parcela de contrato cancelado não é dívida (2026-11-12, caso Salatiel dos Santos Ferreira, AlunoID 10958):
 -- o Sponte cancelou o contrato POSTS e a matrícula "Pós-TS" saiu da tela, mas a API seguiu devolvendo a
 -- parcela como Pendente. A categoria da parcela ("Matrícula Pós-TS") e a turma do contrato ("PÓS EAD - POSTS - 2026.2")
@@ -39,9 +40,18 @@ DROP TRIGGER IF EXISTS parcela_contrato_cancelado ON public.sponte_parcelas;
 CREATE TRIGGER parcela_contrato_cancelado BEFORE INSERT OR UPDATE OF situacao_parcela, categoria, aluno_id
   ON public.sponte_parcelas FOR EACH ROW EXECUTE FUNCTION public.trg_parcela_contrato_cancelado();
 
--- Corrige o que já está no espelho.
-UPDATE public.sponte_parcelas
+-- Corrige o que já está no espelho. Avalia a regra uma vez por par aluno/categoria, só de quem tem contrato
+-- cancelado (por linha estourava o statement timeout).
+CREATE INDEX IF NOT EXISTS idx_sponte_matriculas_aluno_id ON public.sponte_matriculas (aluno_id);
+
+UPDATE public.sponte_parcelas p
    SET situacao_parcela = 'Cancelada'
- WHERE situacao_parcela = 'Pendente' AND aluno_id IS NOT NULL
-   AND public.codigo_pos_categoria(categoria) IS NOT NULL
-   AND public.parcela_de_contrato_cancelado(aluno_id, categoria);
+  FROM (
+    SELECT DISTINCT q.aluno_id, q.categoria
+      FROM public.sponte_parcelas q
+     WHERE q.situacao_parcela = 'Pendente' AND q.aluno_id IS NOT NULL
+       AND public.codigo_pos_categoria(q.categoria) IS NOT NULL
+       AND q.aluno_id IN (SELECT m.aluno_id FROM public.sponte_matriculas m WHERE m.situacao ILIKE 'cancel%')
+  ) c
+ WHERE p.aluno_id = c.aluno_id AND p.categoria = c.categoria AND p.situacao_parcela = 'Pendente'
+   AND public.parcela_de_contrato_cancelado(c.aluno_id, c.categoria);
