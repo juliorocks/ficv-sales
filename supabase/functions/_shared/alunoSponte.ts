@@ -26,6 +26,21 @@ export function comCursoBase<T extends { curso: string | null; data_matricula: s
     return ms.map((m) => ({ ...m, curso_base: m.curso ? (nomes.get(cursoChave(m.curso)) ?? cursoLimpo(m.curso)) : null }));
 }
 
+// Parcela Pendente de contrato Cancelado (caso Salatiel, 2026-11-12): o Sponte tira a matrícula da tela mas a
+// API segue devolvendo "Pendente". Categoria "Matrícula Pós-TS" e turma "PÓS EAD - POSTS - 2026.2" dividem o
+// código (TS). Cancelado com esse código e nenhum contrato ativo com ele = não é dívida. Mesma regra do gatilho
+// `parcela_contrato_cancelado` do banco (migration 20261112100000): mudou uma, muda a outra.
+const semAcento = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase();
+const codigoCategoria = (c: string | null) => c ? semAcento(c).match(/POS-([A-Z0-9]+)/)?.[1] ?? null : null;
+const codigoTurma = (t: string | null) => t ? semAcento(t).match(/(?:^|[^A-Z0-9])POS([A-Z0-9]+)/)?.[1] ?? null : null;
+export function parcelaDeContratoCancelado(p: { categoria: string | null; situacao: string | null }, matriculas: { turma: string | null; situacao: string | null }[]): boolean {
+    if (!/pendente/i.test(p.situacao ?? "")) return false;
+    const cod = codigoCategoria(p.categoria);
+    if (!cod) return false;
+    const doCodigo = matriculas.filter((m) => codigoTurma(m.turma) === cod);
+    return doCodigo.some((m) => /cancel/i.test(m.situacao ?? "")) && !doCodigo.some((m) => !/cancel/i.test(m.situacao ?? ""));
+}
+
 export async function alunoOverview(A: number) {
     const [xa, xm, xp] = await Promise.all([
         sponteCall("GetAlunos", { sParametrosBusca: `AlunoID=${A}` }),
@@ -52,7 +67,7 @@ export async function alunoOverview(A: number) {
         vencimento: brDate(r.Vencimento), valor: brNum(r.ValorParcela), valor_pago: brNum(r.ValorPago) || null,
         data_pagamento: brDate(r.DataPagamento), situacao: n(r.SituacaoParcela), forma: n(r.FormaCobranca),
         categoria: n(r.Categoria), bolsa: n(r.BolsaAssociada),
-    })).filter((p) => noPeriodo(p.vencimento)).sort((x, y) => String(x.vencimento).localeCompare(String(y.vencimento)));
+    })).filter((p) => noPeriodo(p.vencimento)).filter((p) => !parcelaDeContratoCancelado(p, matriculas)).sort((x, y) => String(x.vencimento).localeCompare(String(y.vencimento)));
     return {
         raw: a,
         aluno: {
