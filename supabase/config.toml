@@ -432,3 +432,5 @@ verify_jwt = false
 verify_jwt = false
 [functions.cpa-form]
 verify_jwt = false
+[functions.sponte-baixa]
+verify_jwt = false
