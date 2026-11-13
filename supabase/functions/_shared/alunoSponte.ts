@@ -1,6 +1,6 @@
 // Dados do Sponte de UM aluno (AlunoID) — usados pelo Portal do Aluno (aluno-portal)
 // e pelo Tutor Virtual (tutor-virtual), pra que os dois mostrem exatamente o mesmo.
-import { brDate, brNum, records, retorno, sponteCall } from "./sponte.ts";
+import { brDate, brNum, raDoContrato, raValido, records, retorno, sponteCall } from "./sponte.ts";
 import { pg } from "./db.ts";
 
 const n = (v?: string) => (v && v.trim() !== "" ? v.trim() : null);
@@ -71,6 +71,7 @@ export async function alunoOverview(A: number) {
     const matriculas = comCursoBase(records(xm, "wsMatricula").filter((r) => r.ContratoID && r.ContratoID !== "0").map((r) => ({
         contrato_id: Number(r.ContratoID), curso: n(r.NomeCurso), turma: n(r.NomeTurma), turma_id: Number(r.TurmaID) || null,
         situacao: n(r.Situacao), data_matricula: brDate(r.DataMatricula), data_inicio: brDate(r.DataInicio), data_termino: brDate(r.DataTermino),
+        numero_contrato: n(r.NumeroContrato),
     }))).sort((x, y) => String(y.data_matricula).localeCompare(String(x.data_matricula)));
     // 05/10, achado ao vivo (print real de um colega testando o próprio portal — "estou devendo
     // horrores mas as pós foram canceladas"): matrícula Cancelada no Sponte NÃO apaga as
@@ -89,11 +90,13 @@ export async function alunoOverview(A: number) {
         categoria: n(r.Categoria), bolsa: n(r.BolsaAssociada),
     })).filter((p) => noPeriodo(p.vencimento)).sort((x, y) => String(x.vencimento).localeCompare(String(y.vencimento)));
     await aplicarBaixasExternas(parcelas);
+    const contratoRelevante = matriculas.find((m) => /vigente/i.test(m.situacao ?? "")) ?? matriculas[0];
+    const ra = raValido(a.RA) ?? raDoContrato(contratoRelevante?.numero_contrato);
     const parcelasVisiveis = parcelas.filter((p) => !parcelaDeContratoCancelado(p, matriculas));
     return {
         raw: a,
         aluno: {
-            nome: n(a.Nome), ra: n(a.RA), email: n(a.Email), celular: n(a.Celular), situacao: n(a.Situacao),
+            nome: n(a.Nome), ra, email: n(a.Email), celular: n(a.Celular), situacao: n(a.Situacao),
             turma_atual: n(a.TurmaAtual), inadimplente: /sim|true|^1$/i.test(a.Inadimplente ?? ""),
             // Declaração de Matrícula (01/10): precisa da data de nascimento, que mais nada do
             // portal usava até agora.

@@ -78,6 +78,14 @@ export const brDate = (s?: string) => {
 };
 export const brNum = (s?: string) => parseFloat(String(s ?? "").replace(/\./g, "").replace(",", ".")) || 0;
 
+/** O Sponte devolve RA "00:00:00" para aluno cadastrado pela API sem RA (Super Live, 2026-11-13); o RA de
+ *  verdade é o número do contrato antes da "/" (bate com o RA em 1.117 de 1.117 contas). */
+export const raValido = (v?: string | null): string | null => (v && /[1-9]/.test(v) ? v.trim() : null);
+export const raDoContrato = (numeroContrato?: string | null): string | null => {
+    const p = String(numeroContrato ?? "").split("/")[0].trim();
+    return /^\d+$/.test(p) && /[1-9]/.test(p) ? p : null;
+};
+
 /** Aluno do Sponte pelo CPF (aceita com ou sem pontuação). NÃO expõe campos de senha. */
 export async function sponteAlunoByCpf(cpf: string) {
     const xml = await sponteCall("GetAlunos", { sParametrosBusca: `CPF=${cpfDigits(cpf)}` });
@@ -85,7 +93,7 @@ export async function sponteAlunoByCpf(cpf: string) {
     if (!a) return null;
     return {
         aluno_id: Number(a.AlunoID), nome: a.Nome, email: (a.Email || "").toLowerCase() || null,
-        celular: a.Celular || a.Telefone || null, ra: a.RA || a.NumeroMatricula || null,
+        celular: a.Celular || a.Telefone || null, ra: raValido(a.RA) ?? raValido(a.NumeroMatricula),
         situacao: a.Situacao || null, turma_atual: a.TurmaAtual || null, inadimplente: /sim|true|1/i.test(a.Inadimplente || ""),
         data_nascimento: brDate(a.DataNascimento),
     };
@@ -99,7 +107,7 @@ export async function sponteAlunoById(alunoId: number) {
     if (!a) return null;
     return {
         aluno_id: Number(a.AlunoID), nome: a.Nome, cpf: a.CPF || null, email: (a.Email || "").toLowerCase() || null,
-        celular: a.Celular || a.Telefone || null, ra: a.RA || a.NumeroMatricula || null,
+        celular: a.Celular || a.Telefone || null, ra: raValido(a.RA) ?? raValido(a.NumeroMatricula),
         situacao: a.Situacao || null, turma_atual: a.TurmaAtual || null,
     };
 }

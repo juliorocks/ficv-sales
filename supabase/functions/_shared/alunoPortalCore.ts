@@ -3,7 +3,7 @@
 // aluno durante um chamado, não só o próprio aluno logado). Garante que os dois
 // caminhos mostrem exatamente o mesmo dado, sem duplicar a lógica de Moodle.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
-import { nivelDoCurso } from "./sponte.ts";
+import { nivelDoCurso, raValido } from "./sponte.ts";
 import { alunoBoletins, alunoOverview } from "./alunoSponte.ts";
 import { moodleCourses, moodleDisciplinasDoPeriodo, moodleAvaliacoes, moodleUserId, periodosExtrasDoMoodle } from "./alunoMoodle.ts";
 
@@ -77,7 +77,7 @@ export async function overviewFor(db: Db, aluno: AlunoRow) {
     const patch: Record<string, unknown> = {};
     if (n(a.Email) && !aluno.email) patch.email = a.Email.toLowerCase();
     if (n(a.Celular) && !aluno.telefone) patch.telefone = a.Celular;
-    if (n(a.RA) && !aluno.ra) patch.ra = a.RA;
+    if (sa.ra && !raValido(aluno.ra)) patch.ra = sa.ra;
     const vig = matriculas.find((m) => /vigente|ativ|cursando/i.test(m.situacao ?? "")) ?? matriculas[0];
     const nivel = nivelDoCurso(vig?.curso) ?? matriculas.map((m) => nivelDoCurso(m.curso)).find(Boolean) ?? null;
     if (nivel && nivel !== aluno.nivel) patch.nivel = nivel;
@@ -101,7 +101,7 @@ export async function overviewFor(db: Db, aluno: AlunoRow) {
         // `aluno.nome` já passa pela checagem contra `sponte_matriculas` na criação da conta
         // ([[nomeDivergeDoHistorico]], _shared/aluno.ts) — mais confiável que confiar cegamente
         // na resposta ao vivo. Só cai pro nome do Sponte se não tiver nada salvo localmente.
-        aluno: { ...sa, nome: aluno.nome ?? sa.nome, ra: sa.ra ?? aluno.ra, email: sa.email ?? aluno.email, celular: sa.celular ?? aluno.telefone, cpf: aluno.cpf ?? null },
+        aluno: { ...sa, nome: aluno.nome ?? sa.nome, ra: sa.ra ?? raValido(aluno.ra), email: sa.email ?? aluno.email, celular: sa.celular ?? aluno.telefone, cpf: aluno.cpf ?? null },
         matriculas: matriculasCompletas, parcelas,
     };
 }
