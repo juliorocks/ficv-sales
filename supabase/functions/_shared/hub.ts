@@ -154,11 +154,18 @@ const semAcento = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, 
 /** "já preenchi meus dados na página X" → nome do curso X se bater com a tabela `courses` (todos são da Faculdade). */
 export async function paginaDeCurso(db: SupabaseClient, texto: string): Promise<string | null> {
     const m = texto.match(/preenchi\s+meus\s+dados\s+na\s+p[áa]gina\s+(.+?)\s+e\s+quero\s+mais/i);
-    if (!m) return null;
-    const alvo = semAcento(m[1]);
+    const msg = semAcento(texto);
+    if (!m && (mentionsOtherCompany(texto) || msg.length > 120)) return null;
     const { data } = await db.from("courses").select("name");
-    const achou = (data ?? []).find((c: { name: string }) => { const n = semAcento(c.name); return n === alvo || n.includes(alvo) || alvo.includes(n); });
-    return achou ? achou.name : null;
+    const nomes = ((data ?? []) as { name: string }[]).map((c) => ({ name: c.name, n: semAcento(c.name) }));
+    if (m) {
+        const alvo = semAcento(m[1]);
+        return nomes.find((c) => c.n === alvo || c.n.includes(alvo) || alvo.includes(c.n))?.name ?? null;
+    }
+    // 13/11: resposta curta "Missiologia Urbanas" a uma pergunta do hub virou Igreja. Mensagem que é (ou cita,
+    // se o nome tem 8+ letras, pra "direito" solto não valer) um curso e não fala de outra empresa = Faculdade.
+    const soNome = msg.replace(/\b(quero|queria|gostaria|saber|sobre|o|a|do|da|de|curso|pos|graduacao|informacoes|mais|oi|ola)\b/g, " ").replace(/\s+/g, " ").trim();
+    return nomes.find((c) => soNome === c.n || soNome === c.n + "s" || (c.n.length >= 8 && msg.includes(c.n)))?.name ?? null;
 }
 
 export type HubPlano =
