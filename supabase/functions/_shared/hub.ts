@@ -90,6 +90,7 @@ export async function classify(db: SupabaseClient, dests: HubDest[], historico: 
         "Se for só cumprimento ('oi', 'boa tarde'...) ou não der pra saber o assunto ainda, destino=null e escreva em 'resposta' UMA pergunta curta pra descobrir — adapte ao que a pessoa já disse (não repita uma pergunta que você já fez do mesmo jeito). Pra um simples 'oi' de primeira mensagem, pergunte com quem ela quer falar, citando as empresas em prosa.",
         "Não chute: na dúvida real entre duas, destino=null e pergunte pra desempatar citando as duas. Ex.: 'matrícula' sozinho é ambíguo (faculdade ou escola) → pergunte se é matrícula dela mesma ou de um filho; 'vestibular de teologia' → faculdade, sem perguntar; 'quero ser membro' → igreja, sem perguntar.",
         "Regras fixas: 'membro', 'membresia', 'batismo', 'culto', 'célula', 'pastor', 'oração' → IGREJA (a faculdade tem ALUNOS, nunca membros). Educação infantil, fundamental, ensino médio, filho/criança na escola → ESCOLA. Vestibular, graduação, pós, curso superior, EAD da faculdade, diploma → FACULDADE.",
+        "CURSOS: nome de curso, pós-graduação ou formação (ex.: Educação Cristã Clássica, Liderança Cristã, Missiologia Urbana, Psicoteologia, Gestão Escolar, Formação Política, História do Cristianismo, Psicologia, Teologia, Direito) é SEMPRE Faculdade, mesmo com palavra como 'cristã', 'igreja' ou 'escolar' no nome. 'Já preenchi meus dados na página <curso>' = Faculdade. Só vai pra Igreja o que for da vida da igreja em si (culto, membro, célula, pastor, oração...).",
         "Se o assunto não bater com nenhuma da lista abaixo, destino=null e pergunte — nunca invente uma empresa que não está na lista.",
         "Nunca responda aqui a pergunta de preço, horário, matrícula etc. — sua única função é direcionar; quem responde o conteúdo é a equipe de cada empresa depois.",
         settings?.hub_ask_instructions ? `Instruções extras de tom/estilo definidas pela gestão: ${settings.hub_ask_instructions}` : "",
@@ -148,6 +149,18 @@ export function classificarPorPalavras(dests: HubDest[], historico: HubMsg[]): H
     return tentar(falas[falas.length - 1] ?? "") ?? tentar(falas.join(" / "));
 }
 
+const semAcento = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+
+/** "já preenchi meus dados na página X" → nome do curso X se bater com a tabela `courses` (todos são da Faculdade). */
+export async function paginaDeCurso(db: SupabaseClient, texto: string): Promise<string | null> {
+    const m = texto.match(/preenchi\s+meus\s+dados\s+na\s+p[áa]gina\s+(.+?)\s+e\s+quero\s+mais/i);
+    if (!m) return null;
+    const alvo = semAcento(m[1]);
+    const { data } = await db.from("courses").select("name");
+    const achou = (data ?? []).find((c: { name: string }) => { const n = semAcento(c.name); return n === alvo || n.includes(alvo) || alvo.includes(n); });
+    return achou ? achou.name : null;
+}
+
 export type HubPlano =
     | { acao: "faculdade"; destino: HubDest; metodo: string; confianca: number; motivo: string }
     | { acao: "encaminhar"; destino: HubDest; metodo: string; confianca: number; motivo: string; redirect: string; forward: string | null }
@@ -174,6 +187,12 @@ export async function planejar(
     // respostas curtas tipo "a primeira" ou "essa mesma"
     const historico: HubMsg[] = [...(sessao?.messages ?? []), { de: "contato", texto, em: new Date().toISOString() }];
     const falasContato = historico.filter((m) => m.de === "contato").map((m) => m.texto);
+
+    // 13/11: "Oi, já preenchi meus dados na página Educacao Crista Classica…" (texto padrão dos formulários
+    // de curso) ia pra IA, que lia "educação cristã" como Igreja (5 casos em 2 dias). Página = curso da
+    // Faculdade: regra fixa, sem IA.
+    const pagina = await paginaDeCurso(db, texto);
+    if (pagina) return { acao: "faculdade", destino: self, metodo: "formulario", confianca: 1, motivo: `formulário do curso "${pagina}" (Faculdade)` };
 
     const c = await classify(db, dests, historico, nome, settings, { porPalavras: true });
     if (c.destino) {
