@@ -2211,10 +2211,7 @@ const FullApp = () => {
 
     if (loading) return (
         <div className="min-h-screen bg-[var(--bg-main)] flex flex-col items-center justify-center gap-8">
-            <div className="relative">
-                <div className="w-20 h-20 border-2 border-primary/20 rounded-full animate-ping absolute inset-0" />
-                <div className="w-20 h-20 border-4 border-primary border-t-transparent rounded-full animate-spin shadow-[0_0_30px_rgba(85,81,255,0.2)]" />
-            </div>
+            <img src="/ficv-simbolo.png" alt="FICV" className="ficv-pulso h-28 w-auto select-none" draggable={false} />
             <div className="text-center group">
                 <h2 className="text-[var(--text-main)] text-xl font-bold tracking-[0.2em] mb-3 group-hover:scale-105 transition-transform">CONNECT FICV</h2>
                 <div className="flex items-center gap-2 justify-center">

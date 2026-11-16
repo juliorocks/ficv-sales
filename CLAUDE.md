@@ -50,6 +50,7 @@ Produção: projeto Supabase `jsswkmybkgoxpncnxgdd`. Idioma de trabalho e respos
 
 ## Frontend (`src/`)
 
+- Tela de carregamento do app (`App.tsx`, `if (loading)`): símbolo da FICV pulsando (`public/ficv-simbolo.png`, recortado de `public/email/logo-ficv.png`; classe `.ficv-pulso` em `index.css`, respeita `prefers-reduced-motion`) no lugar do spinner (2026-11-16).
 - `App.tsx`: shell principal e roteamento por `activeTab` (kanban, kanban-chat, kanban-courses, dashboard,
   agents, history, tickets, admin...). Barra de filtros da Visão Geral (Agentes/Equipe/Cursos/Data) é DA
   Visão Geral, não do funil. O Kanban tem os próprios filtros (`kanbanDateRange`, `kanbanSearch`, `kanbanAssignee`).

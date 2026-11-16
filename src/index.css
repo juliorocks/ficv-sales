@@ -161,6 +161,13 @@
   animation: fadeIn 0.4s ease-out forwards;
 }
 
+@keyframes ficv-pulso {
+  0%, 100% { transform: scale(0.92); opacity: 0.55; }
+  50% { transform: scale(1.08); opacity: 1; }
+}
+.ficv-pulso { animation: ficv-pulso 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .ficv-pulso { animation: none; } }
+
 @keyframes spin-slow {
   from {
     transform: rotate(0deg);
