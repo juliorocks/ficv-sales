@@ -111,13 +111,18 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin, isDar
     // user ainda não carregado (ou que falhou em resolver, mesmo bug recorrente de sessão)
     // fazia TODO chamado com atendente (inclusive os da própria pessoa) falhar o "!==" contra
     // undefined e sumir — "Em atendimento"/"Aguardando aluno" zerados, só "Novos" sobrava.
-    if (meusChamados && user?.id && t.atendente_id != null && t.atendente_id !== user.id) return false
+    // com texto na busca, mostra os de qualquer atendente: o filtro "Meus chamados" escondia um protocolo
+    // que estava com outra pessoa (caso FICV-2026-00377, com a Izabelly, 2026-11-16)
+    if (!search && meusChamados && user?.id && t.atendente_id != null && t.atendente_id !== user.id) return false
     if (priorityOnly && !alunoRespondeu(t)) return false
     if (dateRange.start && t.created_at.slice(0, 10) < dateRange.start) return false
     if (dateRange.end && t.created_at.slice(0, 10) > dateRange.end) return false
     if (search) {
       const q = search.toLowerCase()
-      if (!t.titulo.toLowerCase().includes(q) && !t.protocolo.toLowerCase().includes(q) && !t.aluno_nome.toLowerCase().includes(q)) return false
+      // protocolo sem o prefixo ("00377") também acha: a pessoa costuma digitar só o final
+      const qProto = q.replace(/[^0-9]/g, '')
+      const protoCasa = t.protocolo.toLowerCase().includes(q) || (qProto.length >= 3 && t.protocolo.replace(/[^0-9]/g, '').endsWith(qProto))
+      if (!t.titulo.toLowerCase().includes(q) && !protoCasa && !t.aluno_nome.toLowerCase().includes(q)) return false
     }
     return true
   }), [tickets, cat, search, since15, priorityOnly, lastWho, dateRange, meusChamados, user?.id])
