@@ -103,7 +103,8 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin, isDar
   const visible = useMemo(() => tickets.filter((t) => {
     if (cat !== 'todas' && (t as any).queue_id !== cat) return false
     // resolvido e fechado (finalizado pela avaliação do aluno) caem juntos na coluna Resolvidos
-    if (['resolvido', 'fechado'].includes(t.status) && new Date(t.resolved_at ?? t.updated_at).getTime() < since15) return false
+    // com texto na busca, o recorte de 15 dias não vale: achar um protocolo antigo é o motivo de buscar
+    if (!search && ['resolvido', 'fechado'].includes(t.status) && new Date(t.resolved_at ?? t.updated_at).getTime() < since15) return false
     // sem atendente (ex.: coluna Novos) tem que aparecer pra todo mundo, mesmo com "Meus
     // chamados" ligado — senão ninguém vê os que ainda precisam ser pegos (pedido do usuário 07/10)
     // `user?.id` exige a sessão já resolvida — achado ao vivo 19/10: sem o "&& user?.id", um
