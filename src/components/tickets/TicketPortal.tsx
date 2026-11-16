@@ -36,6 +36,8 @@ const CATEGORIAS: { value: TicketCategoria; label: string; desc: string; icon: s
   { value: 'outros',          label: 'Outros',          desc: 'Outros assuntos',                    icon: '💬' },
 ]
 
+const LIMITE_TICKETS_ABERTOS = 2
+
 const STATUS_LABELS: Record<string, string> = {
   aberto: 'Aberto',
   em_atendimento: 'Em Atendimento',
@@ -114,6 +116,15 @@ function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose, onCreated }:
   // — "Financeiro" cobre várias coisas distintas — então não trava, só avisa).
   const [duplicateTicket, setDuplicateTicket] = useState<Ticket | null>(null)
   const [confirmDuplicate, setConfirmDuplicate] = useState(false)
+  const [abertos, setAbertos] = useState<Ticket[]>([])
+  useEffect(() => {
+    let vivo = true
+    supabase.from('tickets').select('*').eq('aluno_id', alunoId)
+      .not('status', 'in', '(resolvido,fechado)').order('created_at', { ascending: false })
+      .then(({ data }) => { if (vivo) setAbertos((data ?? []) as Ticket[]) })
+    return () => { vivo = false }
+  }, [alunoId])
+  const limiteAtingido = abertos.length >= LIMITE_TICKETS_ABERTOS
 
   const { data: cursos = [] } = useQuery({
     queryKey: ['courses'],
@@ -155,12 +166,15 @@ function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose, onCreated }:
       showError('Para o assunto Acadêmico, escolha o curso — é ele que define a sua turma de tutores.')
       return
     }
+    const { data: emAberto } = await supabase.from('tickets').select('*')
+      .eq('aluno_id', alunoId).not('status', 'in', '(resolvido,fechado)')
+      .order('created_at', { ascending: false })
+    const lista = (emAberto ?? []) as Ticket[]
+    setAbertos(lista)
+    if (lista.length >= LIMITE_TICKETS_ABERTOS) return
     if (!confirmDuplicate) {
-      const { data: aberto } = await supabase.from('tickets').select('*')
-        .eq('aluno_id', alunoId).eq('categoria', categoria)
-        .not('status', 'in', '(resolvido,fechado)')
-        .order('created_at', { ascending: false }).limit(1).maybeSingle()
-      setDuplicateTicket(aberto as Ticket | null)
+      const aberto = lista.find(t => t.categoria === categoria) ?? null
+      setDuplicateTicket(aberto)
       if (aberto) return
     }
     setSaving(true)
@@ -201,7 +215,9 @@ function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose, onCreated }:
       onClose()
       onCreated?.(ticketData as Ticket)
     } catch (e: any) {
-      showError(e?.message ?? 'Erro ao abrir ticket.')
+      showError(/LIMITE_TICKETS_ABERTOS/.test(e?.message ?? '')
+        ? `Você já tem ${LIMITE_TICKETS_ABERTOS} chamados em aberto. Continue por um deles ou aguarde a resolução.`
+        : (e?.message ?? 'Erro ao abrir ticket.'))
     } finally {
       setSaving(false)
     }
@@ -216,7 +232,24 @@ function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose, onCreated }:
           </DialogTitle>
         </DialogHeader>
 
-        {step === 'categoria' ? (
+        {limiteAtingido ? (
+          <div className="space-y-3 mt-2">
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-200">
+              Você já tem {LIMITE_TICKETS_ABERTOS} chamados em aberto. Para a equipe conseguir acompanhar, só é possível abrir outro depois que um deles for resolvido.
+              Se o assunto for o mesmo ou estiver ligado a um deles, continue pelo chamado existente.
+            </div>
+            {abertos.map(t => (
+              <button key={t.id} onClick={() => { onClose(); onCreated?.(t) }}
+                className="w-full flex items-center gap-3 p-3 rounded-lg border border-[var(--border)] hover:border-[var(--primary)] text-left">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-mono text-[var(--text-muted)]">{t.protocolo} · {STATUS_LABELS[t.status] ?? t.status}</p>
+                  <p className="text-sm font-medium text-[var(--text-main)] truncate">{t.titulo}</p>
+                </div>
+                <ChevronRight className="w-4 h-4 text-[var(--text-muted)]" />
+              </button>
+            ))}
+          </div>
+        ) : step === 'categoria' ? (
           <div className="grid grid-cols-1 gap-2 mt-2">
             {CATEGORIAS.map(cat => (
               <button
