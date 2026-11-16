@@ -28,7 +28,7 @@ const COLUMNS: { status: TicketStatus | typeof TUTOR; label: string; hint: strin
   { status: 'aberto', label: 'Novos', hint: 'Ninguém respondeu ainda', accent: 'border-t-blue-500' },
   { status: 'em_atendimento', label: 'Em atendimento', hint: 'Equipe trabalhando', accent: 'border-t-amber-500' },
   { status: 'aguardando_aluno', label: 'Aguardando aluno', hint: 'Esperando resposta do aluno', accent: 'border-t-purple-500' },
-  { status: 'resolvido', label: 'Resolvidos', hint: 'Últimos 15 dias', accent: 'border-t-green-500' },
+  { status: 'resolvido', label: 'Resolvidos', hint: 'Período selecionado', accent: 'border-t-green-500' },
 ]
 
 const CAT_ICON: Record<string, string> = {
@@ -99,12 +99,8 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin, isDar
   // prioridade do KanbanSort (mesmo conceito do "Esperando Resposta" da tela Atendimentos).
   const alunoRespondeu = (t: Ticket) => lastWho[t.id] === 'aluno' && ['em_atendimento', 'aguardando_aluno'].includes(t.status)
 
-  const since15 = Date.now() - 15 * 86400_000
   const visible = useMemo(() => tickets.filter((t) => {
     if (cat !== 'todas' && (t as any).queue_id !== cat) return false
-    // resolvido e fechado (finalizado pela avaliação do aluno) caem juntos na coluna Resolvidos
-    // com texto na busca, o recorte de 15 dias não vale: achar um protocolo antigo é o motivo de buscar
-    if (!search && ['resolvido', 'fechado'].includes(t.status) && new Date(t.resolved_at ?? t.updated_at).getTime() < since15) return false
     // sem atendente (ex.: coluna Novos) tem que aparecer pra todo mundo, mesmo com "Meus
     // chamados" ligado — senão ninguém vê os que ainda precisam ser pegos (pedido do usuário 07/10)
     // `user?.id` exige a sessão já resolvida — achado ao vivo 19/10: sem o "&& user?.id", um
@@ -115,8 +111,12 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin, isDar
     // que estava com outra pessoa (caso FICV-2026-00377, com a Izabelly, 2026-11-16)
     if (!search && meusChamados && user?.id && t.atendente_id != null && t.atendente_id !== user.id) return false
     if (priorityOnly && !alunoRespondeu(t)) return false
-    if (dateRange.start && t.created_at.slice(0, 10) < dateRange.start) return false
-    if (dateRange.end && t.created_at.slice(0, 10) > dateRange.end) return false
+    // o Período vale para a tela inteira; resolvido/fechado é filtrado pela data de resolução
+    // (a de abertura, nesse caso, deixaria de fora chamados antigos que foram resolvidos agora)
+    const dataFiltro = ['resolvido', 'fechado'].includes(t.status) ? (t.resolved_at ?? t.updated_at) : t.created_at
+    const diaFiltro = String(dataFiltro).slice(0, 10)
+    if (dateRange.start && diaFiltro < dateRange.start) return false
+    if (dateRange.end && diaFiltro > dateRange.end) return false
     if (search) {
       const q = search.toLowerCase()
       // protocolo sem o prefixo ("00377") também acha: a pessoa costuma digitar só o final
@@ -125,7 +125,7 @@ export function TicketKanban({ tickets, onOpen, defaultQueueName, isAdmin, isDar
       if (!t.titulo.toLowerCase().includes(q) && !protoCasa && !t.aluno_nome.toLowerCase().includes(q)) return false
     }
     return true
-  }), [tickets, cat, search, since15, priorityOnly, lastWho, dateRange, meusChamados, user?.id])
+  }), [tickets, cat, search, priorityOnly, lastWho, dateRange, meusChamados, user?.id])
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {}
