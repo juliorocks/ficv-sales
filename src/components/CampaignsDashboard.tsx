@@ -168,6 +168,7 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
     const [gInsights, setGInsights] = useState<GoogleInsight[]>([]);
     const [prevGInsights, setPrevGInsights] = useState<GoogleInsight[]>([]);
     const [demographics, setDemographics] = useState<MetaDemographic[]>([]);
+    const [ativas, setAtivas] = useState<{ campaign_id: string; name: string; daily_budget: number | null; lifetime_budget: number | null }[]>([]);
     const [campaignsList, setCampaignsList] = useState<MetaCampaignOption[]>([]);
     const [matriculasCount, setMatriculasCount] = useState<number | null>(null);
     const [monthly, setMonthly] = useState<MonthlyRow[]>([]);
@@ -198,6 +199,15 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
         document.addEventListener('mousedown', handler);
         return () => document.removeEventListener('mousedown', handler);
     }, []);
+
+    // Campanhas ativas hoje (status vem do sync; a API de insights atrasa 1–2 dias, o status não)
+    useEffect(() => {
+        let vivo = true;
+        supabase.from('meta_campaigns').select('campaign_id,name,daily_budget,lifetime_budget')
+            .eq('status', 'ACTIVE').neq('campaign_id', 'test-123').order('name')
+            .then(({ data }) => { if (vivo && data) setAtivas(data as any); });
+        return () => { vivo = false; };
+    }, [lastSync]);
 
     // ─── Load campaign list (for filter) — campanhas Meta + Google com atividade
     useEffect(() => {
@@ -737,6 +747,25 @@ export const CampaignsDashboard: React.FC<Props> = ({ isAdmin }) => {
                                 </p>
                             </>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {!loading && period === 'today' && source !== 'google' && ativas.length > 0 && (
+                <div className="glass-card p-5">
+                    <div className="flex items-baseline justify-between mb-3">
+                        <h3 className="font-bold text-[var(--text-main)]">Campanhas ativas hoje (Meta) · {ativas.length}</h3>
+                        <span className="text-[11px] text-[var(--text-muted)]">Status ao vivo do sync; gasto e leads de hoje só entram quando o Meta publica o dia</span>
+                    </div>
+                    <div className="divide-y divide-[var(--border)]">
+                        {ativas.map((c) => (
+                            <div key={c.campaign_id} className="flex items-center justify-between gap-4 py-2 text-sm">
+                                <span className="text-[var(--text-main)] font-medium truncate">{c.name}</span>
+                                <span className="text-[var(--text-muted)] whitespace-nowrap text-xs">
+                                    {c.daily_budget ? `${fmt(Number(c.daily_budget))}/dia` : c.lifetime_budget ? `${fmt(Number(c.lifetime_budget))} total` : 'orçamento no conjunto de anúncios'}
+                                </span>
+                            </div>
+                        ))}
                     </div>
                 </div>
             )}
