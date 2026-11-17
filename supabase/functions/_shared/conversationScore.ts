@@ -54,6 +54,10 @@ const SYSTEM_MESSAGE_PATTERNS = [
     "sessão irá expirar", "sessão expirou", "sua sessão", "atendimento encerrado",
     "atendimento finalizado", "atendimento transferido", "em fila de espera",
     "aguarde na fila", "aguardando atendimento", "[sistema]", "[bot]",
+    // textos do robô de menu que o histórico do CSV traz como fala do cliente
+    "sua opinião é muito importante", "esperamos que sua solicitação", "bem-vindo(a) à central digital",
+    "seja bem-vindo ao atendimento digital", "seja bem-vindo à cidade viva. sou", "por favor aguarde, em breve",
+    "aguarde só um momento que em breve", "deseja deixar um comentário",
 ];
 const COURTESY = /bom dia|boa tarde|boa noite|obrigad|gra[çc]a e paz|deus aben[çc]oe|fico feliz|que alegria|prazer|[àa] disposi[çc][ãa]o|posso (te )?ajudar|como posso|conte conosco|abra[çc]o|🙏|😊|💙|😀|🤩|👋/i;
 const INFO = /r\$\s?\d|mensalidade|parcela|investimento|dura[çc][ãa]o|carga hor[áa]ria|disciplina|grade|matriz curricular|in[íi]cio|come[çc]a|aulas?|https?:\/\/|bit\.ly|portal|valor/i;
