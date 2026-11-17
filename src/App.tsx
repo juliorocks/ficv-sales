@@ -1576,22 +1576,32 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                         const chartData = conversionChartData.slice(0, 10);
                                         const agentPhotoMap: Record<string, string | null | undefined> = {};
                                         agentProfilesList.forEach((p: any) => { agentPhotoMap[p.name] = avatarPorNome?.[p.name] ?? p.photo_url; });
-                                        const maxVal = Math.max(...chartData.map((d: any) => d.value), 10);
+                                        const SCALE_H = 300; // altura em px da régua 0–10
+                                        const TOP_PAD = 44; // espaço para a foto da barra de nota 10
                                         const TARGET = 8;
+                                        const px = (v: number) => (Math.min(Math.max(v, 0), 10) / 10) * SCALE_H;
 
                                         return (
                                             <div className="h-full flex flex-col">
-                                                <div className="flex-1 flex items-end gap-2 px-2 pb-8 relative">
-                                                    {/* Target line */}
-                                                    <div
-                                                        className="absolute left-2 right-2 border-t-2 border-dashed border-white/20"
-                                                        style={{ bottom: `${32 + (TARGET / maxVal) * (100 - 8)}%` }}
-                                                    >
-                                                        <span className="absolute right-0 -top-5 text-[9px] font-bold text-white/40 uppercase tracking-widest">Meta {TARGET}</span>
+                                                <div className="flex gap-2 relative" style={{ height: SCALE_H + TOP_PAD }}>
+                                                    {/* Eixo Y 0–10 */}
+                                                    <div className="relative w-6 shrink-0">
+                                                        {[0, 2, 4, 6, 8, 10].map(v => (
+                                                            <span key={v} className="absolute right-0 text-[10px] text-[var(--text-muted)] tabular-nums leading-none"
+                                                                style={{ bottom: px(v) - 5 }}>{v}</span>
+                                                        ))}
                                                     </div>
-
+                                                    <div className="relative flex-1">
+                                                        {/* Linhas de grade */}
+                                                        {[0, 2, 4, 6, 8, 10].map(v => (
+                                                            <div key={v} className="absolute left-0 right-0 border-t border-white/[0.07]" style={{ bottom: px(v) }} />
+                                                        ))}
+                                                        {/* Meta */}
+                                                        <div className="absolute left-0 right-0 border-t-2 border-dashed border-white/30" style={{ bottom: px(TARGET) }}>
+                                                            <span className="absolute right-0 -top-4 text-[9px] font-bold text-white/50 uppercase tracking-widest">Meta {TARGET}</span>
+                                                        </div>
+                                                        <div className="absolute inset-0 flex items-end gap-2 px-2">
                                                     {chartData.map((d: any, i: number) => {
-                                                        const heightPct = Math.max(4, (d.value / maxVal) * 82);
                                                         const color = agentColor(d.name);
                                                         const onTarget = d.value >= TARGET;
                                                         const shortName = d.name?.split(' ')[0] ?? '';
@@ -1606,7 +1616,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                                                     setActiveTab('history');
                                                                 }}
                                                                 title={isAdmin ? `Ver atendimentos de ${d.name}` : undefined}
-                                                                className={`flex-1 flex flex-col items-center gap-1 bg-transparent border-0 p-0 ${isAdmin ? 'cursor-pointer group' : 'cursor-default'}`}
+                                                                className={`flex-1 relative flex flex-col items-center justify-end gap-1 bg-transparent border-0 p-0 ${isAdmin ? 'cursor-pointer group' : 'cursor-default'}`}
                                                             >
                                                                 {/* Photo above bar */}
                                                                 <AgentAvatar
@@ -1619,21 +1629,24 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                                                 <div
                                                                     className={`w-full rounded-t-lg relative flex items-center justify-center transition-all duration-700 ${isAdmin ? 'group-hover:brightness-110' : ''}`}
                                                                     style={{
-                                                                        height: `${heightPct}%`,
+                                                                        height: px(d.value),
                                                                         background: onTarget
                                                                             ? `linear-gradient(to top, ${color}99, ${color})`
                                                                             : `linear-gradient(to top, ${color}66, ${color}99)`,
-                                                                        minHeight: 32
+                                                                        minHeight: 4
                                                                     }}
                                                                 >
                                                                     <span className="text-[var(--text-main)] font-black text-xs drop-shadow">{d.value.toFixed(1)}</span>
                                                                 </div>
                                                                 {/* Name */}
-                                                                <span className={`text-[9px] text-[var(--text-muted)] truncate w-full text-center ${isAdmin ? 'group-hover:text-primary' : ''}`}>{shortName}</span>
+                                                                <span className={`absolute top-full mt-2 text-[10px] text-[var(--text-muted)] truncate w-full text-center ${isAdmin ? 'group-hover:text-primary' : ''}`}>{shortName}</span>
                                                             </button>
                                                         );
                                                     })}
+                                                        </div>
+                                                    </div>
                                                 </div>
+                                                <div style={{ height: 28 }} />
                                             </div>
                                         );
                                     })()}
