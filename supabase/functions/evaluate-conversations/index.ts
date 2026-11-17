@@ -90,7 +90,7 @@ function attendanceEnd(msgs: FullMsg[], fallbackIso: string) {
     return human.length ? human[human.length - 1].created_at : fallbackIso;
 }
 
-function rowFor(protocol: string, contact: string, ev: Evaluation, msgs: FullMsg[], endIso: string, agentId: string | null) {
+function rowFor(protocol: string, contact: string, ev: Evaluation, msgs: FullMsg[], endIso: string, agentId: string | null, converted = false) {
     return {
         protocol, contact, agent_name: ev.agent, agent_id: agentId,
         message_content: JSON.stringify(buildTranscript(msgs)),
@@ -99,13 +99,28 @@ function rowFor(protocol: string, contact: string, ev: Evaluation, msgs: FullMsg
         depth_score: ev.depth, commercial_score: ev.commercial, agility_score: ev.agility,
         message_count: ev.messageCount, status: ev.status, is_commercial: ev.isCommercial,
         overall_conclusion: ev.overallConclusion, improvements: ev.improvements,
-        avaliacao_metodo: ev.method, upload_id: null,
+        avaliacao_metodo: ev.method, upload_id: null, convertido: (converted || !!ev.paymentLink) && ev.status === "approved",
+        convertido_via: ev.status !== "approved" ? null : converted ? "matricula" : ev.paymentLink ? "link" : null,
     };
 }
 
 // Heurística sempre; IA só no modo "compare" (grava em nota_ia, nunca na nota oficial).
-function evaluateSegment(msgs: Msg[], converted = false): Evaluation {
-    return evaluateAtendimento(msgs, null, { converted });
+// Fechou a matrícula = o agente do atendimento é o atribuído a uma matrícula (matricula_atribuicao) cuja data cai
+// entre a última fala humana do segmento e 60 dias depois dela, OU o lead está em Matriculado (stageConverted).
+async function evaluateSegment(db: SupabaseClient, leadId: number, msgs: Msg[], stageConverted = false): Promise<{ ev: Evaluation; converted: boolean }> {
+    const ev0 = evaluateAtendimento(msgs, null, { converted: stageConverted });
+    if (ev0.status !== "approved") return { ev: ev0, converted: false };
+    let converted = stageConverted;
+    if (!converted) {
+        const last = Date.parse(attendanceEnd(msgs as FullMsg[], msgs[msgs.length - 1].created_at));
+        const { data } = await db.from("matricula_atribuicao").select("agente_nome, data_matricula").eq("lead_id", leadId);
+        converted = (data ?? []).some((a) => {
+            if (String(a.agente_nome ?? "").trim().toLowerCase() !== ev0.agent.trim().toLowerCase()) return false;
+            const dm = Date.parse(a.data_matricula + "T23:59:59-03:00");
+            return last <= dm && last >= dm - 60 * 86400000;
+        });
+    }
+    return converted && !stageConverted ? { ev: evaluateAtendimento(msgs, null, { converted: true }), converted } : { ev: ev0, converted };
 }
 
 function bump(c: Counts, ev: Evaluation) {
@@ -142,9 +157,9 @@ async function leadSegment(db: SupabaseClient, leadId: number, endIso: string): 
     return { start, msgs };
 }
 
-async function gravar(db: SupabaseClient, protocol: string, contact: string, ev: Evaluation, msgs: FullMsg[], endIso: string, agents: Map<string, string>) {
+async function gravar(db: SupabaseClient, protocol: string, contact: string, ev: Evaluation, msgs: FullMsg[], endIso: string, agents: Map<string, string>, converted = false) {
     const agentId = agents.get(ev.agent.trim().toLowerCase()) ?? null;
-    const { error } = await db.from("messages_logs").upsert(rowFor(protocol, contact, ev, msgs, endIso, agentId), { onConflict: "protocol" });
+    const { error } = await db.from("messages_logs").upsert(rowFor(protocol, contact, ev, msgs, endIso, agentId, converted), { onConflict: "protocol" });
     if (error) throw error;
 }
 
@@ -157,9 +172,9 @@ async function avaliarEtapa(db: SupabaseClient, stage: number, converted: boolea
         if (await protocolExists(db, protocol)) { c.ignorados++; continue; }
         const { msgs } = await leadSegment(db, lead.id, endIso);
         if (msgs.length === 0) { c.ignorados++; continue; }
-        const ev = evaluateSegment(msgs, converted);
+        const { ev, converted: conv } = await evaluateSegment(db, lead.id, msgs, converted);
         if (ev.messageCount === 0) { c.ignorados++; continue; }
-        await gravar(db, protocol, lead.nome_completo ?? "", ev, msgs, endIso, agents);
+        await gravar(db, protocol, lead.nome_completo ?? "", ev, msgs, endIso, agents, conv);
         bump(c, ev);
     }
 }
@@ -202,9 +217,9 @@ async function runBackfillViva(db: SupabaseClient, limit: number, offset: number
         if (await protocolExists(db, protocol)) { c.ignorados++; continue; }
         const { msgs } = await leadSegment(db, lead.id, endIso);
         if (msgs.length === 0) { c.ignorados++; continue; }
-        const ev = evaluateAtendimento(msgs, null);
+        const { ev, converted } = await evaluateSegment(db, lead.id, msgs, false);
         if (ev.messageCount === 0) { c.ignorados++; continue; }
-        await gravar(db, protocol, lead.nome_completo ?? "", ev, msgs, endIso, agents);
+        await gravar(db, protocol, lead.nome_completo ?? "", ev, msgs, endIso, agents, converted);
         bump(c, ev);
     }
     return c;
@@ -239,6 +254,35 @@ async function runBackfillWc(db: SupabaseClient, limit: number): Promise<Counts>
 
 // Reavalia as linhas novas (método != csv) com a segmentação corrigida. Mantém o método original
 // (linhas de IA continuam com IA) e atualiza transcrição e data do atendimento.
+async function reavaliarLead(db: SupabaseClient, row: { protocol: string; contact: string | null }, agents: Map<string, string>, matId: number, c: Counts) {
+    const [, idStr, ...rest] = row.protocol.split(":");
+    const endIso = rest.join(":");
+    const { msgs } = await leadSegment(db, Number(idStr), endIso);
+    if (msgs.length === 0) { c.ignorados++; return; }
+    const { data: lead } = await db.from("leads").select("stage_id, stage_entry_date").eq("id", Number(idStr)).maybeSingle();
+    const stageConv = lead?.stage_id === matId && !!lead.stage_entry_date && new Date(lead.stage_entry_date).toISOString() === endIso;
+    const { ev, converted } = await evaluateSegment(db, Number(idStr), msgs, stageConv);
+    await gravar(db, row.protocol, row.contact ?? "", ev, msgs, endIso, agents, converted);
+    bump(c, ev);
+}
+
+// Matrículas já atribuídas a um agente: reavalia (com o bônus de fechamento) os atendimentos dele com o lead
+// que ainda não estão marcados como convertidos.
+async function runConvertedSync(db: SupabaseClient, limit: number, offset: number): Promise<Counts> {
+    const c = emptyCounts();
+    const { data: atr, error } = await db.from("matricula_atribuicao").select("lead_id, agente_nome, data_matricula")
+        .order("data_matricula", { ascending: false }).range(offset, offset + limit - 1);
+    if (error) throw error;
+    const agents = await profilesByName(db);
+    const matId = await stageId(db, "matriculado");
+    for (const a of atr ?? []) {
+        const { data: rows } = await db.from("messages_logs").select("protocol, contact").like("protocol", `lead:${a.lead_id}:%`)
+            .eq("convertido", false).ilike("agent_name", String(a.agente_nome).trim());
+        for (const row of rows ?? []) await reavaliarLead(db, row, agents, matId, c);
+    }
+    return c;
+}
+
 async function runRefresh(db: SupabaseClient, limit: number, offset: number): Promise<Counts> {
     const c = emptyCounts();
     const rows = await fetchAll<{ protocol: string; avaliacao_metodo: string; contact: string | null; agent_name: string | null }>((from, to) => db.from("messages_logs")
@@ -248,15 +292,7 @@ async function runRefresh(db: SupabaseClient, limit: number, offset: number): Pr
     const matId = await stageId(db, "matriculado");
     for (const row of rows.slice(offset, offset + limit)) {
         if (row.protocol.startsWith("lead:")) {
-            const [, idStr, ...rest] = row.protocol.split(":");
-            const endIso = rest.join(":");
-            const { msgs } = await leadSegment(db, Number(idStr), endIso);
-            if (msgs.length === 0) { c.ignorados++; continue; }
-            const { data: lead } = await db.from("leads").select("stage_id, stage_entry_date").eq("id", Number(idStr)).maybeSingle();
-            const converted = lead?.stage_id === matId && !!lead.stage_entry_date && new Date(lead.stage_entry_date).toISOString() === endIso;
-            const ev = evaluateSegment(msgs, converted);
-            await gravar(db, row.protocol, row.contact ?? "", ev, msgs, endIso, agents);
-            bump(c, ev);
+            await reavaliarLead(db, row, agents, matId, c);
         } else if (row.protocol.startsWith("wc:")) {
             const session = row.protocol.slice(3);
             const msgs = await fetchAll<FullMsg>((from, to) => db.from("widechat_messages")
@@ -336,7 +372,12 @@ serve(async (req) => {
         const limit = Math.min(Number(body.limit ?? 500), 2000);
         const offset = Number(body.offset ?? 0);
         const mode = String(body.mode ?? "live");
-        if (mode === "live") return jsonRes({ mode, ...(await runLive(db, limit)) });
+        if (mode === "live") {
+            const live = await runLive(db, limit);
+            const conv = await runConvertedSync(db, 60, 0);
+            return jsonRes({ mode, ...live, convertidos_reavaliados: conv.avaliados });
+        }
+        if (mode === "converted_sync") return jsonRes({ mode, offset, ...(await runConvertedSync(db, limit, offset)) });
         if (mode === "backfill_viva") return jsonRes({ mode, offset, ...(await runBackfillViva(db, limit, offset)) });
         if (mode === "backfill_matriculados") return jsonRes({ mode, offset, ...(await runBackfillMatriculados(db, limit, offset)) });
         if (mode === "compare") return jsonRes({ mode, offset, ...(await runCompare(db, Math.min(limit, 40), offset, body.agent ? String(body.agent) : null)) });

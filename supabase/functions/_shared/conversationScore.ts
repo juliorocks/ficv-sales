@@ -37,6 +37,7 @@ export type Evaluation = {
     overallConclusion: string;
     improvements: string[];
     aiMessages: { role: "agent" | "client"; text: string }[];
+    paymentLink?: boolean;
 };
 
 export type Opts = { converted?: boolean };
@@ -59,6 +60,12 @@ const INFO = /r\$\s?\d|mensalidade|parcela|investimento|dura[çc][ãa]o|carga ho
 const OFFER = /desconto|condi[çc][ãa]o (exclusiva|especial|excepcional)|promo[çc][ãa]o|\d+ ?% |black|bolsa|vagas?/i;
 const CTA = /matr[íi]cul|inscri|garantir (a|sua) vaga|garanta sua vaga|vamos prosseguir|vamos dar continuidade|podemos prosseguir|fazer o pagamento|efetuar o pagamento|link (de|para) pagamento|boleto|contrato|fechar com a gente|vestibular|pr[óo]ximo passo/i;
 const CLIENT_CONFIRM = /finalizei|finalizado minha|consegui fazer|deu certo|j[áa] fiz a matr[íi]cula|j[áa] fiz minha matr[íi]cula|matr[íi]cula paga|j[áa] paguei|segue (o )?comprovante|comprovante de pagamento|j[áa] me inscrevi|j[áa] me matriculei/i;
+
+// Link de pagamento/inscrição enviado pela agente conta como inscrição realizada (decisão do usuário, 17/11):
+// só vale em conversa comercial e fora de cobrança (juros, atraso, parcela, acordo), porque o mesmo link
+// (SpontePay) também é usado para aluno antigo pagar parcela.
+const PAYMENT_LINK = /spontepay|checkout|link (de|para|do) pagamento[^\n]{0,80}https?:\/\/|https?:\/\/[^\s]*(pagamento|pay\.guru|pagar\.me)/i;
+const DEBT_CONTEXT = /juros|em atraso|atrasad|vencid|parcelas? (em aberto|pendente)|negocia|acordo|inadimpl|d[ée]bito|renegoci/i;
 
 const normalize = (s: string) => (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 const isSystemText = (text: string) => {
@@ -117,7 +124,7 @@ export type Features = {
     nInfo: number; nOffer: number; nCta: number; nCourtesy: number; nDup: number;
     avgLen: number; greetEarly: number; usedName: number; confirm: number;
     medianDelay: number; slowShare: number; ghostQuestion: number; converted: number;
-    templatesIgnored: number;
+    templatesIgnored: number; paymentLink: number;
 };
 
 type Prepared = {
@@ -192,6 +199,7 @@ export function extractFeatures(msgs: Msg[], opts: Opts = {}): Features {
         medianDelay, slowShare, ghostQuestion,
         converted: opts.converted ? 1 : 0,
         templatesIgnored: templates,
+        paymentLink: texts.some((t) => PAYMENT_LINK.test(t)) && !DEBT_CONTEXT.test(relevant.map((m) => m.message ?? "").join("\n")) && NC_COMMERCIAL.test(relevant.map((m) => m.message ?? "").join("\n")) ? 1 : 0,
     };
 }
 
@@ -200,14 +208,18 @@ export function extractFeatures(msgs: Msg[], opts: Opts = {}): Features {
 //    mantendo só pesos positivos e com teto por variável, para volume de mensagem sozinho não render nota alta;
 //  - agilidade e empatia NÃO foram ajustadas à IA: ela não vê horário das mensagens (agilidade dela é palpite),
 //    então agilidade usa a demora real em horário de expediente e empatia usa regras de cortesia.
+//  - 17/11 (decisão do usuário): bases de empatia/clareza/profundidade/comercial subiram 0,2/0,2/0,4/0,5 (a escala
+//    estava apertada em cima) e quem FECHOU a matrícula (atribuída pelo cruzamento Sponte × atendimento) ganha
+//    +3 no pilar comercial e +0,5 na nota final do atendimento (BONUS_FECHAMENTO), para incentivar o fechamento.
+export const BONUS_FECHAMENTO = 0.5;
 const cap = (x: number, m: number) => Math.min(x, m);
 
 export function scorePillars(f: Features): { empathy: number; clarity: number; depth: number; commercial: number; agility: number } {
-    const empathy = 5.5 + 1.5 * f.greetEarly + 1 * f.usedName + 0.5 * cap(f.nCourtesy, 3) - 0.5 * cap(f.nDup, 3);
-    const clarity = 6.5 + 0.42 * (cap(f.avgLen, 300) / 100) + 0.08 * cap(f.nAgent, 8) - 0.7 * cap(f.nDup, 3) - (f.ghostQuestion ? 1 : 0);
-    const depth = 4.1 + 0.4 * cap(f.nInfo, 4) + 0.35 * cap(f.nLong, 4) + 0.15 * cap(f.nQuestions, 3) + 0.06 * cap(f.nAgent, 8);
-    const commercial = 4.55 + 0.25 * cap(f.nInfo, 4) + 0.2 * cap(f.nOffer, 2) + 0.41 * cap(f.nCta, 3) + 0.04 * cap(f.nAgent, 8)
-        + (f.confirm > 0 ? 1.5 : 0) + (f.converted ? 2.5 : 0);
+    const empathy = 5.7 + 1.5 * f.greetEarly + 1 * f.usedName + 0.5 * cap(f.nCourtesy, 3) - 0.5 * cap(f.nDup, 3);
+    const clarity = 6.7 + 0.42 * (cap(f.avgLen, 300) / 100) + 0.08 * cap(f.nAgent, 8) - 0.7 * cap(f.nDup, 3) - (f.ghostQuestion ? 1 : 0);
+    const depth = 4.5 + 0.4 * cap(f.nInfo, 4) + 0.35 * cap(f.nLong, 4) + 0.15 * cap(f.nQuestions, 3) + 0.06 * cap(f.nAgent, 8);
+    const commercial = 5.05 + 0.25 * cap(f.nInfo, 4) + 0.2 * cap(f.nOffer, 2) + 0.41 * cap(f.nCta, 3) + 0.04 * cap(f.nAgent, 8)
+        + (f.confirm > 0 ? 1.5 : 0) + ((f.converted || f.paymentLink) ? 3 : 0);
     const d = f.medianDelay;
     const base = d <= 5 ? 10 : d <= 15 ? 9 : d <= 30 ? 8 : d <= 60 ? 7 : d <= 120 ? 6 : d <= 240 ? 5 : 4;
     const agility = base - (f.slowShare > 0.5 ? 0.5 : 0) - (f.ghostQuestion ? 1 : 0);
@@ -269,15 +281,17 @@ export function evaluateAtendimento(msgs: Msg[], ai: AiResult | null, opts: Opts
         method = "heuristica";
     }
 
-    const finalScore = isCommercial
-        ? round1((empathy + clarity + depth + commercial + agility) / 5)
-        : round1((empathy + clarity + depth + agility) / 4);
+    const base = isCommercial
+        ? (empathy + clarity + depth + commercial + agility) / 5
+        : (empathy + clarity + depth + agility) / 4;
+    const link = !ai && f.paymentLink === 1;
+    const finalScore = round1(clamp(base + ((opts.converted || link) && !ai ? BONUS_FECHAMENTO : 0)));
 
     return {
         status: "approved", method, agent, messageCount: agentMsgs.length,
         empathy: round1(empathy), clarity: round1(clarity), depth: round1(depth), commercial: round1(commercial), agility: round1(agility),
         finalScore, isCommercial, hasEmpathy, closingAttempt,
         overallConclusion: overallConclusion || (finalScore >= 8 ? "Excelente" : finalScore >= 6.5 ? "Bom" : "Regular"),
-        improvements, aiMessages,
+        improvements, aiMessages, paymentLink: link,
     };
 }
