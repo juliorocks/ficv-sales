@@ -427,7 +427,20 @@ async function aiReply(db: any, settings: any, leadId: number, channelId: number
     const messages = (hist ?? []).reverse()
         .filter((h: any) => h.message)
         .map((h: any) => ({ role: h.origin === "channel" ? "user" : "assistant", content: h.message }));
-    if (!messages.length || messages[messages.length - 1].role !== "user") return "ia:sem fala do lead";
+    if (!messages.length || messages[messages.length - 1].role !== "user") {
+        // Última fala do cliente é só mídia (áudio, imagem, arquivo, contato): a IA não tem texto
+        // para responder e o lead ficava parado em "IA Atendendo" para sempre (2026-11-17).
+        const ultima = (hist ?? [])[0];
+        if (ultima && ultima.origin === "channel" && !ultima.message) {
+            await markAiHandedOff(db, leadId, "Cliente enviou áudio/imagem/arquivo, que a IA não lê");
+            await db.from("lead_notes").insert({
+                lead_id: leadId, created_at: new Date().toISOString(),
+                note: "🎧 Cliente enviou áudio/imagem/arquivo e a IA não consegue ler: lead passado para a Entrada para as agentes atenderem.",
+            });
+            return "ia:mídia sem texto → Entrada";
+        }
+        return "ia:sem fala do lead";
+    }
 
     const botPeer = detectAutomatedPeer(hist ?? []);
     if (botPeer) {
