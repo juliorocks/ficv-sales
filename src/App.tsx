@@ -68,7 +68,7 @@ import {
 } from 'recharts';
 import confetti from 'canvas-confetti';
 import { IaStatusAlert } from './components/admin/IaStatusAlert';
-import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQueryClient, useQuery } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 import { MatriculaConfetti } from './components/MatriculaConfetti';
 import { KanbanBoard } from './components/kanban/KanbanBoard';
@@ -875,6 +875,17 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     }, [validData]);
     // Agent profiles for photo mapping in the bar chart
     const { profiles: agentProfilesList } = useAgentProfiles();
+    // Foto que a própria agente configurou em "Meu Perfil" (profiles.avatar_url) tem prioridade sobre agent_profiles.photo_url
+    const { data: avatarPorNome } = useQuery({
+        queryKey: ['profiles-avatar'],
+        staleTime: 5 * 60_000,
+        queryFn: async () => {
+            const { data } = await supabase.from('profiles').select('full_name, avatar_url').not('avatar_url', 'is', null);
+            const m: Record<string, string> = {};
+            (data ?? []).forEach((r: any) => { if (r.full_name && r.avatar_url) m[r.full_name] = r.avatar_url; });
+            return m;
+        },
+    });
 
     // Derive selected period from active date filter (follows the filter, not today)
     const selectedFilterDate = dateRange.start ? new Date(dateRange.start + 'T00:00:00') : new Date();
@@ -913,6 +924,13 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     const semAchieved = semMonths.reduce((a, g) => a + g.monthly_achieved, 0);
 
     const LINE_COLORS = ['#5551FF', '#00D4AA', '#FFB347', '#FF6B9D', '#A78BFA'];
+    // Cor fixa por agente (mesma nos gráficos de barra, linha e pizza): posição na lista ordenada por nome, não na ordem de cada gráfico
+    const agentColor = (name: string) => {
+        const nomes = [...new Set(agentProfilesList.map((p: any) => p.name as string))].sort((a, b) => a.localeCompare(b));
+        let i = nomes.indexOf(name);
+        if (i < 0) { i = 0; for (const ch of name) i = (i * 31 + ch.charCodeAt(0)) >>> 0; }
+        return LINE_COLORS[i % LINE_COLORS.length];
+    };
 
     const globalRadarData = useMemo(() => {
         const radarScores = { empathy: 0, clarity: 0, depth: 0, commercial: 0, agility: 0, count: validData.length || 1 };
@@ -1557,10 +1575,9 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                     {(() => {
                                         const chartData = conversionChartData.slice(0, 10);
                                         const agentPhotoMap: Record<string, string | null | undefined> = {};
-                                        agentProfilesList.forEach((p: any) => { agentPhotoMap[p.name] = p.photo_url; });
+                                        agentProfilesList.forEach((p: any) => { agentPhotoMap[p.name] = avatarPorNome?.[p.name] ?? p.photo_url; });
                                         const maxVal = Math.max(...chartData.map((d: any) => d.value), 10);
                                         const TARGET = 8;
-                                        const COLORS = LINE_COLORS;
 
                                         return (
                                             <div className="h-full flex flex-col">
@@ -1575,7 +1592,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
 
                                                     {chartData.map((d: any, i: number) => {
                                                         const heightPct = Math.max(4, (d.value / maxVal) * 82);
-                                                        const color = COLORS[i % COLORS.length];
+                                                        const color = agentColor(d.name);
                                                         const onTarget = d.value >= TARGET;
                                                         const shortName = d.name?.split(' ')[0] ?? '';
                                                         const isAdmin = profile?.role === 'admin';
@@ -1677,8 +1694,8 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                             <YAxis domain={[0, 10]} axisLine={false} tickLine={false} tick={{ fill: '#8B949E', fontSize: 10 }} />
                                             <Tooltip contentStyle={{ background: '#0D1117', border: '1px solid #30363D', borderRadius: '12px' }} />
                                             <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '8px' }} />
-                                            {monthlyEvolution.agents.map((agent, i) => (
-                                                <Line key={agent} type="monotone" dataKey={agent} stroke={LINE_COLORS[i % LINE_COLORS.length]} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls />
+                                            {monthlyEvolution.agents.map((agent) => (
+                                                <Line key={agent} type="monotone" dataKey={agent} stroke={agentColor(agent)} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls />
                                             ))}
                                         </LineChart>
                                     </ResponsiveContainer>
@@ -1709,7 +1726,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                                 label={({ name, percent }) => `${name.split(' ')[0]} ${(percent * 100).toFixed(0)}%`}
                                                 labelLine={false}
                                             >
-                                                {agentVolumeData.map((_: any, i: number) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                                                {agentVolumeData.map((_: any, i: number) => <Cell key={i} fill={agentColor(_.name)} />)}
                                             </Pie>
                                             <Tooltip
                                                 contentStyle={{ background: '#0D1117', border: '1px solid #30363D', borderRadius: '12px' }}
