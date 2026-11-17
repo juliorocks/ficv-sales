@@ -88,6 +88,30 @@ export function businessMinutes(startMs: number, endMs: number): number {
     return total;
 }
 
+// Atendimento sem nada comercial (suporte/assunto de aluno, transferência para Secretaria/Tutor/Financeiro, aviso
+// administrativo): não entra na nota do Comercial. Conservador: qualquer sinal de curso, valor de curso, turma,
+// início de aula, rematrícula ou matrícula mantém o atendimento avaliado.
+const NC_TRANSFER = /(transfer\w*|encaminh\w*|passar|passo)\b[^.\n]{0,45}\b(secretaria|secret[áa]ri[oa]|tutor\w*|financeiro|suporte|setor|equipe|atendente)\b|transferiu o atendimento para a equipe|seu atendimento foi transferido/i;
+const NC_TOPIC = /secretaria|\btutor|tutoria|financeiro|suporte|portal do aluno|web ?aluno|segunda via|2[ªa] via|declara[çc][ãa]o|hist[óo]rico escolar|\bnotas?\b|moodle|\bsenha\b|n[ãa]o consegu\w+ acessar|acesso (ao|a)\b|diploma|certificado|est[áa]gio|\btcc\b|trancamento|cancelamento|\bsou (aluno|aluna|ex-aluno)|\bj[áa] sou (aluno|aluna)|prezado aluno|ambiente virtual|\bsponte\b|carteirinha|aproveitamento de estudos|ementa|boleto/i;
+const NC_COMMERCIAL = /rematr[íi]cula|renova[çc][ãa]o de matr[íi]cula|\bturma|in[íi]cio das aulas|aulas? (come[çc]|inici)|come[çc]a (dia|em|no|na)|\bvagas?\b|matr[íi]cula (nova|de calouro)|teologia|direito|psicologia|missiologia|lideran[çc]a crist[ãa]|forma[çc][ãa]o pol[íi]tica|gest[ãa]o escolar|psicopedagogia|psicoteologia|hist[óo]ria do cristianismo|educa[çc][ãa]o crist[ãa]|gradua[çc][ãa]o|p[óo]s-?gradua|bacharelado|vestibular|inscri[çc][ãa]o|me matricular|quero (me )?matricular|informa[çc][õo]es (sobre|do|da|de) (o |a )?(curso|gradua|p[óo]s)|\bgrade\b|disciplinas|carga hor[áa]ria|dura[çc][ãa]o|desconto|\bbolsa|condi[çc][ãa]o (exclusiva|especial|excepcional)|mensalidade|investimento|interesse (no|em|pelo|pela) (curso|gradua|p[óo]s)|preenchi meus dados/i;
+
+export function motivoNaoComercial(msgs: Msg[]): string | null {
+    const sorted = [...msgs].filter((m) => !m.interno).sort((a, b) => a.created_at.localeCompare(b.created_at));
+    const humanAgent = (m: Msg) => m.origin === "agent" && !isAutoAgentText(m.message ?? "");
+    const entry = sorted.findIndex(humanAgent);
+    if (entry < 0) return "sem fala de agente humano";
+    const rel = sorted.slice(entry);
+    const talk = rel.filter((m) => (m.origin === "agent" && !isAutoAgentText(m.message ?? "")) || m.origin === "channel");
+    const all = talk.map((m) => m.message ?? "").join("\n");
+    const withBot = rel.map((m) => m.message ?? "").join("\n");
+    if (NC_COMMERCIAL.test(all)) return null;
+    const transfer = NC_TRANSFER.test(withBot);
+    const topic = NC_TOPIC.test(all);
+    if (transfer) return "transferência para outro setor (Secretaria, Tutor, Financeiro ou Suporte), sem assunto comercial";
+    if (topic) return "assunto de aluno/suporte/administrativo, sem assunto comercial";
+    return null;
+}
+
 export type Features = {
     nAgent: number; nClient: number; nMedia: number; nQuestions: number; nLong: number;
     nInfo: number; nOffer: number; nCta: number; nCourtesy: number; nDup: number;
@@ -211,6 +235,8 @@ export function evaluateAtendimento(msgs: Msg[], ai: AiResult | null, opts: Opts
     if (realClient.length === 0) {
         return invalid("auto_invalidada", "o cliente não enviou nenhuma mensagem após o agente entrar no atendimento.", true);
     }
+    const naoComercial = motivoNaoComercial(msgs);
+    if (naoComercial) return invalid("auto_invalidada", `${naoComercial}.`, false);
     if (ai?.shouldInvalidate) return invalid("ia", ai.invalidateReason || "Atendimento sem interação real avaliável.", false);
 
     const f = extractFeatures(msgs, opts);
