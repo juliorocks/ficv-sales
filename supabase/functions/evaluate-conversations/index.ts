@@ -1,12 +1,16 @@
 // evaluate-conversations — nota de atendimento em tempo real (e backfill heurístico).
 //
-//   mode "live" (cron a cada 10 min, x-cron-key): leads que entraram em "Finalizado" nos
-//     últimos 3 dias ganham uma avaliação por finalização (IA; heurística se a IA falhar).
+//   mode "live" (cron a cada 10 min, x-cron-key): leads que entraram em "Finalizado" ou "Matriculado"
+//     nos últimos 3 dias ganham uma avaliação por entrada (heurística calibrada; a IA não roda mais aqui).
+//     Matriculado = venda fechada: a conversão entra na nota comercial.
+//   mode "backfill_matriculados" (admin): idem para quem virou Matriculado desde 25/09.
+//   mode "compare" (admin): roda a IA em atendimentos já avaliados e grava só em messages_logs.nota_ia
+//     (não muda a nota oficial). Aceita limit e agent (nome) para a amostra.
 //   mode "backfill_viva" (admin): leads finalizados desde 25/09 — só heurística (sem OpenAI).
 //   mode "backfill_wc" (admin): sessões do WideChat de 01/10 a 09/10 — só heurística. Antes de
 //     01/10 já existe avaliação pela exportação (CSV), que termina em 30/09.
-//   mode "refresh" (admin): reavalia as linhas novas (método != csv) com a lógica atual, para
-//     corrigir transcrição, data do atendimento e segmentação.
+//   mode "refresh" (admin): reavalia as linhas novas (método != csv) com a lógica atual (sempre heurística;
+//     a nota antiga da IA fica em nota_ia).
 //
 // Segmentos por lead usam só mensagens do VivaConnect: o histórico do WideChat já foi avaliado
 // (CSV até 30/09, sessões em outubro). Cada atendimento vira uma linha em messages_logs com
@@ -99,12 +103,9 @@ function rowFor(protocol: string, contact: string, ev: Evaluation, msgs: FullMsg
     };
 }
 
-// Heurística sempre; IA só quando pedido (live e refresh de linhas que já eram IA).
-async function evaluateSegment(msgs: Msg[], useAi: boolean): Promise<Evaluation> {
-    const pre = evaluateAtendimento(msgs, null);
-    if (pre.method === "auto_invalidada" || !useAi) return pre;
-    const ai = await callAi(pre.aiMessages);
-    return evaluateAtendimento(msgs, ai);
+// Heurística sempre; IA só no modo "compare" (grava em nota_ia, nunca na nota oficial).
+function evaluateSegment(msgs: Msg[], converted = false): Evaluation {
+    return evaluateAtendimento(msgs, null, { converted });
 }
 
 function bump(c: Counts, ev: Evaluation) {
@@ -121,12 +122,13 @@ async function profilesByName(db: SupabaseClient) {
     return m;
 }
 
-async function finalizadoStageId(db: SupabaseClient): Promise<number> {
+async function stageId(db: SupabaseClient, name: string): Promise<number> {
     const { data: stages } = await db.from("stages").select("id, name");
-    const fin = (stages ?? []).find((s) => String(s.name).trim().toLowerCase() === "finalizado");
-    if (!fin) throw new Error("Etapa 'Finalizado' não encontrada");
-    return fin.id;
+    const st = (stages ?? []).find((s) => String(s.name).trim().toLowerCase() === name);
+    if (!st) throw new Error(`Etapa '${name}' não encontrada`);
+    return st.id;
 }
+const finalizadoStageId = (db: SupabaseClient) => stageId(db, "finalizado");
 
 // Um atendimento de lead = mensagens do VivaConnect entre o fim da avaliação anterior e a finalização.
 async function leadSegment(db: SupabaseClient, leadId: number, endIso: string): Promise<{ start: string; msgs: FullMsg[] }> {
@@ -146,26 +148,43 @@ async function gravar(db: SupabaseClient, protocol: string, contact: string, ev:
     if (error) throw error;
 }
 
-async function runLive(db: SupabaseClient, limit: number): Promise<Counts> {
-    const c = emptyCounts();
-    const finId = await finalizadoStageId(db);
-    const since = new Date(Date.now() - LIVE_WINDOW_DAYS * 86400000).toISOString();
-    const { data: leads, error } = await db.from("leads").select("id, nome_completo, stage_entry_date")
-        .eq("stage_id", finId).gte("stage_entry_date", since).limit(limit);
-    if (error) throw error;
-    const agents = await profilesByName(db);
-    for (const lead of leads ?? []) {
+// Avalia os leads de uma etapa (Finalizado = sem venda; Matriculado = venda fechada).
+async function avaliarEtapa(db: SupabaseClient, stage: number, converted: boolean, leads: { id: number; nome_completo: string | null; stage_entry_date: string | null }[], c: Counts, agents: Map<string, string>) {
+    for (const lead of leads) {
         if (!lead.stage_entry_date) { c.ignorados++; continue; }
         const endIso = new Date(lead.stage_entry_date).toISOString();
         const protocol = `lead:${lead.id}:${endIso}`;
         if (await protocolExists(db, protocol)) { c.ignorados++; continue; }
         const { msgs } = await leadSegment(db, lead.id, endIso);
         if (msgs.length === 0) { c.ignorados++; continue; }
-        const ev = await evaluateSegment(msgs, true);
+        const ev = evaluateSegment(msgs, converted);
         if (ev.messageCount === 0) { c.ignorados++; continue; }
         await gravar(db, protocol, lead.nome_completo ?? "", ev, msgs, endIso, agents);
         bump(c, ev);
     }
+}
+
+async function runLive(db: SupabaseClient, limit: number): Promise<Counts> {
+    const c = emptyCounts();
+    const since = new Date(Date.now() - LIVE_WINDOW_DAYS * 86400000).toISOString();
+    const agents = await profilesByName(db);
+    for (const [name, converted] of [["finalizado", false], ["matriculado", true]] as const) {
+        const id = await stageId(db, name);
+        const { data: leads, error } = await db.from("leads").select("id, nome_completo, stage_entry_date")
+            .eq("stage_id", id).gte("stage_entry_date", since).limit(limit);
+        if (error) throw error;
+        await avaliarEtapa(db, id, converted, leads ?? [], c, agents);
+    }
+    return c;
+}
+
+async function runBackfillMatriculados(db: SupabaseClient, limit: number, offset: number): Promise<Counts> {
+    const c = emptyCounts();
+    const id = await stageId(db, "matriculado");
+    const { data: leads, error } = await db.from("leads").select("id, nome_completo, stage_entry_date")
+        .eq("stage_id", id).gte("stage_entry_date", VIVA_FLOOR).order("id", { ascending: true }).range(offset, offset + limit - 1);
+    if (error) throw error;
+    await avaliarEtapa(db, id, true, leads ?? [], c, await profilesByName(db));
     return c;
 }
 
@@ -226,14 +245,16 @@ async function runRefresh(db: SupabaseClient, limit: number, offset: number): Pr
         .select("protocol, avaliacao_metodo, contact, agent_name").neq("avaliacao_metodo", "csv")
         .order("protocol", { ascending: true }).range(from, to));
     const agents = await profilesByName(db);
+    const matId = await stageId(db, "matriculado");
     for (const row of rows.slice(offset, offset + limit)) {
-        const useAi = row.avaliacao_metodo === "ia";
         if (row.protocol.startsWith("lead:")) {
             const [, idStr, ...rest] = row.protocol.split(":");
             const endIso = rest.join(":");
             const { msgs } = await leadSegment(db, Number(idStr), endIso);
             if (msgs.length === 0) { c.ignorados++; continue; }
-            const ev = await evaluateSegment(msgs, useAi);
+            const { data: lead } = await db.from("leads").select("stage_id, stage_entry_date").eq("id", Number(idStr)).maybeSingle();
+            const converted = lead?.stage_id === matId && !!lead.stage_entry_date && new Date(lead.stage_entry_date).toISOString() === endIso;
+            const ev = evaluateSegment(msgs, converted);
             await gravar(db, row.protocol, row.contact ?? "", ev, msgs, endIso, agents);
             bump(c, ev);
         } else if (row.protocol.startsWith("wc:")) {
@@ -248,6 +269,34 @@ async function runRefresh(db: SupabaseClient, limit: number, offset: number): Pr
         } else {
             c.ignorados++;
         }
+    }
+    return c;
+}
+
+// Compara com a IA: roda a IA em atendimentos já avaliados (por lead) e grava só nota_ia.
+async function runCompare(db: SupabaseClient, limit: number, offset: number, agent: string | null): Promise<Counts & { diffs: { protocol: string; heuristica: number; ia: number | null }[] }> {
+    const c = { ...emptyCounts(), diffs: [] as { protocol: string; heuristica: number; ia: number | null }[] };
+    let q = db.from("messages_logs").select("protocol, final_score, agent_name").neq("avaliacao_metodo", "csv").eq("status", "approved")
+        .like("protocol", "lead:%").is("nota_ia", null).order("timestamp", { ascending: false });
+    if (agent) q = q.eq("agent_name", agent);
+    const { data: rows, error } = await q.range(offset, offset + limit - 1);
+    if (error) throw error;
+    for (const row of rows ?? []) {
+        const [, idStr, ...rest] = row.protocol.split(":");
+        const endIso = rest.join(":");
+        const { msgs } = await leadSegment(db, Number(idStr), endIso);
+        if (msgs.length === 0) { c.ignorados++; continue; }
+        const pre = evaluateAtendimento(msgs, null);
+        if (pre.method === "auto_invalidada") { c.ignorados++; continue; }
+        const ai = await callAi(pre.aiMessages);
+        const ev = ai ? evaluateAtendimento(msgs, ai) : null;
+        const nota = ev && ev.status === "approved" ? ev.finalScore : null;
+        if (nota != null) {
+            const { error: e2 } = await db.from("messages_logs").update({ nota_ia: nota }).eq("protocol", row.protocol);
+            if (e2) throw e2;
+        }
+        c.avaliados++; c.ia++;
+        c.diffs.push({ protocol: row.protocol, heuristica: row.final_score, ia: nota });
     }
     return c;
 }
@@ -289,6 +338,8 @@ serve(async (req) => {
         const mode = String(body.mode ?? "live");
         if (mode === "live") return jsonRes({ mode, ...(await runLive(db, limit)) });
         if (mode === "backfill_viva") return jsonRes({ mode, offset, ...(await runBackfillViva(db, limit, offset)) });
+        if (mode === "backfill_matriculados") return jsonRes({ mode, offset, ...(await runBackfillMatriculados(db, limit, offset)) });
+        if (mode === "compare") return jsonRes({ mode, offset, ...(await runCompare(db, Math.min(limit, 40), offset, body.agent ? String(body.agent) : null)) });
         if (mode === "backfill_wc") return jsonRes({ mode, ...(await runBackfillWc(db, limit)) });
         if (mode === "refresh") return jsonRes({ mode, offset, ...(await runRefresh(db, limit, offset)) });
         if (mode === "transcript") return jsonRes({ mode, offset, ...(await runTranscripts(db, limit, offset)) });
