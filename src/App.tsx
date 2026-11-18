@@ -58,7 +58,6 @@ import { TeamsAdmin } from './components/TeamsAdmin';
 import { HistoryLog } from './components/HistoryLog';
 import { UserManagement } from './components/UserManagement';
 import { ConversationAnalysis } from './utils/csvProcessor';
-import { computeMatriculasPorAgente, type SponteMatricula } from './utils/matriculaAttribution';
 import { supabase } from './lib/supabase';
 import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
@@ -725,36 +724,29 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     // do score Comercial da IA — os três números agora concordam entre si. Busca TODAS as
     // matrículas (não só as do período): o cálculo precisa do histórico completo de cada
     // aluna pra saber se é matrícula nova ou renovação (~3.800 linhas, tranquilo sem filtro).
-    const [matriculasData, setMatriculasData] = useState<SponteMatricula[]>([]);
-    useEffect(() => {
-        const fetchMatriculas = async () => {
-            const { data, error } = await supabase
-                .from('sponte_matriculas')
-                .select('contrato_id, aluno_id, aluno, turma_id, nome_turma, nome_curso, situacao_id, situacao, data_matricula, data_inicio, data_termino, contratante, numero_contrato, financeiro_lancado, celular')
-                .limit(20000);
-            if (!error) setMatriculasData((data ?? []) as SponteMatricula[]);
-        };
-        fetchMatriculas();
-    }, []);
+    // Mesma RPC da tela de Matrículas por agente (usa matricula_atribuicao + telefone do Portal): os números concordam.
+    const { data: matriculaRpc } = useQuery({
+        queryKey: ['matriculas-por-agente', dateRange.start, dateRange.end, selectedCourses],
+        staleTime: 5 * 60_000,
+        queryFn: async () => {
+            const { data, error } = await supabase.rpc('matriculas_por_agente', {
+                p_data_inicio: dateRange.start || '2015-01-01',
+                p_data_fim: dateRange.end || '2099-12-31',
+                p_cursos: selectedCourses.length > 0 ? selectedCourses : null,
+                p_turma: null,
+                p_situacao: null,
+            });
+            if (error) throw error;
+            return data as { porAgente: { agentName: string; matriculas: number }[] };
+        },
+    });
 
-    // Mesmo recorte de agente/equipe do filteredData, mas SEM o filtro de data — o
-    // atendimento que gerou a matrícula pode ter acontecido antes do início do período
-    // selecionado (ex.: matrícula no dia 1 do mês, atendimento fechado 3 semanas antes).
-    const atendimentosParaMatch = useMemo(() => {
-        return analysisData
-            .filter(d => {
-                const matchesAgent = selectedAgents.length === 0 || selectedAgents.includes('all') || selectedAgents.includes(d.agent);
-                const matchesTeam = !selectedTeamId || agentTeamMap[d.agent] === selectedTeamId;
-                return matchesAgent && matchesTeam;
-            })
-            .map(d => ({ agent_name: d.agent, contact: d.contact, timestamp: d.date }));
-    }, [analysisData, selectedAgents, selectedTeamId, agentTeamMap]);
-
-    const matriculaAttribution = useMemo(() => computeMatriculasPorAgente(
-        matriculasData, atendimentosParaMatch,
-        dateRange.start || '0001-01-01', dateRange.end || '9999-12-31',
-        selectedCourses, '', '',
-    ), [matriculasData, atendimentosParaMatch, dateRange, selectedCourses]);
+    // Recorte de agente/equipe aplicado ao resultado da RPC (a data e o curso já vão na consulta).
+    const matriculaAttribution = useMemo(() => ({
+        porAgente: (matriculaRpc?.porAgente ?? []).filter(a =>
+            (selectedAgents.length === 0 || selectedAgents.includes('all') || selectedAgents.includes(a.agentName)) &&
+            (!selectedTeamId || agentTeamMap[a.agentName] === selectedTeamId)),
+    }), [matriculaRpc, selectedAgents, selectedTeamId, agentTeamMap]);
 
     const matriculasConvertidas = useMemo(
         () => matriculaAttribution.porAgente.reduce((sum, a) => sum + a.matriculas, 0),
