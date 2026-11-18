@@ -908,7 +908,11 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     const isMultiMonth = periodMonths.length > 1;
 
     // Financial goals — tied to the selected filter period
-    const semMonths = financialGoals.filter(g => (selectedSemester === 1 ? g.month <= 6 : g.month > 6));
+    // Período que cruza os dois semestres (ex.: o ano todo): soma o ano inteiro em vez de só o semestre do mês inicial
+    const spansBothSemesters = periodMonths.some(m => m <= 6) && periodMonths.some(m => m > 6);
+    const semMonths = spansBothSemesters
+        ? financialGoals
+        : financialGoals.filter(g => (selectedSemester === 1 ? g.month <= 6 : g.month > 6));
     const monthTarget = activeGoals.reduce((a, g) => a + g.monthly_target, 0) / (periodMonths.length || 1);
     const monthAchieved = activeGoals.reduce((a, g) => a + g.monthly_achieved, 0) / (periodMonths.length || 1);
     const semTarget = semMonths.reduce((a, g) => a + g.monthly_target, 0);
@@ -1545,7 +1549,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                                 />
                             </div>
                             <div className="glass-card p-4 flex flex-col items-center justify-center">
-                                <p className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1">Meta Semestral</p>
+                                <p className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1">{spansBothSemesters ? 'Meta Anual' : `Meta ${selectedSemester}º Semestre`}</p>
                                 <ArcGauge
                                     percent={semTarget > 0 ? (semAchieved / semTarget) * 100 : 0}
                                     label={semTarget > 0 ? `Meta: ${semTarget.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}` : 'Sem meta definida'}
