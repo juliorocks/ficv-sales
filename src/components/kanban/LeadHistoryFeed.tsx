@@ -158,7 +158,7 @@ export function LeadHistoryFeed({ lead, stages, users, courses, leadSources }: L
                         <EventWrapper>
                             <p className="font-semibold flex items-center gap-2"><PlusCircle size={16} /> Lead criado com as seguintes informações:</p>
                             <ul className="list-disc pl-5 mt-1 space-y-1">
-                                {event.data.details.changes.map((change: any, index: number) => (
+                                {(event.data.details?.changes ?? []).map((change: any, index: number) => (
                                     <li key={index}>
                                         <strong>{formatValue(change.field, 'field')}:</strong> {formatValue(change.field, change.to)}
                                     </li>
@@ -219,7 +219,7 @@ export function LeadHistoryFeed({ lead, stages, users, courses, leadSources }: L
                     <EventWrapper>
                         <p className="font-semibold flex items-center gap-2"><Pencil size={16} /> Atualizou as seguintes informações:</p>
                         <ul className="list-disc pl-5 mt-1 space-y-1">
-                            {event.data.details.changes.map((change: any, index: number) => (
+                            {(event.data.details?.changes ?? []).map((change: any, index: number) => (
                                 <li key={index}>
                                     <strong>{formatValue(change.field, 'field')}:</strong> de "{formatValue(change.field, change.from)}" para "{formatValue(change.field, change.to)}"
                                 </li>
