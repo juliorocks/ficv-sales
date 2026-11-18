@@ -115,6 +115,18 @@ const fetchAchievedByMonth = async (year: number): Promise<Record<number, number
         }
         if (!data || data.length < PAGE) break;
     }
+    // Antecipação (aluno pagou o semestre/curso todo de uma vez) também conta na meta: tabela
+    // meta_antecipacoes, mantida pelo admin. Só a meta; a tela Matrículas (sponte-read) segue só com matrícula.
+    const { data: antec, error: errAntec } = await supabase
+        .from('meta_antecipacoes')
+        .select('data_pagamento, valor')
+        .gte('data_pagamento', `${year}-01-01`)
+        .lte('data_pagamento', `${year}-12-31`);
+    if (errAntec) throw errAntec;
+    for (const r of antec ?? []) {
+        const m = Number(String(r.data_pagamento).slice(5, 7));
+        totals[m] = (totals[m] ?? 0) + (Number(r.valor) || 0);
+    }
     return totals;
 };
 
