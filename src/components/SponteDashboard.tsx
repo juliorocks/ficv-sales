@@ -610,10 +610,6 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                 </div>
             )}
 
-            {preAberto && (
-                <PreMatriculasDrilldown contratos={preMatriculasLista.map(m => m.contrato_id)} onClose={() => setPreAberto(false)} />
-            )}
-
             {/* Stats cards */}
             {!loading && matriculas.length > 0 && (
                 <>
@@ -663,6 +659,10 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                             color="#FFB347"
                         />
                     </div>
+
+                    {preAberto && (
+                        <PreMatriculasDrilldown contratos={preMatriculasLista.map(m => m.contrato_id)} onClose={() => setPreAberto(false)} />
+                    )}
 
                     {/* Charts */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
