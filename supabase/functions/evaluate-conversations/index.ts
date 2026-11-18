@@ -106,18 +106,20 @@ function rowFor(protocol: string, contact: string, ev: Evaluation, msgs: FullMsg
 
 // Heurística sempre; IA só no modo "compare" (grava em nota_ia, nunca na nota oficial).
 // Fechou a matrícula = o agente do atendimento é o atribuído a uma matrícula (matricula_atribuicao) cuja data cai
-// entre a última fala humana do segmento e 60 dias depois dela, OU o lead está em Matriculado (stageConverted).
+// dentro do atendimento (começou até a data da matrícula; a agente pode seguir falando depois, ex. boas-vindas) e a
+// última fala humana não é anterior a 60 dias da matrícula, OU o lead está em Matriculado (stageConverted).
 async function evaluateSegment(db: SupabaseClient, leadId: number, msgs: Msg[], stageConverted = false): Promise<{ ev: Evaluation; converted: boolean }> {
     const ev0 = evaluateAtendimento(msgs, null, { converted: stageConverted });
     if (ev0.status !== "approved") return { ev: ev0, converted: false };
     let converted = stageConverted;
     if (!converted) {
+        const first = Date.parse(msgs[0].created_at);
         const last = Date.parse(attendanceEnd(msgs as FullMsg[], msgs[msgs.length - 1].created_at));
         const { data } = await db.from("matricula_atribuicao").select("agente_nome, data_matricula").eq("lead_id", leadId);
         converted = (data ?? []).some((a) => {
             if (String(a.agente_nome ?? "").trim().toLowerCase() !== ev0.agent.trim().toLowerCase()) return false;
             const dm = Date.parse(a.data_matricula + "T23:59:59-03:00");
-            return last <= dm && last >= dm - 60 * 86400000;
+            return first <= dm && last >= dm - 60 * 86400000;
         });
     }
     return converted && !stageConverted ? { ev: evaluateAtendimento(msgs, null, { converted: true }), converted } : { ev: ev0, converted };
