@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Sync Sponte CRM → Supabase (Postgres via PostgREST)
-// Uso: node scripts/sync-sponte.mjs [full|matriculas|parcelas|abertas] [start_date] [end_date]
+// Uso: node scripts/sync-sponte.mjs [full|matriculas|parcelas|abertas|contatos] [start_date] [end_date]
 
-import { pgUpsert, pgEnabled } from './lib/pg-mirror.mjs';
+import { pgUpsert, pgEnabled, pgRpc } from './lib/pg-mirror.mjs';
 
 
 const SPONTE_URL = 'https://api.sponteeducacional.net.br/WSAPIEdu.asmx';
@@ -219,6 +219,45 @@ async function syncInpc() {
     console.log(`  ✓ ${rows.length} meses de INPC`);
 }
 
+
+// ─── Contatos do aluno (GetAlunos por AlunoID) ────────────────────────────────
+// GetMatriculas não traz celular. Lê o cadastro dos alunos com matrícula Vigente/Pré ou parcela pendente
+// que ainda não têm contato carregado (ou carregado há mais de 7 dias), até `limite` por execução.
+async function syncContatos(limite = 600) {
+    const H = { apikey: process.env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}` };
+    const get = async (q) => (await fetch(`${process.env.SUPABASE_URL}/rest/v1/${q}`, { headers: H })).json();
+    const ids = new Set();
+    for (let off = 0; ; off += 1000) {
+        const r = await get(`sponte_matriculas?select=aluno_id&situacao_id=in.(1,6)&limit=1000&offset=${off}&order=id`);
+        r.forEach(x => x.aluno_id && ids.add(x.aluno_id)); if (r.length < 1000) break;
+    }
+    for (let off = 0; ; off += 1000) {
+        const r = await get(`sponte_parcelas?select=aluno_id&situacao_parcela=eq.Pendente&limit=1000&offset=${off}&order=id`);
+        r.forEach(x => x.aluno_id && ids.add(x.aluno_id)); if (r.length < 1000) break;
+    }
+    const velho = Date.now() - 7 * 864e5;
+    const feitos = new Map();
+    for (let off = 0; ; off += 1000) {
+        const r = await get(`sponte_alunos_contato?select=aluno_id,synced_at&limit=1000&offset=${off}&order=aluno_id`);
+        r.forEach(x => feitos.set(x.aluno_id, Date.parse(x.synced_at))); if (r.length < 1000) break;
+    }
+    const fila = [...ids].filter(i => !feitos.has(i)).concat([...ids].filter(i => feitos.has(i) && feitos.get(i) < velho)).slice(0, limite);
+    console.log(`  ${ids.size} alunos relevantes, ${fila.length} a ler agora`);
+    let rows = [];
+    for (const id of fila) {
+        try {
+            const xml = await soapCall('GetAlunos', `<sParametrosBusca>AlunoID=${id}</sParametrosBusca>`);
+            if (!xml.includes('<wsAluno>')) continue;
+            rows.push({ aluno_id: id, celular: extractFirst(xml, 'Celular') || null, telefone: extractFirst(xml, 'Telefone') || null,
+                        email: extractFirst(xml, 'Email') || null, synced_at: new Date().toISOString() });
+        } catch (e) { console.error(`  aluno ${id}: ${e.message}`); }
+        if (rows.length >= 100) { await pgUpsert('sponte_alunos_contato', rows, 'aluno_id'); rows = []; }
+    }
+    await pgUpsert('sponte_alunos_contato', rows, 'aluno_id');
+    const n = await pgRpc('sponte_contatos_aplicar');
+    console.log(`  ✓ contatos lidos; ${n} matrículas ganharam celular`);
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 if (!pgEnabled) throw new Error('SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY não definidos');
@@ -231,5 +270,6 @@ if (mode === 'abertas'    || mode === 'full') {
     await syncMatriculas('2015-01-01', `${year}-12-31`);
     await syncAbertas(); await syncInpc();
 }
+if (mode === 'contatos') await syncContatos(Number(process.argv[3]) || 600);
 
 console.log('\n✅ Sync concluído!');
