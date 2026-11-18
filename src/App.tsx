@@ -724,33 +724,19 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
     // do score Comercial da IA — os três números agora concordam entre si. Busca TODAS as
     // matrículas (não só as do período): o cálculo precisa do histórico completo de cada
     // aluna pra saber se é matrícula nova ou renovação (~3.800 linhas, tranquilo sem filtro).
-    // Mesma RPC da tela de Matrículas por agente (usa matricula_atribuicao + telefone do Portal): os números concordam.
+    // Mesma regra da tela de Matrículas por agente (usa matricula_atribuicao + telefone do Portal): os números concordam.
     const { data: matriculaRpc } = useQuery({
         queryKey: ['matriculas-por-agente', dateRange.start, dateRange.end, selectedCourses],
         staleTime: 5 * 60_000,
         queryFn: async () => {
-            // A RPC leva ~13 s de jan a hoje e o papel authenticated corta em 8 s: períodos longos vão em janelas de 45 dias, em paralelo.
-            const hoje = new Date().toISOString().slice(0, 10);
-            const ini = dateRange.start || '2026-01-01';
-            const fim = dateRange.end || hoje;
-            const janelas: [string, string][] = [];
-            const dia = (d: Date) => d.toISOString().slice(0, 10);
-            for (let c = new Date(ini + 'T00:00:00Z'); dia(c) <= fim; c = new Date(c.getTime() + 45 * 86400000)) {
-                const f = new Date(c.getTime() + 44 * 86400000);
-                janelas.push([dia(c), dia(f) < fim ? dia(f) : fim]);
-            }
-            const partes = await Promise.all(janelas.map(async ([i, f]) => {
-                const { data, error } = await supabase.rpc('matriculas_por_agente', {
-                    p_data_inicio: i, p_data_fim: f,
-                    p_cursos: selectedCourses.length > 0 ? selectedCourses : null,
-                    p_turma: null, p_situacao: null,
-                });
-                if (error) throw error;
-                return data as { porAgente: { agentName: string; matriculas: number }[] };
-            }));
-            const soma: Record<string, number> = {};
-            partes.forEach(r => r.porAgente.forEach(a => { soma[a.agentName] = (soma[a.agentName] ?? 0) + a.matriculas; }));
-            return { porAgente: Object.entries(soma).map(([agentName, matriculas]) => ({ agentName, matriculas })) };
+            // Lê o cache horário (matriculas_validas_cache): a RPC direta leva ~13 s e o papel authenticated corta em 8 s.
+            const { data, error } = await supabase.rpc('matriculas_validas_resumo', {
+                p_inicio: dateRange.start || '2026-01-01',
+                p_fim: dateRange.end || new Date().toISOString().slice(0, 10),
+                p_cursos: selectedCourses.length > 0 ? selectedCourses : null,
+            });
+            if (error) throw error;
+            return data as { porAgente: { agentName: string; matriculas: number }[] };
         },
     });
 
