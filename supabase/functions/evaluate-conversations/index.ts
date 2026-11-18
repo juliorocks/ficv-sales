@@ -281,6 +281,21 @@ async function runConvertedSync(db: SupabaseClient, limit: number, offset: numbe
         const { data: rows } = await db.from("messages_logs").select("protocol, contact").like("protocol", `lead:${a.lead_id}:%`)
             .eq("convertido", false).ilike("agent_name", String(a.agente_nome).trim());
         for (const row of rows ?? []) await reavaliarLead(db, row, agents, matId, c);
+        // Atendimentos do WideChat legado (protocolo wc:<sessão>) do mesmo lead
+        const { data: ses } = await db.from("widechat_messages").select("session_id").eq("lead_id", a.lead_id).not("session_id", "is", null).limit(2000);
+        for (const sid of new Set((ses ?? []).map((r: any) => String(r.session_id)))) {
+            const { data: wrows } = await db.from("messages_logs").select("protocol, contact").eq("protocol", `wc:${sid}`)
+                .eq("convertido", false).ilike("agent_name", String(a.agente_nome).trim());
+            for (const row of wrows ?? []) {
+                const msgs = await fetchAll<FullMsg>((from, to) => db.from("widechat_messages")
+                    .select("origin, sender_name, message, created_at, interno, session_id, lead_id")
+                    .eq("session_id", sid).order("created_at", { ascending: true }).range(from, to));
+                if (msgs.length === 0) { c.ignorados++; continue; }
+                const { ev, converted } = await evaluateSegment(db, a.lead_id, msgs);
+                await gravar(db, row.protocol, row.contact ?? "WideChat", ev, msgs, msgs[msgs.length - 1].created_at, agents, converted);
+                bump(c, ev);
+            }
+        }
     }
     return c;
 }
