@@ -113,6 +113,13 @@ export function LeadHistoryFeed({ lead, stages, users, courses, leadSources }: L
 
     const formatValue = (field: string, value: any) => {
         if (value === null || value === undefined) return "vazio"
+        if (value === 'field') {
+            const rotulos: Record<string, string> = {
+                nome_completo: 'Nome', telefone: 'Telefone', fonte_lead: 'Fonte', source_id: 'Origem', stage_id: 'Etapa',
+                assigned_to_id: 'Atendente', perfil: 'Perfil', observacoes: 'Observações', curso_interesse: 'Curso de interesse',
+            }
+            return rotulos[field] ?? field
+        }
         switch (field) {
             case 'curso_interesse':
                 return courses.find(c => c.id === value)?.name || value
