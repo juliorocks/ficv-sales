@@ -7,6 +7,7 @@ import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid
 } from 'recharts';
 import { supabase } from '../lib/supabase';
+import { PreMatriculasDrilldown } from './PreMatriculasDrilldown';
 import { showSuccess, showError } from '@/utils/toast';
 import { extractFnErrorMessage } from '@/utils/functionsError';
 import { periodToDates, AutoWidthSelect, PERIOD_OPTIONS } from '@/utils/dashboardFilters';
@@ -254,9 +255,11 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
     const vigentes = useMemo(() =>
         filtered.filter(m => m.situacao?.toLowerCase() === 'vigente').length, [filtered]
     );
-    const preMatriculas = useMemo(() =>
-        filtered.filter(m => m.situacao?.toLowerCase().includes('pr')).length, [filtered]
+    const preMatriculasLista = useMemo(() =>
+        filtered.filter(m => m.situacao?.toLowerCase().includes('pr')), [filtered]
     );
+    const preMatriculas = preMatriculasLista.length;
+    const [preAberto, setPreAberto] = useState(false);
     const encerrados = useMemo(() =>
         filtered.filter(m => {
             const s = m.situacao?.toLowerCase() ?? '';
@@ -607,6 +610,10 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                 </div>
             )}
 
+            {preAberto && (
+                <PreMatriculasDrilldown contratos={preMatriculasLista.map(m => m.contrato_id)} onClose={() => setPreAberto(false)} />
+            )}
+
             {/* Stats cards */}
             {!loading && matriculas.length > 0 && (
                 <>
@@ -631,6 +638,8 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                             value={preMatriculas.toLocaleString()}
                             sub={filtered.length > 0 ? `${((preMatriculas / filtered.length) * 100).toFixed(0)}% do total` : ''}
                             color="#5551FF"
+                            onClick={preMatriculas > 0 ? () => setPreAberto(true) : undefined}
+                            hint="Ver quem são"
                         />
                         <StatCard
                             icon={XCircle}
@@ -956,10 +965,12 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
 };
 
 // ─── Stat card ────────────────────────────────────────────────────────────────
-const StatCard: React.FC<{ icon: any; title: string; value: string; sub: string; color: string }> = ({
-    icon: Icon, title, value, sub, color
+const StatCard: React.FC<{ icon: any; title: string; value: string; sub: string; color: string; onClick?: () => void; hint?: string }> = ({
+    icon: Icon, title, value, sub, color, onClick, hint
 }) => (
-    <div className="glass-card p-5 relative overflow-hidden">
+    <div className={`glass-card p-5 relative overflow-hidden ${onClick ? 'cursor-pointer hover:ring-2 hover:ring-[#5551FF]/40 transition' : ''}`}
+        onClick={onClick} role={onClick ? 'button' : undefined} tabIndex={onClick ? 0 : undefined}
+        onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') onClick(); } : undefined}>
         <div className="flex justify-between items-start mb-4">
             <div className="p-2 rounded-lg" style={{ background: `${color}15` }}>
                 <Icon size={16} style={{ color }} />
@@ -968,5 +979,6 @@ const StatCard: React.FC<{ icon: any; title: string; value: string; sub: string;
         <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">{title}</p>
         <p className="text-xl font-bold text-[var(--text-main)]">{value}</p>
         {sub && <p className="text-[10px] text-[var(--text-muted)] mt-0.5">{sub}</p>}
+        {hint && <p className="text-[10px] font-medium mt-1" style={{ color }}>{hint} →</p>}
     </div>
 );
