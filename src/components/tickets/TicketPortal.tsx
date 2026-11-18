@@ -115,7 +115,6 @@ function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose, onCreated }:
   // categoria e deixa escolher ver o existente ou abrir mesmo assim (categoria é ampla
   // — "Financeiro" cobre várias coisas distintas — então não trava, só avisa).
   const [duplicateTicket, setDuplicateTicket] = useState<Ticket | null>(null)
-  const [confirmDuplicate, setConfirmDuplicate] = useState(false)
   const [abertos, setAbertos] = useState<Ticket[]>([])
   useEffect(() => {
     let vivo = true
@@ -172,11 +171,9 @@ function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose, onCreated }:
     const lista = (emAberto ?? []) as Ticket[]
     setAbertos(lista)
     if (lista.length >= LIMITE_TICKETS_ABERTOS) return
-    if (!confirmDuplicate) {
-      const aberto = lista.find(t => t.categoria === categoria) ?? null
-      setDuplicateTicket(aberto)
-      if (aberto) return
-    }
+    const aberto = categoria === 'outros' ? null : (lista.find(t => t.categoria === categoria) ?? null)
+    setDuplicateTicket(aberto)
+    if (aberto) return
     setSaving(true)
     try {
       const { data: ticketData, error: tErr } = await supabase.from('tickets').insert({
@@ -215,7 +212,9 @@ function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose, onCreated }:
       onClose()
       onCreated?.(ticketData as Ticket)
     } catch (e: any) {
-      showError(/LIMITE_TICKETS_ABERTOS/.test(e?.message ?? '')
+      showError(/ASSUNTO_JA_ABERTO/.test(e?.message ?? '')
+        ? 'Você já tem um chamado aberto nesse assunto. Continue por ele.'
+        : /LIMITE_TICKETS_ABERTOS/.test(e?.message ?? '')
         ? `Você já tem ${LIMITE_TICKETS_ABERTOS} chamados em aberto. Continue por um deles ou aguarde a resolução.`
         : (e?.message ?? 'Erro ao abrir ticket.'))
     } finally {
@@ -254,7 +253,7 @@ function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose, onCreated }:
             {CATEGORIAS.map(cat => (
               <button
                 key={cat.value}
-                onClick={() => { setCategoria(cat.value); setStep('detalhes'); setConfirmDuplicate(false); setDuplicateTicket(null) }}
+                onClick={() => { setCategoria(cat.value); setStep('detalhes'); setDuplicateTicket(null) }}
                 className="flex items-center gap-3 p-3 rounded-lg border border-[var(--border)] hover:border-[var(--primary)] hover:bg-[var(--primary)]/5 transition-all text-left group"
               >
                 <span className="text-2xl">{cat.icon}</span>
@@ -356,19 +355,13 @@ function NewTicketDialog({ alunoId, alunoNome, alunoEmail, onClose, onCreated }:
               <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm space-y-2">
                 <p className="text-amber-200">
                   Você já tem o chamado <span className="font-mono">{duplicateTicket.protocolo}</span> aberto nesse mesmo assunto
-                  ("{duplicateTicket.titulo}", {STATUS_LABELS[duplicateTicket.status] ?? duplicateTicket.status}). A equipe já está ciente — pode
-                  continuar por lá em vez de abrir outro.
+                  ("{duplicateTicket.titulo}", {STATUS_LABELS[duplicateTicket.status] ?? duplicateTicket.status}). Não é possível abrir outro
+                  nesse assunto: continue por esse chamado, que a equipe já está acompanhando.
                 </p>
-                <div className="flex gap-2">
-                  <Button size="sm" variant="outline" className="flex-1"
-                    onClick={() => { onClose(); onCreated?.(duplicateTicket) }}>
-                    Ver chamado existente
-                  </Button>
-                  <Button size="sm" variant="outline" className="flex-1 text-amber-200 border-amber-500/40"
-                    onClick={() => { setConfirmDuplicate(true); setDuplicateTicket(null) }}>
-                    É outro assunto — abrir mesmo assim
-                  </Button>
-                </div>
+                <Button size="sm" variant="outline" className="w-full"
+                  onClick={() => { onClose(); onCreated?.(duplicateTicket) }}>
+                  Continuar pelo chamado existente
+                </Button>
               </div>
             )}
 
