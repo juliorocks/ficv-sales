@@ -350,15 +350,7 @@ Deno.serve(async (req) => {
                 // Em Contato = agente humano assumiu (inclusive puxando de Aluno na mão): não volta
                 // pra Aluno nem manda o link do Portal por cima da conversa dele.
                 if (/em contato/i.test(st?.name ?? "")) return await done("stored:aluno (em atendimento humano)", lead.id);
-                if (!/matricul|^aluno$/i.test(st?.name ?? "")) {
-                    const { data: alunoStage } = await db.from("stages").select("id").eq("name", "Aluno").maybeSingle();
-                    if (alunoStage) {
-                        await db.from("leads").update({
-                            stage_id: alunoStage.id, stage_entry_date: new Date().toISOString(),
-                            perfil: "aluno", updated_at: new Date().toISOString(),
-                        }).eq("id", lead.id);
-                    }
-                }
+                // a etapa Aluno é decisão da equipe (2026-11-19): ex-aluno com matrícula cancelada caía lá sozinho
             }
             if (!settings.student_reply_enabled) return await done("stored:aluno (resposta do portal desligada)", lead?.id ?? null);
             const since = new Date(Date.now() - 24 * 3600_000).toISOString();
@@ -396,15 +388,6 @@ async function tratarAlunoAtual(db: any, settings: any, leadId: number, channelI
     if (leadRow?.stage_id) {
         const { data: st } = await db.from("stages").select("name").eq("id", leadRow.stage_id).maybeSingle();
         if (/em contato/i.test(st?.name ?? "")) return `ia:aluno_atual ignorado (lead em atendimento humano)`;
-        if (!/matricul|^aluno$/i.test(st?.name ?? "")) {
-            const { data: alunoStage } = await db.from("stages").select("id").eq("name", "Aluno").maybeSingle();
-            if (alunoStage) {
-                await db.from("leads").update({
-                    stage_id: alunoStage.id, stage_entry_date: new Date().toISOString(),
-                    perfil: "aluno", updated_at: new Date().toISOString(),
-                }).eq("id", leadId);
-            }
-        }
     }
     if (settings.student_reply_enabled && String(settings.student_reply_template ?? "").trim()) {
         await db.from("vivaconnect_outbox").insert({
