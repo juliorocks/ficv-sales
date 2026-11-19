@@ -12,8 +12,8 @@ import { showSuccess, showError } from '@/utils/toast';
 import { extractFnErrorMessage } from '@/utils/functionsError';
 import { periodToDates, AutoWidthSelect, PERIOD_OPTIONS } from '@/utils/dashboardFilters';
 import { normalizeName, extractContactPhone, normalizeStudentPhone, daysDiff } from '@/utils/sponteMatch';
+import { withTimeout } from '@/utils/withTimeout';
 import {
-    computeMatriculasPorAgente,
     type SponteMatricula,
     type MessagesLogLite as MessagesLog,
     type MatriculaDetalhe,
@@ -129,24 +129,55 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
         return () => clearInterval(id);
     }, [loadData]);
 
-    // ─── Matrículas por agente — calculado client-side
+    // ─── Matrículas por agente: lê o cache horário de matricula_atribuicao (mesma base da Visão Geral).
+    // O cálculo antigo (messages_logs + celular do Sponte) perdia quase tudo: celular vazio e só conversas avaliadas.
     useEffect(() => {
-        if (!messagesLogsReady || !matriculas.length) return;
+        if (!matriculas.length) return;
+        let cancelado = false;
         setAgentAttribution({ porAgente: [], detalhes: [], semAtribuicao: 0, jaExistente: 0 });
         setSelectedAgentDrillDown(null);
         setPorAgenteLoading(true);
-        try {
-            const result = computeMatriculasPorAgente(
-                matriculas, messagesLogs, dateStart, dateEnd,
-                selectedCursos, selectedTurma, selectedSituacao
-            );
-            setAgentAttribution(result);
-        } catch (e) {
-            console.error('computeMatriculasPorAgente error:', e);
-        } finally {
-            setPorAgenteLoading(false);
-        }
-    }, [matriculas, messagesLogs, messagesLogsReady, dateStart, dateEnd, selectedCursos, selectedTurma, selectedSituacao]);
+        (async () => {
+            try {
+                const { data, error } = await withTimeout(
+                    supabase.from('matriculas_validas_cache')
+                        .select('agente, aluno, curso, data_matricula')
+                        .gte('data_matricula', dateStart).lte('data_matricula', dateEnd)
+                        .limit(5000),
+                    15000, 'As matrículas por agente');
+                if (error) throw error;
+                const chave = (a: string, c: string | null, d: string) => `${normalizeName(a)}|${c ?? ''}|${d}`;
+                const candidatas = new Map<string, boolean>();
+                for (const m of matriculas) {
+                    if (!m.aluno || !m.data_matricula) continue;
+                    if (m.data_matricula < dateStart || m.data_matricula > dateEnd) continue;
+                    if (selectedCursos.length > 0 && !selectedCursos.includes(m.nome_curso)) continue;
+                    if (selectedTurma && selectedTurma !== 'all' && m.nome_turma !== selectedTurma) continue;
+                    if (selectedSituacao && selectedSituacao !== 'all' && m.situacao !== selectedSituacao) continue;
+                    candidatas.set(chave(m.aluno, m.nome_curso, m.data_matricula), true);
+                }
+                const detalhes: MatriculaDetalhe[] = [];
+                for (const r of data ?? []) {
+                    if (!candidatas.has(chave(r.aluno, r.curso, r.data_matricula))) continue;
+                    detalhes.push({ agentName: r.agente, aluno: r.aluno, curso: r.curso ?? '', dataMatricula: r.data_matricula });
+                }
+                const cont = new Map<string, number>();
+                detalhes.forEach(d => cont.set(d.agentName, (cont.get(d.agentName) ?? 0) + 1));
+                const porAgente = Array.from(cont.entries())
+                    .map(([agentName, n]) => ({ agentName, matriculas: n }))
+                    .sort((x, y) => y.matriculas - x.matriculas);
+                if (!cancelado) setAgentAttribution({
+                    porAgente, detalhes,
+                    semAtribuicao: Math.max(0, candidatas.size - detalhes.length), jaExistente: 0,
+                });
+            } catch (e) {
+                console.error('matriculas por agente error:', e);
+            } finally {
+                if (!cancelado) setPorAgenteLoading(false);
+            }
+        })();
+        return () => { cancelado = true; };
+    }, [matriculas, dateStart, dateEnd, selectedCursos, selectedTurma, selectedSituacao]);
 
     // Fecha os drill-downs de curso/mês quando os filtros mudam (o conjunto filtrado muda de baixo)
     useEffect(() => {
@@ -802,7 +833,7 @@ export const SponteDashboard: React.FC<Props> = ({ isAdmin }) => {
                                 Matrículas por Agente
                             </h3>
                             <span className="text-[10px] text-[var(--text-muted)] text-right">
-                                Conta 1x por aluno+curso; ignora atendimento com mais de 30 dias ou quem já estava matriculado antes
+                                Conta 1x por aluno+curso; atribui ao agente que mais atendeu o lead até 60 dias antes; ignora renovação do mesmo curso; atualizado de hora em hora
                             </span>
                         </div>
                         {porAgenteLoading ? (
