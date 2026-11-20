@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronLeft, ChevronRight, Loader2, Play, LogOut, GraduationCap } from 'lucide-react'
+import { CheckCircle2, ChevronLeft, ChevronRight, Loader2, Play, LogOut, GraduationCap } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { avaCall, AVA_BG, programaDe, type AvaCursoResumo } from './avaApi'
 
@@ -205,19 +205,28 @@ function CartaoPrograma({ p }: { p: Programa }) {
 
 function CartaoCurso({ c, className = '', grad = false }: { c: AvaCursoResumo; className?: string; grad?: boolean }) {
   const p = pct(c)
+  const concluida = c.total_aulas > 0 && c.concluidas >= c.total_aulas
+  const andamento = !concluida && (c.concluidas > 0 || !!c.ultimo_acesso)
   return (
-    <Link to={`/ava/curso/${c.id}`} className={`group block rounded-xl overflow-hidden border border-white/10 bg-[#13161D] hover:border-[#C9A84C]/60 transition-colors ${className}`}>
+    <Link to={`/ava/curso/${c.id}`} className={`group block rounded-xl overflow-hidden border bg-[#13161D] hover:border-[#C9A84C]/60 transition-colors ${concluida ? 'border-[#C9A84C]/50' : 'border-white/10'} ${className}`}>
       <div className="relative">
         <Capa c={c} className="aspect-video" />
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
           <span className="w-11 h-11 rounded-full bg-white/90 flex items-center justify-center"><Play className="w-5 h-5 text-black fill-black ml-0.5" /></span>
         </div>
-        {p > 0 && <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20"><div className="h-full" style={{ width: `${p}%`, background: GOLD }} /></div>}
+        {concluida && <span className="absolute top-2.5 right-2.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide" style={{ background: GOLD, color: '#111' }}><CheckCircle2 className="w-3 h-3" /> Concluída</span>}
+        {andamento && <span className="absolute top-2.5 right-2.5 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-black/55 text-[#E0BF6A] border border-[#C9A84C]/40">Em andamento</span>}
+        <div className="absolute bottom-0 inset-x-0 h-1 bg-white/15"><div className="h-full" style={{ width: `${p}%`, background: GOLD }} /></div>
       </div>
       <div className="p-3">
         <p className="text-[10px] uppercase tracking-wider text-[#8A8A9A] truncate">{(grad ? [rotuloGrupo(grupoDe(c), true), c.semestre].filter(Boolean).join(' · ') : rotuloGrupo(grupoDe(c)))}</p>
         <h4 className="text-sm font-medium leading-snug mt-1 line-clamp-2 min-h-[2.5rem]">{c.titulo}</h4>
-        <p className="text-[11px] text-[#8A8A9A] mt-1.5">{c.total_aulas} aulas{p > 0 ? ` · ${p}%` : ''}</p>
+        <p className="text-[11px] mt-1.5" style={{ color: concluida ? '#E0BF6A' : '#8A8A9A' }}>
+          {c.total_aulas === 0 ? 'Sem videoaulas'
+            : concluida ? `${c.total_aulas} de ${c.total_aulas} aulas assistidas`
+            : c.concluidas > 0 ? `${c.concluidas} de ${c.total_aulas} aulas · ${p}%`
+            : `${c.total_aulas} ${c.total_aulas === 1 ? 'aula' : 'aulas'} · não iniciada`}
+        </p>
       </div>
     </Link>
   )
