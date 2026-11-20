@@ -29,6 +29,7 @@ import {
     Search,
     Ticket as TicketIcon,
     GraduationCap,
+    Layers,
     Megaphone,
     CalendarClock,
     Bot,
@@ -98,6 +99,7 @@ import { MarketingFormBuilder } from './components/marketing/MarketingFormBuilde
 import { CpaAdmin } from './components/cpa/CpaAdmin';
 import { PortalBannersAdmin } from './components/admin/PortalBannersAdmin';
 import { AvaGestao } from './components/ava-admin/AvaGestao';
+import { AcademicoGestao } from './components/academico/AcademicoGestao';
 import { ProjetoPainel } from './components/projeto/ProjetoPainel';
 
 const queryClient = new QueryClient({
@@ -1074,6 +1076,9 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                             )}
                             {(profile?.role === 'admin' || isTicketRole) && (
                                 <NavItem collapsed={sidebarCollapsed} icon={TicketIcon} label="Tickets" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
+                            )}
+                            {profile?.role === 'admin' && (
+                                <NavItem collapsed={sidebarCollapsed} icon={Layers} label="Acadêmico" active={activeTab === 'academico'} onClick={() => setActiveTab('academico')} />
                             )}
                             {profile?.role === 'admin' && (
                                 <NavItem collapsed={sidebarCollapsed} icon={GraduationCap} label="AVA" active={activeTab === 'ava-gestao'} onClick={() => setActiveTab('ava-gestao')} />
@@ -2129,6 +2134,12 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {activeTab === 'matriculas' && ehComercial && (
                     <div className="animate-fade-in">
                         <SponteDashboard isAdmin={profile?.role === 'admin'} />
+                    </div>
+                )}
+
+                {activeTab === 'academico' && profile?.role === 'admin' && (
+                    <div className="animate-fade-in">
+                        <AcademicoGestao />
                     </div>
                 )}
 
