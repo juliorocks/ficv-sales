@@ -18,6 +18,10 @@ const PublicMarketingFormPage = React.lazy(() =>
 const CpaFormPage = React.lazy(() =>
     import('./components/cpa/CpaFormPage').then((m) => ({ default: m.CpaFormPage })))
 
+// AVA (ambiente de estudos, fase de teste): rota /ava, fora de qualquer menu
+const AvaPage = React.lazy(() =>
+    import('./components/ava/AvaPage').then((m) => ({ default: m.AvaPage })))
+
 // portal.ficv.edu.br = só o Portal do Aluno (mesmo deploy da Vercel do CRM): qualquer
 // caminho nesse domínio abre o portal — EXCETO /connect, que é o CRM nesse mesmo domínio
 // (pedido do usuário 02/10: "portal.ficv.edu.br/connect" em vez do link genérico da Vercel).
@@ -29,7 +33,7 @@ const CpaFormPage = React.lazy(() =>
 // o admin gerou o código (achado ao vivo 08/10: snippet gerado em portal.ficv.edu.br/connect caía
 // no catch-all do portal, que não tem a rota /f e renderizava o login do aluno no lugar do form).
 const isPortalHost = /^portal\./i.test(window.location.hostname)
-const isCrmPath = /^\/(connect|relatorio|f|aluno-visualizacao|avaliacao)(\/|$)/.test(window.location.pathname)
+const isCrmPath = /^\/(connect|relatorio|f|aluno-visualizacao|avaliacao|ava)(\/|$)/.test(window.location.pathname)
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
@@ -48,6 +52,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                     <Route path="/atendimento" element={<Navigate to="/aluno" replace />} />
                     <Route path="/avaliacao" element={<AlunoPortalPage />} />
                     <Route path="/avaliacao/:token" element={<Suspense fallback={null}><CpaFormPage /></Suspense>} />
+                    <Route path="/ava/*" element={<Suspense fallback={null}><AvaPage /></Suspense>} />
                     <Route path="/f/:slug" element={<Suspense fallback={null}><PublicMarketingFormPage /></Suspense>} />
                     <Route path="/*" element={<App />} />
                 </Routes>
