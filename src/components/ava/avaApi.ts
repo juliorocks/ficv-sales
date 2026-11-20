@@ -50,3 +50,19 @@ export function programaDe(c: { nome: string; curso_area: string | null }): { ke
   const area = c.curso_area ?? 'Outros'
   return { key: area.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\W+/g, '-'), label: capitaliza(area), nivel: 'Graduação EAD' }
 }
+
+export type AvaAnotacao = { id: number; aula_id: number; segundos: number; texto: string; criado_em: string }
+export type AvaResposta = { id: number; pergunta_id: number; autor_tipo: 'aluno' | 'professor' | 'equipe'; autor_nome: string; texto: string; criado_em: string }
+export type AvaPergunta = { id: number; aula_id: number | null; autor_nome: string; titulo: string; texto: string; resolvida: boolean; criado_em: string; minha: boolean; respostas: AvaResposta[] }
+export type AvaAviso = { id: number; curso_id: number | null; titulo: string; texto: string; autor_nome: string | null; criado_em: string }
+export type MsgChat = { role: 'user' | 'assistant'; content: string }
+
+export const fmtTempo = (seg: number) => { const m = Math.floor(seg / 60), s = Math.floor(seg % 60); return `${m}:${String(s).padStart(2, '0')}` }
+export function haQuanto(iso: string): string {
+  const d = (Date.now() - new Date(iso).getTime()) / 1000
+  if (d < 90) return 'agora há pouco'
+  if (d < 3600) return `${Math.floor(d / 60)} min atrás`
+  if (d < 86400) return `${Math.floor(d / 3600)} h atrás`
+  if (d < 86400 * 30) return `${Math.floor(d / 86400)} dias atrás`
+  return new Date(iso).toLocaleDateString('pt-BR')
+}

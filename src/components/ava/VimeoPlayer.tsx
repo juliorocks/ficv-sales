@@ -23,11 +23,12 @@ type Props = {
   inicio?: number
   onProgresso: (posicao: number, duracao: number, fim: boolean) => void
   onFim?: () => void
+  playerRef?: React.MutableRefObject<any>
 }
 
 /** Player do Vimeo (os mesmos vídeos do Moodle) com retomada de onde parou e progresso a cada ~15 s.
  *  Remontar com `key={videoId}` ao trocar de aula. */
-export function VimeoPlayer({ videoId, hash, inicio = 0, onProgresso, onFim }: Props) {
+export function VimeoPlayer({ videoId, hash, inicio = 0, onProgresso, onFim, playerRef }: Props) {
   const ref = useRef<HTMLIFrameElement>(null)
   const cb = useRef({ onProgresso, onFim })
   cb.current = { onProgresso, onFim }
@@ -39,7 +40,8 @@ export function VimeoPlayer({ videoId, hash, inicio = 0, onProgresso, onFim }: P
     carregarSdk().then(() => {
       if (!vivo || !ref.current || !window.Vimeo) return
       player = new window.Vimeo.Player(ref.current)
-      player.on('loaded', () => { if (inicio > 5) player.setCurrentTime(inicio).catch(() => {}) })
+      if (playerRef) playerRef.current = player
+      player.on('loaded', () => { if (inicio >= 1) player.setCurrentTime(inicio).catch(() => {}) })
       player.on('timeupdate', (d: { seconds: number; duration: number }) => {
         pos = d.seconds; dur = d.duration
         if (pos - ultimo >= 15 || pos < ultimo) { ultimo = pos; cb.current.onProgresso(pos, dur, false) }
@@ -49,7 +51,7 @@ export function VimeoPlayer({ videoId, hash, inicio = 0, onProgresso, onFim }: P
     }).catch(() => {})
     const sair = () => { if (dur && pos) cb.current.onProgresso(pos, dur, false) }
     window.addEventListener('pagehide', sair)
-    return () => { vivo = false; window.removeEventListener('pagehide', sair); sair(); try { player?.destroy() } catch { /* já destruído */ } }
+    return () => { vivo = false; window.removeEventListener('pagehide', sair); sair(); if (playerRef) playerRef.current = null; try { player?.destroy() } catch { /* já destruído */ } }
   }, [videoId, hash, inicio])
 
   const src = `https://player.vimeo.com/video/${videoId}?${hash ? `h=${hash}&` : ''}title=0&byline=0&portrait=0&dnt=1&playsinline=1`

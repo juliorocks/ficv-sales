@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { AlignLeft, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ClipboardCheck, ExternalLink, FileText, Loader2, Play } from 'lucide-react'
-import { avaCall, AVA_BG, fmtDuracao, programaDe, type AvaAula, type AvaCurso } from './avaApi'
+import { AlignLeft, Check, Sparkles, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ClipboardCheck, ExternalLink, FileText, Loader2, Play } from 'lucide-react'
+import { avaCall, AVA_BG, fmtDuracao, programaDe, type AvaAula, type AvaCurso, type MsgChat } from './avaApi'
+import { AvaAssistente } from './AvaAssistente'
+import { AbaAnotacoes, AbaAvisos, AbaPerguntas } from './AvaAbas'
 import { VimeoPlayer } from './VimeoPlayer'
 
 const GOLD = '#C9A84C'
@@ -38,7 +40,19 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
   const navigate = useNavigate()
   const [prog, setProg] = useState<Prog>(() => Object.fromEntries(dados.progresso.map(p => [p.aula_id, { posicao_seg: p.posicao_seg, concluida: p.concluida }])))
   const progRef = useRef(prog); progRef.current = prog
-  const [aba, setAba] = useState<'conteudo' | 'geral'>(() => (window.innerWidth >= 1024 ? 'geral' : 'conteudo'))
+  type Aba = 'conteudo' | 'assistente' | 'geral' | 'perguntas' | 'anotacoes' | 'avisos'
+  const [aba, setAba] = useState<Aba>(() => (window.innerWidth >= 1024 ? 'geral' : 'conteudo'))
+  const [lateral, setLateral] = useState<'conteudo' | 'assistente'>('conteudo')
+  const [chat, setChat] = useState<MsgChat[]>([])
+  const [semente, setSemente] = useState<string | null>(null)
+  const playerRef = useRef<any>(null)
+  const [sp] = useSearchParams()
+  const [desktop, setDesktop] = useState(() => window.matchMedia('(min-width: 1024px)').matches)
+  useEffect(() => {
+    const m = window.matchMedia('(min-width: 1024px)')
+    const f = () => setDesktop(m.matches); m.addEventListener('change', f); return () => m.removeEventListener('change', f)
+  }, [])
+  const perguntarAoTutor = (t: string) => { setSemente(t); if (window.matchMedia('(min-width: 1024px)').matches) setLateral('assistente'); else setAba('assistente') }
 
   // sem aula na URL: retoma a última com progresso não concluído, senão a 1ª de vídeo
   const aulaAtual = useMemo(() => {
@@ -53,7 +67,8 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
   useEffect(() => { if (aulaAtual) setAbertas(s => (s.has(aulaAtual.secao_id) ? s : new Set(s).add(aulaAtual.secao_id))) }, [aulaAtual])
   useEffect(() => { window.scrollTo({ top: 0 }) }, [aulaAtual?.id])
 
-  const inicio = useMemo(() => progRef.current[aulaAtual?.id ?? -1]?.posicao_seg ?? 0, [aulaAtual?.id])
+  const tUrl = Number(sp.get('t')) || 0
+  const inicio = useMemo(() => tUrl || (progRef.current[aulaAtual?.id ?? -1]?.posicao_seg ?? 0), [aulaAtual?.id, tUrl])
   const ordenadas = useMemo(() => aulas, [aulas])
   const idx = ordenadas.findIndex(a => a.id === aulaAtual?.id)
   const anterior = idx > 0 ? ordenadas[idx - 1] : null
@@ -63,7 +78,7 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
   const feitas = aulas.filter(a => a.tipo === 'video' && prog[a.id]?.concluida).length
   const pct = total ? Math.round((feitas / total) * 100) : 0
 
-  const ir = useCallback((a: AvaAula) => navigate(`/ava/curso/${curso.id}/aula/${a.id}`, { replace: false }), [navigate, curso.id])
+  const ir = useCallback((a: AvaAula, seg?: number) => navigate(`/ava/curso/${curso.id}/aula/${a.id}${seg ? `?t=${seg}` : ''}`), [navigate, curso.id])
 
   const salvar = useCallback((aula: AvaAula, pos: number, dur: number, concluida?: boolean) => {
     const fim = concluida ?? (dur > 0 && pos >= dur * 0.9)
@@ -101,7 +116,7 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
             </div>
             <div className="relative w-full aspect-video lg:max-h-[72dvh] bg-black mx-auto">
               {aulaAtual.tipo === 'video' && aulaAtual.video_id
-                ? <VimeoPlayer key={aulaAtual.id} videoId={aulaAtual.video_id} hash={aulaAtual.video_hash} inicio={inicio}
+                ? <VimeoPlayer key={`${aulaAtual.id}-${tUrl}`} playerRef={playerRef} videoId={aulaAtual.video_id} hash={aulaAtual.video_hash} inicio={inicio}
                     onProgresso={(pos, dur, fim) => salvar(aulaAtual, pos, dur, fim ? true : undefined)}
                     onFim={() => { if (proxima) setTimeout(() => ir(proxima), 1500) }} />
                 : <PainelNaoVideo aula={aulaAtual} />}
@@ -128,14 +143,17 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
                 <Check className="w-4 h-4" /> {concluidaAtual ? 'Concluída' : 'Marcar como concluída'}</button>
             </div>
 
-            <div className="mt-5 border-b border-white/10 flex gap-6 text-sm">
-              {([['conteudo', 'Conteúdo', 'lg:hidden'], ['geral', 'Visão geral', '']] as const).map(([k, t, extra]) => (
-                <button key={k} onClick={() => setAba(k)} className={`pb-2.5 -mb-px border-b-2 ${extra}`}
+            <div className="mt-5 border-b border-white/10 flex gap-5 text-sm overflow-x-auto [scrollbar-width:none] -mx-4 px-4 lg:mx-0 lg:px-0">
+              {([['conteudo', 'Conteúdo', 'lg:hidden'], ['assistente', 'Assistente IA', 'lg:hidden'], ['geral', 'Visão geral', ''], ['perguntas', 'Perguntas e respostas', ''], ['anotacoes', 'Anotações', ''], ['avisos', 'Avisos', '']] as const).map(([k, t, extra]) => (
+                <button key={k} onClick={() => setAba(k)} className={`pb-2.5 -mb-px border-b-2 whitespace-nowrap shrink-0 ${extra}`}
                   style={aba === k ? { borderColor: GOLD, color: '#fff' } : { borderColor: 'transparent', color: '#8A8A9A' }}>{t}</button>
               ))}
             </div>
             {aba === 'conteudo' && <div className="lg:hidden -mx-4 mt-1">{lista}</div>}
-            {(aba === 'geral') && (
+            {aba === 'assistente' && !desktop && (
+              <div className="-mx-4 h-[70dvh]"><AvaAssistente cursoId={curso.id} aulaId={aulaAtual.id} professor={curso.professor} chat={chat} setChat={setChat} semente={semente} onSemente={() => setSemente(null)} /></div>
+            )}
+            {aba === 'geral' && (
               <div className="py-4 text-sm leading-relaxed text-[#cfcfd6] space-y-3">
                 <p className="text-base font-semibold text-white">{curso.titulo}</p>
                 <p className="text-[#8A8A9A]">{[curso.curso_area, curso.periodo, curso.semestre].filter(Boolean).join(' · ')}</p>
@@ -144,12 +162,22 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
                 <p className="text-[#8A8A9A]">{total} videoaulas · {feitas} concluídas</p>
               </div>
             )}
+            {aba === 'perguntas' && <AbaPerguntas cursoId={curso.id} aulas={aulas} aulaAtual={aulaAtual} onAssistente={perguntarAoTutor} />}
+            {aba === 'anotacoes' && <AbaAnotacoes cursoId={curso.id} aulas={aulas} aulaAtual={aulaAtual} playerRef={playerRef} irPara={(a, seg) => ir(a, seg)} />}
+            {aba === 'avisos' && <AbaAvisos cursoId={curso.id} />}
           </div>
         </div>
 
         <aside className="hidden lg:flex flex-col border-l border-white/10 overflow-hidden" style={{ background: '#101319' }}>
-          <div className="px-4 py-3.5 border-b border-white/10 text-sm font-semibold">Conteúdo da disciplina</div>
-          <div className="flex-1 overflow-y-auto">{lista}</div>
+          <div className="flex border-b border-white/10 text-sm">
+            {([['conteudo', 'Conteúdo da disciplina'], ['assistente', 'Assistente IA']] as const).map(([k, t]) => (
+              <button key={k} onClick={() => setLateral(k)} className="flex-1 py-3.5 font-semibold flex items-center justify-center gap-1.5 border-b-2 -mb-px"
+                style={lateral === k ? { borderColor: GOLD, color: '#fff' } : { borderColor: 'transparent', color: '#8A8A9A' }}>{k === 'assistente' && <Sparkles className="w-4 h-4" style={{ color: GOLD }} />}{t}</button>
+            ))}
+          </div>
+          <div className="flex-1 overflow-y-auto min-h-0">
+            {lateral === 'conteudo' ? lista : desktop && <AvaAssistente cursoId={curso.id} aulaId={aulaAtual.id} professor={curso.professor} chat={chat} setChat={setChat} semente={semente} onSemente={() => setSemente(null)} />}
+          </div>
         </aside>
       </div>
     </div>
