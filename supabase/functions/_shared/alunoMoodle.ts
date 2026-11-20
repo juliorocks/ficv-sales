@@ -251,3 +251,12 @@ function semPrefixoComum(avaliacoes: Avaliacao[]): Avaliacao[] {
     if (!comum) return avaliacoes;
     return avaliacoes.map((a, i) => ({ ...a, nome: partes[i].slice(comum).join(" - ") }));
 }
+
+
+/** Atividades concluídas pelo aluno num curso do Moodle (cmid → data de conclusão em segundos; 0 = sem data). */
+export async function moodleConclusoes(userid: number, courseid: number): Promise<Map<number, number>> {
+    const d = await moodleCall("core_completion_get_activities_completion_status", { courseid, userid });
+    const out = new Map<number, number>();
+    for (const s of d?.statuses ?? []) if (Number(s.state) > 0) out.set(Number(s.cmid), Number(s.timecompleted) || 0);
+    return out;
+}

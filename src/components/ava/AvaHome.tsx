@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, ChevronLeft, ChevronRight, Loader2, Play, LogOut, GraduationCap } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { avaCall, AVA_BG, programaDe, type AvaCursoResumo } from './avaApi'
@@ -41,6 +41,21 @@ type Programa = { key: string; label: string; nivel: string; cursos: AvaCursoRes
 export function AvaHome({ nome }: { nome: string }) {
   const { programa: chave } = useParams()
   const q = useQuery({ queryKey: ['ava-cursos'], queryFn: () => avaCall<{ cursos: AvaCursoResumo[] }>('meus_cursos') })
+  const qc = useQueryClient()
+  useEffect(() => {
+    let vivo = true
+    ;(async () => {
+      let mudou = false
+      for (let i = 0; i < 30 && vivo; i++) {
+        const r = await avaCall<{ restantes: number; importadas: number }>('sincronizar_moodle').catch(() => null)
+        if (!r) break
+        if (r.importadas) mudou = true
+        if (!r.restantes) break
+      }
+      if (mudou && vivo) qc.invalidateQueries({ queryKey: ['ava-cursos'] })
+    })()
+    return () => { vivo = false }
+  }, [qc])
   const [filtro, setFiltro] = useState<string>('todos')
   const cursos = q.data?.cursos ?? []
 

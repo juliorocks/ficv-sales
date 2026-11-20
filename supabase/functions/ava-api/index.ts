@@ -12,7 +12,7 @@
 //   avisos_listar { curso_id }
 //   assistente { curso_id, aula_id?, mensagens: [{role, content}] } → Tutor Virtual + Base de Conhecimento (máx. 40/dia)
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
-import { moodleCourses, moodleUserId } from "../_shared/alunoMoodle.ts";
+import { moodleConclusoes, moodleCourses, moodleUserId } from "../_shared/alunoMoodle.ts";
 import { chatJSON, ensureLineBreaks, searchKnowledge } from "../_shared/ai.ts";
 
 const cors = {
@@ -99,6 +99,40 @@ Deno.serve(async (req) => {
                 db.from("ava_progresso").select("aula_id, posicao_seg, concluida").eq("aluno_id", user.id).eq("curso_id", cursoId),
             ]);
             return j({ curso, secoes: secoes ?? [], aulas: aulas ?? [], progresso: prog ?? [] });
+        }
+
+        // traz do Moodle o que o aluno já concluiu (rótulos com vídeo e provas); roda em lotes, uma vez por disciplina
+        if (action === "sincronizar_moodle") {
+            const uid = await moodleUserId(aluno?.email ?? null);
+            if (!uid) return j({ restantes: 0, importadas: 0 });
+            const meus = new Set((await moodleCourses(uid)).map((c) => c.id));
+            const { data: cs } = await db.from("ava_cursos").select("id, moodle_id").in("moodle_id", [...meus]);
+            const { data: feitos } = await db.from("ava_moodle_sync").select("curso_id").eq("aluno_id", user.id);
+            const ja = new Set((feitos ?? []).map((f: any) => f.curso_id));
+            const faltam = (cs ?? []).filter((c: any) => !ja.has(c.id));
+            let importadas = 0;
+            for (const c of faltam.slice(0, 6)) {
+                let n = 0;
+                try {
+                    const conc = await moodleConclusoes(uid, c.moodle_id);
+                    if (conc.size) {
+                        const { data: aulas } = await db.from("ava_aulas").select("id, moodle_id").eq("curso_id", c.id).in("moodle_id", [...conc.keys()]);
+                        const ids = (aulas ?? []).map((a: any) => a.id);
+                        const { data: ex } = ids.length ? await db.from("ava_progresso").select("aula_id, posicao_seg, concluida, concluida_em").eq("aluno_id", user.id).in("aula_id", ids) : { data: [] };
+                        const exMap = new Map((ex ?? []).map((e: any) => [e.aula_id, e]));
+                        const linhas = (aulas ?? []).filter((a: any) => !exMap.get(a.id)?.concluida).map((a: any) => {
+                            const t = conc.get(a.moodle_id) ?? 0;
+                            return { aluno_id: user.id, aula_id: a.id, curso_id: c.id, posicao_seg: exMap.get(a.id)?.posicao_seg ?? 0, concluida: true,
+                                concluida_em: t ? new Date(t * 1000).toISOString() : new Date().toISOString(), atualizado_em: new Date().toISOString() };
+                        });
+                        if (linhas.length) { const { error } = await db.from("ava_progresso").upsert(linhas); if (error) throw error; }
+                        n = linhas.length;
+                    }
+                } catch (e) { console.error("sync moodle", c.id, (e as Error).message); continue; }
+                await db.from("ava_moodle_sync").upsert({ aluno_id: user.id, curso_id: c.id, importadas: n, sincronizado_em: new Date().toISOString() });
+                importadas += n;
+            }
+            return j({ restantes: Math.max(0, faltam.length - 6), importadas });
         }
 
         if (action === "progresso") {
