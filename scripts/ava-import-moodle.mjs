@@ -64,7 +64,9 @@ const cap = s => s.toLowerCase().replace(/(^|\s)(\S)/g, (_, a, b) => a + b.toUpp
 const todos = await moodle('core_course_get_courses')
 const soNovos = process.argv.includes('--novos')
 const jaTem = soNovos ? new Set((await sql('select moodle_id from ava_cursos where exists (select 1 from ava_aulas a where a.curso_id = ava_cursos.id)')).map(r => Number(r.moodle_id))) : new Set()
-const cursos = todos.filter(c => filtro.test(c.fullname) && c.visible !== 0 && !jaTem.has(c.id)).slice(0, limite)
+const idsArg = (process.argv.find(a => a.startsWith('--ids=')) ?? '').split('=')[1]
+const soIds = idsArg ? new Set(idsArg.split(',').map(Number)) : null
+const cursos = todos.filter(c => (soIds ? soIds.has(c.id) : filtro.test(c.fullname)) && c.visible !== 0 && !jaTem.has(c.id)).slice(0, limite)
 console.log(`${cursos.length} cursos a importar (filtro ${filtro})`)
 
 let nAulas = 0, nVideos = 0
