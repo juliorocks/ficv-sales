@@ -106,7 +106,7 @@ export function AvaHome({ nome }: { nome: string }) {
           <>
             {atual ? (
               <div className="mt-5">
-                {programas.length > 1 && <Link to="/ava" className="inline-flex items-center gap-1 text-xs text-[#8A8A9A] hover:text-white -ml-1"><ChevronLeft className="w-4 h-4" /> Meus cursos</Link>}
+                <Link to={programas.length > 1 ? '/ava' : '/aluno'} className="inline-flex items-center gap-1 text-sm text-[#cfcfd6] hover:text-white -ml-1 py-1"><ChevronLeft className="w-5 h-5" /> {programas.length > 1 ? 'Meus cursos' : 'Portal do Aluno'}</Link>
                 <p className="text-[11px] uppercase tracking-widest text-[#E0BF6A] mt-2">{atual.nivel}</p>
                 <h1 className="text-2xl font-semibold leading-tight">{atual.label}</h1>
               </div>
