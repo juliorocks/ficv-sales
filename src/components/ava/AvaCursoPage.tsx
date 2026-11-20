@@ -77,7 +77,8 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
   const concluidaAtual = !!prog[aulaAtual.id]?.concluida
   const lista = (
     <Curriculo secoes={secoes} aulas={aulas} prog={prog} atual={aulaAtual.id} abertas={abertas}
-      alternar={id => setAbertas(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })} ir={ir} />
+      alternar={id => setAbertas(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })} ir={ir}
+      marcar={a => salvar(a, prog[a.id]?.posicao_seg ?? 0, a.duracao_seg ?? 0, !prog[a.id]?.concluida)} />
   )
 
   return (
@@ -85,7 +86,7 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
       <header className="hidden lg:flex h-14 items-center gap-4 px-5 border-b border-white/10" style={{ background: '#13161D' }}>
         <Link to={voltar} className="flex items-center gap-2 text-sm text-[#cfcfd6] hover:text-white"><ChevronLeft className="w-4 h-4" /> Disciplinas</Link>
         <span className="w-px h-5 bg-white/15" />
-        <h1 className="text-sm font-semibold truncate flex-1">{curso.titulo}</h1>
+        <div className="flex-1 min-w-0"><h1 className="text-sm font-semibold truncate">{curso.titulo}</h1>{curso.professor && <p className="text-[11px] text-[#8A8A9A] truncate">Prof. {curso.professor}</p>}</div>
         <Progresso pct={pct} feitas={feitas} total={total} />
       </header>
 
@@ -112,6 +113,7 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
               <div className="flex-1 min-w-0">
                 <p className="text-[11px] uppercase tracking-wider text-[#8A8A9A]">{secoes.find(s => s.id === aulaAtual.secao_id)?.nome}</p>
                 <h2 className="text-lg font-semibold leading-snug mt-0.5">{aulaAtual.titulo}</h2>
+                {curso.professor && <p className="text-[13px] text-[#cfcfd6] mt-1">Prof. <span className="text-[#E0BF6A]">{curso.professor}</span></p>}
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 mt-3">
@@ -163,8 +165,8 @@ function Progresso({ pct, feitas, total }: { pct: number; feitas: number; total:
   )
 }
 
-function Curriculo({ secoes, aulas, prog, atual, abertas, alternar, ir }: {
-  secoes: AvaCurso['secoes']; aulas: AvaAula[]; prog: Prog; atual: number; abertas: Set<number>; alternar: (id: number) => void; ir: (a: AvaAula) => void
+function Curriculo({ secoes, aulas, prog, atual, abertas, alternar, ir, marcar }: {
+  secoes: AvaCurso['secoes']; aulas: AvaAula[]; prog: Prog; atual: number; abertas: Set<number>; alternar: (id: number) => void; ir: (a: AvaAula) => void; marcar: (a: AvaAula) => void
 }) {
   return (
     <div>
@@ -172,27 +174,36 @@ function Curriculo({ secoes, aulas, prog, atual, abertas, alternar, ir }: {
         const doS = aulas.filter(a => a.secao_id === s.id)
         if (!doS.length) return null
         const feitas = doS.filter(a => prog[a.id]?.concluida).length
+        const seg = doS.reduce((n, a) => n + (a.duracao_seg ?? 0), 0)
         const aberta = abertas.has(s.id)
         return (
           <div key={s.id} className="border-b border-white/10">
-            <button onClick={() => alternar(s.id)} className="w-full flex items-center gap-3 px-4 py-3.5 text-left" style={{ background: 'rgba(255,255,255,.03)' }}>
+            <button onClick={() => alternar(s.id)} className="w-full flex items-center gap-3 px-4 py-3.5 text-left" style={{ background: aberta ? 'rgba(201,168,76,.08)' : 'rgba(255,255,255,.03)' }}>
               <div className="flex-1 min-w-0">
-                <p className="text-[13px] font-semibold truncate">{s.nome}</p>
-                <p className="text-[11px] text-[#8A8A9A] mt-0.5">{feitas}/{doS.length} concluídas</p>
+                <p className="text-[13px] font-semibold truncate" style={{ color: aberta ? '#E0BF6A' : undefined }}>{s.nome}</p>
+                <p className="text-[11px] text-[#8A8A9A] mt-0.5">{feitas}/{doS.length} concluídas{seg ? ` | ${fmtDuracao(seg)}` : ''}</p>
               </div>
-              <ChevronDown className={`w-4 h-4 text-[#8A8A9A] transition-transform ${aberta ? 'rotate-180' : ''}`} />
+              <ChevronDown className={`w-4 h-4 transition-transform ${aberta ? 'rotate-180' : ''}`} style={{ color: aberta ? '#E0BF6A' : '#8A8A9A' }} />
             </button>
             {aberta && doS.map(a => {
               const ehAtual = a.id === atual
+              const feita = !!prog[a.id]?.concluida
               return (
-                <button key={a.id} onClick={() => ir(a)} className="w-full flex items-start gap-3 px-4 py-3 text-left active:bg-white/5"
+                <div key={a.id} className="flex items-start gap-3 px-4 py-3 active:bg-white/5 cursor-pointer" onClick={() => ir(a)}
                   style={ehAtual ? { background: 'rgba(201,168,76,.12)' } : undefined}>
-                  <span className="mt-0.5"><IconeAula a={a} feita={!!prog[a.id]?.concluida} atual={ehAtual} /></span>
+                  <button onClick={e => { e.stopPropagation(); marcar(a) }} aria-label={feita ? 'Desmarcar como concluída' : 'Marcar como concluída'}
+                    className="mt-0.5 w-[18px] h-[18px] shrink-0 rounded border flex items-center justify-center"
+                    style={feita ? { background: GOLD, borderColor: GOLD, color: '#111' } : { borderColor: 'rgba(255,255,255,.35)' }}>
+                    {feita && <Check className="w-3 h-3" strokeWidth={3} />}
+                  </button>
                   <span className="flex-1 min-w-0">
                     <span className={`block text-[13px] leading-snug ${ehAtual ? 'text-white font-medium' : 'text-[#cfcfd6]'}`}>{a.titulo}</span>
-                    <span className="block text-[11px] text-[#8A8A9A] mt-0.5">{a.tipo === 'video' ? fmtDuracao(a.duracao_seg) || 'Vídeo' : a.tipo === 'quiz' ? 'Avaliação' : a.tipo === 'material' ? 'Material' : a.tipo === 'link' ? 'Link' : 'Leitura'}</span>
+                    <span className="flex items-center gap-1.5 text-[11px] text-[#8A8A9A] mt-1">
+                      <IconeAula a={a} feita={false} atual={false} />
+                      {a.tipo === 'video' ? fmtDuracao(a.duracao_seg) || 'Vídeo' : a.tipo === 'quiz' ? 'Avaliação' : a.tipo === 'material' ? 'Material' : a.tipo === 'link' ? 'Link' : 'Leitura'}
+                    </span>
                   </span>
-                </button>
+                </div>
               )
             })}
           </div>
