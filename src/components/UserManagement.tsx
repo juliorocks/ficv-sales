@@ -21,7 +21,7 @@ import { AlunosPortalList } from './AlunosPortalList';
 
 // Funções: admin/agent = CRM; secretaria/tutor/atendente/biblioteca/coordenador = só Chamados do Portal do Aluno
 // (quem vê o quê: ticket_visible() no banco; filas em Gestão > Filas de Atendimento).
-type Role = 'admin' | 'agent' | 'secretaria' | 'tutor' | 'coordenador' | 'atendente' | 'biblioteca';
+type Role = 'admin' | 'agent' | 'secretaria' | 'tutor' | 'coordenador' | 'atendente' | 'biblioteca' | 'professor';
 const ROLES: { value: Role; label: string; hint: string }[] = [
     { value: 'admin', label: 'Admin', hint: 'Tudo' },
     { value: 'agent', label: 'Agente Comercial', hint: 'CRM / leads' },
@@ -29,7 +29,8 @@ const ROLES: { value: Role; label: string; hint: string }[] = [
     { value: 'tutor', label: 'Tutor', hint: 'Chamados das suas filas' },
     { value: 'atendente', label: 'Atendente', hint: 'Chamados das suas filas' },
     { value: 'biblioteca', label: 'Biblioteca', hint: 'Chamados das suas filas' },
-    { value: 'coordenador', label: 'Coordenador', hint: 'Todos os chamados' },
+    { value: 'coordenador', label: 'Coordenador', hint: 'Todos os chamados + AVA' },
+    { value: 'professor', label: 'Professor', hint: 'AVA: só suas disciplinas' },
 ];
 
 function RolePicker({ value, onChange }: { value: Role; onChange: (r: Role) => void }) {

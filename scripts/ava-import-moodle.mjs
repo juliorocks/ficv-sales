@@ -68,6 +68,7 @@ for (const c of cursos) {
     values (${c.id}, ${lit(c.fullname)}, ${lit(cap(disc))}, ${lit(area)}, ${lit(per)}, ${lit(sem)}, ${lit(prof)}, ${lit(texto(c.summary ?? '').slice(0, 1500) || null)}, now())
     on conflict (moodle_id) do update set nome=excluded.nome, titulo=excluded.titulo, curso_area=excluded.curso_area, periodo=excluded.periodo,
       semestre=excluded.semestre, professor=coalesce(excluded.professor, ava_cursos.professor), atualizado_em=now()
+    where ava_cursos.editado = false
     returning id`)
   const conteudo = await moodle('core_course_get_contents', { courseid: c.id })
   if (!Array.isArray(conteudo)) { console.log('  falhou', c.id, JSON.stringify(conteudo).slice(0, 120)); continue }
@@ -101,11 +102,12 @@ for (const c of cursos) {
     if (!aulas.length) continue
     const [{ id: secaoId }] = await sql(`
       insert into ava_secoes (curso_id, moodle_id, nome, ordem) values (${cursoId}, ${s.id}, ${lit((s.name ?? '').trim() || 'Conteúdo')}, ${ordemSecao++})
-      on conflict (curso_id, moodle_id) do update set nome=excluded.nome, ordem=excluded.ordem returning id`)
+      on conflict (curso_id, moodle_id) do update set nome=excluded.nome, ordem=excluded.ordem where ava_secoes.editado = false returning id`)
     const valores = aulas.map(a => `(${cursoId}, ${secaoId}, ${a.moodle}, ${a.sub}, ${lit(a.tipo)}, ${lit(a.titulo)}, ${lit(a.video_id)}, ${lit(a.video_hash)}, ${lit(a.thumb)}, ${a.dur ?? 'null'}, ${lit(a.url)}, ${lit(a.descricao)}, ${ordem++})`)
     await sql(`insert into ava_aulas (curso_id, secao_id, moodle_id, sub, tipo, titulo, video_id, video_hash, thumb_url, duracao_seg, url, descricao, ordem) values ${valores.join(',')}
       on conflict (curso_id, moodle_id, sub) do update set secao_id=excluded.secao_id, tipo=excluded.tipo, titulo=excluded.titulo, video_id=excluded.video_id,
-      video_hash=excluded.video_hash, thumb_url=excluded.thumb_url, duracao_seg=excluded.duracao_seg, url=excluded.url, descricao=excluded.descricao, ordem=excluded.ordem`)
+      video_hash=excluded.video_hash, thumb_url=excluded.thumb_url, duracao_seg=excluded.duracao_seg, url=excluded.url, descricao=excluded.descricao, ordem=excluded.ordem
+      where ava_aulas.editado = false`)
     nAulas += aulas.length
   }
   console.log(`  ${c.fullname.slice(0, 70)} → ${nAulas} aulas acumuladas`)

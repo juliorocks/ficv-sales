@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { AlignLeft, Check, Sparkles, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ClipboardCheck, ExternalLink, FileText, Loader2, Play } from 'lucide-react'
+import { AlignLeft, Check, PanelRightClose, PanelRightOpen, Search, Sparkles, X, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ClipboardCheck, ExternalLink, FileText, Loader2, Play } from 'lucide-react'
 import { avaCall, AVA_BG, fmtDuracao, programaDe, type AvaAula, type AvaCurso, type MsgChat } from './avaApi'
 import { AvaAssistente } from './AvaAssistente'
 import { AbaAnotacoes, AbaAvisos, AbaPerguntas } from './AvaAbas'
@@ -52,7 +52,12 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
     const m = window.matchMedia('(min-width: 1024px)')
     const f = () => setDesktop(m.matches); m.addEventListener('change', f); return () => m.removeEventListener('change', f)
   }, [])
-  const perguntarAoTutor = (t: string) => { setSemente(t); if (window.matchMedia('(min-width: 1024px)').matches) setLateral('assistente'); else setAba('assistente') }
+  const [teatro, setTeatro] = useState(() => { try { return localStorage.getItem('ava_teatro') === '1' } catch { return false } })
+  const alternarTeatro = () => setTeatro(t => { const n = !t; try { localStorage.setItem('ava_teatro', n ? '1' : '0') } catch { /* sem storage */ } return n })
+  const [busca, setBusca] = useState<string | null>(null)
+  const recolhida = teatro && desktop
+  useEffect(() => { if (recolhida && (aba === 'geral')) return; if (!recolhida && desktop && (aba === 'conteudo' || aba === 'assistente')) setAba('geral') }, [recolhida, desktop, aba])
+  const perguntarAoTutor = (t: string) => { setSemente(t); if (recolhida || !window.matchMedia('(min-width: 1024px)').matches) setAba('assistente'); else setLateral('assistente') }
 
   // sem aula na URL: retoma a última com progresso não concluído, senão a 1ª de vídeo
   const aulaAtual = useMemo(() => {
@@ -105,7 +110,7 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
         <Progresso pct={pct} feitas={feitas} total={total} />
       </header>
 
-      <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:h-[calc(100dvh-3.5rem)]">
+      <div className={`relative lg:grid lg:h-[calc(100dvh-3.5rem)] ${recolhida ? 'lg:grid-cols-1' : 'lg:grid-cols-[minmax(0,1fr)_380px]'}`}>
         <div className="lg:overflow-y-auto">
           {/* mídia: fixa no topo no celular */}
           <div className="sticky top-0 z-20 lg:static bg-black">
@@ -114,7 +119,7 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
               <span className="text-[13px] font-medium truncate flex-1">{curso.titulo}</span>
               <span className="text-[11px] text-[#8A8A9A] pr-2">{pct}%</span>
             </div>
-            <div className="relative w-full aspect-video lg:max-h-[72dvh] bg-black mx-auto">
+            <div className={`relative w-full aspect-video bg-black mx-auto ${recolhida ? 'lg:max-h-[82dvh]' : 'lg:max-h-[72dvh]'}`}>
               {aulaAtual.tipo === 'video' && aulaAtual.video_id
                 ? <VimeoPlayer key={`${aulaAtual.id}-${tUrl}`} playerRef={playerRef} videoId={aulaAtual.video_id} hash={aulaAtual.video_hash} inicio={inicio}
                     onProgresso={(pos, dur, fim) => salvar(aulaAtual, pos, dur, fim ? true : undefined)}
@@ -123,7 +128,7 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
             </div>
           </div>
 
-          <div className="px-4 lg:px-8 py-4 max-w-4xl">
+          <div className={`px-4 lg:px-8 py-4 ${recolhida ? 'max-w-6xl' : 'max-w-4xl'}`}>
             <div className="flex items-start gap-3">
               <div className="flex-1 min-w-0">
                 <p className="text-[11px] uppercase tracking-wider text-[#8A8A9A]">{secoes.find(s => s.id === aulaAtual.secao_id)?.nome}</p>
@@ -143,15 +148,34 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
                 <Check className="w-4 h-4" /> {concluidaAtual ? 'Concluída' : 'Marcar como concluída'}</button>
             </div>
 
-            <div className="mt-5 border-b border-white/10 flex gap-5 text-sm overflow-x-auto [scrollbar-width:none] -mx-4 px-4 lg:mx-0 lg:px-0">
-              {([['conteudo', 'Conteúdo', 'lg:hidden'], ['assistente', 'Assistente IA', 'lg:hidden'], ['geral', 'Visão geral', ''], ['perguntas', 'Perguntas e respostas', ''], ['anotacoes', 'Anotações', ''], ['avisos', 'Avisos', '']] as const).map(([k, t, extra]) => (
-                <button key={k} onClick={() => setAba(k)} className={`pb-2.5 -mb-px border-b-2 whitespace-nowrap shrink-0 ${extra}`}
-                  style={aba === k ? { borderColor: GOLD, color: '#fff' } : { borderColor: 'transparent', color: '#8A8A9A' }}>{t}</button>
+            <div className="mt-5 border-b border-white/10 flex items-stretch gap-1 text-[15px] overflow-x-auto [scrollbar-width:none] -mx-4 px-4 lg:mx-0 lg:px-0">
+              <button onClick={() => { setBusca(b => (b === null ? '' : null)); if (!recolhida && desktop) setLateral('conteudo'); else setAba('conteudo') }} aria-label="Buscar aula"
+                className="px-3 shrink-0 text-[#cfcfd6] hover:text-white"><Search className="w-[18px] h-[18px]" /></button>
+              {([['conteudo', 'Conteúdo', recolhida ? '' : 'lg:hidden'], ['assistente', 'Assistente IA', recolhida ? '' : 'lg:hidden'], ['geral', 'Visão geral', ''], ['perguntas', 'Perguntas e respostas', ''], ['anotacoes', 'Anotações', ''], ['avisos', 'Anúncios', '']] as const).map(([k, t, extra]) => (
+                <button key={k} onClick={() => setAba(k)} className={`px-3 pb-3 pt-2.5 -mb-px border-b-[3px] whitespace-nowrap shrink-0 ${extra} ${aba === k ? 'font-bold' : 'font-medium'}`}
+                  style={aba === k ? { borderColor: '#fff', color: '#fff' } : { borderColor: 'transparent', color: '#a8a8b5' }}>{t}</button>
               ))}
             </div>
-            {aba === 'conteudo' && <div className="lg:hidden -mx-4 mt-1">{lista}</div>}
-            {aba === 'assistente' && !desktop && (
-              <div className="-mx-4 h-[70dvh]"><AvaAssistente cursoId={curso.id} aulaId={aulaAtual.id} professor={curso.professor} chat={chat} setChat={setChat} semente={semente} onSemente={() => setSemente(null)} /></div>
+            {busca !== null && (
+              <div className="mt-3">
+                <div className="flex items-center gap-2 h-10 px-3 rounded-lg border border-white/15 bg-white/5">
+                  <Search className="w-4 h-4 text-[#8A8A9A]" />
+                  <input autoFocus value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar aula pelo título" className="flex-1 bg-transparent outline-none text-sm placeholder:text-[#8A8A9A]" />
+                  <button onClick={() => setBusca(null)} aria-label="Fechar busca"><X className="w-4 h-4 text-[#8A8A9A]" /></button>
+                </div>
+                {busca.trim() && (
+                  <div className="mt-2 rounded-lg border border-white/10 overflow-hidden">
+                    {aulas.filter(a => a.titulo.toLowerCase().includes(busca.trim().toLowerCase())).slice(0, 12).map(a => (
+                      <button key={a.id} onClick={() => { ir(a); setBusca(null) }} className="w-full text-left px-3 py-2.5 text-[13px] text-[#cfcfd6] hover:bg-white/5 border-b border-white/5 last:border-0">{a.titulo}</button>
+                    ))}
+                    {!aulas.some(a => a.titulo.toLowerCase().includes(busca.trim().toLowerCase())) && <p className="px-3 py-3 text-[13px] text-[#8A8A9A]">Nenhuma aula encontrada.</p>}
+                  </div>
+                )}
+              </div>
+            )}
+            {aba === 'conteudo' && <div className={`-mx-4 mt-1 ${recolhida ? 'lg:mx-0' : 'lg:hidden'}`}>{lista}</div>}
+            {aba === 'assistente' && (!desktop || recolhida) && (
+              <div className="-mx-4 lg:mx-0 h-[70dvh]"><AvaAssistente cursoId={curso.id} aulaId={aulaAtual.id} professor={curso.professor} chat={chat} setChat={setChat} semente={semente} onSemente={() => setSemente(null)} /></div>
             )}
             {aba === 'geral' && (
               <div className="py-4 text-sm leading-relaxed text-[#cfcfd6] space-y-3">
@@ -168,12 +192,17 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
           </div>
         </div>
 
-        <aside className="hidden lg:flex flex-col border-l border-white/10 overflow-hidden" style={{ background: '#101319' }}>
+        {recolhida && (
+          <button onClick={alternarTeatro} aria-label="Mostrar conteúdo da disciplina" title="Mostrar conteúdo da disciplina"
+            className="hidden lg:flex absolute right-0 top-24 z-30 h-11 w-9 items-center justify-center rounded-l-lg shadow-lg" style={{ background: GOLD, color: '#111' }}><PanelRightOpen className="w-5 h-5" /></button>
+        )}
+        <aside className={`${recolhida ? 'hidden' : 'hidden lg:flex'} flex-col border-l border-white/10 overflow-hidden`} style={{ background: '#101319' }}>
           <div className="flex border-b border-white/10 text-sm">
             {([['conteudo', 'Conteúdo da disciplina'], ['assistente', 'Assistente IA']] as const).map(([k, t]) => (
               <button key={k} onClick={() => setLateral(k)} className="flex-1 py-3.5 font-semibold flex items-center justify-center gap-1.5 border-b-2 -mb-px"
                 style={lateral === k ? { borderColor: GOLD, color: '#fff' } : { borderColor: 'transparent', color: '#8A8A9A' }}>{k === 'assistente' && <Sparkles className="w-4 h-4" style={{ color: GOLD }} />}{t}</button>
             ))}
+            <button onClick={alternarTeatro} aria-label="Modo teatro: ampliar o vídeo" title="Modo teatro" className="px-3.5 text-[#8A8A9A] hover:text-white border-b-2 border-transparent"><PanelRightClose className="w-[18px] h-[18px]" /></button>
           </div>
           <div className="flex-1 overflow-y-auto min-h-0">
             {lateral === 'conteudo' ? lista : desktop && <AvaAssistente cursoId={curso.id} aulaId={aulaAtual.id} professor={curso.professor} chat={chat} setChat={setChat} semente={semente} onSemente={() => setSemente(null)} />}

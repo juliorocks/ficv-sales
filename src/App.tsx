@@ -97,6 +97,7 @@ import { MarketingFormSubmissions } from './components/marketing/MarketingFormSu
 import { MarketingFormBuilder } from './components/marketing/MarketingFormBuilder';
 import { CpaAdmin } from './components/cpa/CpaAdmin';
 import { PortalBannersAdmin } from './components/admin/PortalBannersAdmin';
+import { AvaGestao } from './components/ava-admin/AvaGestao';
 import { ProjetoPainel } from './components/projeto/ProjetoPainel';
 
 const queryClient = new QueryClient({
@@ -212,13 +213,16 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
         localStorage.setItem('ficv_active_tab', activeTab);
     }, [activeTab]);
     // Secretaria/Tutor/Coordenador trabalham só com Chamados (Portal do Aluno)
-    const isTicketRole = ['secretaria', 'tutor', 'coordenador', 'atendente', 'biblioteca'].includes(String(profile?.role ?? ''));
+    const isTicketRole = ['secretaria', 'tutor', 'coordenador', 'atendente', 'biblioteca', 'professor'].includes(String(profile?.role ?? ''));
+    // AVA (ambiente de estudos): admin e coordenação gerem tudo, professor só as suas disciplinas, tutor responde dúvidas
+    const podeAva = ['admin', 'coordenador', 'professor', 'tutor'].includes(String(profile?.role ?? ''));
+    const ehProfessor = String(profile?.role ?? '') === 'professor';
     const podeInadimplencia = ['admin', 'agent', 'secretaria', 'coordenador'].includes(String(profile?.role ?? ''));
     // admin/agent, ou papel principal de chamados com 'agent' como extra (ex.: secretaria que também atende o Comercial)
     const ehComercial = temPapel(profile, 'admin', 'agent');
     useEffect(() => {
-        if (isTicketRole && !ehComercial && activeTab !== 'tickets' && !(activeTab === 'inadimplencia' && podeInadimplencia)) setActiveTab('tickets');
-    }, [isTicketRole, ehComercial, activeTab, podeInadimplencia]);
+        if (isTicketRole && !ehComercial && !(activeTab === 'tickets' && !ehProfessor) && !(activeTab === 'inadimplencia' && podeInadimplencia) && !(activeTab === 'ava-gestao' && podeAva)) setActiveTab(ehProfessor ? 'ava-gestao' : 'tickets');
+    }, [isTicketRole, ehComercial, activeTab, podeInadimplencia, podeAva, ehProfessor]);
 
     // Load team selection — always validate against DB to flush corrupted localStorage values
     useEffect(() => {
@@ -990,7 +994,8 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                         {isTicketRole && !ehComercial ? (<>
                         {!sidebarCollapsed && <p className="text-[10px] text-[var(--text-muted)] font-bold tracking-widest uppercase mb-4 px-2">Atendimento ao Aluno</p>}
                         <nav className="space-y-1">
-                            <NavItem collapsed={sidebarCollapsed} icon={TicketIcon} label="Chamados" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
+                            {!ehProfessor && <NavItem collapsed={sidebarCollapsed} icon={TicketIcon} label="Chamados" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />}
+                            {podeAva && <NavItem collapsed={sidebarCollapsed} icon={GraduationCap} label="AVA" active={activeTab === 'ava-gestao'} onClick={() => setActiveTab('ava-gestao')} />}
                             {podeInadimplencia && <NavItem collapsed={sidebarCollapsed} icon={DollarSign} label="Inadimplência" active={activeTab === 'inadimplencia'} onClick={() => setActiveTab('inadimplencia')} />}
                         </nav>
                         </>) : (<>
@@ -1069,6 +1074,9 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                             )}
                             {(profile?.role === 'admin' || isTicketRole) && (
                                 <NavItem collapsed={sidebarCollapsed} icon={TicketIcon} label="Tickets" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
+                            )}
+                            {profile?.role === 'admin' && (
+                                <NavItem collapsed={sidebarCollapsed} icon={GraduationCap} label="AVA" active={activeTab === 'ava-gestao'} onClick={() => setActiveTab('ava-gestao')} />
                             )}
                             {ehComercial && (
                                 <NavItem collapsed={sidebarCollapsed} icon={GraduationCap} label="Matrículas" active={activeTab === 'matriculas'} onClick={() => setActiveTab('matriculas')} />
@@ -2121,6 +2129,12 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {activeTab === 'matriculas' && ehComercial && (
                     <div className="animate-fade-in">
                         <SponteDashboard isAdmin={profile?.role === 'admin'} />
+                    </div>
+                )}
+
+                {activeTab === 'ava-gestao' && podeAva && (
+                    <div className="animate-fade-in">
+                        <AvaGestao />
                     </div>
                 )}
 

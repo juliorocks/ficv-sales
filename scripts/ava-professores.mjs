@@ -30,7 +30,7 @@ for (const c of cursos) {
   } catch { /* segue para o fallback */ }
   if (nomes.length > 4) nomes = [] // TCC: banca inteira, não é "o professor"
   const prof = nomes.length ? nomes.join(' / ') : (manual[c.moodle_id] ? String(manual[c.moodle_id]).split(' / ').map(nome).join(' / ') : null)
-  await sql(`update ava_cursos set professor = ${lit(prof)} where id = ${c.id}`)
+  await sql(`update ava_cursos set professor = ${lit(prof)} where id = ${c.id} and editado = false`)
   prof ? com++ : sem++
 }
 console.log(`professor preenchido em ${com} de ${cursos.length} cursos (${sem} sem professor)`)

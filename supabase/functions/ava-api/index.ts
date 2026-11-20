@@ -64,11 +64,12 @@ Deno.serve(async (req) => {
             const real = verTodos ? await inscritos(true) : ins;
             let q = db.from("ava_cursos").select("id, moodle_id, titulo, curso_area, periodo, semestre, professor, capa_url, nome");
             if (ins) q = q.in("moodle_id", [...ins]);
+            if (!verTodos) q = q.eq("publicado", true);
             const { data: cursos } = await q.order("semestre", { ascending: false }).order("periodo").order("titulo").limit(200);
             const ids = (cursos ?? []).map((c) => c.id);
             if (!ids.length) return j({ cursos: [] });
             const [{ data: aulas }, { data: prog }] = await Promise.all([
-                db.from("ava_aulas").select("id, curso_id, thumb_url, tipo").in("curso_id", ids).eq("tipo", "video").limit(20000),
+                db.from("ava_aulas").select("id, curso_id, thumb_url, tipo").in("curso_id", ids).eq("tipo", "video").eq("oculto", false).limit(20000),
                 db.from("ava_progresso").select("aula_id, curso_id, concluida, atualizado_em").eq("aluno_id", user.id).in("curso_id", ids),
             ]);
             const total: Record<number, number> = {}, thumb: Record<number, string> = {};
@@ -88,13 +89,13 @@ Deno.serve(async (req) => {
 
         if (action === "curso") {
             const cursoId = Number(body.curso_id);
-            const { data: curso } = await db.from("ava_cursos").select("id, moodle_id, titulo, nome, curso_area, periodo, semestre, professor, descricao, capa_url").eq("id", cursoId).maybeSingle();
-            if (!curso) return j({ error: "Curso não encontrado." }, 404);
+            const { data: curso } = await db.from("ava_cursos").select("id, moodle_id, titulo, nome, curso_area, periodo, semestre, professor, descricao, capa_url, publicado").eq("id", cursoId).maybeSingle();
+            if (!curso || (!curso.publicado && !verTodos)) return j({ error: "Curso não encontrado." }, 404);
             const ins = await inscritos();
             if (ins && !ins.has(curso.moodle_id)) return j({ error: "Você não está inscrito nesta disciplina." }, 403);
             const [{ data: secoes }, { data: aulas }, { data: prog }] = await Promise.all([
-                db.from("ava_secoes").select("id, nome, ordem").eq("curso_id", cursoId).order("ordem"),
-                db.from("ava_aulas").select("id, secao_id, tipo, titulo, video_id, video_hash, thumb_url, duracao_seg, url, descricao, ordem").eq("curso_id", cursoId).order("ordem"),
+                db.from("ava_secoes").select("id, nome, ordem").eq("curso_id", cursoId).eq("oculto", false).order("ordem"),
+                db.from("ava_aulas").select("id, secao_id, tipo, titulo, video_id, video_hash, thumb_url, duracao_seg, url, descricao, ordem").eq("curso_id", cursoId).eq("oculto", false).order("ordem"),
                 db.from("ava_progresso").select("aula_id, posicao_seg, concluida").eq("aluno_id", user.id).eq("curso_id", cursoId),
             ]);
             return j({ curso, secoes: secoes ?? [], aulas: aulas ?? [], progresso: prog ?? [] });
@@ -184,8 +185,8 @@ Deno.serve(async (req) => {
             const [{ data: ts }, { data: ai }, { data: secs }, { data: aulas }] = await Promise.all([
                 db.from("tutor_settings").select("nome, system_prompt, chat_model, temperature").eq("id", 1).single(),
                 db.from("ai_agent_settings").select("embedding_model, match_count, min_similarity").eq("id", 1).single(),
-                db.from("ava_secoes").select("id, nome, ordem").eq("curso_id", c.id).order("ordem"),
-                db.from("ava_aulas").select("id, secao_id, tipo, titulo, descricao, ordem").eq("curso_id", c.id).order("ordem").limit(300),
+                db.from("ava_secoes").select("id, nome, ordem").eq("curso_id", c.id).eq("oculto", false).order("ordem"),
+                db.from("ava_aulas").select("id, secao_id, tipo, titulo, descricao, ordem").eq("curso_id", c.id).eq("oculto", false).order("ordem").limit(300),
             ]);
             const consulta = msgs.filter((m) => m.role === "user").slice(-2).map((m) => m.content).join("\n");
             const hits = await searchKnowledge(db, `${c.titulo}\n${consulta}`, {
