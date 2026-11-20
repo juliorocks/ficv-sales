@@ -173,6 +173,26 @@ function LoadState({ isLoading, error, refetch }: { isLoading: boolean; error: u
   )
 }
 
+/** Aviso de mensalidade no Início: vence em até 5 dias, vence hoje ou em atraso. Calculado ao vivo das parcelas (paga some sozinho). */
+function AvisoMensalidade({ parcelas, onGo }: { parcelas: Parcela[]; onGo: () => void }) {
+  const abertas = parcelas.filter((p) => !isPaid(p) && p.vencimento).sort((a, b) => String(a.vencimento).localeCompare(String(b.vencimento)))
+  const p = abertas[0]
+  if (!p) return null
+  const dias = Math.round((new Date(`${p.vencimento}T12:00:00`).getTime() - new Date(`${today}T12:00:00`).getTime()) / 86400000)
+  if (dias > 5) return null
+  const atraso = dias < 0
+  const msg = atraso
+    ? `Sua mensalidade de ${dt(p.vencimento)} está em atraso há ${-dias} dia${dias === -1 ? '' : 's'}.${abertas.filter(isLate).length > 1 ? ` Você tem ${abertas.filter(isLate).length} parcelas em atraso.` : ''}`
+    : dias === 0 ? 'Sua mensalidade vence hoje.' : `Sua mensalidade vence em ${dias} dia${dias === 1 ? '' : 's'} (${dt(p.vencimento)}).`
+  return (
+    <div className={`rounded-xl border p-4 flex items-center gap-3 ${atraso ? 'border-red-500/40 bg-red-500/10' : 'border-amber-500/40 bg-amber-500/10'}`}>
+      <AlertCircle className={`w-5 h-5 shrink-0 ${atraso ? 'text-red-400' : 'text-amber-400'}`} />
+      <p className="text-sm text-[var(--text-main)] flex-1">{msg}</p>
+      <button onClick={onGo} className="text-xs font-semibold text-[var(--primary)] hover:underline shrink-0">{atraso ? 'Regularizar →' : 'Ver boleto →'}</button>
+    </div>
+  )
+}
+
 // ── Início ───────────────────────────────────────────────────
 
 export function AlunoInicio({ onGo, onDeclaracao }: { onGo: (tab: 'financeiro' | 'notas' | 'chamados', foco?: NotasFoco) => void; onDeclaracao: () => void }) {
@@ -209,6 +229,8 @@ export function AlunoInicio({ onGo, onDeclaracao }: { onGo: (tab: 'financeiro' |
 
       {/* Destaques no topo: Avaliação da CPA (só com o Portal ligado) e os banners do admin. Fora na visão de staff. */}
       {!readOnly && <PortalDestaques />}
+
+      {!readOnly && <AvisoMensalidade parcelas={parcelas} onGo={() => onGo('financeiro')} />}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Box>
