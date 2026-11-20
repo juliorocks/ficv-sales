@@ -60,6 +60,7 @@ function Acesso({ userId }: { userId: string }) {
   return (
     <Routes>
       <Route index element={<AvaHome nome={primeiroNome} />} />
+      <Route path="c/:programa" element={<AvaHome nome={primeiroNome} />} />
       <Route path="curso/:cursoId" element={<AvaCursoPage />} />
       <Route path="curso/:cursoId/aula/:aulaId" element={<AvaCursoPage />} />
       <Route path="*" element={<AvaHome nome={primeiroNome} />} />

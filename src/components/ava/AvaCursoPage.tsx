@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { AlignLeft, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ClipboardCheck, ExternalLink, FileText, Loader2, Play } from 'lucide-react'
-import { avaCall, AVA_BG, fmtDuracao, type AvaAula, type AvaCurso } from './avaApi'
+import { avaCall, AVA_BG, fmtDuracao, programaDe, type AvaAula, type AvaCurso } from './avaApi'
 import { VimeoPlayer } from './VimeoPlayer'
 
 const GOLD = '#C9A84C'
@@ -73,6 +73,7 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
 
   if (!aulaAtual) return <div className="min-h-dvh p-8 text-[#8A8A9A]" style={{ background: AVA_BG }}>Esta disciplina ainda não tem conteúdo.</div>
 
+  const voltar = `/ava/c/${programaDe(curso).key}`
   const concluidaAtual = !!prog[aulaAtual.id]?.concluida
   const lista = (
     <Curriculo secoes={secoes} aulas={aulas} prog={prog} atual={aulaAtual.id} abertas={abertas}
@@ -82,7 +83,7 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
   return (
     <div className="min-h-dvh text-[#F0EDE8]" style={{ background: AVA_BG }}>
       <header className="hidden lg:flex h-14 items-center gap-4 px-5 border-b border-white/10" style={{ background: '#13161D' }}>
-        <Link to="/ava" className="flex items-center gap-2 text-sm text-[#cfcfd6] hover:text-white"><ChevronLeft className="w-4 h-4" /> Disciplinas</Link>
+        <Link to={voltar} className="flex items-center gap-2 text-sm text-[#cfcfd6] hover:text-white"><ChevronLeft className="w-4 h-4" /> Disciplinas</Link>
         <span className="w-px h-5 bg-white/15" />
         <h1 className="text-sm font-semibold truncate flex-1">{curso.titulo}</h1>
         <Progresso pct={pct} feitas={feitas} total={total} />
@@ -93,7 +94,7 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
           {/* mídia: fixa no topo no celular */}
           <div className="sticky top-0 z-20 lg:static bg-black">
             <div className="lg:hidden flex items-center gap-2 px-2 h-11 border-b border-white/10" style={{ background: '#13161D' }}>
-              <Link to="/ava" aria-label="Voltar" className="p-2 text-[#cfcfd6]"><ChevronLeft className="w-5 h-5" /></Link>
+              <Link to={voltar} aria-label="Voltar" className="p-2 text-[#cfcfd6]"><ChevronLeft className="w-5 h-5" /></Link>
               <span className="text-[13px] font-medium truncate flex-1">{curso.titulo}</span>
               <span className="text-[11px] text-[#8A8A9A] pr-2">{pct}%</span>
             </div>

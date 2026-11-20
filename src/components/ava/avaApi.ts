@@ -33,3 +33,20 @@ export function fmtDuracao(seg: number | null | undefined): string {
 }
 
 export const AVA_BG = '#0B0D12'
+
+const POS_NOMES: Record<string, string> = {
+  TNT: 'Teologia Bíblica e Exegética do Novo Testamento', GE: 'Gestão Escolar', LC: 'Liderança Cristã', MU: 'Missiologia Urbana',
+  PSIP: 'Psicopedagogia', PSIT: 'Psicoteologia', TS: 'Teologia Sistemática', ECC: 'Educação Cristã Clássica', CP: 'Formação Política', HC: 'História do Cristianismo',
+}
+const capitaliza = (t: string) => t.toLowerCase().replace(/(^|\s)(\S)/g, (_, x, y) => x + y.toUpperCase())
+
+/** Curso do aluno ao qual a disciplina pertence (graduação = área; pós = programa, ex.: POSECC). */
+export function programaDe(c: { nome: string; curso_area: string | null }): { key: string; label: string; nivel: string } {
+  const pos = c.nome.match(/\bPOS([A-Z]+)\b/i)
+  if (/^P[ÓO]S$/i.test(c.curso_area ?? '') || pos) {
+    const sigla = (pos?.[1] ?? 'OUTROS').toUpperCase()
+    return { key: `pos-${sigla.toLowerCase()}`, label: POS_NOMES[sigla] ?? `Pós ${sigla}`, nivel: 'Pós-graduação' }
+  }
+  const area = c.curso_area ?? 'Outros'
+  return { key: area.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\W+/g, '-'), label: capitaliza(area), nivel: 'Graduação EAD' }
+}
