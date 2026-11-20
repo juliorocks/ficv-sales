@@ -12,7 +12,7 @@ type Prog = Record<number, { posicao_seg: number; concluida: boolean }>
 
 function IconeAula({ a, feita, atual }: { a: AvaAula; feita: boolean; atual: boolean }) {
   if (feita) return <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: GOLD }} />
-  const cls = `w-4 h-4 shrink-0 ${atual ? 'text-white' : 'text-[#8A8A9A]'}`
+  const cls = `w-4 h-4 shrink-0 ${atual ? 'text-[var(--ava-text)]' : 'text-[var(--ava-muted)]'}`
   if (a.tipo === 'video') return <Play className={cls} />
   if (a.tipo === 'quiz') return <ClipboardCheck className={cls} />
   if (a.tipo === 'link') return <ExternalLink className={cls} />
@@ -26,8 +26,8 @@ export function AvaCursoPage() {
   if (q.isLoading) return <div className="min-h-dvh flex items-center justify-center" style={{ background: AVA_BG }}><Loader2 className="w-6 h-6 animate-spin" style={{ color: GOLD }} /></div>
   if (q.isError || !q.data) {
     return (
-      <div className="min-h-dvh flex flex-col items-center justify-center gap-4 px-6 text-center text-[#F0EDE8]" style={{ background: AVA_BG }}>
-        <p className="text-sm text-[#8A8A9A]">{(q.error as Error)?.message ?? 'Disciplina indisponível.'}</p>
+      <div className="min-h-dvh flex flex-col items-center justify-center gap-4 px-6 text-center text-[var(--ava-text)]" style={{ background: AVA_BG }}>
+        <p className="text-sm text-[var(--ava-muted)]">{(q.error as Error)?.message ?? 'Disciplina indisponível.'}</p>
         <Link to="/ava" className="text-sm underline" style={{ color: GOLD }}>Voltar às disciplinas</Link>
       </div>
     )
@@ -91,7 +91,7 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
     avaCall('progresso', { aula_id: aula.id, posicao_seg: Math.floor(pos), duracao_seg: Math.floor(dur), ...(concluida === undefined ? {} : { concluida }) }).catch(() => {})
   }, [])
 
-  if (!aulaAtual) return <div className="min-h-dvh p-8 text-[#8A8A9A]" style={{ background: AVA_BG }}>Esta disciplina ainda não tem conteúdo.</div>
+  if (!aulaAtual) return <div className="min-h-dvh p-8 text-[var(--ava-muted)]" style={{ background: AVA_BG }}>Esta disciplina ainda não tem conteúdo.</div>
 
   const voltar = `/ava/c/${programaDe(curso).key}`
   const concluidaAtual = !!prog[aulaAtual.id]?.concluida
@@ -102,22 +102,22 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
   )
 
   return (
-    <div className="min-h-dvh text-[#F0EDE8]" style={{ background: AVA_BG }}>
-      <header className="hidden lg:flex h-14 items-center gap-4 px-5 border-b border-white/10" style={{ background: '#13161D' }}>
-        <Link to={voltar} className="flex items-center gap-2 text-sm text-[#cfcfd6] hover:text-white"><ChevronLeft className="w-4 h-4" /> Disciplinas</Link>
-        <span className="w-px h-5 bg-white/15" />
-        <div className="flex-1 min-w-0"><h1 className="text-sm font-semibold truncate">{curso.titulo}</h1>{curso.professor && <p className="text-[11px] text-[#8A8A9A] truncate">Prof. {curso.professor}</p>}</div>
+    <div className="min-h-[calc(100dvh-4rem)] lg:min-h-0 text-[var(--ava-text)]" style={{ background: AVA_BG }}>
+      <header className="hidden lg:flex h-14 items-center gap-4 px-5 border-b border-[var(--ava-line)]" style={{ background: 'var(--ava-panel)' }}>
+        <Link to={voltar} className="flex items-center gap-2 text-sm text-[var(--ava-soft)] hover:text-[var(--ava-text)]"><ChevronLeft className="w-4 h-4" /> Disciplinas</Link>
+        <span className="w-px h-5 bg-[var(--ava-surface)]" />
+        <div className="flex-1 min-w-0"><h1 className="text-sm font-semibold truncate">{curso.titulo}</h1>{curso.professor && <p className="text-[11px] text-[var(--ava-muted)] truncate">Prof. {curso.professor}</p>}</div>
         <Progresso pct={pct} feitas={feitas} total={total} />
       </header>
 
-      <div className={`relative lg:grid lg:h-[calc(100dvh-3.5rem)] ${recolhida ? 'lg:grid-cols-1' : 'lg:grid-cols-[minmax(0,1fr)_380px]'}`}>
+      <div className={`relative lg:grid lg:h-[calc(100dvh-10.25rem)] ${recolhida ? 'lg:grid-cols-1' : 'lg:grid-cols-[minmax(0,1fr)_380px]'}`}>
         <div className="lg:overflow-y-auto">
           {/* mídia: fixa no topo no celular */}
-          <div className="sticky top-0 z-20 lg:static bg-black">
-            <div className="lg:hidden flex items-center gap-2 px-2 h-11 border-b border-white/10" style={{ background: '#13161D' }}>
-              <Link to={voltar} aria-label="Voltar" className="p-2 text-[#cfcfd6]"><ChevronLeft className="w-5 h-5" /></Link>
+          <div className="sticky top-[53px] sm:top-[61px] z-20 lg:static bg-black">
+            <div className="lg:hidden flex items-center gap-2 px-2 h-11 border-b border-[var(--ava-line)]" style={{ background: 'var(--ava-panel)' }}>
+              <Link to={voltar} aria-label="Voltar" className="p-2 text-[var(--ava-soft)]"><ChevronLeft className="w-5 h-5" /></Link>
               <span className="text-[13px] font-medium truncate flex-1">{curso.titulo}</span>
-              <span className="text-[11px] text-[#8A8A9A] pr-2">{pct}%</span>
+              <span className="text-[11px] text-[var(--ava-muted)] pr-2">{pct}%</span>
             </div>
             <div className={`relative w-full aspect-video bg-black mx-auto ${recolhida ? 'lg:max-h-[82dvh]' : 'lg:max-h-[72dvh]'}`}>
               {aulaAtual.tipo === 'video' && aulaAtual.video_id
@@ -131,44 +131,44 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
           <div className={`px-4 lg:px-8 py-4 ${recolhida ? 'max-w-6xl' : 'max-w-4xl'}`}>
             <div className="flex items-start gap-3">
               <div className="flex-1 min-w-0">
-                <p className="text-[11px] uppercase tracking-wider text-[#8A8A9A]">{secoes.find(s => s.id === aulaAtual.secao_id)?.nome}</p>
+                <p className="text-[11px] uppercase tracking-wider text-[var(--ava-muted)]">{secoes.find(s => s.id === aulaAtual.secao_id)?.nome}</p>
                 <h2 className="text-lg font-semibold leading-snug mt-0.5">{aulaAtual.titulo}</h2>
-                {curso.professor && <p className="text-[13px] text-[#cfcfd6] mt-1">Prof. <span className="text-[#E0BF6A]">{curso.professor}</span></p>}
+                {curso.professor && <p className="text-[13px] text-[var(--ava-soft)] mt-1">Prof. <span className="text-[var(--ava-gold)]">{curso.professor}</span></p>}
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 mt-3">
               <button onClick={() => anterior && ir(anterior)} disabled={!anterior} aria-label="Aula anterior"
-                className="h-10 w-10 rounded-lg border border-white/15 flex items-center justify-center disabled:opacity-30"><ChevronLeft className="w-5 h-5" /></button>
+                className="h-10 w-10 rounded-lg border border-[var(--ava-line)] flex items-center justify-center disabled:opacity-30"><ChevronLeft className="w-5 h-5" /></button>
               <button onClick={() => proxima && ir(proxima)} disabled={!proxima}
                 className="h-10 px-4 rounded-lg text-sm font-semibold flex items-center gap-1.5 disabled:opacity-30" style={{ background: GOLD, color: '#111' }}>
                 Próxima <ChevronRight className="w-4 h-4" /></button>
               <button onClick={() => salvar(aulaAtual, prog[aulaAtual.id]?.posicao_seg ?? 0, aulaAtual.duracao_seg ?? 0, !concluidaAtual)}
                 className="h-10 px-3.5 rounded-lg border text-sm flex items-center gap-1.5"
-                style={concluidaAtual ? { borderColor: GOLD, color: GOLD } : { borderColor: 'rgba(255,255,255,.15)', color: '#cfcfd6' }}>
+                style={concluidaAtual ? { borderColor: GOLD, color: GOLD } : { borderColor: 'var(--ava-line)', color: 'var(--ava-soft)' }}>
                 <Check className="w-4 h-4" /> {concluidaAtual ? 'Concluída' : 'Marcar como concluída'}</button>
             </div>
 
-            <div className="mt-5 border-b border-white/10 flex items-stretch gap-1 text-[15px] overflow-x-auto [scrollbar-width:none] -mx-4 px-4 lg:mx-0 lg:px-0">
+            <div className="mt-5 border-b border-[var(--ava-line)] flex items-stretch gap-1 text-[15px] overflow-x-auto [scrollbar-width:none] -mx-4 px-4 lg:mx-0 lg:px-0">
               <button onClick={() => { setBusca(b => (b === null ? '' : null)); if (!recolhida && desktop) setLateral('conteudo'); else setAba('conteudo') }} aria-label="Buscar aula"
-                className="px-3 shrink-0 text-[#cfcfd6] hover:text-white"><Search className="w-[18px] h-[18px]" /></button>
+                className="px-3 shrink-0 text-[var(--ava-soft)] hover:text-[var(--ava-text)]"><Search className="w-[18px] h-[18px]" /></button>
               {([['conteudo', 'Conteúdo', recolhida ? '' : 'lg:hidden'], ['assistente', 'Assistente IA', recolhida ? '' : 'lg:hidden'], ['geral', 'Visão geral', ''], ['perguntas', 'Perguntas e respostas', ''], ['anotacoes', 'Anotações', ''], ['avisos', 'Anúncios', '']] as const).map(([k, t, extra]) => (
                 <button key={k} onClick={() => setAba(k)} className={`px-3 pb-3 pt-2.5 -mb-px border-b-[3px] whitespace-nowrap shrink-0 ${extra} ${aba === k ? 'font-bold' : 'font-medium'}`}
-                  style={aba === k ? { borderColor: '#fff', color: '#fff' } : { borderColor: 'transparent', color: '#a8a8b5' }}>{t}</button>
+                  style={aba === k ? { borderColor: 'var(--ava-text)', color: 'var(--ava-text)' } : { borderColor: 'transparent', color: 'var(--ava-soft)' }}>{t}</button>
               ))}
             </div>
             {busca !== null && (
               <div className="mt-3">
-                <div className="flex items-center gap-2 h-10 px-3 rounded-lg border border-white/15 bg-white/5">
-                  <Search className="w-4 h-4 text-[#8A8A9A]" />
-                  <input autoFocus value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar aula pelo título" className="flex-1 bg-transparent outline-none text-sm placeholder:text-[#8A8A9A]" />
-                  <button onClick={() => setBusca(null)} aria-label="Fechar busca"><X className="w-4 h-4 text-[#8A8A9A]" /></button>
+                <div className="flex items-center gap-2 h-10 px-3 rounded-lg border border-[var(--ava-line)] bg-[var(--ava-surface)]">
+                  <Search className="w-4 h-4 text-[var(--ava-muted)]" />
+                  <input autoFocus value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar aula pelo título" className="flex-1 bg-transparent outline-none text-sm placeholder:text-[var(--ava-muted)]" />
+                  <button onClick={() => setBusca(null)} aria-label="Fechar busca"><X className="w-4 h-4 text-[var(--ava-muted)]" /></button>
                 </div>
                 {busca.trim() && (
-                  <div className="mt-2 rounded-lg border border-white/10 overflow-hidden">
+                  <div className="mt-2 rounded-lg border border-[var(--ava-line)] overflow-hidden">
                     {aulas.filter(a => a.titulo.toLowerCase().includes(busca.trim().toLowerCase())).slice(0, 12).map(a => (
-                      <button key={a.id} onClick={() => { ir(a); setBusca(null) }} className="w-full text-left px-3 py-2.5 text-[13px] text-[#cfcfd6] hover:bg-white/5 border-b border-white/5 last:border-0">{a.titulo}</button>
+                      <button key={a.id} onClick={() => { ir(a); setBusca(null) }} className="w-full text-left px-3 py-2.5 text-[13px] text-[var(--ava-soft)] hover:bg-[var(--ava-surface)] border-b border-[var(--ava-line)] last:border-0">{a.titulo}</button>
                     ))}
-                    {!aulas.some(a => a.titulo.toLowerCase().includes(busca.trim().toLowerCase())) && <p className="px-3 py-3 text-[13px] text-[#8A8A9A]">Nenhuma aula encontrada.</p>}
+                    {!aulas.some(a => a.titulo.toLowerCase().includes(busca.trim().toLowerCase())) && <p className="px-3 py-3 text-[13px] text-[var(--ava-muted)]">Nenhuma aula encontrada.</p>}
                   </div>
                 )}
               </div>
@@ -178,12 +178,12 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
               <div className="-mx-4 lg:mx-0 h-[70dvh]"><AvaAssistente cursoId={curso.id} aulaId={aulaAtual.id} professor={curso.professor} chat={chat} setChat={setChat} semente={semente} onSemente={() => setSemente(null)} /></div>
             )}
             {aba === 'geral' && (
-              <div className="py-4 text-sm leading-relaxed text-[#cfcfd6] space-y-3">
-                <p className="text-base font-semibold text-white">{curso.titulo}</p>
-                <p className="text-[#8A8A9A]">{[curso.curso_area, curso.periodo, curso.semestre].filter(Boolean).join(' · ')}</p>
-                {curso.professor && <p>Professor(a): <span className="text-white">{curso.professor}</span></p>}
+              <div className="py-4 text-sm leading-relaxed text-[var(--ava-soft)] space-y-3">
+                <p className="text-base font-semibold text-[var(--ava-text)]">{curso.titulo}</p>
+                <p className="text-[var(--ava-muted)]">{[curso.curso_area, curso.periodo, curso.semestre].filter(Boolean).join(' · ')}</p>
+                {curso.professor && <p>Professor(a): <span className="text-[var(--ava-text)]">{curso.professor}</span></p>}
                 {curso.descricao && <p className="whitespace-pre-line">{curso.descricao}</p>}
-                <p className="text-[#8A8A9A]">{total} videoaulas · {feitas} concluídas</p>
+                <p className="text-[var(--ava-muted)]">{total} videoaulas · {feitas} concluídas</p>
               </div>
             )}
             {aba === 'perguntas' && <AbaPerguntas cursoId={curso.id} aulas={aulas} aulaAtual={aulaAtual} onAssistente={perguntarAoTutor} />}
@@ -196,13 +196,13 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
           <button onClick={alternarTeatro} aria-label="Mostrar conteúdo da disciplina" title="Mostrar conteúdo da disciplina"
             className="hidden lg:flex absolute right-0 top-24 z-30 h-11 w-9 items-center justify-center rounded-l-lg shadow-lg" style={{ background: GOLD, color: '#111' }}><PanelRightOpen className="w-5 h-5" /></button>
         )}
-        <aside className={`${recolhida ? 'hidden' : 'hidden lg:flex'} flex-col border-l border-white/10 overflow-hidden`} style={{ background: '#101319' }}>
-          <div className="flex border-b border-white/10 text-sm">
+        <aside className={`${recolhida ? 'hidden' : 'hidden lg:flex'} flex-col border-l border-[var(--ava-line)] overflow-hidden`} style={{ background: 'var(--ava-panel2)' }}>
+          <div className="flex border-b border-[var(--ava-line)] text-sm">
             {([['conteudo', 'Conteúdo da disciplina'], ['assistente', 'Assistente IA']] as const).map(([k, t]) => (
               <button key={k} onClick={() => setLateral(k)} className="flex-1 py-3.5 font-semibold flex items-center justify-center gap-1.5 border-b-2 -mb-px"
-                style={lateral === k ? { borderColor: GOLD, color: '#fff' } : { borderColor: 'transparent', color: '#8A8A9A' }}>{k === 'assistente' && <Sparkles className="w-4 h-4" style={{ color: GOLD }} />}{t}</button>
+                style={lateral === k ? { borderColor: GOLD, color: 'var(--ava-text)' } : { borderColor: 'transparent', color: 'var(--ava-muted)' }}>{k === 'assistente' && <Sparkles className="w-4 h-4" style={{ color: GOLD }} />}{t}</button>
             ))}
-            <button onClick={alternarTeatro} aria-label="Modo teatro: ampliar o vídeo" title="Modo teatro" className="px-3.5 text-[#8A8A9A] hover:text-white border-b-2 border-transparent"><PanelRightClose className="w-[18px] h-[18px]" /></button>
+            <button onClick={alternarTeatro} aria-label="Modo teatro: ampliar o vídeo" title="Modo teatro" className="px-3.5 text-[var(--ava-muted)] hover:text-[var(--ava-text)] border-b-2 border-transparent"><PanelRightClose className="w-[18px] h-[18px]" /></button>
           </div>
           <div className="flex-1 overflow-y-auto min-h-0">
             {lateral === 'conteudo' ? lista : desktop && <AvaAssistente cursoId={curso.id} aulaId={aulaAtual.id} professor={curso.professor} chat={chat} setChat={setChat} semente={semente} onSemente={() => setSemente(null)} />}
@@ -215,8 +215,8 @@ function Sala({ dados, aulaId }: { dados: AvaCurso; aulaId: number | null }) {
 
 function Progresso({ pct, feitas, total }: { pct: number; feitas: number; total: number }) {
   return (
-    <div className="flex items-center gap-2.5 text-xs text-[#cfcfd6]">
-      <div className="w-28 h-1.5 rounded-full bg-white/15 overflow-hidden"><div className="h-full" style={{ width: `${pct}%`, background: GOLD }} /></div>
+    <div className="flex items-center gap-2.5 text-xs text-[var(--ava-soft)]">
+      <div className="w-28 h-1.5 rounded-full bg-[var(--ava-surface)] overflow-hidden"><div className="h-full" style={{ width: `${pct}%`, background: GOLD }} /></div>
       {feitas}/{total} aulas
     </div>
   )
@@ -234,28 +234,28 @@ function Curriculo({ secoes, aulas, prog, atual, abertas, alternar, ir, marcar }
         const seg = doS.reduce((n, a) => n + (a.duracao_seg ?? 0), 0)
         const aberta = abertas.has(s.id)
         return (
-          <div key={s.id} className="border-b border-white/10">
-            <button onClick={() => alternar(s.id)} className="w-full flex items-center gap-3 px-4 py-3.5 text-left" style={{ background: aberta ? 'rgba(201,168,76,.08)' : 'rgba(255,255,255,.03)' }}>
+          <div key={s.id} className="border-b border-[var(--ava-line)]">
+            <button onClick={() => alternar(s.id)} className="w-full flex items-center gap-3 px-4 py-3.5 text-left" style={{ background: aberta ? 'rgba(201,168,76,.08)' : 'var(--ava-surface)' }}>
               <div className="flex-1 min-w-0">
-                <p className="text-[13px] font-semibold truncate" style={{ color: aberta ? '#E0BF6A' : undefined }}>{s.nome}</p>
-                <p className="text-[11px] text-[#8A8A9A] mt-0.5">{feitas}/{doS.length} concluídas{seg ? ` | ${fmtDuracao(seg)}` : ''}</p>
+                <p className="text-[13px] font-semibold truncate" style={{ color: aberta ? 'var(--ava-gold)' : undefined }}>{s.nome}</p>
+                <p className="text-[11px] text-[var(--ava-muted)] mt-0.5">{feitas}/{doS.length} concluídas{seg ? ` | ${fmtDuracao(seg)}` : ''}</p>
               </div>
-              <ChevronDown className={`w-4 h-4 transition-transform ${aberta ? 'rotate-180' : ''}`} style={{ color: aberta ? '#E0BF6A' : '#8A8A9A' }} />
+              <ChevronDown className={`w-4 h-4 transition-transform ${aberta ? 'rotate-180' : ''}`} style={{ color: aberta ? 'var(--ava-gold)' : 'var(--ava-muted)' }} />
             </button>
             {aberta && doS.map(a => {
               const ehAtual = a.id === atual
               const feita = !!prog[a.id]?.concluida
               return (
-                <div key={a.id} className="flex items-start gap-3 px-4 py-3 active:bg-white/5 cursor-pointer" onClick={() => ir(a)}
+                <div key={a.id} className="flex items-start gap-3 px-4 py-3 active:bg-[var(--ava-surface)] cursor-pointer" onClick={() => ir(a)}
                   style={ehAtual ? { background: 'rgba(201,168,76,.12)' } : undefined}>
                   <button onClick={e => { e.stopPropagation(); marcar(a) }} aria-label={feita ? 'Desmarcar como concluída' : 'Marcar como concluída'}
                     className="mt-0.5 w-[18px] h-[18px] shrink-0 rounded border flex items-center justify-center"
-                    style={feita ? { background: GOLD, borderColor: GOLD, color: '#111' } : { borderColor: 'rgba(255,255,255,.35)' }}>
+                    style={feita ? { background: GOLD, borderColor: GOLD, color: '#111' } : { borderColor: 'var(--ava-muted)' }}>
                     {feita && <Check className="w-3 h-3" strokeWidth={3} />}
                   </button>
                   <span className="flex-1 min-w-0">
-                    <span className={`block text-[13px] leading-snug ${ehAtual ? 'text-white font-medium' : 'text-[#cfcfd6]'}`}>{a.titulo}</span>
-                    <span className="flex items-center gap-1.5 text-[11px] text-[#8A8A9A] mt-1">
+                    <span className={`block text-[13px] leading-snug ${ehAtual ? 'text-[var(--ava-text)] font-medium' : 'text-[var(--ava-soft)]'}`}>{a.titulo}</span>
+                    <span className="flex items-center gap-1.5 text-[11px] text-[var(--ava-muted)] mt-1">
                       <IconeAula a={a} feita={false} atual={false} />
                       {a.tipo === 'video' ? fmtDuracao(a.duracao_seg) || 'Vídeo' : a.tipo === 'quiz' ? 'Avaliação' : a.tipo === 'material' ? 'Material' : a.tipo === 'link' ? 'Link' : 'Leitura'}
                     </span>
@@ -275,13 +275,13 @@ function PainelNaoVideo({ aula }: { aula: AvaAula }) {
   return (
     <div className="absolute inset-0 overflow-y-auto flex flex-col items-center justify-center text-center px-6 gap-3" style={{ background: 'linear-gradient(135deg,#171b25,#0f1218)' }}>
       {aula.tipo === 'texto'
-        ? <p className="text-sm text-[#cfcfd6] whitespace-pre-line text-left max-w-xl py-6">{aula.descricao}</p>
+        ? <p className="text-sm text-[var(--ava-soft)] whitespace-pre-line text-left max-w-xl py-6">{aula.descricao}</p>
         : <>
             <span className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: 'rgba(201,168,76,.15)', color: GOLD }}>
               {aula.tipo === 'quiz' ? <ClipboardCheck className="w-6 h-6" /> : aula.tipo === 'link' ? <ExternalLink className="w-6 h-6" /> : <FileText className="w-6 h-6" />}
             </span>
             <p className="text-sm font-medium max-w-sm">{aula.titulo}</p>
-            {aula.tipo === 'quiz' && <p className="text-xs text-[#8A8A9A] max-w-xs">As avaliações ainda são feitas no ambiente atual (Moodle). Em breve aqui.</p>}
+            {aula.tipo === 'quiz' && <p className="text-xs text-[var(--ava-muted)] max-w-xs">As avaliações ainda são feitas no ambiente atual (Moodle). Em breve aqui.</p>}
             {aula.url && <a href={aula.url} target="_blank" rel="noreferrer" className="h-10 px-5 rounded-lg text-sm font-semibold inline-flex items-center" style={{ background: GOLD, color: '#111' }}>{rotulo}</a>}
           </>}
     </div>

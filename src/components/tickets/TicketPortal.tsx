@@ -13,7 +13,10 @@ import { Textarea } from '../ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog'
 import { TicketDetail } from './TicketDetail'
-import { InstallAppBanner, InstallAppButton } from './InstallAppBanner'
+import { InstallAppBanner } from './InstallAppBanner'
+import { PortalShell, type PortalTab } from '../portal/PortalShell'
+import { avaCall } from '../ava/avaApi'
+import { useNavigate } from 'react-router-dom'
 import { AlunoInicio, AlunoFinanceiro, AlunoNotas, AlunoDeclaracao, useOverview, type NotasFoco } from './AlunoPainel'
 import { showSuccess, showError } from '../../utils/toast'
 import {
@@ -422,9 +425,15 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, appInstalado, onL
   }, [])
   // 'declaracao' não entra na barra de baixo (tabs) — só acessível pelo botão em Início,
   // tela própria em branco (document), sem o header/nav escuro do portal por cima.
-  const [tab, setTab] = useState<'inicio' | 'financeiro' | 'notas' | 'chamados' | 'declaracao'>('inicio')
+  const [tab, setTab] = useState<'inicio' | 'financeiro' | 'notas' | 'chamados' | 'declaracao'>(() => {
+    const a = new URLSearchParams(window.location.search).get('aba')
+    return a === 'financeiro' || a === 'notas' || a === 'chamados' ? a : 'inicio'
+  })
   // período tocado no Início → Notas abre já nele (some ao trocar de aba pelo menu)
   const [notasFoco, setNotasFoco] = useState<NotasFoco | null>(null)
+  const navigate = useNavigate()
+  const ava = useQuery({ queryKey: ['ava-acesso-portal', alunoId], queryFn: () => avaCall<{ liberado: boolean }>('acesso'), staleTime: 300_000, retry: 0 })
+  const irPara = (t: PortalTab) => { if (t === 'estudos') { navigate('/ava'); return } setNotasFoco(null); setTab(t); window.scrollTo({ top: 0 }) }
   const [showNew, setShowNew] = useState(false)
   const [selected, setSelected] = useState<Ticket | null>(null)
   const [search, setSearch] = useState('')
@@ -477,58 +486,7 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, appInstalado, onL
   if (tab === 'declaracao') return <AlunoDeclaracao onVoltar={() => setTab('inicio')} />
 
   return (
-    <div className="min-h-screen bg-[var(--bg-main)] overflow-x-clip">
-      {/* Top bar */}
-      <header className="sticky top-0 z-30 border-b border-[#2A2D36] bg-[#13161D] px-4 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <img
-            src="https://siteficv.vercel.app/images/test-logo.png"
-            alt="FICV"
-            className="h-8 sm:h-9 w-auto object-contain"
-            onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
-          />
-          <div className="border-l border-[#2A2D36] pl-3">
-            <p className="text-xs font-semibold text-[#F0EDE8]">Portal do Aluno</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-4 sm:gap-5">
-        <button onClick={() => setTab('chamados')} aria-label="Notificações" className="relative text-[#8A8A9A] hover:text-[#F0EDE8] transition-colors">
-          <Bell className="w-4 h-4 sm:w-[18px] sm:h-[18px]" />
-          {aguardando > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-[#C9A84C] text-[9px] font-bold text-[#13161D]">
-              {aguardando}
-            </span>
-          )}
-        </button>
-        <InstallAppButton />
-        <button onClick={refreshAll} disabled={refreshing} aria-label="Atualizar"
-          className="flex items-center gap-1.5 text-xs text-[#8A8A9A] hover:text-[#F0EDE8] transition-colors">
-          <RefreshCw className={`w-4 h-4 sm:w-3.5 sm:h-3.5 ${refreshing ? 'animate-spin' : ''}`} /> <span className="hidden sm:inline">Atualizar</span>
-        </button>
-        {onLogout && (
-          <button
-            onClick={onLogout}
-            className="flex items-center gap-1.5 text-xs text-[#8A8A9A] hover:text-red-400 transition-colors"
-          >
-            <LogOut className="w-4 h-4 sm:w-3.5 sm:h-3.5" /> <span className="hidden sm:inline">Sair</span>
-          </button>
-        )}
-        </div>
-      </header>
-
-      {/* Abas — no computador ficam em cima; no celular viram a barra fixa de baixo (estilo app) */}
-      <nav className="hidden sm:block border-b border-[#2A2D36] bg-[#13161D] px-6">
-        <div className="max-w-3xl mx-auto flex gap-1">
-          {tabs.map(t => (
-            <button key={t.id} onClick={() => { setNotasFoco(null); setTab(t.id) }}
-              className={`relative flex items-center gap-1.5 px-3 py-3 text-sm whitespace-nowrap border-b-2 transition-colors ${tab === t.id ? 'border-[#C9A84C] text-[#F0EDE8] font-semibold' : 'border-transparent text-[#8A8A9A] hover:text-[#F0EDE8]'}`}>
-              <t.icon className="w-4 h-4" /> {t.label}
-              {'badge' in t && t.badge > 0 && <span className="ml-0.5 text-[10px] bg-purple-500 text-white rounded-full px-1.5">{t.badge}</span>}
-            </button>
-          ))}
-        </div>
-      </nav>
-
+    <PortalShell tab={tab as PortalTab} onTab={irPara} aguardando={aguardando} mostrarEstudos={!!ava.data?.liberado} onRefresh={refreshAll} refreshing={refreshing} onLogout={onLogout}>
       {tab === 'inicio' && !appInstalado && <InstallAppBanner />}
 
       {tab !== 'chamados' && (
@@ -640,22 +598,6 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, appInstalado, onL
           <Plus className="w-5 h-5" /> Novo chamado
         </button>
       )}
-      <nav className="sm:hidden fixed bottom-0 inset-x-0 z-40 border-t border-[#2A2D36] bg-[#13161D]/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
-        <div className="grid grid-cols-4">
-          {tabs.map(t => (
-            <button key={t.id} onClick={() => { setNotasFoco(null); setTab(t.id); window.scrollTo({ top: 0 }) }}
-              className={`relative flex flex-col items-center gap-1 pt-2.5 pb-2 text-[11px] transition-colors ${tab === t.id ? 'text-[#C9A84C] font-semibold' : 'text-[#8A8A9A]'}`}>
-              {tab === t.id && <span className="absolute top-0 h-0.5 w-8 rounded-full bg-[#C9A84C]" />}
-              <span className="relative">
-                <t.icon className="w-[22px] h-[22px]" />
-                {'badge' in t && t.badge > 0 && <span className="absolute -top-1.5 -right-2.5 min-w-[18px] h-[18px] text-[10px] leading-[18px] text-center bg-purple-500 text-white rounded-full px-1">{t.badge}</span>}
-              </span>
-              {t.label}
-            </button>
-          ))}
-        </div>
-      </nav>
-
       {showNew && (
         <NewTicketDialog
           alunoId={alunoId}
@@ -673,6 +615,6 @@ export function TicketPortal({ alunoId, alunoNome, alunoEmail, appInstalado, onL
           alunoNome={alunoNome}
         />
       )}
-    </div>
+    </PortalShell>
   )
 }

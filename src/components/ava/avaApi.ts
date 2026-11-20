@@ -32,7 +32,7 @@ export function fmtDuracao(seg: number | null | undefined): string {
   return `${Math.max(1, m)} min`
 }
 
-export const AVA_BG = '#0B0D12'
+export const AVA_BG = 'var(--ava-bg)'
 
 const POS_NOMES: Record<string, string> = {
   TNT: 'Teologia Bíblica e Exegética do Novo Testamento', GE: 'Gestão Escolar', LC: 'Liderança Cristã', MU: 'Missiologia Urbana',

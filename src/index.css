@@ -202,3 +202,7 @@ html:not(.dark) .text-yellow-400,
 html:not(.dark) .text-orange-400 { color: #b45309; }            /* amber-700 */
 html:not(.dark) .placeholder\:text-amber-200::placeholder,
 html:not(.dark) .placeholder\:text-amber-300::placeholder { color: #b45309; }
+
+/* Ambiente de Estudos (AVA): escuro por padrão; segue o tema claro/escuro do Portal (classe `dark` no <html>) */
+.ava-tema { --ava-bg:#F4F5F7; --ava-text:#1b1d24; --ava-muted:#6b7280; --ava-soft:#3f4350; --ava-line:rgba(0,0,0,.12); --ava-surface:rgba(0,0,0,.045); --ava-panel:#ffffff; --ava-panel2:#fafafa; --ava-gold:#8A6A12; }
+.dark .ava-tema { --ava-bg:#0B0D12; --ava-text:#F0EDE8; --ava-muted:#8A8A9A; --ava-soft:#cfcfd6; --ava-line:rgba(255,255,255,.1); --ava-surface:rgba(255,255,255,.05); --ava-panel:#13161D; --ava-panel2:#101319; --ava-gold:#E0BF6A; }

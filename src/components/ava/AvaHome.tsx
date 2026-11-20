@@ -107,24 +107,14 @@ export function AvaHome({ nome }: { nome: string }) {
   if (q.data && chave && !atual) return <Navigate to="/ava" replace />
 
   return (
-    <div className="min-h-dvh text-[#F0EDE8]" style={{ background: AVA_BG }}>
-      <header className="sticky top-0 z-30 backdrop-blur border-b border-white/5" style={{ background: 'rgba(11,13,18,.88)' }}>
-        <div className="max-w-7xl mx-auto px-4 h-14 flex items-center gap-3">
-          <img src="/ficv-simbolo.png" alt="FICV" className="h-7 w-7 object-contain" />
-          <span className="font-semibold tracking-wide text-sm">Ambiente de Estudos</span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded border border-[#C9A84C]/50 text-[#E0BF6A] uppercase tracking-wider">teste</span>
-          <div className="flex-1" />
-          <Link to="/aluno" className="text-xs text-[#8A8A9A] hover:text-white hidden sm:block">Portal do Aluno</Link>
-          <button onClick={() => supabase.auth.signOut()} aria-label="Sair" className="p-2 -mr-2 text-[#8A8A9A] hover:text-white"><LogOut className="w-4 h-4" /></button>
-        </div>
-      </header>
+    <div className="min-h-dvh text-[var(--ava-text)]" style={{ background: AVA_BG }}>
 
       <main className="max-w-7xl mx-auto px-4 pb-16">
         {q.isLoading && <div className="py-24 flex justify-center"><Loader2 className="w-6 h-6 animate-spin" style={{ color: GOLD }} /></div>}
-        {q.isError && <p className="py-24 text-center text-sm text-[#8A8A9A]">{(q.error as Error).message}</p>}
+        {q.isError && <p className="py-24 text-center text-sm text-[var(--ava-muted)]">{(q.error as Error).message}</p>}
 
         {q.data && cursos.length === 0 && (
-          <div className="py-24 text-center text-[#8A8A9A]">
+          <div className="py-24 text-center text-[var(--ava-muted)]">
             <GraduationCap className="w-10 h-10 mx-auto mb-3 opacity-60" />
             <p className="text-sm">Nenhuma disciplina disponível para você ainda.</p>
           </div>
@@ -134,14 +124,14 @@ export function AvaHome({ nome }: { nome: string }) {
           <>
             {atual ? (
               <div className="mt-5">
-                <Link to={programas.length > 1 ? '/ava' : '/aluno'} className="inline-flex items-center gap-1 text-sm text-[#cfcfd6] hover:text-white -ml-1 py-1"><ChevronLeft className="w-5 h-5" /> {programas.length > 1 ? 'Meus cursos' : 'Portal do Aluno'}</Link>
-                <p className="text-[11px] uppercase tracking-widest text-[#E0BF6A] mt-2">{atual.nivel}</p>
+                <Link to={programas.length > 1 ? '/ava' : '/aluno'} className="inline-flex items-center gap-1 text-sm text-[var(--ava-soft)] hover:text-[var(--ava-text)] -ml-1 py-1"><ChevronLeft className="w-5 h-5" /> {programas.length > 1 ? 'Meus cursos' : 'Portal do Aluno'}</Link>
+                <p className="text-[11px] uppercase tracking-widest text-[var(--ava-gold)] mt-2">{atual.nivel}</p>
                 <h1 className="text-2xl font-semibold leading-tight">{atual.label}</h1>
               </div>
             ) : (
               <>
                 <h1 className="text-2xl font-semibold mt-6">Olá{nome ? `, ${nome}` : ''}</h1>
-                <p className="text-sm text-[#8A8A9A] mt-1">Escolha o curso que você quer estudar.</p>
+                <p className="text-sm text-[var(--ava-muted)] mt-1">Escolha o curso que você quer estudar.</p>
               </>
             )}
 
@@ -184,7 +174,7 @@ export function AvaHome({ nome }: { nome: string }) {
                     <h4 className="text-lg font-semibold">{sem === 'sem' ? 'Sem semestre' : `Semestre ${sem}`}</h4>
                     {porGrupo.map(([g, lista]) => (
                       <div key={g} className="mt-4">
-                        <p className="text-[11px] font-semibold uppercase tracking-widest text-[#E0BF6A] mb-2.5">{rotuloGrupo(g)} <span className="text-[#8A8A9A] font-normal normal-case tracking-normal">· {lista.length} {lista.length === 1 ? 'disciplina' : 'disciplinas'}</span></p>
+                        <p className="text-[11px] font-semibold uppercase tracking-widest text-[var(--ava-gold)] mb-2.5">{rotuloGrupo(g)} <span className="text-[var(--ava-muted)] font-normal normal-case tracking-normal">· {lista.length} {lista.length === 1 ? 'disciplina' : 'disciplinas'}</span></p>
                         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
                           {lista.map(c => <CartaoCurso key={c.id} c={c} />)}
                         </div>
@@ -223,7 +213,7 @@ function CartaoCurso({ c, className = '', grad = false }: { c: AvaCursoResumo; c
   const concluida = c.total_aulas > 0 && c.concluidas >= c.total_aulas
   const andamento = !concluida && (c.concluidas > 0 || !!c.ultimo_acesso)
   return (
-    <Link to={`/ava/curso/${c.id}`} className={`group block rounded-xl overflow-hidden border bg-[#13161D] hover:border-[#C9A84C]/60 transition-colors ${concluida ? 'border-[#C9A84C]/50' : 'border-white/10'} ${className}`}>
+    <Link to={`/ava/curso/${c.id}`} className={`group block rounded-xl overflow-hidden border bg-[var(--ava-panel)] hover:border-[#C9A84C]/60 transition-colors ${concluida ? 'border-[#C9A84C]/50' : 'border-[var(--ava-line)]'} ${className}`}>
       <div className="relative">
         <Capa c={c} className="aspect-video" />
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -253,7 +243,7 @@ function Chips({ opcoes, valor, onChange, rotulo }: { opcoes: string[]; valor: s
     <div className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-2.5 [scrollbar-width:none]">
       {opcoes.map(o => (
         <button key={o} onClick={() => onChange(o)} className="shrink-0 text-xs rounded-full px-3.5 py-1.5 border transition-colors"
-          style={valor === o ? { background: GOLD, color: '#111', borderColor: GOLD } : { borderColor: 'rgba(255,255,255,.15)', color: '#cfcfd6' }}>{rotulo(o)}</button>
+          style={valor === o ? { background: GOLD, color: '#111', borderColor: GOLD } : { borderColor: 'var(--ava-line)', color: 'var(--ava-soft)' }}>{rotulo(o)}</button>
       ))}
     </div>
   )
