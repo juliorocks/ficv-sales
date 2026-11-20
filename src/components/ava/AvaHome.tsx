@@ -16,9 +16,9 @@ export function grupoDe(c: AvaCursoResumo): string {
   const m = c.nome.match(/\b(POS[A-Z]+)\s*\/\s*(T\d+)/i)
   return m ? `${m[1].toUpperCase()} · ${m[2].toUpperCase()}` : 'Outras'
 }
-function rotuloGrupo(g: string) {
+function rotuloGrupo(g: string, grad = false) {
   const m = g.match(/^P(\d+)$/i)
-  return m ? `${m[1]}º período` : /^modular$/i.test(g) ? 'Modular' : g
+  return m ? `${m[1]}º ${grad ? 'semestre' : 'período'}` : /^modular$/i.test(g) ? 'Modular' : g
 }
 const ordemGrupo = (g: string) => { const m = g.match(/^P(\d+)$/i); return m ? Number(m[1]) : 100 }
 
@@ -55,8 +55,16 @@ export function AvaHome({ nome }: { nome: string }) {
   const atual = chave ? programas.find(p => p.key === chave) : undefined
   const doPrograma = atual?.cursos ?? []
 
+  const ehGrad = atual?.nivel !== 'Pós-graduação'
   const semestres = useMemo(() => [...new Set(doPrograma.map(c => c.semestre).filter(Boolean) as string[])].sort().reverse(), [doPrograma])
-  const visiveis = doPrograma.filter(c => filtro === 'todos' || c.semestre === filtro)
+  // graduação: a mesma disciplina existe como cópia em cada semestre letivo no Moodle; mostra só a oferta mais recente
+  const unicas = useMemo(() => (ehGrad ? semRepetidas(doPrograma) : doPrograma), [doPrograma, ehGrad])
+  const visiveis = ehGrad ? unicas : doPrograma.filter(c => filtro === 'todos' || c.semestre === filtro)
+  const gradGrupos = useMemo(() => {
+    const m = new Map<string, AvaCursoResumo[]>()
+    for (const c of unicas) m.set(grupoDe(c), [...(m.get(grupoDe(c)) ?? []), c])
+    return [...m.entries()].sort((a, b) => ordemGrupo(a[0]) - ordemGrupo(b[0]) || a[0].localeCompare(b[0]))
+  }, [unicas])
   // semestre (mais novo primeiro) → período (1º, 2º, ...)
   const grupos = useMemo(() => {
     const porSem = new Map<string, AvaCursoResumo[]>()
@@ -142,8 +150,16 @@ export function AvaHome({ nome }: { nome: string }) {
 
             {atual && (
               <section className="mt-6">
-                <Chips opcoes={['todos', ...semestres]} valor={filtro} onChange={setFiltro} rotulo={x => (x === 'todos' ? 'Todos os semestres' : x)} />
-                {grupos.map(([sem, porGrupo]) => (
+                {ehGrad && gradGrupos.map(([g, lista]) => (
+                  <div key={g} className="mt-6">
+                    <h4 className="text-lg font-semibold">{rotuloGrupo(g, true)} <span className="text-sm text-[#8A8A9A] font-normal">· {lista.length} {lista.length === 1 ? 'disciplina' : 'disciplinas'}</span></h4>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4 mt-3">
+                      {lista.map(c => <CartaoCurso key={c.id} c={c} grad />)}
+                    </div>
+                  </div>
+                ))}
+                {!ehGrad && <Chips opcoes={['todos', ...semestres]} valor={filtro} onChange={setFiltro} rotulo={x => (x === 'todos' ? 'Todos os semestres' : x)} />}
+                {!ehGrad && grupos.map(([sem, porGrupo]) => (
                   <div key={sem} className="mt-5">
                     <h4 className="text-lg font-semibold">{sem === 'sem' ? 'Sem semestre' : `Semestre ${sem}`}</h4>
                     {porGrupo.map(([g, lista]) => (
@@ -182,7 +198,7 @@ function CartaoPrograma({ p }: { p: Programa }) {
   )
 }
 
-function CartaoCurso({ c, className = '' }: { c: AvaCursoResumo; className?: string }) {
+function CartaoCurso({ c, className = '', grad = false }: { c: AvaCursoResumo; className?: string; grad?: boolean }) {
   const p = pct(c)
   return (
     <Link to={`/ava/curso/${c.id}`} className={`group block rounded-xl overflow-hidden border border-white/10 bg-[#13161D] hover:border-[#C9A84C]/60 transition-colors ${className}`}>
@@ -194,7 +210,7 @@ function CartaoCurso({ c, className = '' }: { c: AvaCursoResumo; className?: str
         {p > 0 && <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20"><div className="h-full" style={{ width: `${p}%`, background: GOLD }} /></div>}
       </div>
       <div className="p-3">
-        <p className="text-[10px] uppercase tracking-wider text-[#8A8A9A] truncate">{rotuloGrupo(grupoDe(c))}</p>
+        <p className="text-[10px] uppercase tracking-wider text-[#8A8A9A] truncate">{(grad ? [rotuloGrupo(grupoDe(c), true), c.semestre].filter(Boolean).join(' · ') : rotuloGrupo(grupoDe(c)))}</p>
         <h4 className="text-sm font-medium leading-snug mt-1 line-clamp-2 min-h-[2.5rem]">{c.titulo}</h4>
         <p className="text-[11px] text-[#8A8A9A] mt-1.5">{c.total_aulas} aulas{p > 0 ? ` · ${p}%` : ''}</p>
       </div>
@@ -212,4 +228,22 @@ function Chips({ opcoes, valor, onChange, rotulo }: { opcoes: string[]; valor: s
       ))}
     </div>
   )
+}
+
+const normTitulo = (t: string) => t.split(/\s+-\s+/)[0].toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(Boolean)
+const contem = (a: string[], b: string[]) => {
+  const [curto, longo] = a.length <= b.length ? [a, b] : [b, a]
+  for (let i = 0; i + curto.length <= longo.length; i++) if (curto.every((w, j) => longo[i + j] === w)) return true
+  return false
+}
+/** Mesma disciplina no mesmo período em semestres letivos diferentes: fica a oferta mais recente. */
+function semRepetidas(cursos: AvaCursoResumo[]): AvaCursoResumo[] {
+  const ord = [...cursos].sort((a, b) => (b.semestre ?? '').localeCompare(a.semestre ?? ''))
+  const mantidos: AvaCursoResumo[] = []
+  for (const c of ord) {
+    const t = normTitulo(c.titulo)
+    const igual = mantidos.some(m => m.periodo === c.periodo && m.semestre !== c.semestre && contem(normTitulo(m.titulo), t))
+    if (!igual) mantidos.push(c)
+  }
+  return mantidos
 }
