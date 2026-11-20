@@ -16,6 +16,16 @@ const primeiroNome = (s: string) => {
     return n ? n.charAt(0).toUpperCase() + n.slice(1).toLowerCase() : "aluno(a)";
 };
 
+// Fila do dia quando não cabe tudo no teto: quem ainda vai vencer ou vence hoje primeiro (evita virar inadimplente),
+// depois o atraso mais recente (responde melhor); o resto segue nos dias seguintes.
+function ordenar(grupos: any[][]) {
+    const topo = (g: any[]) => Math.max(...g.map((x) => x.dias));
+    return grupos.sort((a, b) => {
+        const pa = topo(a) <= 0 ? 0 : 1, pb = topo(b) <= 0 ? 0 : 1;
+        return pa - pb || topo(a) - topo(b);
+    });
+}
+
 function preencher(t: string, v: Record<string, string>) {
     return t.replace(/\{(\w+)\}/g, (_, k) => v[k] ?? "");
 }
@@ -81,8 +91,7 @@ Deno.serve(async (req) => {
         .eq("canal", "email").eq("status", "enviado").gte("created_at", desde);
     let orcamento = (cfg.limite_email_dia ?? 60) - Math.ceil((jaEnviados ?? 0));
     let enviados = 0, falhas = 0, adiados = 0;
-    // mais atrasados primeiro: são os que mais importam
-    const ordem = [...porAluno.values()].sort((a, b) => Math.max(...b.map((x) => x.dias)) - Math.max(...a.map((x) => x.dias)));
+        const ordem = ordenar([...porAluno.values()]);
     for (const grupo of ordem) {
         const email = grupo[0].email as string | null;
         if (!email) continue;
@@ -117,7 +126,7 @@ async function rodarWhatsApp(db: any, cfg: any, porId: Map<number, any>) {
         .eq("canal", "whatsapp").eq("status", "enviado").gte("created_at", desde);
     let orcamento = (cfg.limite_whatsapp_dia ?? 150) - (ja ?? 0);
     let enfileirados = 0, sem_celular = 0, adiados = 0;
-    const ordem = [...porAluno.values()].sort((a, b) => Math.max(...b.map((x) => x.dias)) - Math.max(...a.map((x) => x.dias)));
+    const ordem = ordenar([...porAluno.values()]);
     for (const grupo of ordem) {
         const number = toZproNumber(grupo[0].celular);
         if (!number || !/^55\d{2}9\d{8}$/.test(number)) { sem_celular++; continue; }
