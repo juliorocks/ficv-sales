@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { AlignLeft, Check, PanelRightClose, PanelRightOpen, Search, Sparkles, X, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ClipboardCheck, ExternalLink, FileText, Loader2, Play } from 'lucide-react'
 import { avaCall, AVA_BG, fmtDuracao, programaDe, type AvaAula, type AvaCurso, type MsgChat } from './avaApi'
+import { AvaCarregando } from './AvaCarregando'
 import { AvaAssistente } from './AvaAssistente'
 import { AbaAnotacoes, AbaAvisos, AbaPerguntas } from './AvaAbas'
 import { VimeoPlayer } from './VimeoPlayer'
@@ -23,7 +24,7 @@ function IconeAula({ a, feita, atual }: { a: AvaAula; feita: boolean; atual: boo
 export function AvaCursoPage() {
   const { cursoId, aulaId } = useParams()
   const q = useQuery({ queryKey: ['ava-curso', cursoId], queryFn: () => avaCall<AvaCurso>('curso', { curso_id: Number(cursoId) }) })
-  if (q.isLoading) return <div className="min-h-dvh flex items-center justify-center" style={{ background: AVA_BG }}><Loader2 className="w-6 h-6 animate-spin" style={{ color: GOLD }} /></div>
+  if (q.isLoading) return <div style={{ background: AVA_BG }}><AvaCarregando passos={['Abrindo a disciplina…', 'Carregando as aulas…', 'Conferindo onde você parou…', 'Preparando o player…']} /></div>
   if (q.isError || !q.data) {
     return (
       <div className="min-h-dvh flex flex-col items-center justify-center gap-4 px-6 text-center text-[var(--ava-text)]" style={{ background: AVA_BG }}>

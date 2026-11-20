@@ -3,6 +3,7 @@ import { Link, Navigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, ChevronLeft, ChevronRight, Loader2, Play, LogOut, GraduationCap } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { AvaCarregando } from './AvaCarregando'
 import { avaCall, AVA_BG, programaDe, type AvaCursoResumo } from './avaApi'
 
 const GOLD = '#C9A84C'
@@ -114,7 +115,7 @@ export function AvaHome({ nome }: { nome: string }) {
     <div className="min-h-dvh text-[var(--ava-text)]" style={{ background: AVA_BG }}>
 
       <main className="max-w-7xl mx-auto px-4 pb-16">
-        {q.isLoading && <div className="py-24 flex justify-center"><Loader2 className="w-6 h-6 animate-spin" style={{ color: GOLD }} /></div>}
+        {q.isLoading && <AvaCarregando compacto />}
         {q.isError && <p className="py-24 text-center text-sm text-[var(--ava-muted)]">{(q.error as Error).message}</p>}
 
         {q.data && cursos.length === 0 && (

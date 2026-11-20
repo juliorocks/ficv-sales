@@ -11,6 +11,7 @@ import { supabase } from '../../lib/supabase'
 import { AlunoAuth } from '../tickets/AlunoAuth'
 import { PortalShell, type PortalTab } from '../portal/PortalShell'
 import { avaCall, AVA_BG } from './avaApi'
+import { AvaCarregando } from './AvaCarregando'
 import { AvaHome } from './AvaHome'
 import { AvaCursoPage } from './AvaCursoPage'
 
@@ -49,7 +50,7 @@ function Acesso({ userId }: { userId: string }) {
     queryFn: async () => (await supabase.from('alunos').select('nome').eq('id', userId).single()).data?.nome as string | undefined,
   })
 
-  if (acesso.isLoading) return <Tela><Loader2 className="w-6 h-6 animate-spin text-[#C9A84C]" /></Tela>
+  if (acesso.isLoading) return <Tela><AvaCarregando passos={['Verificando o seu acesso…', 'Abrindo o seu ambiente de estudos…']} compacto /></Tela>
   if (acesso.isError) return <Tela><p className="text-sm text-[var(--ava-muted)]">Não foi possível abrir o AVA agora. Tente de novo em instantes.</p></Tela>
   if (!acesso.data?.liberado) {
     return (
