@@ -1,11 +1,13 @@
 // regua-cobranca — avisos de mensalidade a vencer/vencida por e-mail.
 //   rodar    {}                      (cron diário, service) → envia se modo = 'ligado'; em 'teste' só simula
+//   WhatsApp: template UTILITY (só manda abrir o Portal, {{1}} = primeiro nome) no canal oficial; etapa sem `whatsapp_template` não envia
 //   simular  {}                      (admin)                → quantos receberiam hoje, por etapa
 //   amostra  { etapa_id, email? }    (admin)                → manda 1 e-mail de exemplo (para o e-mail do admin ou o informado)
 // Nunca escreve valores na mensagem (dependem de bolsa/desconto): o valor certo está no Portal.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { identify, isAdmin, jsonRes } from "../_shared/ai.ts";
 import { emailLayout, escHtml, portalUrl, sendEmail } from "../_shared/email.ts";
+import { TICKET_TEMPLATE_CHANNEL_ID, toZproNumber } from "../_shared/vivaconnect.ts";
 
 const hojeBR = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
 const br = (iso: string) => iso.split("-").reverse().join("/");
@@ -66,9 +68,11 @@ Deno.serve(async (req) => {
         (porAluno.get(c.aluno_id) ?? porAluno.set(c.aluno_id, []).get(c.aluno_id)!).push(c);
     }
     const emails = [...porAluno.values()].filter((l) => l[0].email).length;
+    const { data: waC } = await db.rpc("regua_cobranca_candidatos", { p_hoje: hojeBR(), p_canal: "whatsapp" });
+    const waAlunos = new Set(((waC ?? []) as any[]).filter((c) => toZproNumber(c.celular) && /^55\d{2}9\d{8}$/.test(toZproNumber(c.celular)!)).map((c) => c.aluno_id)).size;
 
     if (action === "simular" || cfg?.modo !== "ligado" || !cfg?.email_ativo) {
-        return jsonRes({ modo: cfg?.modo ?? "teste", enviou: false, alunos: porAluno.size, emails_a_enviar: emails, limite_dia: cfg?.limite_email_dia, por_etapa: resumo });
+        return jsonRes({ modo: cfg?.modo ?? "teste", enviou: false, alunos: porAluno.size, emails_a_enviar: emails, whatsapp_a_enviar: waAlunos, whatsapp_ativo: !!cfg?.whatsapp_ativo, limite_dia: cfg?.limite_email_dia, por_etapa: resumo });
     }
 
     // teto diário (a mesma chave do Resend serve aos chamados): o que passar fica para a próxima rodada
@@ -94,5 +98,51 @@ Deno.serve(async (req) => {
             etapa_id: g.etapa_id, canal: "email", status, destino: email, erro: r.ok ? null : (r.error ?? "").slice(0, 300),
         })), { onConflict: "conta_receber_id,numero_parcela,etapa_id,canal" });
     }
-    return jsonRes({ modo: "ligado", enviou: true, enviados, falhas, adiados, sem_email: lista.filter((c) => !c.email).length });
+    const wa = cfg.whatsapp_ativo ? await rodarWhatsApp(db, cfg, porId) : null;
+    return jsonRes({ modo: "ligado", enviou: true, enviados, falhas, adiados, sem_email: lista.filter((c) => !c.email).length, whatsapp: wa });
 });
+
+// WhatsApp: celular BR de verdade (13 dígitos, 9 depois do DDD: o fixo/institucional já gerou loop de bot, ver ticket-emails),
+// um aviso por aluno, mais atrasados primeiro, teto diário próprio. Enfileira em vivaconnect_outbox (kind 'cobranca').
+async function rodarWhatsApp(db: any, cfg: any, porId: Map<number, any>) {
+    const { data: ch } = await db.from("vivaconnect_channels").select("id, active").eq("id", TICKET_TEMPLATE_CHANNEL_ID).maybeSingle();
+    if (!ch?.active) return { enviou: false, motivo: "canal oficial inativo" };
+    const { data: st } = await db.from("vivaconnect_settings").select("enabled").eq("id", 1).maybeSingle();
+    if (!st?.enabled) return { enviou: false, motivo: "VivaConnect desligado" };
+    const { data: cands } = await db.rpc("regua_cobranca_candidatos", { p_hoje: hojeBR(), p_canal: "whatsapp" });
+    const porAluno = new Map<number, any[]>();
+    for (const c of (cands ?? []) as any[]) (porAluno.get(c.aluno_id) ?? porAluno.set(c.aluno_id, []).get(c.aluno_id)!).push(c);
+    const desde = new Date(Date.now() - 24 * 3600_000).toISOString();
+    const { count: ja } = await db.from("regua_cobranca_envios").select("id", { count: "exact", head: true })
+        .eq("canal", "whatsapp").eq("status", "enviado").gte("created_at", desde);
+    let orcamento = (cfg.limite_whatsapp_dia ?? 150) - (ja ?? 0);
+    let enfileirados = 0, sem_celular = 0, adiados = 0;
+    const ordem = [...porAluno.values()].sort((a, b) => Math.max(...b.map((x) => x.dias)) - Math.max(...a.map((x) => x.dias)));
+    for (const grupo of ordem) {
+        const number = toZproNumber(grupo[0].celular);
+        if (!number || !/^55\d{2}9\d{8}$/.test(number)) { sem_celular++; continue; }
+        if (orcamento <= 0) { adiados++; continue; }
+        const topo = grupo.reduce((a, b) => (b.dias > a.dias ? b : a));
+        const etapa = porId.get(topo.etapa_id);
+        const nome = primeiroNome(grupo[0].nome);
+        await db.from("vivaconnect_outbox").insert({
+            lead_id: null, channel_id: TICKET_TEMPLATE_CHANNEL_ID, kind: "cobranca", number,
+            body: `Template: ${etapa.whatsapp_template} (${nome})`,
+            hsm_template_name: etapa.whatsapp_template, hsm_language: "pt_BR",
+            hsm_components: [{ type: "body", parameters: [{ type: "text", text: nome }] }],
+        });
+        orcamento--; enfileirados++;
+        await db.from("regua_cobranca_envios").upsert(grupo.map((g) => ({
+            aluno_id: g.aluno_id, conta_receber_id: g.conta_receber_id, numero_parcela: g.numero_parcela,
+            etapa_id: g.etapa_id, canal: "whatsapp", status: "enviado", destino: number,
+        })), { onConflict: "conta_receber_id,numero_parcela,etapa_id,canal" });
+    }
+    if (enfileirados) {
+        await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/vivaconnect-api`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` },
+            body: JSON.stringify({ action: "process_outbox" }), signal: AbortSignal.timeout(15000),
+        }).catch(() => {});
+    }
+    return { enviou: true, enfileirados, sem_celular, adiados };
+}
