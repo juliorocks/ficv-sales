@@ -12,11 +12,31 @@ const GRADIENTES = [
   'linear-gradient(135deg,#40281f,#6b3f2a)', 'linear-gradient(135deg,#2a1f40,#4a2d6b)',
 ]
 
+const PALETAS = [
+  ['#1f2a44', '#3b2f5c'], ['#17323a', '#2d5a52'], ['#40281f', '#6b3f2a'], ['#2a1f40', '#4a2d6b'], ['#33301a', '#5e5526'], ['#2b2b33', '#4a4a58'],
+]
+
+export function grupoDe(c: AvaCursoResumo): string {
+  if (c.periodo) return c.periodo
+  const m = c.nome.match(/\b(POS[A-Z]+)\s*\/\s*(T\d+)/i)
+  return m ? `${m[1].toUpperCase()} · ${m[2].toUpperCase()}` : 'Outras'
+}
+function rotuloGrupo(g: string) {
+  const m = g.match(/^P(\d+)$/i)
+  return m ? `${m[1]}º período` : /^modular$/i.test(g) ? 'Modular' : g
+}
+const ordemGrupo = (g: string) => { const m = g.match(/^P(\d+)$/i); return m ? Number(m[1]) : 100 }
+const areaDe = (c: AvaCursoResumo) => (c.curso_area ?? 'Outros').replace(/^PÓS$/i, 'Pós-graduação')
+const cap = (t: string) => t.toLowerCase().replace(/(^|\s)(\S)/g, (_, x, y) => x + y.toUpperCase())
+
 function Capa({ c, className = '' }: { c: AvaCursoResumo; className?: string }) {
+  const g = grupoDe(c)
+  const [c1, c2] = PALETAS[(g.length + (c.curso_area ?? '').length + ordemGrupo(g)) % PALETAS.length]
   return (
-    <div className={`relative overflow-hidden ${className}`} style={{ background: GRADIENTES[c.id % GRADIENTES.length] }}>
-      {c.capa_url && <img src={c.capa_url} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+    <div className={`relative overflow-hidden ${className}`} style={{ background: `linear-gradient(135deg,${c1},${c2})` }}>
+      <span className="absolute -right-2 -bottom-5 text-[5.5rem] font-black leading-none select-none text-white/10">{ordemGrupo(g) < 100 ? `P${ordemGrupo(g)}` : ''}</span>
+      <img src="/ficv-simbolo.png" alt="" className="absolute left-3 top-3 h-6 w-6 object-contain opacity-80" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
     </div>
   )
 }
@@ -26,10 +46,24 @@ const pct = (c: AvaCursoResumo) => (c.total_aulas ? Math.round((c.concluidas / c
 export function AvaHome({ nome }: { nome: string }) {
   const q = useQuery({ queryKey: ['ava-cursos'], queryFn: () => avaCall<{ cursos: AvaCursoResumo[] }>('meus_cursos') })
   const [filtro, setFiltro] = useState<string>('todos')
+  const [area, setArea] = useState<string>('todas')
   const cursos = q.data?.cursos ?? []
 
   const semestres = useMemo(() => [...new Set(cursos.map(c => c.semestre).filter(Boolean) as string[])].sort().reverse(), [cursos])
-  const visiveis = filtro === 'todos' ? cursos : cursos.filter(c => c.semestre === filtro)
+  const areas = useMemo(() => [...new Set(cursos.map(areaDe))].sort(), [cursos])
+  const visiveis = cursos.filter(c => (filtro === 'todos' || c.semestre === filtro) && (area === 'todas' || areaDe(c) === area))
+  // semestre (mais novo primeiro) → curso → período (1º, 2º, ...)
+  const grupos = useMemo(() => {
+    const porSem = new Map<string, AvaCursoResumo[]>()
+    for (const c of visiveis) porSem.set(c.semestre ?? 'sem', [...(porSem.get(c.semestre ?? 'sem') ?? []), c])
+    return [...porSem.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1)).map(([sem, lista]) => {
+      const m = new Map<string, AvaCursoResumo[]>()
+      for (const c of lista) { const k = `${areaDe(c)}\u0000${grupoDe(c)}`; m.set(k, [...(m.get(k) ?? []), c]) }
+      const itens = [...m.entries()].map(([k, l]) => [k.split('\u0000')[1], l] as [string, AvaCursoResumo[]])
+        .sort((a, b) => areaDe(a[1][0]).localeCompare(areaDe(b[1][0])) || ordemGrupo(a[0]) - ordemGrupo(b[0]) || a[0].localeCompare(b[0]))
+      return [sem, itens] as [string, [string, AvaCursoResumo[]][]]
+    })
+  }, [visiveis])
   const continuar = useMemo(
     () => [...cursos].filter(c => c.ultimo_acesso && pct(c) < 100).sort((a, b) => (b.ultimo_acesso! > a.ultimo_acesso! ? 1 : -1)),
     [cursos],
@@ -89,23 +123,22 @@ export function AvaHome({ nome }: { nome: string }) {
             )}
 
             <section className="mt-8">
-              <div className="flex items-center justify-between gap-3 mb-3">
-                <h3 className="text-base font-semibold">Minhas disciplinas</h3>
-              </div>
-              {semestres.length > 1 && (
-                <div className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-3 [scrollbar-width:none]">
-                  {['todos', ...semestres].map(s => (
-                    <button key={s} onClick={() => setFiltro(s)}
-                      className="shrink-0 text-xs rounded-full px-3.5 py-1.5 border transition-colors"
-                      style={filtro === s ? { background: GOLD, color: '#111', borderColor: GOLD } : { borderColor: 'rgba(255,255,255,.15)', color: '#cfcfd6' }}>
-                      {s === 'todos' ? 'Todas' : s}
-                    </button>
+              <h3 className="text-base font-semibold mb-3">Minhas disciplinas</h3>
+              <Chips opcoes={['todas', ...areas]} valor={area} onChange={setArea} rotulo={x => (x === 'todas' ? 'Todos os cursos' : cap(x))} />
+              <Chips opcoes={['todos', ...semestres]} valor={filtro} onChange={setFiltro} rotulo={x => (x === 'todos' ? 'Todos os semestres' : x)} />
+              {grupos.map(([sem, porGrupo]) => (
+                <div key={sem} className="mt-6">
+                  <h4 className="text-lg font-semibold">{sem === 'sem' ? 'Sem semestre' : `Semestre ${sem}`}</h4>
+                  {porGrupo.map(([g, lista]) => (
+                    <div key={g} className="mt-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-widest text-[#E0BF6A] mb-2.5">{[area === 'todas' && areas.length > 1 ? areaDe(lista[0]) : null, rotuloGrupo(g)].filter(Boolean).join(' · ')} <span className="text-[#8A8A9A] font-normal normal-case tracking-normal">· {lista.length} {lista.length === 1 ? 'disciplina' : 'disciplinas'}</span></p>
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+                        {lista.map(c => <CartaoCurso key={c.id} c={c} />)}
+                      </div>
+                    </div>
                   ))}
                 </div>
-              )}
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
-                {visiveis.map(c => <CartaoCurso key={c.id} c={c} />)}
-              </div>
+              ))}
             </section>
           </>
         )}
@@ -126,10 +159,22 @@ function CartaoCurso({ c, className = '' }: { c: AvaCursoResumo; className?: str
         {p > 0 && <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20"><div className="h-full" style={{ width: `${p}%`, background: GOLD }} /></div>}
       </div>
       <div className="p-3">
-        <p className="text-[10px] uppercase tracking-wider text-[#8A8A9A] truncate">{[c.curso_area, c.periodo, c.semestre].filter(Boolean).join(' · ')}</p>
+        <p className="text-[10px] uppercase tracking-wider text-[#8A8A9A] truncate">{[c.curso_area, rotuloGrupo(grupoDe(c))].filter(Boolean).join(' · ')}</p>
         <h4 className="text-sm font-medium leading-snug mt-1 line-clamp-2 min-h-[2.5rem]">{c.titulo}</h4>
         <p className="text-[11px] text-[#8A8A9A] mt-1.5">{c.total_aulas} aulas{p > 0 ? ` · ${p}%` : ''}</p>
       </div>
     </Link>
+  )
+}
+
+function Chips({ opcoes, valor, onChange, rotulo }: { opcoes: string[]; valor: string; onChange: (v: string) => void; rotulo: (v: string) => string }) {
+  if (opcoes.length <= 2) return null
+  return (
+    <div className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-2.5 [scrollbar-width:none]">
+      {opcoes.map(o => (
+        <button key={o} onClick={() => onChange(o)} className="shrink-0 text-xs rounded-full px-3.5 py-1.5 border transition-colors"
+          style={valor === o ? { background: GOLD, color: '#111', borderColor: GOLD } : { borderColor: 'rgba(255,255,255,.15)', color: '#cfcfd6' }}>{rotulo(o)}</button>
+      ))}
+    </div>
   )
 }
