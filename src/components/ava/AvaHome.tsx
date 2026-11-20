@@ -40,22 +40,26 @@ type Programa = { key: string; label: string; nivel: string; cursos: AvaCursoRes
 
 export function AvaHome({ nome }: { nome: string }) {
   const { programa: chave } = useParams()
-  const q = useQuery({ queryKey: ['ava-cursos'], queryFn: () => avaCall<{ cursos: AvaCursoResumo[] }>('meus_cursos') })
+  const q = useQuery({ queryKey: ['ava-cursos'], queryFn: () => avaCall<{ cursos: AvaCursoResumo[] }>('meus_cursos', { todos: window.location.search.includes('todos') }), staleTime: 120_000 })
   const qc = useQueryClient()
+  const carregou = q.isSuccess
   useEffect(() => {
+    if (!carregou) return
+    try { if (Date.now() - Number(sessionStorage.getItem('ava_sync_moodle') ?? 0) < 6 * 3600_000) return } catch { /* sem storage */ }
     let vivo = true
     ;(async () => {
-      let mudou = false
+      let mudou = false, completo = false
       for (let i = 0; i < 30 && vivo; i++) {
         const r = await avaCall<{ restantes: number; importadas: number }>('sincronizar_moodle').catch(() => null)
         if (!r) break
         if (r.importadas) mudou = true
-        if (!r.restantes) break
+        if (!r.restantes) { completo = true; break }
       }
+      if (completo) { try { sessionStorage.setItem('ava_sync_moodle', String(Date.now())) } catch { /* sem storage */ } }
       if (mudou && vivo) qc.invalidateQueries({ queryKey: ['ava-cursos'] })
     })()
     return () => { vivo = false }
-  }, [qc])
+  }, [qc, carregou])
   const [filtro, setFiltro] = useState<string>('todos')
   const cursos = q.data?.cursos ?? []
 
@@ -138,7 +142,7 @@ export function AvaHome({ nome }: { nome: string }) {
             {destaque && (
               <Link to={`/ava/curso/${destaque.id}`} className="mt-5 block rounded-2xl overflow-hidden relative group border border-white/10">
                 <Capa c={destaque} className="h-44 sm:h-60" />
-                <div className="absolute inset-0 p-5 flex flex-col justify-end">
+                <div className="absolute inset-0 p-5 flex flex-col justify-end text-white">
                   <span className="text-[11px] uppercase tracking-widest text-[#E0BF6A]">Continuar assistindo</span>
                   <h2 className="text-xl sm:text-3xl font-semibold leading-tight mt-1 max-w-2xl">{destaque.titulo}</h2>
                   <div className="flex items-center gap-3 mt-3">
@@ -198,7 +202,7 @@ function CartaoPrograma({ p }: { p: Programa }) {
   return (
     <Link to={`/ava/c/${p.key}`} className="group relative block rounded-2xl overflow-hidden border border-white/10 hover:border-[#C9A84C]/60 transition-colors">
       <Capa c={p.cursos[0]} className="h-36 sm:h-44" />
-      <div className="absolute inset-0 p-4 flex flex-col justify-end">
+      <div className="absolute inset-0 p-4 flex flex-col justify-end text-white">
         <span className="text-[10px] uppercase tracking-widest text-[#E0BF6A]">{p.nivel}</span>
         <h3 className="text-lg font-semibold leading-snug">{p.label}</h3>
         <p className="text-xs text-white/70 mt-1 flex items-center gap-1">{p.cursos.length} disciplinas{pr > 0 ? ` · ${pr}% concluído` : ''} <ChevronRight className="w-3.5 h-3.5 ml-auto" /></p>

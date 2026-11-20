@@ -59,13 +59,13 @@ Deno.serve(async (req) => {
         if (action === "acesso") return j({ liberado: true });
 
         if (action === "meus_cursos") {
-            const ins = await inscritos();
-            // inscrição real no Moodle (mesmo para quem vê tudo): marca o semestre em que o aluno está
-            const real = verTodos ? await inscritos(true) : ins;
+            // inscrição real no Moodle (uma consulta só); quem "vê tudo" só recebe o catálogo inteiro com ?todos (senão a lista pesa)
+            const real = await inscritos(true);
+            const ins = verTodos && body.todos ? null : real;
             let q = db.from("ava_cursos").select("id, moodle_id, titulo, curso_area, periodo, semestre, professor, capa_url, nome");
             if (ins) q = q.in("moodle_id", [...ins]);
             if (!verTodos) q = q.eq("publicado", true);
-            const { data: cursos } = await q.order("semestre", { ascending: false }).order("periodo").order("titulo").limit(200);
+            const { data: cursos } = await q.order("semestre", { ascending: false }).order("periodo").order("titulo").limit(400);
             const ids = (cursos ?? []).map((c) => c.id);
             if (!ids.length) return j({ cursos: [] });
             const [{ data: aulas }, { data: prog }] = await Promise.all([

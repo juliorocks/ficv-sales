@@ -11,7 +11,13 @@ const REF = 'jsswkmybkgoxpncnxgdd'
 const filtro = new RegExp(process.argv.find(a => !a.startsWith('--') && a !== process.argv[0] && a !== process.argv[1]) ?? 'EAD - 2026\\.', 'i')
 const limite = Number((process.argv.find(a => a.startsWith('--limite=')) ?? '').split('=')[1]) || Infinity
 
-async function sql(q) {
+async function tentar(fn, n = 5) {
+  for (let i = 1; ; i++) {
+    try { return await fn() } catch (e) { if (i >= n) throw e; await new Promise(r => setTimeout(r, 1500 * i)) }
+  }
+}
+async function sql(q) { return tentar(() => sql1(q)) }
+async function sql1(q) {
   const r = await fetch(`https://api.supabase.com/v1/projects/${REF}/database/query`, {
     method: 'POST', headers: { Authorization: 'Bearer ' + env.SUPABASE_ACCESS_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q }),
   })
@@ -26,7 +32,7 @@ let base = u.replace(/\/+$/, ''); if (!/webservice/.test(base)) base += '/webser
 async function moodle(fn, p = {}) {
   const qs = new URLSearchParams({ wstoken: t, wsfunction: fn, moodlewsrestformat: 'json' })
   for (const [k, v] of Object.entries(p)) qs.set(k, String(v))
-  const r = await fetch(base, { method: 'POST', body: qs }); return r.json()
+  return tentar(async () => (await fetch(base, { method: 'POST', body: qs })).json())
 }
 
 const decode = s => s.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ')
@@ -56,11 +62,14 @@ function partirCurso(full) {
 const cap = s => s.toLowerCase().replace(/(^|\s)(\S)/g, (_, a, b) => a + b.toUpperCase()).replace(/\b(Da|De|Do|Das|Dos|E|Em|Na|No|A|O)\b/g, m => m.toLowerCase())
 
 const todos = await moodle('core_course_get_courses')
-const cursos = todos.filter(c => filtro.test(c.fullname) && c.visible !== 0).slice(0, limite)
+const soNovos = process.argv.includes('--novos')
+const jaTem = soNovos ? new Set((await sql('select moodle_id from ava_cursos where exists (select 1 from ava_aulas a where a.curso_id = ava_cursos.id)')).map(r => Number(r.moodle_id))) : new Set()
+const cursos = todos.filter(c => filtro.test(c.fullname) && c.visible !== 0 && !jaTem.has(c.id)).slice(0, limite)
 console.log(`${cursos.length} cursos a importar (filtro ${filtro})`)
 
 let nAulas = 0, nVideos = 0
 for (const c of cursos) {
+  try {
   const { per, sem, area, disc } = partirCurso(c.fullname)
   const prof = (c.fullname.match(/PROF[ªA.]*\s*(.+)$/i) ?? [])[1] ?? null
   const [{ id: cursoId }] = await sql(`
@@ -111,5 +120,6 @@ for (const c of cursos) {
     nAulas += aulas.length
   }
   console.log(`  ${c.fullname.slice(0, 70)} → ${nAulas} aulas acumuladas`)
+  } catch (e) { console.log('  ERRO', c.id, String(e).slice(0, 100)) }
 }
 console.log(`Pronto: ${nAulas} itens, ${nVideos} vídeos.`)
