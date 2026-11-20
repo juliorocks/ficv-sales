@@ -3,7 +3,7 @@
 //   WhatsApp: template UTILITY (só manda abrir o Portal, {{1}} = primeiro nome) no canal oficial; etapa sem `whatsapp_template` não envia
 //   simular  {}                      (admin)                → quantos receberiam hoje, por etapa
 //   amostra  { etapa_id, email? }    (admin)                → manda 1 e-mail de exemplo (para o e-mail do admin ou o informado)
-// Nunca escreve valores na mensagem (dependem de bolsa/desconto): o valor certo está no Portal.
+// Lista número e vencimento das parcelas, nunca valores na mensagem (dependem de bolsa/desconto): o valor certo está no Portal.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { identify, isAdmin, jsonRes } from "../_shared/ai.ts";
 import { emailLayout, escHtml, portalUrl, sendEmail } from "../_shared/email.ts";
@@ -30,11 +30,14 @@ function preencher(t: string, v: Record<string, string>) {
     return t.replace(/\{(\w+)\}/g, (_, k) => v[k] ?? "");
 }
 
-function montar(etapa: any, nome: string, parcelas: { vencimento: string; atraso: number }[], link: string) {
+function montar(etapa: any, nome: string, parcelas: { vencimento: string; atraso: number; numero?: number }[], link: string) {
     const ordenadas = [...parcelas].sort((a, b) => a.vencimento.localeCompare(b.vencimento));
     const p = ordenadas[0];
     const vars = { nome: primeiroNome(nome), dias: String(Math.abs(p.atraso)), vencimento: br(p.vencimento) };
-    const extra = ordenadas.length > 1 ? `\n\nVocê tem ${ordenadas.length} parcelas nessa situação; veja todas no Portal.` : "";
+    const situacao = (a: number) => (a < 0 ? `vence em ${-a} dia${a === -1 ? "" : "s"}` : a === 0 ? "vence hoje" : `venceu há ${a} dia${a === 1 ? "" : "s"}`);
+    const extra = ordenadas.length > 1
+        ? `\n\nParcelas em aberto:\n` + ordenadas.map((x) => `• ${x.numero ? `Parcela ${x.numero}: ` : ""}vencimento ${br(x.vencimento)} (${situacao(x.atraso)})`).join("\n")
+        : "";
     const corpo = escHtml(preencher(etapa.texto, vars) + extra).replace(/\n/g, "<br>");
     return {
         assunto: preencher(etapa.assunto, vars),
@@ -61,7 +64,7 @@ Deno.serve(async (req) => {
         if (!to && caller?.kind === "user") to = (await db.auth.admin.getUserById(caller.id)).data.user?.email ?? "";
         if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return jsonRes({ error: "Informe um e-mail válido." }, 400);
         const d = new Date(Date.now() - etapa.dias * 86400_000).toISOString().slice(0, 10);
-        const m = montar(etapa, "Maria da Silva", [{ vencimento: d, atraso: etapa.dias }], link);
+        const m = montar(etapa, "Maria da Silva", [{ vencimento: d, atraso: etapa.dias, numero: 3 }, { vencimento: new Date(Date.parse(d) - 30 * 86400_000).toISOString().slice(0, 10), atraso: etapa.dias + 30, numero: 2 }], link);
         const r = await sendEmail(to, `[AMOSTRA] ${m.assunto}`, m.html);
         return jsonRes({ ok: r.ok, error: r.error, para: to });
     }
@@ -97,7 +100,7 @@ Deno.serve(async (req) => {
         if (!email) continue;
         if (orcamento <= 0) { adiados++; continue; }
         const topo = grupo.reduce((a, b) => (b.dias > a.dias ? b : a));
-        const m = montar(porId.get(topo.etapa_id), grupo[0].nome, grupo.map((g) => ({ vencimento: g.vencimento, atraso: g.atraso })), link);
+        const m = montar(porId.get(topo.etapa_id), grupo[0].nome, grupo.map((g) => ({ vencimento: g.vencimento, atraso: g.atraso, numero: g.numero_parcela })), link);
         const r = await sendEmail(email, m.assunto, m.html);
         orcamento--;
         const status = r.ok ? "enviado" : "falhou";
