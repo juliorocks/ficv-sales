@@ -30,8 +30,8 @@ Deno.serve(async (req) => {
     const { data: aluno } = await db.from("alunos").select("email").eq("id", user.id).maybeSingle();
 
     /** ids (ava_cursos.moodle_id) em que o aluno está inscrito; null = todos */
-    async function inscritos(): Promise<Set<number> | null> {
-        if (verTodos) return null;
+    async function inscritos(real = false): Promise<Set<number> | null> {
+        if (verTodos && !real) return null;
         const uid = await moodleUserId(aluno?.email ?? null);
         if (!uid) return new Set();
         return new Set((await moodleCourses(uid)).map((c) => c.id));
@@ -45,6 +45,8 @@ Deno.serve(async (req) => {
 
         if (action === "meus_cursos") {
             const ins = await inscritos();
+            // inscrição real no Moodle (mesmo para quem vê tudo): marca o semestre em que o aluno está
+            const real = verTodos ? await inscritos(true) : ins;
             let q = db.from("ava_cursos").select("id, moodle_id, titulo, curso_area, periodo, semestre, professor, capa_url, nome");
             if (ins) q = q.in("moodle_id", [...ins]);
             const { data: cursos } = await q.order("semestre", { ascending: false }).order("periodo").order("titulo").limit(200);
@@ -64,7 +66,7 @@ Deno.serve(async (req) => {
             return j({
                 cursos: (cursos ?? []).filter((c) => total[c.id]).map((c) => ({
                     ...c, capa_url: c.capa_url ?? thumb[c.id] ?? null, total_aulas: total[c.id] ?? 0,
-                    concluidas: feitas[c.id] ?? 0, ultimo_acesso: ultimo[c.id] ?? null,
+                    concluidas: feitas[c.id] ?? 0, ultimo_acesso: ultimo[c.id] ?? null, inscrito: !!real?.has(c.moodle_id),
                 })),
             });
         }

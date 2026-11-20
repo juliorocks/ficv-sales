@@ -60,12 +60,17 @@ export function AvaHome({ nome }: { nome: string }) {
   // graduação: a mesma disciplina existe como cópia em cada semestre letivo no Moodle; mostra só a oferta mais recente
   const unicas = useMemo(() => (ehGrad ? semRepetidas(doPrograma) : doPrograma), [doPrograma, ehGrad])
   const visiveis = ehGrad ? unicas : doPrograma.filter(c => filtro === 'todos' || c.semestre === filtro)
+  // semestre atual = período mais alto das disciplinas em que o aluno está inscrito na oferta mais recente;
+  // vem primeiro, depois os demais do mais novo para o mais antigo
   const gradGrupos = useMemo(() => {
     const m = new Map<string, AvaCursoResumo[]>()
     for (const c of unicas) m.set(grupoDe(c), [...(m.get(grupoDe(c)) ?? []), c])
-    return [...m.entries()].sort((a, b) => ordemGrupo(a[0]) - ordemGrupo(b[0]) || a[0].localeCompare(b[0]))
-  }, [unicas])
-  // semestre (mais novo primeiro) → período (1º, 2º, ...)
+    const insc = doPrograma.filter(c => c.inscrito).sort((a, b) => (b.semestre ?? '').localeCompare(a.semestre ?? '') || ordemGrupo(grupoDe(b)) - ordemGrupo(grupoDe(a)))
+    const atualG = insc[0] ? grupoDe(insc[0]) : null
+    const lista = [...m.entries()].sort((a, b) => ordemGrupo(b[0]) - ordemGrupo(a[0]) || a[0].localeCompare(b[0]))
+    return lista.sort((a, b) => Number(b[0] === atualG) - Number(a[0] === atualG)).map(([g, l]) => [g, l, g === atualG] as [string, AvaCursoResumo[], boolean])
+  }, [unicas, doPrograma])
+  // pós: semestre letivo (mais novo primeiro) → turma/período
   const grupos = useMemo(() => {
     const porSem = new Map<string, AvaCursoResumo[]>()
     for (const c of visiveis) porSem.set(c.semestre ?? 'sem', [...(porSem.get(c.semestre ?? 'sem') ?? []), c])
@@ -150,9 +155,9 @@ export function AvaHome({ nome }: { nome: string }) {
 
             {atual && (
               <section className="mt-6">
-                {ehGrad && gradGrupos.map(([g, lista]) => (
+                {ehGrad && gradGrupos.map(([g, lista, cursando]) => (
                   <div key={g} className="mt-6">
-                    <h4 className="text-lg font-semibold">{rotuloGrupo(g, true)} <span className="text-sm text-[#8A8A9A] font-normal">· {lista.length} {lista.length === 1 ? 'disciplina' : 'disciplinas'}</span></h4>
+                    <h4 className="text-lg font-semibold">{rotuloGrupo(g, true)}{cursando && <span className="ml-2 align-middle text-[10px] font-semibold uppercase tracking-wider rounded px-1.5 py-0.5" style={{ background: GOLD, color: '#111' }}>Cursando</span>} <span className="text-sm text-[#8A8A9A] font-normal">· {lista.length} {lista.length === 1 ? 'disciplina' : 'disciplinas'}</span></h4>
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4 mt-3">
                       {lista.map(c => <CartaoCurso key={c.id} c={c} grad />)}
                     </div>

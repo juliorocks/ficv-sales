@@ -5,7 +5,7 @@ import { withTimeout } from '../../utils/withTimeout'
 export type AvaCursoResumo = {
   id: number; moodle_id: number; titulo: string; nome: string; curso_area: string | null; periodo: string | null
   semestre: string | null; professor: string | null; capa_url: string | null
-  total_aulas: number; concluidas: number; ultimo_acesso: string | null
+  total_aulas: number; concluidas: number; ultimo_acesso: string | null; inscrito?: boolean
 }
 export type AvaSecao = { id: number; nome: string; ordem: number }
 export type AvaAula = {
