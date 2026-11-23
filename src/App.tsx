@@ -89,7 +89,7 @@ import { TicketQueuesSettings } from './components/admin/TicketQueuesSettings';
 import { TutorVirtualSettings } from './components/admin/TutorVirtualSettings';
 import { TicketDashboard } from './components/tickets/TicketDashboard';
 import { SponteDashboard } from './components/SponteDashboard';
-import { InadimplenciaDashboard } from './components/InadimplenciaDashboard';
+import { InadimplenciaTabs } from './components/inadimplencia/InadimplenciaTabs';
 import { CampaignsDashboard } from './components/CampaignsDashboard';
 import { NotificationBell } from './components/notifications/NotificationBell';
 import { FollowupsPage } from './components/followups/FollowupsPage';
@@ -2151,7 +2151,7 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
 
                 {activeTab === 'inadimplencia' && podeInadimplencia && (
                     <div className="animate-fade-in">
-                        <InadimplenciaDashboard />
+                        <InadimplenciaTabs />
                     </div>
                 )}
 

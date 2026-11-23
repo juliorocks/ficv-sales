@@ -2,6 +2,7 @@
 //   rodar    {}                      (cron diário, service) → envia se modo = 'ligado'; em 'teste' só simula
 //   WhatsApp: template UTILITY (só manda abrir o Portal, {{1}} = primeiro nome) no canal oficial; etapa sem `whatsapp_template` não envia
 //   simular  {}                      (admin)                → quantos receberiam hoje, por etapa
+//   enviar   { alunos: [aluno_id], canal, etapa_id? } (admin)       → envio avulso agora (ignora teto, janela e histórico)
 //   amostra  { etapa_id, email? }    (admin)                → manda 1 e-mail de exemplo (para o e-mail do admin ou o informado)
 // Lista número e vencimento das parcelas, nunca valores na mensagem (dependem de bolsa/desconto): o valor certo está no Portal.
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
@@ -67,6 +68,68 @@ Deno.serve(async (req) => {
         const m = montar(etapa, "Maria da Silva", [{ vencimento: d, atraso: etapa.dias, numero: 3 }, { vencimento: new Date(Date.parse(d) - 30 * 86400_000).toISOString().slice(0, 10), atraso: etapa.dias + 30, numero: 2 }], link);
         const r = await sendEmail(to, `[AMOSTRA] ${m.assunto}`, m.html);
         return jsonRes({ ok: r.ok, error: r.error, para: to });
+    }
+
+
+    if (action === "enviar") {
+        const ids = (Array.isArray(body.alunos) ? body.alunos : []).map(Number).filter((n: number) => Number.isInteger(n)).slice(0, 50);
+        const canal = body.canal === "email" ? "email" : "whatsapp";
+        if (!ids.length) return jsonRes({ error: "Escolha pelo menos um aluno." }, 400);
+        const forcar = body.etapa_id ? porId.get(Number(body.etapa_id)) : null;
+        if (body.etapa_id && !forcar) return jsonRes({ error: "Etapa não encontrada." }, 404);
+        const { data: rows, error: e2 } = await db.rpc("regua_cobranca_avulso", { p_hoje: hojeBR(), p_aluno_ids: ids, p_canal: canal });
+        if (e2) return jsonRes({ error: e2.message }, 500);
+        const porAl = new Map<number, any[]>();
+        for (const c of (rows ?? []) as any[]) {
+            if (forcar) { c.etapa_id = forcar.id; c.dias = forcar.dias; }
+            (porAl.get(c.aluno_id) ?? porAl.set(c.aluno_id, []).get(c.aluno_id)!).push(c);
+        }
+        const resultado: { aluno_id: number; nome: string; ok: boolean; motivo?: string }[] = [];
+        let enfileirou = false;
+        for (const id of ids) {
+            const grupo = porAl.get(id);
+            if (!grupo?.length) { resultado.push({ aluno_id: id, nome: "", ok: false, motivo: "sem parcela pendente (ou etapa sem template de WhatsApp)" }); continue; }
+            const topo = grupo.reduce((a, b) => (b.dias > a.dias ? b : a));
+            const etapa = forcar ?? porId.get(topo.etapa_id);
+            let destino: string | null = null, erro: string | null = null;
+            if (canal === "email") {
+                destino = grupo[0].email;
+                if (!destino) erro = "aluno sem e-mail";
+                else {
+                    const m = montar(etapa, grupo[0].nome, grupo.map((g) => ({ vencimento: g.vencimento, atraso: g.atraso, numero: g.numero_parcela })), link);
+                    const r = await sendEmail(destino, m.assunto, m.html);
+                    if (!r.ok) erro = (r.error ?? "falha no envio").slice(0, 300);
+                }
+            } else {
+                const number = toZproNumber(grupo[0].celular);
+                destino = number;
+                if (!number || !/^55\d{2}9\d{8}$/.test(number)) erro = "sem celular brasileiro válido";
+                else if (!etapa.whatsapp_template) erro = "etapa sem template de WhatsApp";
+                else {
+                    const nome = primeiroNome(grupo[0].nome);
+                    const { error: e3 } = await db.from("vivaconnect_outbox").insert({
+                        lead_id: null, channel_id: TICKET_TEMPLATE_CHANNEL_ID, kind: "cobranca", number,
+                        body: `Template: ${etapa.whatsapp_template} (${nome})`,
+                        hsm_template_name: etapa.whatsapp_template, hsm_language: "pt_BR",
+                        hsm_components: [{ type: "body", parameters: [{ type: "text", text: nome }] }],
+                    });
+                    if (e3) erro = e3.message.slice(0, 300); else enfileirou = true;
+                }
+            }
+            await db.from("regua_cobranca_envios").upsert(grupo.map((g) => ({
+                aluno_id: g.aluno_id, conta_receber_id: g.conta_receber_id, numero_parcela: g.numero_parcela,
+                etapa_id: etapa.id, canal, status: erro ? "falhou" : "enviado", destino, erro, created_at: new Date().toISOString(),
+            })), { onConflict: "conta_receber_id,numero_parcela,etapa_id,canal" });
+            resultado.push({ aluno_id: id, nome: primeiroNome(grupo[0].nome), ok: !erro, motivo: erro ?? undefined });
+        }
+        if (enfileirou) {
+            await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/vivaconnect-api`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` },
+                body: JSON.stringify({ action: "process_outbox" }), signal: AbortSignal.timeout(15000),
+            }).catch(() => {});
+        }
+        return jsonRes({ ok: true, canal, resultado });
     }
 
     const { data: cands, error } = await db.rpc("regua_cobranca_candidatos", { p_hoje: hojeBR(), p_canal: "email" });
