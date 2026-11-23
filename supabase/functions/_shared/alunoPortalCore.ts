@@ -5,7 +5,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.47.10";
 import { nivelDoCurso, raValido } from "./sponte.ts";
 import { alunoBoletins, alunoOverview } from "./alunoSponte.ts";
-import { moodleCourses, moodleDisciplinasDoPeriodo, moodleAvaliacoes, moodleUserId, periodosExtrasDoMoodle } from "./alunoMoodle.ts";
+import { moodleCourses, moodleDisciplinasDoPeriodo, moodleAvaliacoes, moodleUserId, periodosExtrasDoMoodle, prefixosMoodleDaPosCurta } from "./alunoMoodle.ts";
 
 type Db = ReturnType<typeof createClient>;
 type AlunoRow = { id: string; nome: string | null; cpf: string | null; email: string | null; telefone: string | null; ra: string | null; sponte_aluno_id: number; nivel: string | null };
@@ -15,8 +15,10 @@ type TurmaBoletim = { turma_id: number; turma?: string | null; disciplinas: { av
 
 async function completarTurmasComMoodle(turmas: TurmaBoletim[], uid: number, cursos: { id: number; fullname: string }[]) {
     for (const t of turmas) {
+        const prefixosPos = prefixosMoodleDaPosCurta(cursos, t.turma ?? null);
         if (t.disciplinas.length === 0 && t.turma) {
-            const sintetizadas = await moodleDisciplinasDoPeriodo(uid, cursos, t.turma);
+            let sintetizadas = await moodleDisciplinasDoPeriodo(uid, cursos, t.turma);
+            if (!sintetizadas.length && prefixosPos.length) sintetizadas = await disciplinasDosPrefixos(uid, cursos, prefixosPos);
             if (sintetizadas.length) (t as any).disciplinas = sintetizadas;
             continue;
         }
@@ -27,6 +29,11 @@ async function completarTurmasComMoodle(turmas: TurmaBoletim[], uid: number, cur
                 (d as any).avaliacoes = m.avaliacoes;
                 if (!d.media && m.media) (d as any).media = m.media;
             }
+        }
+        if (prefixosPos.length) {
+            const chavePos = (x: string) => norm(x).replace(/^\d+\s+/, "");
+            const jaTem = (nome: string) => t.disciplinas.some((d) => { const a = chavePos(d.disciplina), b = chavePos(nome); return a === b || a.includes(b) || b.includes(a); });
+            for (const s of await disciplinasDosPrefixos(uid, cursos, prefixosPos)) if (!jaTem(s.disciplina)) (t as any).disciplinas.push(s);
         }
         // O Sponte só lista disciplina com nota consolidada; no EAD o resto já tem nota (ou ao menos o curso) no Moodle
         // (achado 23/10: aluno de pós com 5 disciplinas de 10,0 no Moodle e 2 no Portal).
@@ -54,6 +61,18 @@ async function completarTurmasComMoodle(turmas: TurmaBoletim[], uid: number, cur
             }
         }
     }
+}
+
+// pós com nome curto no Sponte: disciplinas dos cursos "PÓS EAD - POS<sigla>/T<n> - 01 ..." (sem "00", sem o número na frente)
+async function disciplinasDosPrefixos(uid: number, cursos: { id: number; fullname: string }[], prefixos: string[]) {
+    const out: Awaited<ReturnType<typeof moodleDisciplinasDoPeriodo>> = [];
+    for (const pr of prefixos) {
+        for (const s of await moodleDisciplinasDoPeriodo(uid, cursos, pr)) {
+            if (/^0+\s/.test(s.disciplina)) continue;
+            out.push({ ...s, disciplina: s.disciplina.replace(/^\d+\s+/, "") });
+        }
+    }
+    return out;
 }
 
 const EAD_RE = /\bEAD\b/i;

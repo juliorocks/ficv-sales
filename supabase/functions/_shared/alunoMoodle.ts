@@ -9,6 +9,7 @@
 // recalculados aqui — a lógica de peso/arredondamento dele é complexa demais pra reproduzir
 // sem risco de divergir do que o aluno vê na tela dele).
 import { getSecret } from "./secrets.ts";
+import { programaDaTurmaPos } from "./cpaTurma.ts";
 
 async function moodleCall(fn: string, params: Record<string, unknown> = {}): Promise<any> {
     const rawUrl = (await getSecret("MOODLE_URL")).replace(/\/+$/, "");
@@ -201,11 +202,30 @@ export function periodoSinteticoId(periodo: string): number {
 const programaDoPeriodo = (periodo: string) =>
     norm(periodo).replace(/\b20\d{2}\.\d\b/g, "").replace(/-\s*(?:p\d+|modular)\b/gi, "").replace(/[^a-z0-9]+/g, " ").trim();
 
+/** Turma de pós com nome curto do Sponte ("Pós Psicoteo 2026"): os cursos do Moodle são "PÓS EAD - POSPSIT/T1 - 01 ...",
+ *  sem o semestre no nome, então o prefixo da turma não casa. Devolve os prefixos "PÓS EAD - POS<sigla>/T<n>" em que o
+ *  aluno está inscrito (só o termo da turma, se conhecido). Turma com "EAD" no nome já casa pelo caminho normal. */
+export function prefixosMoodleDaPosCurta(courses: { fullname: string }[], turma: string | null): string[] {
+    if (!turma || /\bEAD\b/i.test(turma)) return [];
+    const p = programaDaTurmaPos(turma);
+    if (!p) return [];
+    const re = new RegExp(`^pos ead - pos${p.programa.toLowerCase()}/t(\\d+)\\b`);
+    const out = new Set<string>();
+    for (const c of courses) {
+        const m = norm(c.fullname).match(re);
+        if (m && (!p.termo || p.termo === `T${m[1]}`)) out.add(`PÓS EAD - POS${p.programa}/T${m[1]}`);
+    }
+    return [...out];
+}
+
 export function periodosExtrasDoMoodle(
     courses: { id: number; fullname: string }[],
     matriculasConhecidas: { turma: string | null; curso: string | null; curso_base?: string | null }[],
 ): { turma_id: number; turma: string; curso: string | null; curso_base: string | null; situacao: null; data_matricula: null; data_inicio: null; data_termino: null; contrato_id: number }[] {
     const conhecidos = new Set(matriculasConhecidas.map((m) => norm(m.turma ?? "")).filter(Boolean));
+    // pós: o curso "00 Introdução ao EAD" traz o semestre no nome e virava um período à parte ("POSPSIT/T1 · 2025.2")
+    // ao lado da turma real; programa/termo já conhecido pela matrícula não ganha período extra
+    const posConhecidas = new Set(matriculasConhecidas.map((m) => { const x = m.turma ? programaDaTurmaPos(m.turma) : null; return x?.termo ? `${x.programa}/${x.termo}` : ""; }).filter(Boolean));
     // 1º matrícula de cada programa vira o "modelo" de curso pros períodos extras daquele
     // mesmo programa — e a 1ª de TODAS vira o modelo padrão (fallback) se nada bater.
     const porPrograma = new Map<string, { curso: string | null; curso_base: string | null }>();
@@ -222,6 +242,8 @@ export function periodosExtrasDoMoodle(
         const periodo = periodoDoCurso(c.fullname);
         const chave = norm(periodo);
         if (!chave || conhecidos.has(chave) || vistos.has(chave)) continue;
+        const posPeriodo = programaDaTurmaPos(periodo);
+        if (posPeriodo?.termo && posConhecidas.has(`${posPeriodo.programa}/${posPeriodo.termo}`)) continue;
         // só período que "parece" período acadêmico de verdade (tem ano.semestre, tipo
         // "2026.1") — sem isso juntaria curso avulso tipo "SEMINÁRIO VOCACIONAL: ..." que não
         // é período nenhum, é só uma atividade extra sem relação com boletim/matrícula.
