@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
     const { data: waC } = await db.rpc("regua_cobranca_candidatos", { p_hoje: hojeBR(), p_canal: "whatsapp" });
     const waAlunos = new Set(((waC ?? []) as any[]).filter((c) => toZproNumber(c.celular) && /^55\d{2}9\d{8}$/.test(toZproNumber(c.celular)!)).map((c) => c.aluno_id)).size;
 
-    if (action === "simular" || cfg?.modo !== "ligado" || !cfg?.email_ativo) {
+    if (action === "simular" || cfg?.modo !== "ligado") {
         return jsonRes({ modo: cfg?.modo ?? "teste", enviou: false, alunos: porAluno.size, emails_a_enviar: emails, whatsapp_a_enviar: waAlunos, whatsapp_ativo: !!cfg?.whatsapp_ativo, limite_dia: cfg?.limite_email_dia, por_etapa: resumo });
     }
 
@@ -94,7 +94,7 @@ Deno.serve(async (req) => {
         .eq("canal", "email").eq("status", "enviado").gte("created_at", desde);
     let orcamento = (cfg.limite_email_dia ?? 60) - Math.ceil((jaEnviados ?? 0));
     let enviados = 0, falhas = 0, adiados = 0;
-        const ordem = ordenar([...porAluno.values()]);
+        const ordem = cfg.email_ativo ? ordenar([...porAluno.values()]) : [];
     for (const grupo of ordem) {
         const email = grupo[0].email as string | null;
         if (!email) continue;
