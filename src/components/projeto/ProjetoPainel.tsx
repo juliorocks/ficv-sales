@@ -19,7 +19,22 @@ type Tarefa = {
 }
 type Marco = { id: number; titulo: string; data: string | null; feito: boolean; ordem: number }
 type Registro = { id: number; data: string; texto: string }
-type Dados = { config: Config; frentes: Frente[]; tarefas: Tarefa[]; marcos: Marco[]; registro: Registro[] }
+type Situacao = "em_branco" | "so_responsavel" | "preenchido"
+type Diag = { id: number; unidade: "faculdade" | "escola"; setor: string; responsavel: string | null; preenchido_em: string | null; situacao: Situacao; obs: string | null; ordem: number }
+type Dados = { config: Config; frentes: Frente[]; tarefas: Tarefa[]; marcos: Marco[]; registro: Registro[]; diag: Diag[] }
+type Visao = "todas" | "abertas" | "andamento" | "alta" | "concluidas"
+const VISOES: { id: Visao; nome: string; vale: (t: Tarefa) => boolean }[] = [
+    { id: "todas", nome: "Todas", vale: () => true },
+    { id: "abertas", nome: "A fazer", vale: (t) => t.status === "planejado" },
+    { id: "andamento", nome: "Em andamento", vale: (t) => t.status === "andamento" || t.status === "bloqueado" },
+    { id: "alta", nome: "Prioridade alta", vale: (t) => t.prioridade === "alta" && t.status !== "concluido" },
+    { id: "concluidas", nome: "Concluídas", vale: (t) => t.status === "concluido" },
+]
+const SITUACAO: Record<Situacao, { nome: string; cor: string }> = {
+    preenchido: { nome: "Preenchido", cor: "var(--success)" },
+    so_responsavel: { nome: "Só o responsável", cor: "var(--warning)" },
+    em_branco: { nome: "Em branco", cor: "var(--danger)" },
+}
 
 const SISTEMAS = [
     { id: "projeto", nome: "Projeto e infraestrutura" },
@@ -99,6 +114,7 @@ async function conferir<T>(consulta: PromiseLike<{ data: T[] | null; error: { me
 export function ProjetoPainel() {
     const qc = useQueryClient()
     const [filtro, setFiltro] = useState("todos")
+    const [visao, setVisao] = useState<Visao>("todas")
     const [tarefaEdit, setTarefaEdit] = useState<Partial<Tarefa> | null>(null)
     const [frenteEdit, setFrenteEdit] = useState<Frente | null>(null)
 
@@ -110,14 +126,15 @@ export function ProjetoPainel() {
                 if (error) throw new Error(error.message)
                 return data as T
             }
-            const [config, frentes, tarefas, marcos, registro] = await Promise.all([
+            const [config, frentes, tarefas, marcos, registro, diag] = await Promise.all([
                 ler<Config>(supabase.from("projeto_config").select("nome, inicio, fim, duracao_meses").single(), "O painel"),
                 ler<Frente[]>(supabase.from("projeto_frentes").select("*").order("ordem"), "As frentes"),
                 ler<Tarefa[]>(supabase.from("projeto_tarefas").select("*").order("ordem").order("id"), "As tarefas"),
                 ler<Marco[]>(supabase.from("projeto_marcos").select("*").order("ordem"), "Os marcos"),
                 ler<Registro[]>(supabase.from("projeto_registro").select("*").order("data", { ascending: false }).order("id", { ascending: false }).limit(30), "O registro"),
+                ler<Diag[]>(supabase.from("projeto_diagnostico").select("*").order("ordem"), "O diagnóstico"),
             ])
-            return { config, frentes, tarefas, marcos, registro }
+            return { config, frentes, tarefas, marcos, registro, diag }
         },
     })
     const atualizar = () => qc.invalidateQueries({ queryKey: ["projeto-painel"] })
@@ -190,6 +207,16 @@ export function ProjetoPainel() {
         onError: falha,
     })
 
+    const mudarDiag = useMutation({
+        mutationFn: async ({ d, situacao }: { d: Diag; situacao: Situacao }) => {
+            await sessao()
+            const preenchido_em = situacao === "preenchido" ? d.preenchido_em ?? paraIso(hojeData()) : d.preenchido_em
+            await conferir(supabase.from("projeto_diagnostico").update({ situacao, preenchido_em }).eq("id", d.id).select("id"), "A mudança do diagnóstico")
+        },
+        onSuccess: atualizar,
+        onError: falha,
+    })
+
     const [nota, setNota] = useState("")
     const registrar = useMutation({
         mutationFn: async (texto: string) => {
@@ -214,7 +241,7 @@ export function ProjetoPainel() {
     if (isLoading) return <div className="flex justify-center p-16"><Loader2 className="h-6 w-6 animate-spin" /></div>
     if (error || !data || !calc) return <p className="p-6 text-sm text-destructive">{(error as Error | null)?.message ?? "Não foi possível carregar o painel."}</p>
 
-    const { config, marcos, registro } = data
+    const { config, marcos, registro, diag } = data
     const { frentes, porFrente, tarefas, geral } = calc
     const P = D(config.inicio)!, E = D(config.fim)!
     const tempo = hoje >= E ? 1 : hoje > P ? (hoje.getTime() - P.getTime()) / (E.getTime() - P.getTime()) : 0
@@ -287,6 +314,8 @@ export function ProjetoPainel() {
                 </div>
             </section>
 
+            <Diagnostico diag={diag} ocupado={mudarDiag.isPending} onSituacao={(d, situacao) => mudarDiag.mutate({ d, situacao })} />
+
             <Cronograma config={config} frentes={frentes} porFrente={porFrente} marcos={marcos} hoje={hoje} />
 
             <section className="space-y-4">
@@ -302,8 +331,20 @@ export function ProjetoPainel() {
                         </button>
                     ))}
                 </div>
+                <div className="flex flex-wrap gap-2" role="group" aria-label="Filtrar tarefas por situação">
+                    {VISOES.map((v) => {
+                        const n = tarefas.filter(v.vale).length
+                        return (
+                            <button key={v.id} type="button" aria-pressed={visao === v.id} onClick={() => setVisao(v.id)}
+                                className={`rounded-full border px-3.5 py-1 text-[13px] font-semibold transition-colors ${visao === v.id ? "border-[var(--primary)] text-[var(--primary)]" : "border-transparent bg-[var(--bg-card)] text-[var(--text-muted)] shadow-[var(--card-shadow)]"}`}>
+                                {v.nome} <span className="tabular-nums opacity-80">{n}</span>
+                            </button>
+                        )
+                    })}
+                </div>
                 {SISTEMAS.filter((s) => filtro === "todos" || filtro === s.id).map((s) => {
-                    const fs = frentes.filter((f) => f.sistema === s.id)
+                    const vale = VISOES.find((v) => v.id === visao)!.vale
+                    const fs = frentes.filter((f) => f.sistema === s.id && (visao === "todas" || porFrente[f.id].some(vale)))
                     if (!fs.length) return null
                     const ts = fs.flatMap((f) => porFrente[f.id])
                     const ss = stats(ts)
@@ -318,7 +359,7 @@ export function ProjetoPainel() {
                             </div>
                             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                                 {fs.map((f) => (
-                                    <FrenteCard key={f.id} f={f} ts={porFrente[f.id]} hoje={hoje}
+                                    <FrenteCard key={f.id} f={f} ts={porFrente[f.id]} lista={porFrente[f.id].filter(vale)} filtrada={visao !== "todas"} hoje={hoje}
                                         onEditarFrente={() => setFrenteEdit(f)}
                                         onNova={() => setTarefaEdit({ frente_id: f.id, status: "planejado", prioridade: "normal", previo: false, progresso: 0 })}
                                         onEditar={(t) => setTarefaEdit(t)}
@@ -432,8 +473,8 @@ function ItemLista({ t, frente, hoje, progresso }: { t: Tarefa; frente: string; 
     )
 }
 
-function FrenteCard({ f, ts, hoje, onEditarFrente, onNova, onEditar, onStatus, ocupado }: {
-    f: Frente; ts: Tarefa[]; hoje: Date; onEditarFrente: () => void; onNova: () => void
+function FrenteCard({ f, ts, lista, filtrada, hoje, onEditarFrente, onNova, onEditar, onStatus, ocupado }: {
+    f: Frente; ts: Tarefa[]; lista: Tarefa[]; filtrada: boolean; hoje: Date; onEditarFrente: () => void; onNova: () => void
     onEditar: (t: Tarefa) => void; onStatus: (t: Tarefa, s: Status) => void; ocupado: boolean
 }) {
     const s = stats(ts)
@@ -452,10 +493,10 @@ function FrenteCard({ f, ts, hoje, onEditarFrente, onNova, onEditar, onStatus, o
                 <i className="block h-full" style={{ width: `${Math.max(0, pct(s.pct) - pct(s.previoPct))}%`, background: "var(--success)" }} />
             </div>
             <div className="flex justify-between text-[13px] text-[var(--text-muted)]"><span>{s.done} de {s.n} concluídas</span><span>{pct(s.pct)}%</span></div>
-            <details>
-                <summary className="cursor-pointer text-[13px] font-semibold" style={{ color: "var(--primary)" }}>Ver tarefas</summary>
+            <details open={filtrada}>
+                <summary className="cursor-pointer text-[13px] font-semibold" style={{ color: "var(--primary)" }}>{filtrada ? `Ver ${plural(lista.length, "tarefa", "tarefas")} do filtro` : "Ver tarefas"}</summary>
                 <ul className="space-y-2.5 pt-3">
-                    {ts.map((t) => (
+                    {lista.map((t) => (
                         <li key={t.id} className="grid grid-cols-[auto_1fr] items-start gap-2 text-[13.5px]">
                             <Ponto status={t.status} />
                             <div className="min-w-0 space-y-1">
@@ -478,6 +519,59 @@ function FrenteCard({ f, ts, hoje, onEditarFrente, onNova, onEditar, onStatus, o
                 <button type="button" onClick={onNova} className="mt-3 inline-flex items-center gap-1 text-[13px] font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)]"><Plus className="h-3.5 w-3.5" /> Nova tarefa</button>
             </details>
         </div>
+    )
+}
+
+function Diagnostico({ diag, ocupado, onSituacao }: { diag: Diag[]; ocupado: boolean; onSituacao: (d: Diag, s: Situacao) => void }) {
+    const setores = [...new Set(diag.map((d) => d.setor))]
+    const celula = (unidade: Diag["unidade"], setor: string) => diag.find((d) => d.unidade === unidade && d.setor === setor)
+    const total = diag.length, feitos = diag.filter((d) => d.situacao === "preenchido").length
+    const cel = (d?: Diag) => {
+        if (!d) return <td className="px-3 py-2.5" />
+        const c = SITUACAO[d.situacao]
+        return (
+            <td className="px-3 py-2.5 align-top">
+                <div className="flex flex-wrap items-center gap-2">
+                    <i aria-hidden className="block h-2.5 w-2.5 rounded-full" style={{ background: c.cor }} />
+                    <select aria-label={`${d.setor}, ${d.unidade}`} value={d.situacao} disabled={ocupado} onChange={(e) => onSituacao(d, e.target.value as Situacao)}
+                        className={`${CAMPO} !w-auto !py-0.5 !text-xs`}>
+                        {(Object.keys(SITUACAO) as Situacao[]).map((k) => <option key={k} value={k}>{SITUACAO[k].nome}</option>)}
+                    </select>
+                </div>
+                <p className="mt-1 text-xs text-[var(--text-muted)]">
+                    {d.responsavel || "sem responsável"}{d.preenchido_em ? ` · ${dm(D(d.preenchido_em)!)}` : ""}
+                </p>
+                {d.obs && <p className="text-xs text-[var(--text-muted)]">{d.obs}</p>}
+            </td>
+        )
+    }
+    return (
+        <section className="space-y-3">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h3 className="text-xl font-bold text-[var(--text-main)]">Diagnóstico do TI</h3>
+                <span className="text-xs text-[var(--text-muted)]">{feitos} de {total} setores preenchidos nas duas unidades</span>
+            </div>
+            <div className="glass-card overflow-x-auto">
+                <table className="w-full min-w-[640px] text-sm">
+                    <thead>
+                        <tr className="border-b border-[var(--bg-card-hover)] text-left text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                            <th className="px-3 py-2.5 font-semibold">Setor</th>
+                            <th className="px-3 py-2.5 font-semibold">Faculdade</th>
+                            <th className="px-3 py-2.5 font-semibold">Escola</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {setores.map((s) => (
+                            <tr key={s} className="border-b border-[var(--bg-card-hover)] last:border-0">
+                                <th scope="row" className="px-3 py-2.5 text-left align-top font-semibold">{s}</th>
+                                {cel(celula("faculdade", s))}
+                                {cel(celula("escola", s))}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </section>
     )
 }
 
