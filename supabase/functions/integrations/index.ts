@@ -43,6 +43,13 @@ const REGISTRY: Integration[] = [
         ],
     },
     {
+        id: "sponte-escola", name: "Sponte — Escola", description: "Conta SEPARADA da Escola (espelho em escola_sponte_*, nunca mistura com a Faculdade).",
+        fields: [
+            { key: "SPONTE_ESCOLA_TOKEN", label: "Token da API (Escola)", help: "Sponte da Escola → Configurações → Integrações/API" },
+            { plain: true, key: "SPONTE_ESCOLA_CODIGO_CLIENTE", label: "Código do cliente (Escola)", optional: true, placeholder: "489164", help: "Escola = 489164" },
+        ],
+    },
+    {
         id: "resend", name: "Resend (e-mails)", description: "E-mails do Portal do Aluno: confirmação e respostas de chamados, redefinição de senha.",
         fields: [
             { key: "RESEND_API_KEY", label: "API Key", placeholder: "re_...", help: "resend.com → API Keys" },

@@ -7,15 +7,19 @@ import { pgUpsert, pgEnabled, pgRpc } from './lib/pg-mirror.mjs';
 
 const SPONTE_URL = 'https://api.sponteeducacional.net.br/WSAPIEdu.asmx';
 const SPONTE_NS  = 'http://api.sponteeducacional.net.br/';
-const CODIGO_CLIENTE = 489166;
-// Token do Sponte: Gestão > Integrações (Supabase Vault). SPONTE_TOKEN no ambiente tem prioridade.
+// SPONTE_EMPRESA=escola usa a conta da Escola (489164) e grava só nas tabelas escola_* (nunca mistura com a Faculdade).
+const ESCOLA = process.env.SPONTE_EMPRESA === 'escola';
+const PFX = ESCOLA ? 'escola_' : '';
+const CHAVE_TOKEN = ESCOLA ? 'SPONTE_ESCOLA_TOKEN' : 'SPONTE_TOKEN';
+const CODIGO_CLIENTE = ESCOLA ? 489164 : 489166;
+// Token do Sponte: Gestão > Integrações (Supabase Vault). SPONTE_TOKEN no ambiente tem prioridade (só na Faculdade).
 async function loadSponteToken() {
-    if (process.env.SPONTE_TOKEN) return process.env.SPONTE_TOKEN;
+    if (!ESCOLA && process.env.SPONTE_TOKEN) return process.env.SPONTE_TOKEN;
     const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!url || !key) throw new Error('Defina SPONTE_TOKEN ou SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY');
     const r = await fetch(`${url}/rest/v1/rpc/integ_get_secret`, {
         method: 'POST', headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ p_key: 'SPONTE_TOKEN' }),
+        body: JSON.stringify({ p_key: CHAVE_TOKEN }),
     });
     const t = await r.json();
     if (!r.ok || !t) throw new Error(`Token do Sponte não encontrado no cofre (HTTP ${r.status})`);
@@ -114,7 +118,7 @@ async function syncMatriculas(ini = startDate, fim = endDate) {
 
     console.log(`  ${rows.length} matrículas encontradas. Upserting...`);
 
-    await pgUpsert('sponte_matriculas', rows, 'contrato_id');
+    await pgUpsert(PFX + 'sponte_matriculas', rows, 'contrato_id');
     const synced = rows.length;
     console.log(`\n  ✓ ${synced} matrículas sincronizadas`);
     return synced;
@@ -170,7 +174,7 @@ async function syncParcelas() {
 
         const rows = parseParcelas(xml);
 
-        await pgUpsert('sponte_parcelas', rows, 'conta_receber_id,numero_parcela');
+        await pgUpsert(PFX + 'sponte_parcelas', rows, 'conta_receber_id,numero_parcela');
         totalSynced += rows.length;
         process.stdout.write(`\r  ${totalSynced} parcelas processadas...`);
     }
@@ -203,7 +207,7 @@ async function syncAbertas() {
         cursor.setDate(cursor.getDate() + 1);
         if (!xml) continue;
         const rows = parseParcelas(xml);
-        await pgUpsert('sponte_parcelas', rows, 'conta_receber_id,numero_parcela');
+        await pgUpsert(PFX + 'sponte_parcelas', rows, 'conta_receber_id,numero_parcela');
         total += rows.length;
         process.stdout.write(`\r  ${total} parcelas por vencimento...`);
     }
@@ -265,10 +269,11 @@ console.log(`\n🔄 Sync Sponte → Supabase | modo=${mode} | ${startDate} → $
 
 if (mode === 'matriculas' || mode === 'full') await syncMatriculas();
 if (mode === 'parcelas'   || mode === 'full') await syncParcelas();
+if (ESCOLA && (mode === 'contatos')) throw new Error('Modo contatos não existe para a Escola');
 if (mode === 'abertas'    || mode === 'full') {
     // situação do contrato muda depois da data da matrícula (cancelou, encerrou): relê todas, senão o Integrantes da turma fica velho
     await syncMatriculas('2015-01-01', `${year}-12-31`);
-    await syncAbertas(); await syncInpc();
+    await syncAbertas(); if (!ESCOLA) await syncInpc();
 }
 if (mode === 'contatos') await syncContatos(Number(process.argv[3]) || 600);
 
