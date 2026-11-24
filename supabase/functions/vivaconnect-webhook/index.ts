@@ -350,7 +350,25 @@ Deno.serve(async (req) => {
                 // Em Contato = agente humano assumiu (inclusive puxando de Aluno na mão): não volta
                 // pra Aluno nem manda o link do Portal por cima da conversa dele.
                 if (/em contato/i.test(st?.name ?? "")) return await done("stored:aluno (em atendimento humano)", lead.id);
-                // a etapa Aluno é decisão da equipe (2026-11-19): ex-aluno com matrícula cancelada caía lá sozinho
+                // a etapa Aluno é decisão da equipe (2026-11-19): ex-aluno com matrícula cancelada caía lá sozinho.
+                // Exceção certa: quem responde à régua de cobrança é aluno com assunto financeiro (2026-11-24, 4 respostas
+                // pararam na Entrada do Comercial no 1º dia da régua)
+                if (!/matricul|^aluno/i.test(st?.name ?? "") && !lead.assigned_to_id) {
+                    const sufixo = String(m.number ?? "").replace(/\D/g, "").slice(-8);
+                    const desde = new Date(Date.now() - 72 * 3600_000).toISOString();
+                    const { data: cob } = sufixo.length === 8
+                        ? await db.from("vivaconnect_outbox").select("id").eq("kind", "cobranca").like("number", `%${sufixo}`)
+                            .gte("created_at", desde).limit(1).maybeSingle()
+                        : { data: null };
+                    if (cob) {
+                        const { data: stAluno } = await db.from("stages").select("id").ilike("name", "aluno%").limit(1).maybeSingle();
+                        if (stAluno?.id) {
+                            await db.from("leads").update({ stage_id: stAluno.id, stage_entry_date: new Date().toISOString(), perfil: "aluno", updated_at: new Date().toISOString() }).eq("id", lead.id);
+                            await db.from("lead_history").insert({ lead_id: lead.id, from_stage_id: lead.stage_id, to_stage_id: stAluno.id, changed_at: new Date().toISOString() });
+                            await db.from("ai_lead_sessions").delete().eq("lead_id", lead.id);
+                        }
+                    }
+                }
             }
             if (!settings.student_reply_enabled) return await done("stored:aluno (resposta do portal desligada)", lead?.id ?? null);
             const since = new Date(Date.now() - 24 * 3600_000).toISOString();
