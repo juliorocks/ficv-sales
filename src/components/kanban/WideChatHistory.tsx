@@ -736,19 +736,62 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
         const linhas = trecho.split('\n').map((l) => `> ${l}`).join('\n')
         return `${linhas}\n\n${text}`
     }
+    // lead de outra pessoa: avisa antes de enviar (2026-11-24, Thayanne escreveu no lead da Karina e o lead seguiu dela)
+    const { data: donoLead } = useQuery<{ id: string; nome: string } | null>({
+        queryKey: ['lead-dono', String(leadId)],
+        queryFn: async () => {
+            const { data: l } = await supabase.from('leads').select('assigned_to_id').eq('id', leadId).maybeSingle()
+            if (!l?.assigned_to_id) return null
+            const { data: p } = await supabase.from('profiles').select('full_name').eq('id', l.assigned_to_id).maybeSingle()
+            return { id: l.assigned_to_id as string, nome: p?.full_name ?? 'outra pessoa' }
+        },
+        enabled: !!leadId,
+        staleTime: 15_000,
+    })
+    const [avisoDono, setAvisoDono] = useState<{ arg: any; depois?: () => void } | null>(null)
+    const [assumindo, setAssumindo] = useState(false)
+    const enviar = (arg: any, depois?: () => void) => {
+        if (donoLead?.id && user?.id && donoLead.id !== user.id) { setAvisoDono({ arg, depois }); return }
+        sendMessageMutation.mutate(arg)
+        depois?.()
+    }
+    const confirmarAviso = async (assumir: boolean) => {
+        if (!avisoDono) return
+        if (assumir) {
+            setAssumindo(true)
+            try {
+                await supabase.auth.getSession()
+                const { data, error } = await supabase.functions.invoke('vivaconnect-api', { body: { action: 'transfer', lead_id: leadId, profile_id: user?.id } })
+                if (error || data?.error) throw new Error(data?.error ?? error?.message)
+                queryClient.invalidateQueries({ queryKey: ['lead-dono', String(leadId)] })
+                queryClient.invalidateQueries({ queryKey: ['leads'] })
+            } catch (e: any) {
+                showError(`Não consegui assumir o lead: ${e.message}`)
+                setAssumindo(false)
+                return
+            }
+            setAssumindo(false)
+        }
+        const { arg, depois } = avisoDono
+        setAvisoDono(null)
+        sendMessageMutation.mutate(arg)
+        depois?.()
+    }
     const doSend = () => {
         if (sendMessageMutation.isPending || !canSendText) return
         if (pendingFile) {
-            sendMessageMutation.mutate({ media: pendingFile, caption: withQuote(newMessage.trim()) })
-            setPendingFile(null)
-            setNewMessage("")
-            setReplyingTo(null)
+            enviar({ media: pendingFile, caption: withQuote(newMessage.trim()) }, () => {
+                setPendingFile(null)
+                setNewMessage("")
+                setReplyingTo(null)
+            })
             return
         }
         if (!newMessage.trim()) return
-        sendMessageMutation.mutate(withQuote(newMessage))
-        setNewMessage("")
-        setReplyingTo(null)
+        enviar(withQuote(newMessage), () => {
+            setNewMessage("")
+            setReplyingTo(null)
+        })
     }
     const handleSend = (e: React.FormEvent) => { e.preventDefault(); doSend() }
 
@@ -782,7 +825,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                     setConvertingAudio(true)
                     const mp3Blob = await transcodeToMp3(rawBlob)
                     const file = new File([mp3Blob], `audio-${Date.now()}.mp3`, { type: 'audio/mpeg' })
-                    sendMessageMutation.mutate({ media: file, caption: '' })
+                    enviar({ media: file, caption: '' })
                 } catch {
                     showError('Não foi possível converter o áudio gravado. Tente de novo.')
                 } finally {
@@ -1045,7 +1088,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
     const openTemplate = (t: any) => {
         const { slots } = parseTemplate(t)
         if (slots.length === 0) {
-            sendMessageMutation.mutate({ hsm_template_name: t.name, hsm_placeholders: [], hsm_language: t.language, preview: tplBody(t) })
+            enviar({ hsm_template_name: t.name, hsm_placeholders: [], hsm_language: t.language, preview: tplBody(t) })
             return
         }
         setTplForm({
@@ -1059,7 +1102,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
         if (!tplForm) return
         const { t, slots, values } = tplForm
         const preview = fillTemplate(tplBody(t), slots, values)
-        sendMessageMutation.mutate({ hsm_template_name: t.name, hsm_placeholders: values, hsm_language: t.language, preview })
+        enviar({ hsm_template_name: t.name, hsm_placeholders: values, hsm_language: t.language, preview })
         setTplForm(null)
     }
 
@@ -1460,7 +1503,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                             <QuickRepliesMenu triggerClassName="rounded-full h-9 w-9 text-slate-600"
                                 onPick={(reply) => {
                                     if (reply.attachment_url) {
-                                        sendMessageMutation.mutate({
+                                        enviar({
                                             mediaUrl: reply.attachment_url, fileName: reply.attachment_name || 'arquivo',
                                             mediaType: attachmentKind(reply.attachment_mime), caption: reply.content,
                                         })
@@ -1504,7 +1547,7 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                         </div>
                         <div className="relative flex-1">
                         <QuickReplySlash value={newMessage} onChange={setNewMessage} textareaRef={textareaRef}
-                            onAttachment={(reply) => sendMessageMutation.mutate({
+                            onAttachment={(reply) => enviar({
                                 mediaUrl: reply.attachment_url!, fileName: reply.attachment_name || 'arquivo',
                                 mediaType: attachmentKind(reply.attachment_mime), caption: reply.content,
                             })} />
@@ -1587,6 +1630,23 @@ export function WideChatHistory({ widechatContactId, leadId, telefone, leadName,
                     </Popover>
                 )}
             </div>
+
+            <Dialog open={!!avisoDono} onOpenChange={(o) => { if (!o && !assumindo) setAvisoDono(null) }}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="text-base">Este lead é de {donoLead?.nome ?? 'outra pessoa'}</DialogTitle>
+                    </DialogHeader>
+                    <p className="text-sm text-muted-foreground">
+                        {donoLead?.nome ?? 'Outra pessoa'} é a atendente deste lead: as respostas do cliente e o som de aviso vão para ela, e o fechamento da matrícula é creditado a ela.
+                        Quer assumir o lead antes de enviar?
+                    </p>
+                    <DialogFooter className="gap-2 sm:gap-2">
+                        <Button variant="outline" disabled={assumindo} onClick={() => setAvisoDono(null)}>Cancelar</Button>
+                        <Button variant="outline" disabled={assumindo} onClick={() => confirmarAviso(false)}>Enviar sem assumir</Button>
+                        <Button disabled={assumindo} onClick={() => confirmarAviso(true)}>{assumindo ? 'Assumindo…' : 'Assumir e enviar'}</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             <Dialog open={emailOpen} onOpenChange={setEmailOpen}>
                 <DialogContent className="max-w-lg">
