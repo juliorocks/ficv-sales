@@ -60,3 +60,11 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/sync-sponte.mjs contatos 600
+      - name: Sync Sponte da ESCOLA (conta separada, tabelas escola_*)
+        if: ${{ github.event.inputs.mode == '' || github.event.inputs.mode == 'abertas' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SPONTE_EMPRESA: escola
+          ABERTAS_DESDE: '2024-01-01'
+        run: node scripts/sync-sponte.mjs abertas
