@@ -2,52 +2,20 @@
 // Dados hoje vêm do espelho do Sponte (RPC financeiro_painel); depois passam para o banco próprio.
 import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { AlertCircle, Building2, GraduationCap, Layers, Loader2, RefreshCw, School } from "lucide-react"
+import { AlertCircle, Building2, ChevronRight, GraduationCap, Layers, Loader2, RefreshCw, School } from "lucide-react"
 import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { supabase } from "@/lib/supabase"
 import { withTimeout } from "@/utils/withTimeout"
+import { Conciliacao, Drilldown, DrillTipo, Dre, FluxoCaixa, Modulos } from "./FinanceiroAbas"
+import { Dados, Detalhe, Empresa, Kpi, Linha, NOME, PERIODOS, Visao, brl, brlCurto, fmtPct, intervalo, mesLabel, pct, soma } from "./financeiroUtil"
 
-type Empresa = "faculdade" | "escola"
-type Visao = "consolidado" | Empresa
-interface Kpi {
-    empresa: Empresa; recebido: number; recebido_qtd: number; previsto: number; previsto_qtd: number
-    vencido: number; vencido_qtd: number; vencido_base: number; a_vencer: number; a_vencer_qtd: number
-    alunos_vigentes: number; matriculas_periodo: number; com_bolsa: number; desconto_medio: number
-}
-interface Linha { empresa: Empresa; valor: number; qtd: number; forma?: string; categoria?: string; conta?: string }
-interface Dados {
-    kpis: Kpi[]
-    mensal: { empresa: Empresa; mes: string; previsto: number; recebido: number; vencido: number }[]
-    formas: Linha[]; categorias: Linha[]; contas: Linha[]
-    sincronizado_em: Record<Empresa, string | null>
-}
-
-const NOME: Record<Empresa, string> = { faculdade: "Faculdade", escola: "Escola" }
-const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })
-const brlCurto = (v: number) => (Math.abs(v) >= 1e6 ? `R$ ${(v / 1e6).toFixed(1).replace(".", ",")} mi` : Math.abs(v) >= 1e3 ? `R$ ${Math.round(v / 1e3)} mil` : brl(v))
-const pct = (a: number, b: number) => (b > 0 ? (a / b) * 100 : 0)
-const fmtPct = (v: number) => `${v.toFixed(1).replace(".", ",")}%`
-const iso = (d: Date) => d.toISOString().slice(0, 10)
-const MESES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
-const mesLabel = (m: string) => `${MESES[Number(m.slice(5, 7)) - 1]}/${m.slice(2, 4)}`
-
-const PERIODOS = [
-    ["ano", "Este ano"], ["mes", "Este mês"], ["passado", "Mês passado"], ["90", "Últimos 90 dias"], ["12", "12 meses"],
-] as const
-function intervalo(k: string): [string, string] {
-    const h = new Date(), y = h.getFullYear(), m = h.getMonth()
-    if (k === "mes") return [iso(new Date(y, m, 1)), iso(new Date(y, m + 1, 0))]
-    if (k === "passado") return [iso(new Date(y, m - 1, 1)), iso(new Date(y, m, 0))]
-    if (k === "90") return [iso(new Date(h.getTime() - 90 * 864e5)), iso(h)]
-    if (k === "12") return [iso(new Date(y, m - 11, 1)), iso(new Date(y, m + 1, 0))]
-    return [`${y}-01-01`, `${y}-12-31`]
-}
-
-const soma = (ks: Kpi[], c: keyof Kpi) => ks.reduce((s, k) => s + (Number(k[c]) || 0), 0)
+const ABAS = [["geral", "Visão geral"], ["fluxo", "Fluxo de caixa"], ["dre", "DRE"], ["conciliacao", "Conciliação"], ["modulos", "Módulos"]] as const
 
 export function FinanceiroPainel() {
     const [visao, setVisao] = useState<Visao>("consolidado")
     const [periodo, setPeriodo] = useState<(typeof PERIODOS)[number][0]>("ano")
+    const [aba, setAba] = useState<(typeof ABAS)[number][0]>("geral")
+    const [drill, setDrill] = useState<DrillTipo | null>(null)
     const [de, ate] = intervalo(periodo)
 
     const { data, isLoading, isFetching, error, refetch } = useQuery({
@@ -57,6 +25,18 @@ export function FinanceiroPainel() {
             const { data, error } = await withTimeout(supabase.rpc("financeiro_painel", { p_inicio: de, p_fim: ate }), 30000, "O painel financeiro")
             if (error) throw error
             return data as Dados
+        },
+        staleTime: 60_000,
+        placeholderData: (p) => p,
+    })
+
+    const { data: det } = useQuery({
+        queryKey: ["financeiro_detalhe", de, ate],
+        queryFn: async () => {
+            await supabase.auth.getSession()
+            const { data, error } = await withTimeout(supabase.rpc("financeiro_detalhe", { p_inicio: de, p_fim: ate }), 30000, "O detalhe financeiro")
+            if (error) throw error
+            return data as Detalhe
         },
         staleTime: 60_000,
         placeholderData: (p) => p,
@@ -96,11 +76,14 @@ export function FinanceiroPainel() {
     if (isLoading || !v || !data) return <div className="glass-card flex items-center gap-2 p-6 text-sm"><Loader2 className="h-4 w-4 animate-spin" /> Carregando o financeiro…</div>
 
     const inad = pct(v.vencido, v.vencido_base)
-    const cartoes: { titulo: string; valor: string; sub: string; alerta?: boolean }[] = [
-        { titulo: "Recebido no período", valor: brl(v.recebido), sub: `${v.recebido_qtd.toLocaleString("pt-BR")} parcelas pagas` },
-        { titulo: "Previsto (vencimentos)", valor: brl(v.previsto), sub: `${fmtPct(pct(v.recebido, v.previsto))} já recebido, valor de face` },
-        { titulo: "Em atraso", valor: brl(v.vencido), sub: `${v.vencido_qtd.toLocaleString("pt-BR")} parcelas · ${fmtPct(inad)} do vencido`, alerta: true },
-        { titulo: "A vencer", valor: brl(v.a_vencer), sub: `${v.a_vencer_qtd.toLocaleString("pt-BR")} parcelas pendentes` },
+    const real = (det?.realizacao ?? []).filter((r) => empresas.includes(r.empresa))
+    const qFace = real.reduce((x, r) => x + Number(r.q_face), 0), qPago = real.reduce((x, r) => x + Number(r.q_pago), 0)
+    const cartoes: { titulo: string; valor: string; sub: string; alerta?: boolean; drill?: DrillTipo }[] = [
+        { titulo: "Recebido no período", valor: brl(v.recebido), sub: `${v.recebido_qtd.toLocaleString("pt-BR")} parcelas pagas`, drill: "recebido" },
+        { titulo: "Previsto (vencimentos)", valor: brl(v.previsto), sub: "valor de tabela das parcelas que vencem no período", drill: "previsto" },
+        { titulo: "Em atraso", valor: brl(v.vencido), sub: `${v.vencido_qtd.toLocaleString("pt-BR")} parcelas · ${fmtPct(inad)} do vencido`, alerta: true, drill: "atraso" },
+        { titulo: "A vencer", valor: brl(v.a_vencer), sub: `${v.a_vencer_qtd.toLocaleString("pt-BR")} parcelas pendentes`, drill: "vencer" },
+        { titulo: "Realização", valor: det ? fmtPct(pct(qPago, qFace)) : "…", sub: "pago ÷ tabela, nas parcelas quitadas do período", drill: "realizacao" },
         { titulo: "Alunos vigentes", valor: v.alunos.toLocaleString("pt-BR"), sub: "matrícula Vigente hoje" },
         { titulo: "Matrículas no período", valor: v.matriculas.toLocaleString("pt-BR"), sub: "contratos com data no período" },
     ]
@@ -141,14 +124,30 @@ export function FinanceiroPainel() {
                 </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
-                {cartoes.map((c) => (
-                    <div key={c.titulo} className="glass-card p-4">
-                        <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">{c.titulo}</p>
+            <div role="tablist" aria-label="Seções" className="flex gap-1 overflow-x-auto border-b border-[var(--border)]">
+                {ABAS.map(([k, nome]) => (
+                    <button key={k} type="button" role="tab" aria-selected={aba === k} onClick={() => setAba(k)}
+                        className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium ${aba === k ? "border-primary text-primary" : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-main)]"}`}>{nome}</button>
+                ))}
+            </div>
+
+            {aba === "fluxo" && <FluxoCaixa det={det} empresas={empresas} />}
+            {aba === "dre" && <Dre det={det} empresas={empresas} />}
+            {aba === "conciliacao" && <Conciliacao det={det} empresas={empresas} />}
+            {aba === "modulos" && <Modulos />}
+
+            {aba === "geral" && (<>
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                {cartoes.map((c) => {
+                    const corpo = (<>
+                        <div className="flex items-center justify-between gap-1"><p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">{c.titulo}</p>{c.drill && <ChevronRight className="h-3.5 w-3.5 text-[var(--text-muted)]" />}</div>
                         <p className={`mt-1 text-xl font-bold tabular-nums ${c.alerta ? "text-red-500" : "text-[var(--text-main)]"}`}>{c.valor}</p>
                         <p className="mt-0.5 text-xs text-[var(--text-muted)]">{c.sub}</p>
-                    </div>
-                ))}
+                    </>)
+                    return c.drill
+                        ? <button key={c.titulo} type="button" onClick={() => setDrill(c.drill!)} className="glass-card p-4 text-left transition hover:ring-1 hover:ring-primary/50">{corpo}</button>
+                        : <div key={c.titulo} className="glass-card p-4">{corpo}</div>
+                })}
             </div>
 
             {visao === "consolidado" && (
@@ -212,19 +211,13 @@ export function FinanceiroPainel() {
                 <Lista titulo="Onde o dinheiro entra" sub="Conta de destino (base da conciliação)" itens={v.contas} total={v.recebido} />
             </div>
 
-            <div className="glass-card p-5">
-                <h2 className="mb-2 text-sm font-semibold text-[var(--text-main)]">Próximos módulos deste painel</h2>
-                <ul className="grid gap-x-6 gap-y-1 text-sm text-[var(--text-muted)] sm:grid-cols-2">
-                    <li>Conciliação de extrato e de cartão</li><li>Notas fiscais por competência</li>
-                    <li>Créditos, devoluções e estornos</li><li>Cupons e regras de desconto</li>
-                    <li>Contas a pagar e pagamentos do dia</li><li>Fundação: repasses e despesas centralizadas</li>
-                </ul>
-            </div>
+            </>)}
 
             <p className="text-xs text-[var(--text-muted)]">
                 Fonte: Sponte (Faculdade, conta 489166; Escola, conta 489164), espelho sincronizado de hora em hora{ultima ? `, última leitura ${new Date(ultima).toLocaleString("pt-BR")}` : ""}.
-                Previsto e atraso usam o valor de face da parcela; recebido usa o valor pago. Canceladas e renegociadas ficam de fora. Não substitui o fechamento contábil.
+                Previsto e atraso usam o valor de tabela (face) da parcela; recebido usa o valor pago. Clique nos cartões para ver o detalhe. Canceladas e renegociadas ficam de fora. Não substitui o fechamento contábil.
             </p>
+            {drill && <Drilldown tipo={drill} det={det} empresas={empresas} onClose={() => setDrill(null)} />}
         </div>
     )
 }
