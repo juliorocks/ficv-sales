@@ -230,17 +230,20 @@ export function Dre({ det, empresas }: { det: Detalhe | undefined; empresas: Emp
             linha("Receita líquida de competência", (m) => bruta(m) - desc(m), { forte: true }),
             linha("(−) Inadimplência (pendentes vencidas)", (m) => -atr(m)),
             linha("Receita líquida após inadimplência", (m) => bruta(m) - desc(m) - atr(m), { forte: true }),
+            linha("(−) A vencer (ainda não venceu)", (m) => -val(m, (x) => Number(x.a_vencer))),
+            linha("(−) Pago abaixo do esperado (desconto fora do cadastro de bolsa)", (m) => -val(m, (x) => Number(x.abaixo))),
+            linha("(+) Pago acima do esperado (juros e multa)", (m) => val(m, (x) => Number(x.acima))),
+            linha("Recebido das parcelas do mês (caixa)", (m) => val(m, (x) => Number(x.recebido)), { forte: true }),
         ]
-        const caixa = linha("Recebido das parcelas do mês (caixa)", (m) => val(m, (x) => Number(x.recebido)))
-        return { meses, linhas, caixa }
+        return { meses, linhas }
     }, [det, empresas])
     if (!det || !t) return <p className="text-sm text-[var(--text-muted)]">Carregando…</p>
-    const csv = () => baixarCsv("dre.csv", [["Linha", ...t.meses.map(mesLabel), "Total"], ...[...t.linhas, t.caixa].map((l) => [l.nome.trim(), ...l.v.map((x) => Math.round(x)), Math.round(l.v.reduce((a, b) => a + b, 0))])])
+    const csv = () => baixarCsv("dre.csv", [["Linha", ...t.meses.map(mesLabel), "Total"], ...t.linhas.map((l) => [l.nome.trim(), ...l.v.map((x) => Math.round(x)), Math.round(l.v.reduce((a, b) => a + b, 0))])])
     const DESPESAS = ["Pessoal e encargos", "Corpo docente e pedagógico", "Administrativo e utilidades", "Tarifas e taxas (Pix, boleto, cartão)", "Tributos e impostos", "Repasse à Fundação"]
     return (
         <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex flex-wrap items-center gap-2"><Selo tom="ok">Receita: dado real</Selo><Selo tom="modelo">Despesas: a integrar</Selo><span className="text-sm text-[var(--text-muted)]">DRE gerencial por competência (mês do vencimento).</span></div>
+                <div className="flex flex-wrap items-center gap-2"><Selo tom="ok">Receita: dado real</Selo><Selo tom="modelo">Despesas: a integrar</Selo><span className="text-sm text-[var(--text-muted)]">DRE gerencial por competência (mês do vencimento). Da tabela até o caixa, cada degrau explica a diferença.</span></div>
                 <button type="button" onClick={csv} className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1 text-xs hover:bg-[var(--bg-card-hover)]"><Download className="h-3.5 w-3.5" /> CSV</button>
             </div>
             <div className="glass-card overflow-x-auto p-4">
@@ -253,14 +256,13 @@ export function Dre({ det, empresas }: { det: Detalhe | undefined; empresas: Emp
                                 {l.v.map((x, i) => <td key={i} className={`px-2 text-right ${x < 0 ? "text-red-500" : ""}`}>{brlCurto(x)}</td>)}
                                 <td className={`px-2 text-right ${l.v.reduce((a, b) => a + b, 0) < 0 ? "text-red-500" : ""}`}>{brlCurto(l.v.reduce((a, b) => a + b, 0))}</td>
                             </tr>))}
-                        <tr className="border-b border-[var(--border)]/50 text-[var(--text-muted)]"><td className="px-2 py-1.5">Memo: {t.caixa.nome}</td>{t.caixa.v.map((x, i) => <td key={i} className="px-2 text-right">{brlCurto(x)}</td>)}<td className="px-2 text-right">{brlCurto(t.caixa.v.reduce((a, b) => a + b, 0))}</td></tr>
                         <tr><td colSpan={t.meses.length + 2} className="px-2 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Despesas (modelo, entram com o Contas a Pagar)</td></tr>
                         {DESPESAS.map((d) => <tr key={d} className="border-b border-[var(--border)]/40 text-[var(--text-muted)]"><td className="px-2 py-1.5">(−) {d}</td>{t.meses.map((m) => <td key={m} className="px-2 text-right">—</td>)}<td className="px-2 text-right">—</td></tr>)}
                         <tr className="bg-[var(--bg-card-hover)] font-semibold text-[var(--text-muted)]"><td className="px-2 py-2">Resultado operacional</td>{t.meses.map((m) => <td key={m} className="px-2 text-right">—</td>)}<td className="px-2 text-right">—</td></tr>
                     </tbody>
                 </table>
             </div>
-            <p className="text-xs text-[var(--text-muted)]">Receita bruta é o valor de tabela; descontos são só os registrados no campo de bolsa do Sponte; inadimplência é o que venceu e segue pendente (líquida do desconto registrado). Quando existir plano de contas próprio, cada linha passa a ter detalhe por conta e centro de custo, com o filtro de empresa já aplicado.</p>
+            <p className="text-xs text-[var(--text-muted)]">Receita bruta é o valor de tabela; descontos são só os registrados no campo de bolsa do Sponte; inadimplência é o que venceu e segue pendente (líquida do desconto registrado). "Pago abaixo do esperado" é a diferença que o Sponte não explica: desconto fora do cadastro de bolsa ou baixa parcial. A última linha é o dinheiro que entrou, igual ao cartão Recebido da Visão geral. Quando existir plano de contas próprio, cada linha passa a ter detalhe por conta e centro de custo, com o filtro de empresa já aplicado.</p>
         </div>
     )
 }

@@ -37,7 +37,7 @@ export interface Dados {
     sincronizado_em: Record<Empresa, string | null>
 }
 export interface Detalhe {
-    dre: { empresa: Empresa; mes: string; grupo: string; face: number; desconto: number; atraso: number; recebido: number; qtd: number }[]
+    dre: { empresa: Empresa; mes: string; grupo: string; face: number; desconto: number; atraso: number; recebido: number; qtd: number; a_vencer: number; abaixo: number; acima: number }[]
     dia_conta: { empresa: Empresa; dia: string; conta: string; qtd: number; valor: number }[]
     verificacoes: { empresa: Empresa; pagas_abaixo: number; pagas_abaixo_valor: number; pago_zero: number; sem_conta: number; pendente_antigo: number; pendente_antigo_valor: number; pagas_acima: number; pendente_com_data: number }[]
     semanas: { empresa: Empresa; semana: string; liquido: number; face: number; qtd: number }[]
