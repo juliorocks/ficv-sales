@@ -405,10 +405,21 @@ Deno.serve(async (req) => {
 
 // Aluno reconhecido pelo conteúdo da conversa: etapa "Aluno" + link do Portal, e a IA para.
 async function tratarAlunoAtual(db: any, settings: any, leadId: number, channelId: number, num: string): Promise<string> {
-    const { data: leadRow } = await db.from("leads").select("nome_completo, stage_id").eq("id", leadId).maybeSingle();
+    const { data: leadRow } = await db.from("leads").select("nome_completo, stage_id, assigned_to_id").eq("id", leadId).maybeSingle();
+    let moverParaAluno = false;
     if (leadRow?.stage_id) {
         const { data: st } = await db.from("stages").select("name").eq("id", leadRow.stage_id).maybeSingle();
         if (/em contato/i.test(st?.name ?? "")) return `ia:aluno_atual ignorado (lead em atendimento humano)`;
+        // quem se declara aluno na conversa (sem dono, fora de Matriculado/Aluno) sai da Entrada (2026-11-25, caso Romildo)
+        moverParaAluno = !leadRow.assigned_to_id && !/matricul|^aluno/i.test(st?.name ?? "");
+    }
+    if (moverParaAluno) {
+        const { data: stAluno } = await db.from("stages").select("id").ilike("name", "aluno%").limit(1).maybeSingle();
+        if (stAluno?.id) {
+            const agora = new Date().toISOString();
+            await db.from("leads").update({ stage_id: stAluno.id, stage_entry_date: agora, perfil: "aluno", updated_at: agora }).eq("id", leadId);
+            await db.from("lead_history").insert({ lead_id: leadId, from_stage_id: leadRow.stage_id, to_stage_id: stAluno.id, changed_at: agora });
+        }
     }
     if (settings.student_reply_enabled && String(settings.student_reply_template ?? "").trim()) {
         await db.from("vivaconnect_outbox").insert({
@@ -418,7 +429,7 @@ async function tratarAlunoAtual(db: any, settings: any, leadId: number, channelI
         await kickOutbox();
     }
     await db.from("ai_lead_sessions").delete().eq("lead_id", leadId);
-    return "ia:aluno (pelo conteúdo) → link do portal, IA parou";
+    return moverParaAluno ? "ia:aluno (pelo conteúdo) → Aluno, link do portal, IA parou" : "ia:aluno (pelo conteúdo) → link do portal, IA parou";
 }
 
 // Reserva quando a OpenAI falha: sem ela ninguém reconhece aluno pelo conteúdo (Nubia, 04/11).
