@@ -360,7 +360,10 @@ Deno.serve(async (req) => {
                         ? await db.from("vivaconnect_outbox").select("id").eq("kind", "cobranca").like("number", `%${sufixo}`)
                             .gte("created_at", desde).limit(1).maybeSingle()
                         : { data: null };
-                    if (cob) {
+                    // aluno com matrícula ativa (Vigente/Pré) que escreve pedindo suporte também sai da Entrada
+                    // depois do aviso do Portal (2026-11-25); ex-aluno cancelado segue como estava
+                    const { data: ativo } = cob ? { data: true } : await db.rpc("match_aluno_ativo_by_phone", { p_phone: m.number });
+                    if (cob || ativo === true) {
                         const { data: stAluno } = await db.from("stages").select("id").ilike("name", "aluno%").limit(1).maybeSingle();
                         if (stAluno?.id) {
                             await db.from("leads").update({ stage_id: stAluno.id, stage_entry_date: new Date().toISOString(), perfil: "aluno", updated_at: new Date().toISOString() }).eq("id", lead.id);
