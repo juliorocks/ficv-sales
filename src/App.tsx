@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
     DollarSign,
+    Landmark,
     LayoutDashboard,
     Users,
     Settings,
@@ -101,6 +102,7 @@ import { PortalBannersAdmin } from './components/admin/PortalBannersAdmin';
 import { AvaGestao } from './components/ava-admin/AvaGestao';
 import { AcademicoGestao } from './components/academico/AcademicoGestao';
 import { ProjetoPainel } from './components/projeto/ProjetoPainel';
+import { FinanceiroPainel } from './components/financeiro/FinanceiroPainel';
 
 const queryClient = new QueryClient({
     defaultOptions: {
@@ -1089,6 +1091,9 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                             {(ehComercial || podeInadimplencia) && (
                                 <NavItem collapsed={sidebarCollapsed} icon={DollarSign} label="Inadimplência" active={activeTab === 'inadimplencia'} onClick={() => setActiveTab('inadimplencia')} />
                             )}
+                            {profile?.role === 'admin' && (
+                                <NavItem collapsed={sidebarCollapsed} icon={Landmark} label="Financeiro" active={activeTab === 'financeiro'} onClick={() => setActiveTab('financeiro')} />
+                            )}
                             {(profile?.role === 'admin') && (
                                 <div className="space-y-1">
                                     <NavItem
@@ -1994,6 +1999,12 @@ function App({ session, isDarkMode, setIsDarkMode }: { session: any, isDarkMode:
                 {activeTab === 'portal-banners' && profile?.role === 'admin' && (
                     <div className="animate-fade-in">
                         <PortalBannersAdmin />
+                    </div>
+                )}
+
+                {activeTab === 'financeiro' && profile?.role === 'admin' && (
+                    <div className="animate-fade-in">
+                        <FinanceiroPainel />
                     </div>
                 )}
 
