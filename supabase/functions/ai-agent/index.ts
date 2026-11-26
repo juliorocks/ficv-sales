@@ -69,9 +69,16 @@ Deno.serve(async (req) => {
                 timeZone: "America/Sao_Paulo", weekday: "long", day: "2-digit", month: "long", year: "numeric",
                 hour: "2-digit", minute: "2-digit",
             });
+            // Sem a base, o follow-up inventava valor (2026-11-26: "em torno de R$ 590,00" para Direito, que custa R$ 619,50).
+            const consulta = histMsgs.filter((m) => m.role === "user").slice(-3).map((m) => m.content).join("\n") || curso || "retomar contato";
+            const hits = await searchKnowledge(db, curso ? `${curso}\n${consulta}` : consulta, {
+                publico: "vendas", embeddingModel: s.embedding_model, count: s.match_count, minSimilarity: Number(s.min_similarity),
+            });
+            const knowledge = (hits ?? []).length ? (hits as any[]).map((h, i) => `[${i + 1}] ${h.content}`).join("\n\n---\n\n") : "(nenhum trecho relevante)";
             const system = [
                 s.system_prompt,
                 `Seu nome é ${s.agent_name}. Agora é ${agora} (horário de Brasília).`,
+                `REGRA ABSOLUTA SOBRE NÚMEROS: valor, mensalidade, desconto, bolsa, percentual, data de início e prazo só podem ser citados se aparecerem LITERALMENTE na BASE DE CONHECIMENTO abaixo, com o número exato dela. Nunca arredonde, estime nem escreva "em torno de". Se a base não tiver o número do curso em questão, não cite número nenhum: diga que um consultor confirma os valores e as condições.\n\nBASE DE CONHECIMENTO:\n\n${knowledge}`,
                 // 02/10, achado ao vivo: esta frase dizia "interessado em X" como FATO, e a IA
                 // escrevia o reengajamento em cima disso mesmo quando o histórico mostrava que
                 // o assunto já tinha mudado (lead encerrou sobre X, depois falou de Y/Z) — o
@@ -281,6 +288,7 @@ Deno.serve(async (req) => {
             `Agora é ${agora} (horário de Brasília). Use essa data para "hoje", prazos e saudações (bom dia/boa tarde/boa noite).
 Se a base de conhecimento citar uma data que JÁ PASSOU (início de aulas, prazo de matrícula, promoção "deste mês"), não a apresente como futura nem garanta que ainda vale: diga que um consultor vai confirmar a próxima data/condição e faça o handoff (handoff=true).`,
             s.handoff_instructions,
+            `REGRA ABSOLUTA SOBRE NÚMEROS: valor, mensalidade, desconto, bolsa, percentual, data de início e prazo só podem ser citados se aparecerem LITERALMENTE na base de conhecimento abaixo, com o número exato dela. Nunca arredonde, estime nem escreva "em torno de". Se a base não tiver o número do curso em questão, não cite número nenhum: diga que um consultor confirma e faça o handoff.`,
             // Escopo FIXO no código (pedido do usuário 29/09: "travas pra ela não responder
             // nada que não seja relacionado ao assunto") — não depende do texto editável do
             // painel, pra nunca ficar de fora se alguém reescrever o system_prompt sem saber.
