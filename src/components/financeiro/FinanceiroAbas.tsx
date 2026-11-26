@@ -292,8 +292,8 @@ export function Conciliacao({ det, empresas }: { det: Detalhe | undefined; empre
         <div className="space-y-5">
             <section className="glass-card overflow-x-auto p-5">
                 <div className="mb-1 flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold">Entradas por conta e dia: o que o extrato deveria mostrar</h3><Selo tom="ok">Dado real</Selo></div>
-                <p className="mb-3 text-xs text-[var(--text-muted)]">Últimos 14 dias com pagamento. A coluna Stone fica em branco até a integração direta com a Stone existir.</p>
-                <table className="w-full min-w-[760px] text-sm"><thead><tr className="border-b border-[var(--border)]"><Th>Dia</Th>{t.contas.map((c) => <Th key={c} d>{c.length > 22 ? c.slice(0, 21) + "…" : c}</Th>)}<Th d>Outras</Th><Th d>Parcelas</Th><Th d>Total do sistema</Th><Th d>Stone</Th><Th>Situação</Th></tr></thead>
+                <p className="mb-3 text-xs text-[var(--text-muted)]">Últimos 14 dias com pagamento. A Stone recebe só as matrículas: a coluna Stone vai comparar apenas essa categoria e fica em branco até a integração direta existir. Mensalidades serão conciliadas pelo banco.</p>
+                <table className="w-full min-w-[760px] text-sm"><thead><tr className="border-b border-[var(--border)]"><Th>Dia</Th>{t.contas.map((c) => <Th key={c} d>{c.length > 22 ? c.slice(0, 21) + "…" : c}</Th>)}<Th d>Outras</Th><Th d>Parcelas</Th><Th d>Total do sistema</Th><Th d>Stone (matrículas)</Th><Th>Situação</Th></tr></thead>
                     <tbody className="tabular-nums">{t.dias.map((d) => (
                         <tr key={d.d} className="border-b border-[var(--border)]/50"><td className="px-2 py-1.5">{dataBr(d.d)}</td>{d.cel.map((x, i) => <td key={i} className="px-2 text-right">{x ? brlCurto(x) : ""}</td>)}
                             <td className="px-2 text-right">{d.outras ? brlCurto(d.outras) : ""}</td><td className="px-2 text-right">{d.n}</td><td className="px-2 text-right font-medium">{brl(d.total)}</td>
@@ -315,7 +315,7 @@ export function Conciliacao({ det, empresas }: { det: Detalhe | undefined; empre
             <section className="glass-card p-5">
                 <div className="mb-3 flex items-center gap-2"><h3 className="text-sm font-semibold">Como a conciliação vai funcionar</h3><Selo tom="modelo">Modelo</Selo></div>
                 <ol className="grid gap-3 sm:grid-cols-4">
-                    {[["1. Receber", "Os dados chegam direto da Stone, sem digitar nada. Outros bancos e o SpontePay entram depois, por arquivo ou integração."], ["2. Casar", "O sistema liga cada crédito da Stone às parcelas baixadas, por valor, data e identificador."], ["3. Resolver", "Sobras e faltas viram uma fila: ajuste de centavos, pagamento em duplicidade, tarifa, transferência entre contas."], ["4. Fechar o dia", "Dia sem divergência fica marcado como conciliado, com quem fechou e quando."]].map(([a, b]) => (
+                    {[["1. Receber", "Os recebíveis de matrícula chegam direto da Stone (Pagar.me), sem digitar nada. Mensalidades entram pelo extrato do banco (API do Bradesco ou OFX) e o SpontePay depois."], ["2. Casar", "O sistema liga cada recebível da Stone às parcelas de matrícula baixadas, e cada crédito do banco às mensalidades, por valor, data e identificador."], ["3. Resolver", "Sobras e faltas viram uma fila: ajuste de centavos, pagamento em duplicidade, tarifa, transferência entre contas."], ["4. Fechar o dia", "Dia sem divergência fica marcado como conciliado, com quem fechou e quando."]].map(([a, b]) => (
                         <li key={a} className="rounded-xl bg-[var(--bg-card)] p-3 ring-1 ring-[var(--border)]"><p className="text-sm font-semibold text-[var(--text-main)]">{a}</p><p className="mt-1 text-xs text-[var(--text-muted)]">{b}</p></li>))}
                 </ol>
             </section>
@@ -327,8 +327,8 @@ export function Conciliacao({ det, empresas }: { det: Detalhe | undefined; empre
 const MODULOS: { n: string; d: string; s: "Nesta tela" | "Parcial" | "Planejado" }[] = [
     { n: "DRE gerencial", d: "Resultado por empresa e consolidado, por competência. Receita já real; despesas entram com o Contas a Pagar.", s: "Nesta tela" },
     { n: "Fluxo de caixa", d: "Entradas prováveis das próximas semanas e, depois, saldo projetado com as saídas.", s: "Nesta tela" },
-    { n: "Conciliação bancária", d: "Dados direto da Stone contra as baixas, fila de divergências e fechamento do dia. Outros bancos por OFX, depois.", s: "Parcial" },
-    { n: "Conciliação de cartão e SpontePay", d: "Vendas e repasses da Stone contra as parcelas, com as taxas; SpontePay em seguida.", s: "Planejado" },
+    { n: "Conciliação bancária", d: "Matrículas: dados direto da Stone contra as baixas. Mensalidades: extrato do banco. Fila de divergências e fechamento do dia.", s: "Parcial" },
+    { n: "Conciliação de cartão e SpontePay", d: "Vendas e repasses da Stone contra as parcelas de matrícula, com as taxas; SpontePay em seguida.", s: "Planejado" },
     { n: "Notas fiscais (NFS-e)", d: "Emissão por competência, fila com reenvio, rejeições e envio ao aluno e ao Portal.", s: "Planejado" },
     { n: "Contas a pagar", d: "Agenda do dia, aprovação por alçada, DDA, cartões corporativos e comprovantes.", s: "Planejado" },
     { n: "Repasses e Fundação", d: "Transferências entre as empresas sem virar receita ou despesa, e pagamentos centralizados.", s: "Planejado" },
