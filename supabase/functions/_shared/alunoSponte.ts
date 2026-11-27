@@ -189,9 +189,21 @@ async function boletimDaTurma(A: number, turma: number): Promise<Disciplina[]> {
         // quando a disciplina tem exame (TemExame) e a nota já foi lançada (>0); "0,0" com
         // TemExame=Sim é só "ainda não fez", não é zero de verdade.
         const exameRaw = /^sim$/i.test(r.TemExame ?? "") ? escala10(n(r.ExameFinal)) : null;
+        const avs = porDisciplina.get(Number(r.DisciplinaID))?.avaliacoes ?? [];
+        // Disciplina ainda cursando: o boletim guarda só a AV1 (com peso de metade) e ignora a AV2 já lançada
+        // (2026-11-27, Prática Jurídica II: AV1 10,0 + AV2 5,5 aparecia 5,0, o Sponte mostra 7,75).
+        // Com substitutiva ou disciplina já fechada, vale o consolidado do Sponte.
+        const soAv = avs.filter((a) => /^av\s*\d/i.test(a.nome));
+        let notas = notasRaw.map((v) => escala10(v)!);
+        let media = escala10(mediaRaw);
+        if (/cursando/i.test(n(r.SituacaoDidatica) ?? "") && notasRaw.length === 1 && soAv.length >= 2 && soAv.length === avs.length) {
+            const m = soAv.reduce((s, a) => s + brNum(a.nota), 0) / soAv.length;
+            media = m.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+            notas = [media];
+        }
         return {
             disciplina: r.Disciplina, modulo: Number(r.Modulo) || null,
-            notas: notasRaw.map((v) => escala10(v)!), media: escala10(mediaRaw),
+            notas, media,
             faltas: n(r.TotalFaltas), situacao: n(r.SituacaoDidatica),
             avaliacoes: porDisciplina.get(Number(r.DisciplinaID))?.avaliacoes ?? null,
             exame_final: exameRaw && brNum(exameRaw) > 0 ? exameRaw : null,
